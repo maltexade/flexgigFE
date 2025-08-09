@@ -1,0 +1,13 @@
+# Ignore Node modules everywhere
+**/node_modules/
+
+# Ignore .env file in backend
+backend/.env
+
+# Ignore backend entirely if you're only pushing frontend
+/backend/
+
+# System/Editor files
+.DS_Store
+Thumbs.db
+.vscode/

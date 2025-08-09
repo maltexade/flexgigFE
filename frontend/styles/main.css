@@ -1,0 +1,99 @@
+.flexgig-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  position: absolute;
+  top: 0;
+  z-index: 50;
+  width: 100%;
+  padding: 1rem;
+  backdrop-filter: blur(6px);
+  background-color: rgba(245, 245, 245, 0.8); /* light bg */
+}
+
+.dark .flexgig-header {
+  background-color: rgba(26, 26, 26, 0.8); /* dark bg */
+}
+
+.flexgig-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.flexgig-name {
+  font-family: 'Poppins', sans-serif;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #0D99FF;
+}
+
+.install-app-button {
+  height: 3rem;
+  padding: 0 1.2rem;
+  border-radius: 9999px;
+  background-color: #0D99FF;
+  color: white;
+  font-family: 'Poppins', sans-serif;
+  font-weight: 500;
+  display: flex !important; /* Force visibility */
+  align-items: center;
+  gap: 0.6rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  transition: background-color 0.3s ease;
+  z-index: 100; /* Above header */
+  pointer-events: auto;
+}
+
+.install-app-button:hover {
+  background-color: #007acc;
+}
+
+@media (min-width: 768px) {
+  .install-app-button {
+    display: flex !important; /* Ensure visibility on laptops */
+  }
+}
+
+#fus {
+  padding-bottom: 10px;
+  color: white;
+}
+
+#gcn {
+  align-items: center;
+}
+
+#bbb {
+  align-items: center;
+}
+
+body.modal-open #whatsapp-chat-btn {
+  display: none !important;
+}
+
+body.modal-open {
+  overflow: hidden;
+}
+
+#install-modal:not(.hidden) {
+  display: flex !important;
+}
+
+#install-modal-desktop {
+  pointer-events: none;
+  opacity: 0;
+  transform: perspective(800px) rotateX(-70deg) scale(0.98) translateY(-60px);
+  transition: opacity 0.22s cubic-bezier(.4,0,.2,1), transform 0.22s cubic-bezier(.4,0,.2,1);
+  will-change: transform, opacity;
+}
+
+#install-modal-desktop.show {
+  pointer-events: auto;
+  opacity: 1;
+  transform: perspective(800px) rotateX(0deg) scale(1) translateY(0);
+}
+
+#install-modal-mobile:not(.hidden) {
+  display: flex !important;
+}

@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="en" class="dark" style="color-scheme: dark;">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FlexGig — Cheap Data Plug</title>
+  <meta name="description" content="Get affordable data, convert excess airtime to cash, and pay utility bills - all with great user experience and speed.">
+  <meta name="robots" content="index,follow">
+  <meta name="keywords" content="data, airtime, cash, utility bills, FlexGig, cheap data plug">
+  <meta name="author" content="FlexGig Team">
+  <meta name="application-name" content="FlexGig">
+  <meta name="apple-mobile-web-app-title" content="FlexGig">
+  <script>console.log('index.html: Head scripts loaded');</script>
+  <!-- Open Graph / Twitter Meta -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:site" content="@Flexgig">
+  <meta name="twitter:creator" content="@Flexgig">
+  <meta property="og:title" content="Flexgig — Cheap Data Plug">
+  <meta property="og:description" content="Get affordable data, convert excess airtime to cash, and pay utility bills - all with great user experience and speed.">
+  <meta property="og:url" content="https://abc123.ngrok.io">
+  <meta property="og:image" content="./frontend/pwa/logo-512x512.png">
+  <meta property="og:image:alt" content="Flexgig Data">
+  <meta property="og:image:width" content="512">
+  <meta property="og:image:height" content="512">
+  <link rel="canonical" href="https://abc123.ngrok.io">
+
+  <!-- Styles -->
+  <link rel="stylesheet" href="./frontend/styles/main.css">
+
+  <!-- Favicon and PWA -->
+  <link rel="icon" href="./frontend/pwa/favicon.ico" sizes="48x48">
+  <link rel="icon" href="./frontend/pwa/logo.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="./frontend/pwa/apple-touch-icon-180x180.png">
+  <link rel="manifest" href="./frontend/pwa/manifest.json?v=1">
+  <link rel="preload" href="./frontend/pwa/manifest.json?v=1" as="fetch" crossorigin="anonymous">
+  <meta name="theme-color" content="#080808">
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-analytics.js"></script>
+
+  <!-- Analytics Scripts -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-08FCRYGV8L"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag() { dataLayer.push(arguments); }
+    gtag('js', new Date());
+    gtag('config', 'G-08FCRYGV8L');
+  </script>
+  <script async src="https://static.ads-twitter.com/uwt.js"></script>
+  <script>
+    !function(e, t, n, s, u, a) {
+      e.twq || (s = e.twq = function() {
+        s.exe ? s.exe.apply(s, arguments) : s.queue.push(arguments);
+      }, s.version = '1.1', s.queue = [], u = t.createElement(n), u.async = !0, u.src = 'https://static.ads-twitter.com/uwt.js',
+      a = t.getElementsByTagName(n)[0], a.parentNode.insertBefore(u, a));
+    }(window, document, 'script');
+    twq('config', 'odgtz');
+  </script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/service-worker.js')
+          .then(reg => console.log('index.html: Service Worker registered:', reg.scope))
+          .catch(err => console.error('index.html: Service Worker registration failed:', err));
+      });
+    }
+  </script>
+  <script async src="https://connect.facebook.net/en_US/fbevents.js"></script>
+  <script>
+    !function(f, b, e, v, n, t, s) {
+      if (f.fbq) return; n = f.fbq = function() {
+        n.callMethod ? n.callMethod.apply(n, arguments) : n.queue.push(arguments);
+      };
+      if (!f._fbq) f._fbq = n; n.push = n; n.loaded = !0; n.version = '2.0';
+      n.queue = []; t = b.createElement(e); t.async = !0; t.src = v;
+      s = b.getElementsByTagName(e)[0]; s.parentNode.insertBefore(t, s);
+    }(window, document, 'script', 'https://connect.facebook.net/en_US/fbevents.js');
+    fbq('init', '719922456251516');
+    fbq('track', 'PageView');
+    fbq('track', 'CompleteRegistration');
+  </script>
+  <noscript>
+    <img height="1" width="1" style="display:none" src="https://www.facebook.com/tr?id=719922456251516&ev=PageView&noscript=1" alt="Facebook Pixel">
+  </noscript>
+  <script src="index.html" defer></script>
+</head>
+
+<body>
+  <div id="__next">
+    <!-- Theme Toggle Script -->
+    <script>
+      (function() {
+        try {
+          var d = document.documentElement, c = d.classList;
+          c.remove('light', 'dark');
+          var e = localStorage.getItem('theme');
+          if ('system' === e || (!e && true)) {
+            var t = '(prefers-color-scheme: dark)', m = window.matchMedia(t);
+            if (m.media !== t || m.matches) {
+              d.style.colorScheme = 'dark';
+              c.add('dark');
+            } else {
+              d.style.colorScheme = 'light';
+              c.add('light');
+            }
+          } else if (e) {
+            c.add(e || '');
+          }
+          if (e === 'light' || e === 'dark') d.style.colorScheme = e;
+        } catch(e) {}
+      })();
+    </script>
+
+    <!-- Header -->
+    <header class="flex items-center justify-between p-4 w-full fixed top-0 z-50 backdrop-blur-sm bg-n05 dark:bg-n8/80">
+      <div class="flex items-center gap-3">
+        <!-- SVG Placeholder: Header Logo -->
+         <svg height="30px" width="30px" version="1.1" id="_x32_" xmlns="http://www.w3.org/2000/svg"
+            xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 512 512" xml:space="preserve">
+          <style type="text/css">
+            .blue { fill: #007BFF; } /* Bright blue */
+            .yellow { fill: #FFD700; } /* Vivid yellow */
+          </style>
+          <g>
+            <path class="blue" d="M168.203,192.082c4.093,0.046,7.798-2.039,10.634-5.216c2.822-3.202,4.79-7.504,5.41-12.379
+              c2.806-16.72,8.294-32.85,16.154-47.608c7.875-14.766,18.091-28.16,30.074-39.554c11.983-11.394,25.718-20.78,
+              40.477-27.717c14.758-6.945,30.524-11.434,46.491-13.278c7.085-1.132,13.316-4.147,18.122-8.433
+              c4.775-4.279,8.123-9.874,8.232-16.169c0.124-6.27-3.255-12.084-9.348-16.006c-6.061-3.923-14.836-5.844-24.137-4.356
+              C289.71,5.287,269.836,12.58,251.76,22.758c-18.091,10.177-34.431,23.222-48.228,38.414c-13.828,15.176-25.129,32.516-33.361,
+              51.112c-8.248,18.587-13.394,38.437-15.27,58.467c-0.744,5.813,0.527,11.254,3.023,15.115
+              C160.42,189.742,164.11,192.028,168.203,192.082z"/>
+              
+            <path class="blue" d="M343.797,319.922c-4.092-0.054-7.797,2.039-10.634,5.217c-2.838,3.201-4.791,7.495-5.426,12.378
+              c-2.791,16.72-8.294,32.842-16.154,47.608c-7.86,14.758-18.076,28.16-30.059,39.546c-11.984,11.402-25.734,20.788-40.476,
+              27.726c-14.758,6.945-30.524,11.425-46.491,13.277c-7.085,1.124-13.317,4.139-18.138,8.426c-4.759,4.287-8.108,9.882-8.216,
+              16.177c-0.124,6.263,3.255,12.076,9.348,15.998c6.046,3.922,14.836,5.845,24.137,4.364c20.602-3.922,40.461-11.215,
+              58.552-21.4c18.092-10.178,34.431-23.215,48.227-38.415c13.828-15.177,25.114-32.508,33.362-51.104
+              c8.247-18.594,13.394-38.437,15.27-58.467c0.744-5.813-0.527-11.262-3.023-15.115
+              C351.564,322.255,347.875,319.977,343.797,319.922z"/>
+            
+            <path class="yellow" d="M88.63,258.464c11.968,16.44,26.586,30.834,42.988,42.461c4.65,3.557,10.014,5.177,14.603,4.937
+              c4.604-0.225,8.433-2.279,10.511-5.782c2.093-3.518,2.155-7.774,0.806-11.813c-1.348-4.062-4.092-7.906-7.999-10.89
+              c-13.084-10.782-24.308-23.603-33.159-37.794c-8.852-14.2-15.348-29.741-19.223-45.817c-3.876-16.076-5.132-32.663-3.767-48.918
+              c1.364-16.238,5.364-32.136,11.75-46.902c2.574-6.704,3.07-13.596,1.752-19.905c-1.318-6.27-4.496-11.968-9.875-15.216
+              c-5.379-3.24-12.092-3.216-18.541,0.101c-6.418,3.279-12.48,9.922-15.843,18.711c-6.899,19.812-10.526,40.663-10.743,61.42
+              c-0.232,20.758,2.899,41.422,9.146,60.971C67.267,223.583,76.631,242.038,88.63,258.464z"/>
+            
+            <path class="yellow" d="M423.371,253.534c-11.968-16.432-26.586-30.826-42.988-42.454c-4.666-3.558-10.03-5.185-14.604-4.945
+              c-4.619,0.224-8.433,2.287-10.525,5.79c-2.093,3.512-2.14,7.775-0.791,11.813c1.349,4.053,4.092,7.906,7.999,10.89
+              c13.084,10.775,24.308,23.603,33.159,37.795c8.852,14.192,15.347,29.733,19.207,45.817c3.892,16.068,5.147,32.663,
+              3.767,48.91c-1.364,16.247-5.348,32.136-11.735,46.903c-2.573,6.704-3.069,13.603-1.767,19.913
+              c1.333,6.263,4.496,11.96,9.89,15.216c5.363,3.232,12.092,3.217,18.525-0.109c6.434-3.271,12.495-9.914,15.859-18.711
+              c6.898-19.804,10.51-40.663,10.743-61.412c0.233-20.758-2.898-41.423-9.146-60.978
+              C444.733,288.414,435.354,269.966,423.371,253.534z"/>
+            
+            <path class="yellow" d="M232.724,386.179c5.395-2.256,9.487-6.085,11.58-10.185c2.108-4.1,2.232-8.433,0.232-11.991
+              c-1.999-3.574-5.658-5.744-9.828-6.604c-4.186-0.852-8.884-0.411-13.425,1.488c-15.89,5.938-32.602,9.247-49.313,9.813
+              c-16.728,0.574-33.424-1.573-49.282-6.262c-15.86-4.674-30.866-11.883-44.244-21.192c-13.394-9.309-25.161-20.71-34.756-33.624
+              c-4.528-5.573-10.248-9.456-16.356-11.48c-6.092-1.984-12.618-2.085-18.122,0.961c-5.488,3.031-8.836,8.86-9.177,
+              16.099c-0.372,7.193,2.341,15.766,8.278,23.076c13.704,15.882,29.951,29.439,47.825,40.02
+              c17.859,10.58,37.314,18.207,57.374,22.563c20.045,4.38,40.709,5.488,60.924,3.326C194.665,400.03,214.431,394.566,232.724,386.179z"/>
+            
+            <path class="yellow" d="M503.688,175.72c-13.704-15.882-29.966-29.439-47.825-40.012c-17.858-10.587-37.313-18.207-57.374-22.563
+              c-20.06-4.38-40.709-5.496-60.94-3.326c-20.215,2.155-39.996,7.612-58.273,16.006c-5.395,2.256-9.487,6.076-11.58,
+              10.178c-2.108,4.1-2.232,8.44-0.248,11.999c1.999,3.573,5.674,5.743,9.844,6.596c4.185,0.853,8.882,0.411,
+              13.425-1.488c15.874-5.937,32.602-9.239,49.313-9.813c16.712-0.574,33.423,1.581,49.282,6.27
+              c15.874,4.674,30.865,11.875,44.244,21.184c13.394,9.309,25.16,20.711,34.756,33.632c4.512,5.565,10.232,9.448,
+              16.355,11.472c6.092,1.984,12.619,2.093,18.122-0.954c5.488-3.038,8.836-8.859,9.177-16.099
+              C512.339,191.601,509.61,183.036,503.688,175.72z"/>
+          </g>
+        </svg>
+        <span class="text-xl sm:text-2xl font-bold text-blue-600 tracking-wide">FlexGig</span>
+      </div>
+      <button class="install-app-button h-10 sm:h-12 shadow-sm rounded-full bg-s3 text-n0 font-semibold font-poppins tracking-wider flex items-center gap-2 px-4 text-sm sm:text-base">
+        <!-- SVG Placeholder: Install Icon -->
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
+        </svg>
+        Install App
+      </button>
+    </header>
+
+    <!-- WhatsApp Floating Button -->
+    <a id="whatsapp-chat-btn" href="https://wa.me/2349038492701" target="_blank" rel="noopener" aria-label="Chat on WhatsApp" class="fixed z-[9000] bottom-5 right-5 bg-green-500 hover:bg-green-600 rounded-full shadow-lg w-12 h-10 flex items-center justify-center transition-all duration-200" style="box-shadow: 0 2px 8px 0 rgba(0,0,0,0.22);">
+      <!-- SVG Placeholder: WhatsApp Icon -->
+
+      <svg width="147px" height="147px" viewBox="-2.73 0 1225.016 1225.016" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" fill="#000000"><g id="SVGRepo_bgCarrier" stroke-width="0"></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g><g id="SVGRepo_iconCarrier"><path fill="#E0E0E0" d="M1041.858 178.02C927.206 63.289 774.753.07 612.325 0 277.617 0 5.232 272.298 5.098 606.991c-.039 106.986 27.915 211.42 81.048 303.476L0 1225.016l321.898-84.406c88.689 48.368 188.547 73.855 290.166 73.896h.258.003c334.654 0 607.08-272.346 607.222-607.023.056-162.208-63.052-314.724-177.689-429.463zm-429.533 933.963h-.197c-90.578-.048-179.402-24.366-256.878-70.339l-18.438-10.93-191.021 50.083 51-186.176-12.013-19.087c-50.525-80.336-77.198-173.175-77.16-268.504.111-278.186 226.507-504.503 504.898-504.503 134.812.056 261.519 52.604 356.814 147.965 95.289 95.36 147.728 222.128 147.688 356.948-.118 278.195-226.522 504.543-504.693 504.543z"></path><linearGradient id="a" gradientUnits="userSpaceOnUse" x1="609.77" y1="1190.114" x2="609.77" y2="21.084"><stop offset="0" stop-color="#20b038"></stop><stop offset="1" stop-color="#60d66a"></stop></linearGradient><path fill="url(#a)" d="M27.875 1190.114l82.211-300.18c-50.719-87.852-77.391-187.523-77.359-289.602.133-319.398 260.078-579.25 579.469-579.25 155.016.07 300.508 60.398 409.898 169.891 109.414 109.492 169.633 255.031 169.57 409.812-.133 319.406-260.094 579.281-579.445 579.281-.023 0 .016 0 0 0h-.258c-96.977-.031-192.266-24.375-276.898-70.5l-307.188 80.548z"></path><image overflow="visible" opacity=".08" width="682" height="639" xlink:href="FCC0802E2AF8A915.png" transform="translate(270.984 291.372)"></image><path fill-rule="evenodd" clip-rule="evenodd" fill="#FFF" d="M462.273 349.294c-11.234-24.977-23.062-25.477-33.75-25.914-8.742-.375-18.75-.352-28.742-.352-10 0-26.25 3.758-39.992 18.766-13.75 15.008-52.5 51.289-52.5 125.078 0 73.797 53.75 145.102 61.242 155.117 7.5 10 103.758 166.266 256.203 226.383 126.695 49.961 152.477 40.023 179.977 37.523s88.734-36.273 101.234-71.297c12.5-35.016 12.5-65.031 8.75-71.305-3.75-6.25-13.75-10-28.75-17.5s-88.734-43.789-102.484-48.789-23.75-7.5-33.75 7.516c-10 15-38.727 48.773-47.477 58.773-8.75 10.023-17.5 11.273-32.5 3.773-15-7.523-63.305-23.344-120.609-74.438-44.586-39.75-74.688-88.844-83.438-103.859-8.75-15-.938-23.125 6.586-30.602 6.734-6.719 15-17.508 22.5-26.266 7.484-8.758 9.984-15.008 14.984-25.008 5-10.016 2.5-18.773-1.25-26.273s-32.898-81.67-46.234-111.326z"></path><path fill="#FFF" d="M1036.898 176.091C923.562 62.677 772.859.185 612.297.114 281.43.114 12.172 269.286 12.039 600.137 12 705.896 39.633 809.13 92.156 900.13L7 1211.067l318.203-83.438c87.672 47.812 186.383 73.008 286.836 73.047h.255.003c330.812 0 600.109-269.219 600.25-600.055.055-160.343-62.328-311.108-175.649-424.53zm-424.601 923.242h-.195c-89.539-.047-177.344-24.086-253.93-69.531l-18.227-10.805-188.828 49.508 50.414-184.039-11.875-18.867c-49.945-79.414-76.312-171.188-76.273-265.422.109-274.992 223.906-498.711 499.102-498.711 133.266.055 258.516 52 352.719 146.266 94.195 94.266 146.031 219.578 145.992 352.852-.118 274.999-223.923 498.749-498.899 498.749z"></path></g></svg>
+    </a>
+
+    <!-- Main Content -->
+    <main class="flex p-4 flex-col pt-[6rem] space-y-10 mx-auto min-h-screen relative">
+      <section class="space-y-8">
+        <div class="grid grid-cols-6 rounded-sm overflow-hidden gap-0.5 mx-auto cursor-pointer w-full">
+          <!-- Data -->
+          <div class="flex relative bg-n0 dark:shadow-none shadow-button dark:bg-[#292929] items-center col-span-3">
+            <div class="size-14 flex items-center justify-center">
+              <!-- SVG Placeholder: Data Icon -->
+               <svg width="30" height="30" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+                <g>
+                  <path fill="#FFD700" d="M138.94,27.75a9.67,9.67,0,0,0-14,0c-2.5,2.5-3,5.5-3,8.5v129a10,10,0,0,0,20,0V58.75l11,11a9.67,9.67,0,0,0,14,0,10.65,10.65,0,0,0,0-14Z"/>
+                  <path fill="#007BFF" d="M68.44,24.75a10,10,0,0,0-10,10v106.5l-11-11a9.9,9.9,0,0,0-14,14l28,28a9.67,9.67,0,0,0,14,0c2.5-2.5,3-5.5,3-8.5v-129A10,10,0,0,0,68.44,24.75Z"/>
+                </g>
+              </svg>
+            </div>
+            <p class="font-poppins uppercase text-[0.75rem] font-semibold tracking-wider text-p1 dark:text-n05 text-center leading-tight" id="www">Data</p>
+          </div>
+          <!-- Airtime -->
+          <div class="flex relative bg-n0 dark:shadow-none shadow-button dark:bg-[#292929] dark:bg-opacity-70 items-center col-span-3">
+            <div class="size-14 flex items-center justify-center">
+              <!-- SVG Placeholder: Airtime Icon -->
+               <svg height="30px" width="30px" version="1.1" id="_x32_" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+                <defs>
+                  <style type="text/css">
+                    .yellow { fill: #FFC107; }
+                    .blue { fill: #0D99FF; }
+                  </style>
+                </defs>
+                <g>
+                  <path class="yellow" d="M96.658,148.337l-21.936-8.261c-20.049-7.552-42.424,2.583-49.975,22.616c-7.552,20.053,2.588,42.413,22.635,49.965l49.276,18.575V148.337z"/>
+                  <path class="blue" d="M389.449,164.308c-0.222,0.79-0.439,1.539-0.656,2.308v269.03c0,7.454-3.061,14.306-7.946,19.176c-4.88,4.9-11.722,7.946-19.175,7.946H162.979c0.966-1.577,1.849-3.234,2.529-5.038c1.292-3.45,1.903-6.961,1.903-10.411c0-5.944-1.828-11.751-5.126-16.622c-3.312-4.871-8.059-8.765-14-11.003l-30.577-11.515c-3.44-1.301-6.94-1.913-10.396-1.913c-5.954,0-11.766,1.824-16.627,5.128c-4.87,3.312-8.774,8.064-11.012,14c-1.286,3.43-1.908,6.941-1.908,10.391c0,5.975,1.84,11.782,5.137,16.642c3.313,4.861,8.06,8.774,14,11.003l30.582,11.515c3.446,1.302,6.956,1.912,10.401,1.912c5.956,0,11.766-1.834,16.628-5.127c0.853-0.582,1.636-1.262,2.43-1.932c24.45,20.546,62.683,40.777,119.658,42.137c118.977,2.82,150.62-85.339,167.813-181.976c0,0,41.052-185.13,43.838-194.911C502.171,86.127,415.91,71.379,389.449,164.308z"/>
+                  <path class="yellow" d="M142.986,248.257V44.029h199.48v326.686h-170.9c-0.39,3.47-1.183,6.931-2.464,10.332c-3.234,8.616-8.982,15.617-16.065,20.427c-1.864,1.262-3.811,2.366-5.827,3.322l5.852,2.199c8.611,3.234,15.627,8.991,20.437,16.07c3.909,5.758,6.369,12.402,7.163,19.363h181.01c1.903,0,3.529-0.749,4.791-1.982c1.242-1.262,1.982-2.898,1.982-4.802V6.782c0-1.912-0.74-3.53-1.982-4.792c-1.262-1.252-2.888-1.982-4.791-1.991H123.78c-1.903,0.009-3.534,0.739-4.792,1.991c-1.242,1.262-1.972,2.879-1.982,4.792v230.62l17.756,6.664C137.701,245.191,140.442,246.601,142.986,248.257z"/>
+                  <circle class="blue" cx="242.724" cy="408.869" r="11.87"/>
+                  <path class="blue" d="M118.378,393.489c3.446,1.291,6.955,1.903,10.4,1.903c5.96,0,11.767-1.824,16.627-5.127c4.87-3.312,8.765-8.074,11.007-14c1.292-3.441,1.903-6.95,1.903-10.401c0-5.956-1.823-11.772-5.126-16.622c-3.307-4.87-8.059-8.774-13.989-11.012l-30.588-11.525c-3.44-1.291-6.946-1.903-10.406-1.903c-5.954,0-11.762,1.824-16.622,5.127c-4.865,3.312-8.769,8.074-11.007,14.01c-1.301,3.431-1.908,6.94-1.912,10.401c0,5.954,1.833,11.761,5.136,16.632c3.308,4.871,8.06,8.755,14.004,11.003L118.378,393.489z"/>
+                  <path class="yellow" d="M109.165,312.015c3.446,1.322,6.955,1.913,10.4,1.913c5.955,0,11.776-1.814,16.637-5.128c4.86-3.312,8.765-8.054,10.997-13.98c1.302-3.471,1.903-6.971,1.903-10.43c0.01-5.935-1.818-11.752-5.116-16.622c-3.312-4.861-8.069-8.755-14.01-11.003L99.399,245.25c-3.451-1.302-6.951-1.912-10.406-1.912c-5.954,0-11.762,1.823-16.626,5.146c-4.861,3.293-8.765,8.055-11.013,14c-1.286,3.43-1.898,6.941-1.898,10.391c0,5.954,1.829,11.761,5.132,16.632c3.308,4.861,8.065,8.765,14.006,11.012L109.165,312.015z"/>
+                  <path class="blue" d="M226.638,188.541l10.781-6.941c3.456-2.208,4.461-6.802,2.238-10.253l-15.247-23.78c-2.213-3.45-6.808-4.436-10.263-2.237c-0.079,0.048-1.286,0.818-14.335,9.198c-15.203,9.76-7.034,51.572,14.665,85.398c21.704,33.826,56.329,58.67,71.522,48.91c13.054-8.37,14.251-9.14,14.335-9.208c3.45-2.199,4.456-6.812,2.243-10.263l-15.258-23.76c-2.208-3.451-6.807-4.456-10.263-2.228l-10.785,6.92c-3.145,2.011-7.31,1.371-9.711-1.488c0,0-7.247-7.424-18.067-24.293c-10.815-16.848-14.552-26.55-14.552-26.55C222.335,194.595,223.494,190.553,226.638,188.541z"/>
+                </g>
+              </svg>
+            </div>
+            <p class="font-poppins uppercase text-[0.75rem] font-semibold tracking-wider text-p1 dark:text-n05 text-center leading-tight">Airtime</p>
+          </div>
+          <!-- TV -->
+          <div class="flex relative bg-n0 dark:shadow-none shadow-button dark:bg-[#292929] dark:bg-opacity-70 items-center col-span-2">
+            <div class="size-14 flex items-center justify-center">
+              <!-- SVG Placeholder: TV Icon -->
+               <svg fill="#1E90FF" height="30px" width="30px" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 50 50" xml:space="preserve">
+                <g id="SVGRepo_bgCarrier" stroke-width="0"></g>
+                <g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g>
+                <g id="SVGRepo_iconCarrier">
+                  <g id="Layer_1">
+                    <path d="M1,38h23v3H12v2h26v-2H26v-3h23V8H1V38z M3,10h44v26H3V10z"></path>
+                  </g>
+                  <text x="25" y="27" text-anchor="middle" alignment-baseline="middle" font-family="Arial, Helvetica, sans-serif" font-size="10" font-weight="bold" fill="#FFD700">FG</text>
+                </g>
+              </svg>
+            </div>
+            <p class="font-poppins uppercase text-[0.75rem] font-semibold tracking-wider text-p1 dark:text-n05 text-center leading-tight">Tv</p>
+          </div>
+          <!-- Airtime to Cash -->
+          <div class="flex relative bg-n0 dark:shadow-none shadow-button dark:bg-[#292929] items-center col-span-4">
+            <div class="size-14 flex items-center justify-center">
+              <!-- SVG Placeholder: Airtime to Cash Icon -->
+               <svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" height="35px" width="35" fill="#1E90FF">
+                <g id="SVGRepo_bgCarrier" stroke-width="0"></g>
+                <g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g>
+                <g id="SVGRepo_iconCarrier">
+                  <path fill="#1E90FF" d="M363.783 23.545c-9.782.057-16.583 3.047-20.744 10.22-17.51 30.18-38.432 61.645-48.552 97.245 2.836.83 5.635 1.787 8.373 2.853 7.353 2.863 14.38 6.482 20.542 10.858 27.534-25.542 58.165-45.21 87.45-65.462 11.356-7.854 12.273-13.584 10.183-20.83-2.09-7.246-9.868-16.365-20.525-23.176-10.658-6.81-23.87-11.33-34.73-11.68-.68-.022-1.345-.03-1.997-.027z"/>
+                  <path fill="#FFD700" d="M294.785 24.291c-10.02-.182-17.792 6.393-23.924 20.24-8.94 20.194-10.212 53.436-1.446 83.185.156-.008.31-.023.467-.030 1.99-.087 3.99-.072 6 .030 9.436-34.822 27.966-64.72 44.013-91.528-10.31-8.496-18.874-11.782-25.108-11.896z"/>
+                  <path fill="#1E90FF" d="M197.5 82.5L187 97.97c14.82 10.04 29.056 19.725 39.813 31.374 3.916 4.24 7.37 8.722 10.31 13.607 3.77-4.73 8.51-8.378 13.69-10.792.407-.188.82-.355 1.228-.53-3.423-5.44-7.304-10.418-11.51-14.972C227.765 102.83 212.29 92.52 197.5 82.5z"/>
+                  <path fill="#FFD700" d="M421.27 94.77c-29.255 20.228-58.575 39.152-84.348 62.78.438.576.848 1.168 1.258 1.76 20.68-6.75 49.486-15.333 73.916-19.41 11.484-1.916 15.66-6.552 17.574-13.228 1.914-6.676.447-16.71-5.316-26.983-.924-1.647-1.96-3.29-3.083-4.92z"/>
+                  <path fill="#1E90FF" d="M197.332 130.37c-14.95.2-29.732 4.3-43.957 12.766l9.563 16.03c21.657-12.89 42.626-14.133 65.232-4.563.52-5.592 1.765-10.66 3.728-15.21.35-.806.73-1.586 1.123-2.354-11.87 AKA-1.5.0.2-11.87-4.52-23.83-6.827-35.688-6.67z"/>
+                  <path fill="#FFD700" d="M273.132 134.3c-5.578-.083-10.597.742-14.427 2.526-4.377 2.038-7.466 4.914-9.648 9.97-.884 2.047-1.572 4.54-1.985 7.494.456-.007.91-.03 1.365-.033 16.053-.084 32.587 2.77 49.313 9.19 7.714 2.96 15.062 7.453 22.047 13.184 3.217-2.445 4.99-4.72 5.773-6.535 1.21-2.798 1.095-5.184-.634-8.82-3.46-7.275-15.207-16.955-28.856-22.27-6.824-2.658-13.98-4.224-20.523-4.614-.818-.05-1.627-.08-2.424-.092z"/>
+                  <path fill="#1E90FF" d="M248.375 172.76c-22.982.075-44.722 7.386-65 19.782-32.445 19.835-60.565 53.124-80.344 90.032-19.777 36.908-31.133 77.41-31.186 110.53-.053 33.06 10.26 57.27 32.812 67.782.043.02.082.043.125.063h.032c24.872 11.51 65.616 19.337 108.407 20.092 42.79.756 87.79-5.457 121.874-20.187 21.96-9.49 34.545-28.452 40.5-54.156 5.954-25.705 4.518-57.657-2.375-89.314-6.894-31.657-19.2-63.06-34.095-87.875-14.894-24.814-32.614-42.664-48.063-48.593-14.664-5.627-28.898-8.2-42.687-8.156z"/>
+                </g>
+              </svg>
+            </div>
+            <p class="font-poppins uppercase text-[0.75rem] font-semibold tracking-wider text-p1 dark:text-n05 text-center leading-tight">Airtime 2 Cash</p>
+          </div>
+          <!-- Electricity -->
+          <div class="flex relative bg-n0 dark:shadow-none shadow-button dark:bg-[#292929] items-center col-span-3">
+            <div class="size-14 flex items-center justify-center">
+              <!-- SVG Placeholder: Electricity Icon -->
+               <svg viewBox="0 0 1024 1024" class="icon" version="1.1" xmlns="http://www.w3.org/2000/svg" fill="#000000" width="35px" height="35px">
+                <defs>
+                  <filter id="yellow-glow" x="-50%" y="-50%" width="200%" height="200%">
+                    <feGaussianBlur stdDeviation="8" result="blur" />
+                    <feMerge>
+                      <feMergeNode in="blur" />
+                      <feMergeNode in="SourceGraphic" />
+                    </feMerge>
+                  </filter>
+                  <style>
+                    .main-shape { fill: #2563eb; }
+                    .highlight { fill: #ffeb3b; filter: url(#yellow-glow); }
+                  </style>
+                </defs>
+                <g>
+                  <path class="main-shape" d="M718.933333 106.666667L469.333333 362.666667l320 106.666666-334.933333 313.6 108.8 59.733334L256 917.333333l57.6-315.733333 61.866667 108.8L576 512l-320-106.666667L533.333333 106.666667h185.6z"/>
+                  <path class="highlight" d="M576 512l-320-106.666667L533.333333 106.666667h185.6L469.333333 362.666667l320 106.666666-334.933333 313.6z"/>
+                </g>
+              </svg>
+            </div>
+            <p class="font-poppins uppercase text-[0.75rem] font-semibold tracking-wider text-p1 dark:text-n05 text-center leading-tight">Electricity</p>
+          </div>
+          <!-- Giftcards -->
+          <div class="flex relative bg-n0 dark:shadow-none shadow-button dark:bg-[#292929] dark:bg-opacity-70 items-center col-span-3">
+            <div class="size-14 flex items-center justify-center">
+              <!-- SVG Placeholder: Giftcards Icon -->
+               <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" fill="#000000" width="35px" height="35px">
+                <defs>
+                  <style>
+                    .bg { fill: #2563eb; }
+                    .icon { fill: #ffeb3b; }
+                  </style>
+                </defs>
+                <g id="SVGRepo_iconCarrier">
+                  <g id="Layer_2" data-name="Layer 2">
+                    <g id="invisible_box" data-name="invisible box">
+                      <rect width="48" height="48" fill="none" />
+                    </g>
+                    <g id="Layer_7" data-name="Layer 7">
+                      <path class="bg" d="M43,8H5a2.9,2.9,0,0,0-3,3V37a3,3,0,0,0,3,3H43a3,3,0,0,0,3-3V11A2.9,2.9,0,0,0,43,8Z"/>
+                      <path class="icon" d="M8,19.2l.3-.2h2.8a1.1,1.1,0,0,1,1.2.8l.5,2.4c0,.2,0,.3-.2.4h-.3a8.8,8.8,0,0,0-4.1-2.9A.5.5,0,0,1,8,19.2ZM14.7,29H12.2a.2.2,0,0,1-.2-.2L9.8,21.5c0-.1,0-.3.2-.3h.3a9.4,9.4,0,0,1,3,3.6l.3,1,2.6-6.6c0-.1.1-.2.3-.2h2.2c.1,0,.1.1.2.2s.1.2,0,.2l-4,9.4A.2.2,0,0,1,14.7,29Zm6.5-.3c0,.2-.1.3-.2.3H18.6v-.3l1.6-9.3a.3.3,0,0,1,.3-.3h2.3v.3Zm7.1-5.6c1.5.6,2.2,1.5,2.2,2.6a2.9,2.9,0,0,1-1.3,2.4,6.2,6.2,0,0,1-3.3.9,10,10,0,0,1-2.6-.5c-.2,0-.3-.2-.2-.3l.2-1.5a.2.2,0,0,1,.2-.2h.3a4.5,4.5,0,0,0,2.4.5c.7,0,1.5-.2,1.5-.9s-.3-.7-1.3-1.2-2.3-1.2-2.3-2.6S25.9,19,28.5,19a9.5,9.5,0,0,1,2.1.3.5.5,0,0,1,.2.4l-.3,1.4c0,.1,0,.2-.1.2h-.3a3.2,3.2,0,0,0-1.7-.4h-.1c-1,0-1.5.4-1.5.9S27.4,22.6,28.3,23.1Zm11.6,5.8c0,.1-.1.1-.2.1H37.8l-.3-.2a6.1,6.1,0,0,0-.3-1.3H33.8c-.1.1-.2.6-.5,1.3s-.1.2-.3.2H30.6a.2.2,0,0,1,0-.3l3.8-8.7a1.4,1.4,0,0,1,1.4-.9h1.9c.1,0,.2.1.2.3L40,28.6A.4.4,0,0,1,39.9,28.9ZM36,21.7l-1.4,3.8h2.2l-.6-2.9Z"/>
+                    </g>
+                  </g>
+                </g>
+              </svg>
+            </div>
+            <p class="font-poppins uppercase text-[0.75rem] font-semibold tracking-wider text-p1 dark:text-n05 text-center leading-tight">Giftcards</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="space-y-6 w-full font-poppins flex flex-col">
+        <div class="space-y-2 sm:space-y-3 flex flex-col" id="gcn">
+          <p class="text-sm sm:text-base font-semibold tracking-wide text-blue-600/90 dark:text-blue-400 flex items-center gap-2">
+            🚀 <span>Join <span class="font-bold text-yellow-500">35,962</span> active users</span>
+          </p>
+          <h4 class="text-2xl sm:text-3xl font-poppins leading-snug tracking-wide text-black/80 dark:text-gray-100">
+            Get connected now
+          </h4>
+        </div>
+
+        <div class="flex flex-col w-full space-y-2 mt-auto lg:justify-center gap-1 lg:flex-row lg:gap-6" id="bbb">
+          <a href="/auth/google" class="w-full max-w-sm">
+            <button class="relative w-full bg-white dark:bg-[#1f1f1f] border border-gray-200 dark:border-gray-700 shadow-md h-16 rounded-full flex items-center space-x-4 hover:bg-gray-50 dark:hover:bg-[#2a2a2a] transition-colors duration-200">
+              <span class="h-16 w-20 flex items-center justify-center absolute left-0">
+                <!-- SVG Placeholder: Google Icon -->
+                 <svg width="24" height="24" viewBox="0 0 23 22" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Google Icon">
+                  <path d="M21.1258 11.2139C21.1258 10.4225 21.0603 9.84497 20.9185 9.24609H11.6973V12.818H17.1099C17.0008 13.7057 16.4115 15.0425 15.102 15.9408L15.0836 16.0603L17.9992 18.2738L18.2012 18.2936C20.0563 16.6145 21.1258 14.1441 21.1258 11.2139Z" fill="#4285F4"/>
+                  <path d="M11.6967 20.625C14.3484 20.625 16.5745 19.7694 18.2006 18.2936L15.1014 15.9408C14.272 16.5076 13.1589 16.9033 11.6967 16.9033C9.09946 16.9033 6.89512 15.2243 6.10933 12.9036L5.99415 12.9131L2.9625 15.2125L2.92285 15.3205C4.53791 18.4647 7.85536 20.625 11.6967 20.625Z" fill="#34A853"/>
+                  <path d="M6.11006 12.9036C5.90272 12.3047 5.78273 11.663 5.78273 11C5.78273 10.3369 5.90272 9.69524 6.09915 9.09636L6.09366 8.96881L3.024 6.63257L2.92357 6.67938C2.25792 7.98412 1.87598 9.44929 1.87598 11C1.87598 12.5507 2.25792 14.0158 2.92357 15.3205L6.11006 12.9036Z" fill="#FBBC05"/>
+                  <path d="M11.6967 5.09664C13.5409 5.09664 14.7849 5.87733 15.4943 6.52974L18.2661 3.8775C16.5638 2.32681 14.3485 1.375 11.6967 1.375C7.85539 1.375 4.53792 3.53526 2.92285 6.6794L6.09844 9.09638C6.89514 6.77569 9.09949 5.09664 11.6967 5.09664Z" fill="#EB4335"/>
+                </svg>
+              </span>
+              <p class="text-body2 w-full text-center font-poppins text-n7 font-semibold tracking-wide">Continue with Google</p>
+            </button>
+          </a>
+          <a class="telegram-button relative w-full text-center text-white/90 dark:text-white/80 shadow-button font-poppins max-w-sm h-16 rounded-full flex items-center space-x-4 bg-[#229ED9]/90 hover:bg-[#229ED9] transition" href="tg://resolve?domain=flexgig">
+            <span class="h-16 w-20 flex items-center justify-center absolute">
+              <!-- SVG Placeholder: Telegram Icon -->
+               <svg xmlns="http://www.w3.org/2000/svg" class="size-6" viewBox="0 0 24 24" aria-label="Telegram Icon">
+                <path fill="#FFF" d="M21.73 4.16c.06-.28-.04-.56-.25-.74 -.22-.19-.51-.23-.77-.13l-18.5 7.5c-.31.12-.5.43-.47.76 .03.32.27.6.59.66l4.55.91 1.87 6.56c.08.29.33.5.63.53 .3.03.59-.12.74-.39l2.06-3.72 4.8 3.93c.2.16.47.21.71.12s.43-.3.48-.55l3.5-15.5Z"></path>
+                <path fill="#FFF" fill-rule="evenodd" d="M21.72 4.17c-.03.1-.08.21-.15.3l-8.84 10.79 -.48.92 -.06-.05 -2.07 3.71c-.15.26-.44.41-.75.38 -.31-.04-.56-.25-.64-.54l-1.88-6.57 -1.33-.27 1.5-1.01 .01-.02 13.5-8.5c.03-.03.07-.05.1-.06l0-.01c.1-.05.22-.07.33-.06 .03 0 .06 0 .1.01 .11.02.23.07.32.16 .01.01.02.02.03.03 0 0 0 0 0 0 .01.01.02.02.03.03 .01.02.03.04.05.06 .12.17.16.38.11.59l-.01 0Z"></path>
+              </svg>
+            </span>
+            <p class="text-body2 w-full text-n0 font-poppins font-semibold tracking-wide">Use Telegram Bot</p>
+          </a>
+          <a class="relative w-full text-center text-[#ff]/70 dark:shadow-none shadow-button bg-n0 dark:text-n05/90 dark:bg-[#292929] font-poppins max-w-sm h-16 rounded-full flex items-center space-x-4" href="/auth/email">
+            <span class="h-16 w-20 flex items-center justify-center absolute">
+              <!-- SVG Placeholder: Email Icon -->
+               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="size-6" aria-label="Email Icon">
+                <path d="M1.5 8.67v8.58a3 3 0 0 0 3 3h15a3 3 0 0 0 3-3V8.67l-8.928 5.493a3 3 0 0 1-3.144 0L1.5 8.67Z"></path>
+                <path d="M22.5 6.908V6.75a3 3 0 0 0-3-3h-15a3 3 0 0 0-3 3v.158l9.714 5.978a1.5 1.5 0 0 0 1.572 0L22.5 6.908Z"></path>
+              </svg>
+            </span>
+            <p class="text-body2 w-full font-poppins font-semibold tracking-wide">Continue with Email</p>
+          </a>
+        </div>
+        <div class="text-center my-4 space-y-[0.5px] font-poppins rounded tracking-wider leading-relaxed">
+          <p class="font-semibold text-[0.7rem] dark:text-n05/85" id="fus">Follow Us</p>
+          <div class="flex flex-wrap justify-center space-x-2">
+            <a href="tg://resolve?domain=flexgig" class="flex items-center font-poppins bg-n0 dark:bg-[#292929] w-fit dark:shadow-none shadow-button rounded-full">
+              <span class="size-10 flex items-center justify-center rounded-full">
+                <!-- SVG Placeholder: Telegram Icon (Follow Us) -->
+                 <svg xmlns="http://www.w3.org/2000/svg" class="size-5" viewBox="0 0 24 24" aria-label="Telegram Icon">
+                  <path fill="#5E94FF" d="M21.73 4.16c.06-.28-.04-.56-.25-.74 -.22-.19-.51-.23-.77-.13l-18.5 7.5c-.31.12-.5.43-.47.76 .03.32.27.6.59.66l4.55.91 1.87 6.56c.08.29.33.5.63.53 .3.03.59-.12.74-.39l2.06-3.72 4.8 3.93c.2.16.47.21.71.12s.43-.3.48-.55l3.5-15.5Z"></path>
+                  <path fill="#4DC4FF" fill-rule="evenodd" d="M21.72 4.17c-.03.1-.08.21-.15.3l-8.84 10.79 -.48.92 -.06-.05 -2.07 3.71c-.15.26-.44.41-.75.38 -.31-.04-.56-.25-.64-.54l-1.88-6.57 -1.33-.27 1.5-1.01 .01-.02 13.5-8.5c.03-.03.07-.05.1-.06l0-.01c.1-.05.22-.07.33-.06 .03 0 .06 0 .1.01 .11.02.23.07.32.16 .01.01.02.02.03.03 0 0 0 0 0 0 .01.01.02.02.03.03 .01.02.03.04.05.06 .12.17.16.38.11.59l-.01 0Z"></path>
+                </svg>
+              </span>
+            </a>
+            <a class="w-10 h-10 flex items-center justify-center bg-[#1877F2] rounded-full shadow-button" href="https://www.facebook.com/flexgig" target="_blank" rel="noopener noreferrer" aria-label="Visit our Facebook page">
+              <!-- SVG Placeholder: Facebook Icon -->
+               <svg class="" width="18" height="18" viewBox="0 0 16 16" role="img" xmlns="http://www.w3.org/2000/svg" fill="#FFFFFF">
+                <title>Facebook Icon</title>
+                <path d="M7.967.017a8 8 0 1 1 0 16 8 8 0 1 1 0-16zm0 1.6a6.4 6.4 0 0 0-6.4 6.4c0 2.982 2.039 5.487 4.799 6.198l.001-4.598h-.8a.8.8 0 1 1 0-1.6h.8v-1.6a2.4 2.4 0 0 1 2.4-2.4h.8a.8.8 0 1 1 0 1.6h0-.8a.8.8 0 0 0-.8.8h0v1.6h1.6a.8.8 0 1 1 0 1.6h0-1.6v4.8a6.4 6.4 0 0 0 0-12.8z"/>
+              </svg>
+            </a>
+            <a class="w-10 h-10 flex items-center justify-center rounded-full shadow-button" href="https://instagram.com/flexgig" target="_blank" rel="noopener noreferrer" aria-label="Visit our Instagram page" style="background: radial-gradient(circle at 30% 107%, #fdf497 0%, #fd5949 45%, #d6249f 60%, #285AEB 90%)">
+              <!-- SVG Placeholder: Instagram Icon -->
+               <svg class="block mx-auto" width="18" height="18" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="#FFFFFF" role="img">
+                <title>Instagram Icon</title>
+                <path d="M11.2 0A4.8 4.8 0 0 1 16 4.8h0v6.4a4.8 4.8 0 0 1-4.8 4.8h0-6.4A4.8 4.8 0 0 1 0 11.2h0V4.8A4.8 4.8 0 0 1 4.8 0h0zm0 1.6H4.8a3.2 3.2 0 0 0-3.2 3.2v6.4a3.2 3.2 0 0 0 3.2 3.2h6.4a3.2 3.2 0 0 0 3.2-3.2V4.8a3.2 3.2 0 0 0-3.2-3.2zM8 4a4 4 0 1 1 0 8 4 4 0 1 1 0-8zm0 1.6a2.4 2.4 0 0 0 0 4.8 2.4 2.4 0 0 0 0-4.8zm4-2.4a.8.8 0 1 1 0 1.6.8.8 0 1 1 0-1.6z"/>
+              </svg>
+            </a>
+            <a class="w-10 h-10 flex items-center justify-center bg-black rounded-full shadow-button" href="https://twitter.com/flexgig" target="_blank" rel="noopener noreferrer" aria-label="Visit our X profile">
+              <!-- SVG Placeholder: X Icon -->
+               <svg class="block mx-auto" width="18" height="18" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="#FFFFFF" role="img">
+                <title>X Icon</title>
+                <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+              </svg>
+            </a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <div id="modal-root"></div>
+    <div id="backdrop-root"></div>
+  </div>
+
+  <!-- Install App Modal (Flexgig) -->
+  <div id="install-modal" class="fixed inset-0 z-[99999] flex items-end md:items-center justify-center bg-black/40 hidden">
+    <!-- Mobile Modal (Bottom Sheet) -->
+    <div id="install-modal-mobile" class="w-full max-w-[98vw] h-[75vh] bg-white dark:bg-zinc-900 rounded-t-2xl shadow-lg flex flex-col transition-all duration-300 ease-out p-0 overflow-hidden md:hidden" style="touch-action: none;">
+      <!-- Drag handle -->
+      <div id="modal-drag-handle" class="w-12 h-1.5 bg-gray-300 dark:bg-zinc-500 rounded-full mx-auto mt-3 mb-4 cursor-grab active:cursor-grabbing"></div>
+      <div id="install-modal-box" class="flex-1 flex flex-col">
+        <!-- Popcon -->
+        <div class="flex items-center justify-between px-6 pt-0 pb-4">
+          <div class="flex items-center space-x-4">
+            <!-- SVG Placeholder: Modal Logo -->
+             <svg height="30px" width="30px" version="1.1" id="_x32_" xmlns="http://www.w3.org/2000/svg"
+     xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 512 512" xml:space="preserve">
+              <style type="text/css">
+                .blue { fill: #007BFF; } /* Bright blue */
+                .yellow { fill: #FFD700; } /* Vivid yellow */
+              </style>
+              <g>
+                <path class="blue" d="M168.203,192.082c4.093,0.046,7.798-2.039,10.634-5.216c2.822-3.202,4.79-7.504,5.41-12.379
+                  c2.806-16.72,8.294-32.85,16.154-47.608c7.875-14.766,18.091-28.16,30.074-39.554c11.983-11.394,25.718-20.78,
+                  40.477-27.717c14.758-6.945,30.524-11.434,46.491-13.278c7.085-1.132,13.316-4.147,18.122-8.433
+                  c4.775-4.279,8.123-9.874,8.232-16.169c0.124-6.27-3.255-12.084-9.348-16.006c-6.061-3.923-14.836-5.844-24.137-4.356
+                  C289.71,5.287,269.836,12.58,251.76,22.758c-18.091,10.177-34.431,23.222-48.228,38.414c-13.828,15.176-25.129,32.516-33.361,
+                  51.112c-8.248,18.587-13.394,38.437-15.27,58.467c-0.744,5.813,0.527,11.254,3.023,15.115
+                  C160.42,189.742,164.11,192.028,168.203,192.082z"/>
+                  
+                <path class="blue" d="M343.797,319.922c-4.092-0.054-7.797,2.039-10.634,5.217c-2.838,3.201-4.791,7.495-5.426,12.378
+                  c-2.791,16.72-8.294,32.842-16.154,47.608c-7.86,14.758-18.076,28.16-30.059,39.546c-11.984,11.402-25.734,20.788-40.476,
+                  27.726c-14.758,6.945-30.524,11.425-46.491,13.277c-7.085,1.124-13.317,4.139-18.138,8.426c-4.759,4.287-8.108,9.882-8.216,
+                  16.177c-0.124,6.263,3.255,12.076,9.348,15.998c6.046,3.922,14.836,5.845,24.137,4.364c20.602-3.922,40.461-11.215,
+                  58.552-21.4c18.092-10.178,34.431-23.215,48.227-38.415c13.828-15.177,25.114-32.508,33.362-51.104
+                  c8.247-18.594,13.394-38.437,15.27-58.467c0.744-5.813-0.527-11.262-3.023-15.115
+                  C351.564,322.255,347.875,319.977,343.797,319.922z"/>
+                
+                <path class="yellow" d="M88.63,258.464c11.968,16.44,26.586,30.834,42.988,42.461c4.65,3.557,10.014,5.177,14.603,4.937
+                  c4.604-0.225,8.433-2.279,10.511-5.782c2.093-3.518,2.155-7.774,0.806-11.813c-1.348-4.062-4.092-7.906-7.999-10.89
+                  c-13.084-10.782-24.308-23.603-33.159-37.794c-8.852-14.2-15.348-29.741-19.223-45.817c-3.876-16.076-5.132-32.663-3.767-48.918
+                  c1.364-16.238,5.364-32.136,11.75-46.902c2.574-6.704,3.07-13.596,1.752-19.905c-1.318-6.27-4.496-11.968-9.875-15.216
+                  c-5.379-3.24-12.092-3.216-18.541,0.101c-6.418,3.279-12.48,9.922-15.843,18.711c-6.899,19.812-10.526,40.663-10.743,61.42
+                  c-0.232,20.758,2.899,41.422,9.146,60.971C67.267,223.583,76.631,242.038,88.63,258.464z"/>
+                
+                <path class="yellow" d="M423.371,253.534c-11.968-16.432-26.586-30.826-42.988-42.454c-4.666-3.558-10.03-5.185-14.604-4.945
+                  c-4.619,0.224-8.433,2.287-10.525,5.79c-2.093,3.512-2.14,7.775-0.791,11.813c1.349,4.053,4.092,7.906,7.999,10.89
+                  c13.084,10.775,24.308,23.603,33.159,37.795c8.852,14.192,15.347,29.733,19.207,45.817c3.892,16.068,5.147,32.663,
+                  3.767,48.91c-1.364,16.247-5.348,32.136-11.735,46.903c-2.573,6.704-3.069,13.603-1.767,19.913
+                  c1.333,6.263,4.496,11.96,9.89,15.216c5.363,3.232,12.092,3.217,18.525-0.109c6.434-3.271,12.495-9.914,15.859-18.711
+                  c6.898-19.804,10.51-40.663,10.743-61.412c0.233-20.758-2.898-41.423-9.146-60.978
+                  C444.733,288.414,435.354,269.966,423.371,253.534z"/>
+                
+                <path class="yellow" d="M232.724,386.179c5.395-2.256,9.487-6.085,11.58-10.185c2.108-4.1,2.232-8.433,0.232-11.991
+                  c-1.999-3.574-5.658-5.744-9.828-6.604c-4.186-0.852-8.884-0.411-13.425,1.488c-15.89,5.938-32.602,9.247-49.313,9.813
+                  c-16.728,0.574-33.424-1.573-49.282-6.262c-15.86-4.674-30.866-11.883-44.244-21.192c-13.394-9.309-25.161-20.71-34.756-33.624
+                  c-4.528-5.573-10.248-9.456-16.356-11.48c-6.092-1.984-12.618-2.085-18.122,0.961c-5.488,3.031-8.836,8.86-9.177,
+                  16.099c-0.372,7.193,2.341,15.766,8.278,23.076c13.704,15.882,29.951,29.439,47.825,40.02
+                  c17.859,10.58,37.314,18.207,57.374,22.563c20.045,4.38,40.709,5.488,60.924,3.326C194.665,400.03,214.431,394.566,232.724,386.179z"/>
+                
+                <path class="yellow" d="M503.688,175.72c-13.704-15.882-29.966-29.439-47.825-40.012c-17.858-10.587-37.313-18.207-57.374-22.563
+                  c-20.06-4.38-40.709-5.496-60.94-3.326c-20.215,2.155-39.996,7.612-58.273,16.006c-5.395,2.256-9.487,6.076-11.58,
+                  10.178c-2.108,4.1-2.232,8.44-0.248,11.999c1.999,3.573,5.674,5.743,9.844,6.596c4.185,0.853,8.882,0.411,
+                  13.425-1.488c15.874-5.937,32.602-9.239,49.313-9.813c16.712-0.574,33.423,1.581,49.282,6.27
+                  c15.874,4.674,30.865,11.875,44.244,21.184c13.394,9.309,25.16,20.711,34.756,33.632c4.512,5.565,10.232,9.448,
+                  16.355,11.472c6.092,1.984,12.619,2.093,18.122-0.954c5.488-3.038,8.836-8.859,9.177-16.099
+                  C512.339,191.601,509.61,183.036,503.688,175.72z"/>
+              </g>
+            </svg>
+            <span>
+              <div class="font-bold text-base text-blue-700 dark:text-blue-400">Flexgig – Your Plug for Fast, Cheap Data</div>
+              <div class="text-xs text-gray-500 dark:text-gray-400">app.flexgig.com.ng</div>
+            </span>
+          </div>
+          <button id="install-app-confirm-mobile" class="ml-3 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-full font-semibold shadow transition text-sm">Install</button>
+        </div>
+        <div class="border-t border-gray-200 dark:border-zinc-700 px-7 py-4">
+          <div class="text-xs text-gray-800 dark:text-gray-200 text-left leading-snug">
+            Flexgig is your plug for affordable data and airtime top-ups with instant delivery, secure payments, and 24/7 availability—so you're always online and in control.
+          </div>
+        </div>
+        <div class="flex-1 flex flex-row gap-6 px-7 pb-8 mt-4">
+          <div class="w-[55%] bg-gray-100 dark:bg-zinc-800 rounded-xl flex items-center justify-center overflow-hidden min-h-[90px]">
+            <img src="/img/your-image1.png" alt="Flexgig App Screenshot 1" class="w-full h-auto object-cover">
+          </div>
+          <div class="w-[55%] bg-gray-100 dark:bg-zinc-800 rounded-xl flex items-center justify-center overflow-hidden min-h-[90px]">
+            <img src="/img/your-image2.png" alt="Flexgig App Screenshot 2" class="w-full h-auto object-cover">
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="install-progress" class="hidden flex items-center gap-2 text-blue-700 dark:text-blue-400 py-4">
+      <!-- SVG Placeholder: Loading Spinner -->
+       <svg class="animate-spin h-6 w-6 text-blue-700" fill="none" viewBox="0 0 24 24">
+      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+    </svg>
+      <span>Installing Flexgig app…</span>
+    </div>
+    <div id="install-success" class="hidden text-green-600 dark:text-green-400 py-4 font-semibold">
+      Flexgig is now installed! You’ll find it in your apps or home screen.
+    </div>
+    <!-- Desktop Install Modal (Flexgig) -->
+    <div id="install-modal-desktop" class="fixed z-[99999] inset-0 flex items-center justify-center bg-black/30 pointer-events-none opacity-0 scale-95 transition-all duration-300 ease-[cubic-bezier(.4,0,.2,1)]">
+      <div class="relative bg-white dark:bg-zinc-900 w-[520px] max-w-[95vw] min-h-[420px] rounded-2xl shadow-2xl flex flex-row overflow-hidden pointer-events-auto">
+        <!-- App Image (left) -->
+        <div class="flex-shrink-0 w-[170px] bg-gradient-to-br from-blue-50 to-blue-100 dark:from-zinc-800 dark:to-zinc-900 flex items-center justify-center p-6">
+          <img src="/img/your-image1.png" alt="Flexgig App" class="w-full h-auto max-h-40 rounded-xl shadow-md object-cover">
+        </div>
+        <!-- Content (right) -->
+        <div class="flex flex-col justify-between flex-1 p-7">
+          <div>
+            <!-- Logo and Title -->
+            <div class="flex items-center gap-4 mb-2">
+              <!-- SVG Placeholder: Desktop Modal Logo -->
+               <svg class="w-17 h-14" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" fill="none">
+              <style>
+                .st-blue1 { stroke: #b54cd1; transition: stroke 0.3s ease; }
+                .st-yellow { stroke: #FFC107; transition: stroke 0.3s ease; }
+                .base {
+                  fill: none;
+                  stroke-width: 2;
+                  stroke-linecap: round;
+                  stroke-linejoin: round;
+                  stroke-miterlimit: 10;
+                }
+              </style>
+              <path class="base st-yellow" d="M15,3v1.3C15,5.2,14.2,6,13.3,6h-2.6C9.8,6,9,5.2,9,4.3V3"/>
+              <path class="base st-blue1" d="M19,7V5c0-1.1-0.9-2-2-2H7C5.9,3,5,3.9,5,5v22c0,1.1,0.9,2,2,2h10c1.1,0,2-0.9,2-2v-2"/>
+              <polygon class="base st-yellow" points="16,10 16,19 16,22 22,19 27,19 27,10"/>
+              <line class="base st-blue1" x1="19" y1="13" x2="24" y2="13"/>
+              <line class="base st-blue1" x1="19" y1="16" x2="21" y2="16"/>
+              <line class="base st-yellow" x1="9" y1="25" x2="15" y2="25"/>
+            </svg>
+              <span class="flex-shrink-0"></span>
+              <div>
+                <div class="font-bold text-lg text-blue-700 dark:text-blue-400">Flexgig – Your Plug for Fast, Cheap Data</div>
+                <div class="text-xs text-gray-500 dark:text-gray-400">app.flexgig.com.ng</div>
+              </div>
+            </div>
+            <div class="border-t border-gray-100 dark:border-zinc-700 my-4"></div>
+            <div class="text-sm text-gray-800 dark:text-gray-200 leading-relaxed">
+              Flexgig is your plug for affordable data and airtime top-ups with instant delivery, secure payments, and 24/7 availability—so you're always online and in control.
+            </div>
+          </div>
+          <div class="flex justify-end gap-3 mt-8">
+            <button id="install-app-cancel-desktop" class="bg-gray-200 dark:bg-zinc-800 text-gray-800 dark:text-gray-100 px-5 py-2 rounded-full font-semibold shadow hover:bg-gray-300 dark:hover:bg-zinc-700 transition">Cancel</button>
+            <button id="install-app-confirm-desktop" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-full font-semibold shadow transition">Install</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

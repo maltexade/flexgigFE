@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Flexgig Dashboard</title>
+  <meta name="theme-color" content="#080808">
+  <link rel="stylesheet" href="/styles/main.css">
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth-compat.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-white font-poppins">
+  <header class="flexgig-header">
+    <div class="flexgig-brand">
+      <img src="/pwa/logo.svg" alt="Flexgig Logo" class="h-8">
+      <span class="flexgig-name">Flexgig</span>
+    </div>
+    <button id="logout-btn" class="h-10 px-4 rounded-full bg-red-600 text-white font-semibold flex items-center gap-2">
+      Logout
+    </button>
+  </header>
+
+  <main class="container mx-auto mt-20 p-4">
+    <h1 class="text-2xl font-semibold text-center mb-6">Welcome, <span id="user-name">User</span>!</h1>
+    
+    <!-- Data Purchase -->
+    <section class="mb-8 p-6 bg-gray-800 rounded-lg shadow-md">
+      <h2 class="text-xl font-medium mb-4">Buy Data</h2>
+      <form id="data-purchase-form" class="space-y-4">
+        <div>
+          <label for="network" class="block text-sm">Network</label>
+          <select id="network" class="w-full p-2 rounded bg-gray-700 text-white">
+            <option value="mtn">MTN</option>
+            <option value="airtel">Airtel</option>
+            <option value="glo">Glo</option>
+            <option value="9mobile">9mobile</option>
+          </select>
+        </div>
+        <div>
+          <label for="data-plan" class="block text-sm">Data Plan</label>
+          <select id="data-plan" class="w-full p-2 rounded bg-gray-700 text-white">
+            <option value="500mb">500MB - ₦200</option>
+            <option value="1gb">1GB - ₦350</option>
+            <option value="2gb">2GB - ₦650</option>
+          </select>
+        </div>
+        <div>
+          <label for="phone-number" class="block text-sm">Phone Number</label>
+          <input type="tel" id="phone-number" class="w-full p-2 rounded bg-gray-700 text-white" placeholder="08012345678">
+        </div>
+        <button type="submit" class="w-full p-2 rounded bg-blue-500 text-white font-semibold hover:bg-blue-600">Purchase</button>
+      </form>
+    </section>
+
+    <!-- Airtime to Cash -->
+    <section class="mb-8 p-6 bg-gray-800 rounded-lg shadow-md">
+      <h2 class="text-xl font-medium mb-4">Convert Airtime to Cash</h2>
+      <form id="airtime-conversion-form" class="space-y-4">
+        <div>
+          <label for="airtime-network" class="block text-sm">Network</label>
+          <select id="airtime-network" class="w-full p-2 rounded bg-gray-700 text-white">
+            <option value="mtn">MTN</option>
+            <option value="airtel">Airtel</option>
+            <option value="glo">Glo</option>
+            <option value="9mobile">9mobile</option>
+          </select>
+        </div>
+        <div>
+          <label for="airtime-amount" class="block text-sm">Airtime Amount (₦)</label>
+          <input type="number" id="airtime-amount" class="w-full p-2 rounded bg-gray-700 text-white" placeholder="1000">
+        </div>
+        <div>
+          <label for="bank-account" class="block text-sm">Bank Account</label>
+          <input type="text" id="bank-account" class="w-full p-2 rounded bg-gray-700 text-white" placeholder="Account Number">
+        </div>
+        <button type="submit" class="w-full p-2 rounded bg-blue-500 text-white font-semibold hover:bg-blue-600">Convert</button>
+      </form>
+    </section>
+
+    <!-- Bill Payments -->
+    <section class="mb-8 p-6 bg-gray-800 rounded-lg shadow-md">
+      <h2 class="text-xl font-medium mb-4">Pay Bills</h2>
+      <form id="bill-payment-form" class="space-y-4">
+        <div>
+          <label for="bill-type" class="block text-sm">Bill Type</label>
+          <select id="bill-type" class="w-full p-2 rounded bg-gray-700 text-white">
+            <option value="electricity">Electricity</option>
+            <option value="cable">Cable TV</option>
+            <option value="internet">Internet</option>
+          </select>
+        </div>
+        <div>
+          <label for="bill-amount" class="block text-sm">Amount (₦)</label>
+          <input type="number" id="bill-amount" class="w-full p-2 rounded bg-gray-700 text-white" placeholder="5000">
+        </div>
+        <button type="submit" class="w-full p-2 rounded bg-blue-500 text-white font-semibold hover:bg-blue-600">Pay</button>
+      </form>
+    </section>
+
+    <!-- Transaction History -->
+    <section class="p-6 bg-gray-800 rounded-lg shadow-md">
+      <h2 class="text-xl font-medium mb-4">Transaction History</h2>
+      <ul id="transaction-history" class="space-y-2">
+        <li class="p-2 bg-gray-700 rounded">No transactions yet.</li>
+      </ul>
+    </section>
+  </main>
+
+  <script src="/js/main.js"></script>
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyDygHaTcYyR5hBL3NY9Kl8IaAqbUImLSyc",
+      authDomain: "myauthapp-954b4.firebaseapp.com",
+      projectId: "myauthapp-954b4",
+      storageBucket: "myauthapp-954b4.firebasestorage.app",
+      messagingSenderId: "424977780033",
+      appId: "1:424977780033:web:40882e7f6003bc386ee5c0",
+      measurementId: "G-0Y35JDXM20"
+    };
+    firebase.initializeApp(firebaseConfig);
+
+    const auth = firebase.auth();
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get('token');
+    if (token) {
+      console.log('dashboard.js: Signing in with custom token');
+      auth.signInWithCustomToken(token).then((userCredential) => {
+        console.log('dashboard.js: Signed in with custom token:', userCredential.user.displayName);
+      }).catch((error) => {
+        console.error('dashboard.js: Custom token sign-in error:', error);
+        window.location.href = '/';
+      });
+    }
+
+    auth.onAuthStateChanged((user) => {
+      if (user) {
+        console.log('dashboard.js: User signed in:', user.displayName);
+        document.getElementById('user-name').textContent = user.displayName || 'User';
+      } else {
+        console.log('dashboard.js: No user, redirecting to /');
+        window.location.href = '/';
+      }
+    });
+
+    document.getElementById('logout-btn').addEventListener('click', () => {
+      console.log('dashboard.js: Logging out');
+      auth.signOut().then(() => {
+        window.location.href = '/';
+      }).catch((error) => {
+        console.error('dashboard.js: Logout error:', error);
+      });
+    });
+
+    // Mock form submissions
+    document.getElementById('data-purchase-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      console.log('dashboard.js: Data purchase submitted', {
+        network: document.getElementById('network').value,
+        plan: document.getElementById('data-plan').value,
+        phone: document.getElementById('phone-number').value
+      });
+      alert('Data purchase initiated! (Mock)');
+    });
+
+    document.getElementById('airtime-conversion-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      console.log('dashboard.js: Airtime conversion submitted', {
+        network: document.getElementById('airtime-network').value,
+        amount: document.getElementById('airtime-amount').value,
+        account: document.getElementById('bank-account').value
+      });
+      alert('Airtime conversion initiated! (Mock)');
+    });
+
+    document.getElementById('bill-payment-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      console.log('dashboard.js: Bill payment submitted', {
+        type: document.getElementById('bill-type').value,
+        amount: document.getElementById('bill-amount').value
+      });
+      alert('Bill payment initiated! (Mock)');
+    });
+  </script>
+</body>
+</html>
