@@ -8,23 +8,23 @@
   "theme_color": "#080808",
   "icons": [
     {
-      "src": "/pwa/favicon.ico",
+      "src": "/frontend/pwa/favicon.ico",
       "sizes": "48x48",
       "type": "image/x-icon"
     },
     {
-      "src": "/pwa/apple-touch-icon-180x180.png",
+      "src": "/frontend/pwa/apple-touch-icon-180x180.png",
       "sizes": "180x180",
       "type": "image/png"
     },
     {
-      "src": "/pwa/logo-192x192.png",
+      "src": "/frontend/pwa/logo-192x192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "/pwa/logo-512x512.png",
+      "src": "/frontend/pwa/logo-512x512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
