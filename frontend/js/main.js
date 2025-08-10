@@ -1,16 +1,407 @@
+/* main.js — Client auth flow using Firebase Custom Token from your Express session.
+   Pairs with server.js that:
+   - Uses Passport Google OAuth
+   - Creates a Firebase custom token with Admin SDK
+   - Stores it in the session and exposes /api/session
+
+   How config is resolved:
+   - Prefer window.__FIREBASE_CONFIG__ injected in your HTML
+   - Else try meta tags (see getFirebaseConfig())
+*/
+
+(() => {
+  'use strict';
+
+  // -----------------------------
+  // Configuration helpers
+  // -----------------------------
+  function getFirebaseConfig() {
+    // Preferred: inject in your HTML before main.js:
+    // <script>window.__FIREBASE_CONFIG__ = { apiKey:'', authDomain:'', projectId:'', appId:'', ... };</script>
+    if (window.__FIREBASE_CONFIG__ && typeof window.__FIREBASE_CONFIG__ === 'object') {
+      return window.__FIREBASE_CONFIG__;
+    }
+
+    // Fallback: read from meta tags if present
+    // Example:
+    // <meta name="firebase-api-key" content="...">
+    // <meta name="firebase-auth-domain" content="...">
+    // <meta name="firebase-project-id" content="...">
+    // <meta name="firebase-app-id" content="...">
+    const meta = (name) => document.querySelector(`meta[name="${name}"]`)?.getAttribute('content') || '';
+    const cfg = {
+      apiKey: meta('firebase-api-key'),
+      authDomain: meta('firebase-auth-domain'),
+      projectId: meta('firebase-project-id'),
+      appId: meta('firebase-app-id'),
+      // Optional:
+      databaseURL: meta('firebase-database-url'),
+      storageBucket: meta('firebase-storage-bucket'),
+      messagingSenderId: meta('firebase-messaging-sender-id'),
+      measurementId: meta('firebase-measurement-id'),
+    };
+
+    // Basic sanity check
+    if (!cfg.apiKey || !cfg.authDomain || !cfg.projectId || !cfg.appId) {
+      console.error('[main.js] Missing Firebase config. Provide window.__FIREBASE_CONFIG__ or meta tags.');
+      throw new Error('Firebase config not found');
+    }
+    return cfg;
+  }
+
+  // -----------------------------
+  // Firebase loader (compat CDN)
+  // -----------------------------
+  // Loads compat SDK if not already present. Works with <script type="module"> or plain <script>.
+  const FIREBASE_SCRIPTS = [
+    'https://www.gstatic.com/firebasejs/10.12.4/firebase-app-compat.js',
+    'https://www.gstatic.com/firebasejs/10.12.4/firebase-auth-compat.js',
+  ];
+
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = src;
+      s.async = true;
+      s.onload = () => resolve();
+      s.onerror = () => reject(new Error(`Failed to load ${src}`));
+      document.head.appendChild(s);
+    });
+  }
+
+  async function ensureFirebaseLoaded() {
+    if (window.firebase?.apps) return;
+    for (const src of FIREBASE_SCRIPTS) {
+      // Avoid double-loading if already present
+      const already = Array.from(document.scripts).some((t) => t.src === src);
+      if (!already) {
+        await loadScript(src);
+      }
+    }
+  }
+
+  // -----------------------------
+  // DOM helpers and state
+  // -----------------------------
+  const qs = (sel) => document.querySelector(sel);
+  const qsa = (sel) => Array.from(document.querySelectorAll(sel));
+  const isDashboard = () => /\/dashboard(\.html)?$/i.test(location.pathname);
+
+  const UI = {
+    loginBtn: null,
+    logoutBtn: null,
+    userName: null,
+    userEmail: null,
+    userPhoto: null,
+    authedSection: null,
+    unauthSection: null,
+    statusText: null,
+    spinner: null,
+  };
+
+  function cacheUI() {
+    UI.loginBtn = qs('[data-action="login"], #loginBtn');
+    UI.logoutBtn = qs('[data-action="logout"], #logoutBtn');
+    UI.userName = qs('[data-user="name"], #userName');
+    UI.userEmail = qs('[data-user="email"], #userEmail');
+    UI.userPhoto = qs('[data-user="photo"], #userPhoto');
+    UI.authedSection = qs('[data-section="authed"], #authed');
+    UI.unauthSection = qs('[data-section="unauth"], #unauth');
+    UI.statusText = qs('[data-status], #statusText');
+    UI.spinner = qs('[data-spinner], #spinner');
+  }
+
+  function show(el) {
+    if (el) el.style.display = '';
+  }
+  function hide(el) {
+    if (el) el.style.display = 'none';
+  }
+  function text(el, v) {
+    if (el) el.textContent = v ?? '';
+  }
+  function setImg(el, url, alt = '') {
+    if (!el) return;
+    if (url) {
+      el.src = url;
+      el.alt = alt;
+      show(el);
+    } else {
+      el.removeAttribute('src');
+      el.alt = '';
+      hide(el);
+    }
+  }
+
+  function setLoading(loading, label = '') {
+    if (loading) {
+      show(UI.spinner);
+      text(UI.statusText, label || 'Loading...');
+    } else {
+      hide(UI.spinner);
+      text(UI.statusText, '');
+    }
+  }
+
+  // -----------------------------
+  // Session + Firebase auth flow
+  // -----------------------------
+  let firebaseApp = null;
+  let firebaseAuth = null;
+  let idTokenListenerUnsub = null;
+
+  async function initFirebase() {
+    await ensureFirebaseLoaded();
+    if (!window.firebase) throw new Error('Firebase failed to load');
+    if (!firebaseApp) {
+      firebaseApp = firebase.initializeApp(getFirebaseConfig());
+      firebaseAuth = firebase.auth();
+      // Prefer persistent login
+      try {
+        await firebaseAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+      } catch (e) {
+        console.warn('[main.js] setPersistence failed, defaulting to in-memory:', e?.message || e);
+      }
+    }
+    return { app: firebaseApp, auth: firebaseAuth };
+  }
+
+  async function fetchSessionToken() {
+    const res = await fetch('/api/session', {
+      method: 'GET',
+      credentials: 'include',
+      headers: { 'Accept': 'application/json' },
+    });
+    if (res.status === 401) return { ok: false, status: 401 };
+    if (!res.ok) {
+      const msg = await safeParseError(res);
+      throw new Error(`Session fetch failed: ${res.status} ${msg}`);
+    }
+    const data = await res.json();
+    if (!data?.token) throw new Error('No token in session response');
+    return { ok: true, token: data.token };
+  }
+
+  async function safeParseError(res) {
+    try {
+      const t = await res.text();
+      return t.slice(0, 200);
+    } catch {
+      return '';
+    }
+  }
+
+  async function signInWithCustomToken(token) {
+    const { auth } = await initFirebase();
+    // If already signed in with same user, skip
+    const current = auth.currentUser;
+    if (current) {
+      try {
+        // Attempt to refresh to ensure validity
+        await current.getIdToken(true);
+        return current;
+      } catch {
+        // Continue to sign in fresh
+      }
+    }
+    const cred = await auth.signInWithCustomToken(token);
+    return cred.user;
+  }
+
+  async function ensureSignedInFromSession() {
+    setLoading(true, 'Signing you in...');
+    try {
+      const { ok, token, status } = await fetchSessionToken();
+      if (!ok) {
+        // Not authenticated on server
+        setUnauthenticatedUI();
+        // On dashboard, bounce to /
+        if (isDashboard()) {
+          // Small delay for any UI hint before redirect
+          setTimeout(() => (location.href = '/'), 400);
+        }
+        return null;
+      }
+      const user = await signInWithCustomToken(token);
+      setAuthenticatedUI(user);
+      subscribeIdTokenUpdates();
+      return user;
+    } catch (err) {
+      console.error('[main.js] ensureSignedInFromSession error:', err);
+      setErrorUI(err);
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function subscribeIdTokenUpdates() {
+    const { auth } = (firebaseAuth ? { auth: firebaseAuth } : firebase);
+    if (!auth) return;
+    if (idTokenListenerUnsub) {
+      idTokenListenerUnsub();
+      idTokenListenerUnsub = null;
+    }
+    idTokenListenerUnsub = auth.onIdTokenChanged(async (user) => {
+      if (!user) return;
+      try {
+        // If you need fresh token for API calls:
+        const idToken = await user.getIdToken(/* forceRefresh= */ false);
+        // Example: store in memory; do NOT store in localStorage for security-sensitive apps.
+        window.__ID_TOKEN__ = idToken;
+      } catch (e) {
+        console.warn('[main.js] onIdTokenChanged error:', e?.message || e);
+      }
+    });
+  }
+
+  // -----------------------------
+  // UI states
+  // -----------------------------
+  function setAuthenticatedUI(user) {
+    hide(UI.unauthSection);
+    show(UI.authedSection);
+    const name = user.displayName || 'Signed in';
+    const email = user.email || '';
+    const photo = user.photoURL || '';
+
+    text(UI.userName, name);
+    text(UI.userEmail, email);
+    setImg(UI.userPhoto, photo, name);
+
+    text(UI.statusText, `Welcome${name ? `, ${name}` : ''}!`);
+  }
+
+  function setUnauthenticatedUI() {
+    show(UI.unauthSection);
+    hide(UI.authedSection);
+    setImg(UI.userPhoto, '');
+    text(UI.userName, '');
+    text(UI.userEmail, '');
+    text(UI.statusText, 'You are not signed in.');
+  }
+
+  function setErrorUI(err) {
+    show(UI.unauthSection);
+    hide(UI.authedSection);
+    const msg = err?.message || String(err) || 'Unknown error';
+    text(UI.statusText, `Error: ${msg}`);
+  }
+
+  // -----------------------------
+  // Actions
+  // -----------------------------
+  function goToGoogleAuth() {
+    // Let the server handle the OAuth dance
+    location.href = '/auth/google';
+  }
+
+  async function logoutFlow() {
+    setLoading(true, 'Signing out...');
+    try {
+      // 1) Firebase sign-out (client)
+      await initFirebase();
+      if (firebaseAuth?.currentUser) {
+        await firebaseAuth.signOut();
+      }
+
+      // 2) Try to end server session (if you add a /logout route on server)
+      // This is optional-safe; will ignore failures (e.g., route not present)
+      try {
+        await fetch('/logout', { method: 'POST', credentials: 'include' });
+      } catch {
+        // no-op
+      }
+    } catch (e) {
+      console.warn('[main.js] logout error:', e?.message || e);
+    } finally {
+      setLoading(false);
+      // Send user to home
+      location.href = '/';
+    }
+  }
+
+  function bindEvents() {
+    if (UI.loginBtn) {
+      UI.loginBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        goToGoogleAuth();
+      });
+    }
+    if (UI.logoutBtn) {
+      UI.logoutBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        logoutFlow();
+      });
+    }
+  }
+
+  // -----------------------------
+  // Initialization on page load
+  // -----------------------------
+  async function boot() {
+    cacheUI();
+    bindEvents();
+
+    // If the page has no dedicated sections, create a minimal default experience
+    if (!UI.authedSection && !UI.unauthSection) {
+      // Create minimal indicators
+      const bar = document.createElement('div');
+      bar.style.cssText = 'padding:10px;margin:10px 0;border:1px solid #ddd;border-radius:6px;font-family:system-ui, sans-serif;';
+      const span = document.createElement('span');
+      span.setAttribute('id', 'statusText');
+      bar.appendChild(span);
+      document.body.insertBefore(bar, document.body.firstChild);
+      UI.statusText = span;
+    }
+
+    // Spinner default
+    if (!UI.spinner) {
+      const sp = document.createElement('div');
+      sp.textContent = '⏳';
+      sp.style.cssText = 'display:none;margin:8px 0;';
+      sp.setAttribute('id', 'spinner');
+      UI.spinner = sp;
+      (UI.statusText?.parentElement || document.body).appendChild(sp);
+    }
+
+    // Try to sign in using session
+    await ensureSignedInFromSession();
+  }
+
+  // Kick off after DOM is ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
+
+  // -----------------------------
+  // Expose minimal API (optional)
+  // -----------------------------
+  window.AppAuth = {
+    goToGoogleAuth,
+    logout: logoutFlow,
+    getCurrentUser: () => firebaseAuth?.currentUser || null,
+    getIdToken: async (force = false) => {
+      if (!firebaseAuth?.currentUser) return null;
+      return firebaseAuth.currentUser.getIdToken(!!force);
+    },
+  };
+})();
+
+
+
+
+
+
+
+
 console.log('main.js: Starting execution');
 
 try {
   console.log('main.js: Initializing Firebase');
-  const firebaseConfig = {
-    apiKey: "AIzaSyDygHaTcYyR5hBL3NY9Kl8IaAqbUImLSyc",
-    authDomain: "myauthapp-954b4.firebaseapp.com",
-    projectId: "myauthapp-954b4",
-    storageBucket: "myauthapp-954b4.firebasestorage.app",
-    messagingSenderId: "424977780033",
-    appId: "1:424977780033:web:40882e7f6003bc386ee5c0",
-    measurementId: "G-0Y35JDXM20"
-  };
+  // Using firebaseConfig from getFirebaseConfig()
   try {
     if (typeof firebase !== 'undefined') {
       firebase.initializeApp(firebaseConfig);

@@ -3,16 +3,16 @@ console.log('service-worker.js: Loaded');
 const CACHE_NAME = 'flexgig-v1';
 const urlsToCache = [
   '/',
-  '/frontend/index.html',
-  '/frontend/js/main.js',
-  '/frontend/styles/main.css',
-  '/frontend/pwa/manifest.json',
-  '/frontend/pwa/apple-touch-icon-180x180.png',
-  '/frontend/pwa/logo-192x192.png',
-  '/frontend/pwa/logo-512x512.png',
-  '/frontend/pwa/favicon.ico',
-  '/frontend/pwa/logo.svg',
-  '/frontend/html/dashboard.html',
+  'frontend/index.html',
+  'frontend/js/main.js',
+  'frontend/styles/main.css',
+  'frontend/pwa/manifest.json',
+  'frontend/pwa/apple-touch-icon-180x180.png',
+  'frontend/pwa/logo-192x192.png',
+  'frontend/pwa/logo-512x512.png',
+  'frontend/pwa/favicon.ico',
+  'frontend/pwa/logo.svg',
+  'frontend/html/dashboard.html',
 ];
 
 self.addEventListener('install', (event) => {
