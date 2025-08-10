@@ -8,6 +8,7 @@
    - Prefer window.__FIREBASE_CONFIG__ injected in your HTML
    - Else try meta tags (see getFirebaseConfig())
 */
+const BACKEND_URL = 'https://85068664d2d8.ngrok-free.app';
 
 (() => {
   'use strict';
@@ -167,7 +168,7 @@
   }
 
   async function fetchSessionToken() {
-    const res = await fetch('/api/session', {
+    const res = await fetch(`${BACKEND_URL}/api/session`, {
       method: 'GET',
       credentials: 'include',
       headers: { 'Accept': 'application/json' },
@@ -293,7 +294,7 @@
   // -----------------------------
   function goToGoogleAuth() {
     // Let the server handle the OAuth dance
-    location.href = '/auth/google';
+    location.href = `${BACKEND_URL}/auth/google`;
   }
 
   async function logoutFlow() {
