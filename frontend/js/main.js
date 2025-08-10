@@ -414,6 +414,9 @@ try {
     console.error('main.js: Firebase init error:', error);
   }
 
+  const BACKEND_URL = 'https://85068664d2d8.ngrok-free.app'; // change for prod
+  document.getElementById('googleLoginBtn').href = `${BACKEND_URL}/auth/google`;
+
   let deferredPrompt = null;
   let modalMode = null;
 
