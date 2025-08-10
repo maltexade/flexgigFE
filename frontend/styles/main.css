@@ -97,3 +97,6 @@ body.modal-open {
 #install-modal-mobile:not(.hidden) {
   display: flex !important;
 }
+#auth-container {
+  display: none !important;
+}

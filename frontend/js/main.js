@@ -136,7 +136,7 @@ const BACKEND_URL = 'https://85068664d2d8.ngrok-free.app';
 
   function setLoading(loading, label = '') {
     if (loading) {
-      show(UI.spinner);
+      hide(UI.spinner);
       text(UI.statusText, label || 'Loading...');
     } else {
       hide(UI.spinner);
@@ -210,7 +210,7 @@ const BACKEND_URL = 'https://85068664d2d8.ngrok-free.app';
   }
 
   async function ensureSignedInFromSession() {
-    setLoading(true, 'Signing you in...');
+    setLoading(true);
     try {
       const { ok, token, status } = await fetchSessionToken();
       if (!ok) {
@@ -348,6 +348,7 @@ const BACKEND_URL = 'https://85068664d2d8.ngrok-free.app';
     if (!UI.authedSection && !UI.unauthSection) {
       // Create minimal indicators
       const bar = document.createElement('div');
+      bar.id = 'auth-container';
       bar.style.cssText = 'padding:10px;margin:10px 0;border:1px solid #ddd;border-radius:6px;font-family:system-ui, sans-serif;';
       const span = document.createElement('span');
       span.setAttribute('id', 'statusText');
