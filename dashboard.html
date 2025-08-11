@@ -1,9 +1,122 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta http-equiv="refresh" content="0;url=/frontend/html/dashboard.html">
+  <meta charset="UTF-8">
+  <meta http-equiv="refresh" content="3.5;url=/frontend/html/dashboard.html">
+  <style>
+    /* Background animation */
+    body {
+      background: linear-gradient(-45deg, #0d1117, #0a0e14, #101820, #0f172a);
+      background-size: 400% 400%;
+      animation: gradientShift 8s ease infinite;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+      font-family: Arial, sans-serif;
+      color: white;
+      overflow: hidden;
+    }
+
+    .container {
+      text-align: center;
+      animation: fadeIn 1s ease-in-out;
+      position: relative;
+      z-index: 2;
+    }
+
+    /* Spinner */
+    .spinner {
+      margin: 20px auto;
+      border: 4px solid rgba(255, 255, 255, 0.05);
+      border-top: 4px solid #1E90FF; /* Blue */
+      border-radius: 50%;
+      width: 80px;
+      height: 80px;
+      animation: spin 1s linear infinite, glowBlue 1.5s ease-in-out infinite alternate;
+    }
+
+    /* Text */
+    .text {
+      font-size: 1.2rem;
+      font-weight: bold;
+      color: #FFD700; /* Yellow */
+      text-shadow: 0 0 4px #FFD700, 0 0 6px rgba(255, 215, 0, 0.5);
+      display: inline-block;
+      white-space: nowrap;
+      border-right: 2px solid #FFD700;
+      overflow: hidden;
+      opacity: 0;
+      transition: opacity 0.3s ease-in;
+      animation: pulseGlow 1.5s infinite alternate;
+    }
+
+    /* Teleport effect */
+    .fade-out {
+      animation: shrinkFade 0.8s forwards;
+    }
+
+    /* Animations */
+    @keyframes gradientShift {
+      0% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    @keyframes glowBlue {
+      from { box-shadow: 0 0 3px #1E90FF, 0 0 6px rgba(30, 144, 255, 0.5); }
+      to { box-shadow: 0 0 8px #1E90FF, 0 0 12px rgba(30, 144, 255, 0.7); }
+    }
+
+    @keyframes pulseGlow {
+      from { text-shadow: 0 0 4px #FFD700, 0 0 6px rgba(255, 215, 0, 0.5); }
+      to { text-shadow: 0 0 8px #FFD700, 0 0 12px rgba(255, 215, 0, 0.7); }
+    }
+
+    @keyframes shrinkFade {
+      to { opacity: 0; transform: scale(0.3); }
+    }
+  </style>
 </head>
 <body>
-  <p>Redirecting to dashboard...</p>
+  <div class="container" id="page">
+    <div class="spinner"></div>
+    <p class="text" id="typing"></p>
+  </div>
+
+  <script>
+    const text = "Redirecting to dashboard...";
+    const typingElement = document.getElementById("typing");
+    let index = 0;
+
+    setTimeout(() => {
+      typingElement.style.opacity = "1";
+      typeEffect();
+    }, 500);
+
+    function typeEffect() {
+      if (index < text.length) {
+        typingElement.textContent += text.charAt(index);
+        index++;
+        setTimeout(typeEffect, 80);
+      }
+    }
+    
+    // Shrink into screen before redirect
+    setTimeout(() => {
+      document.getElementById("page").classList.add("fade-out");
+    }, 2800);
+  </script>
 </body>
 </html>
