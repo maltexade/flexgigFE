@@ -1,201 +1,467 @@
+<!DOCTYPE html>
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Flexgig Dashboard</title>
-  <meta name="theme-color" content="#080808">
-  <meta name="firebase-api-key" content="AIzaSyDygHaTcYyR5hBL3NY9Kl8IaAqbUImLSyc">
-  <meta name="firebase-auth-domain" content="myauthapp-954b4.firebaseapp.com">
-  <meta name="firebase-project-id" content="myauthapp-954b4">
-  <meta name="firebase-storage-bucket" content="myauthapp-954b4.firebasestorage.app">
-  <meta name="firebase-messaging-sender-id" content="424977780033">
-  <meta name="firebase-app-id" content="1:424977780033:web:40882e7f6003bc386ee5c0">
-  <meta name="firebase-measurement-id" content="G-0Y35JDXM20">
-  <link rel="stylesheet" href="/styles/main.css">
-  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap" rel="stylesheet">
-  <script src="https://cdn.tailwindcss.com"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Network Reseller Dashboard</title>
+  <link rel="stylesheet" href="/frontend/styles/dashboard.css">
+  <link rel="stylesheet" href="/frontend/styles/user-profile.css">
 </head>
-<body class="bg-gray-900 text-white font-poppins">
-  <header class="flexgig-header">
-    <div class="flex items-center gap-3">
-        <!-- SVG Placeholder: Header Logo -->
-         <svg height="30px" width="30px" version="1.1" id="_x32_" xmlns="http://www.w3.org/2000/svg"
-            xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 512 512" xml:space="preserve">
-          <style type="text/css">
-            .blue { fill: #007BFF; } /* Bright blue */
-            .yellow { fill: #FFD700; } /* Vivid yellow */
-          </style>
-          <g>
-            <path class="blue" d="M168.203,192.082c4.093,0.046,7.798-2.039,10.634-5.216c2.822-3.202,4.79-7.504,5.41-12.379
-              c2.806-16.72,8.294-32.85,16.154-47.608c7.875-14.766,18.091-28.16,30.074-39.554c11.983-11.394,25.718-20.78,
-              40.477-27.717c14.758-6.945,30.524-11.434,46.491-13.278c7.085-1.132,13.316-4.147,18.122-8.433
-              c4.775-4.279,8.123-9.874,8.232-16.169c0.124-6.27-3.255-12.084-9.348-16.006c-6.061-3.923-14.836-5.844-24.137-4.356
-              C289.71,5.287,269.836,12.58,251.76,22.758c-18.091,10.177-34.431,23.222-48.228,38.414c-13.828,15.176-25.129,32.516-33.361,
-              51.112c-8.248,18.587-13.394,38.437-15.27,58.467c-0.744,5.813,0.527,11.254,3.023,15.115
-              C160.42,189.742,164.11,192.028,168.203,192.082z"/>
-              
-            <path class="blue" d="M343.797,319.922c-4.092-0.054-7.797,2.039-10.634,5.217c-2.838,3.201-4.791,7.495-5.426,12.378
-              c-2.791,16.72-8.294,32.842-16.154,47.608c-7.86,14.758-18.076,28.16-30.059,39.546c-11.984,11.402-25.734,20.788-40.476,
-              27.726c-14.758,6.945-30.524,11.425-46.491,13.277c-7.085,1.124-13.317,4.139-18.138,8.426c-4.759,4.287-8.108,9.882-8.216,
-              16.177c-0.124,6.263,3.255,12.076,9.348,15.998c6.046,3.922,14.836,5.845,24.137,4.364c20.602-3.922,40.461-11.215,
-              58.552-21.4c18.092-10.178,34.431-23.215,48.227-38.415c13.828-15.177,25.114-32.508,33.362-51.104
-              c8.247-18.594,13.394-38.437,15.27-58.467c0.744-5.813-0.527-11.262-3.023-15.115
-              C351.564,322.255,347.875,319.977,343.797,319.922z"/>
-            
-            <path class="yellow" d="M88.63,258.464c11.968,16.44,26.586,30.834,42.988,42.461c4.65,3.557,10.014,5.177,14.603,4.937
-              c4.604-0.225,8.433-2.279,10.511-5.782c2.093-3.518,2.155-7.774,0.806-11.813c-1.348-4.062-4.092-7.906-7.999-10.89
-              c-13.084-10.782-24.308-23.603-33.159-37.794c-8.852-14.2-15.348-29.741-19.223-45.817c-3.876-16.076-5.132-32.663-3.767-48.918
-              c1.364-16.238,5.364-32.136,11.75-46.902c2.574-6.704,3.07-13.596,1.752-19.905c-1.318-6.27-4.496-11.968-9.875-15.216
-              c-5.379-3.24-12.092-3.216-18.541,0.101c-6.418,3.279-12.48,9.922-15.843,18.711c-6.899,19.812-10.526,40.663-10.743,61.42
-              c-0.232,20.758,2.899,41.422,9.146,60.971C67.267,223.583,76.631,242.038,88.63,258.464z"/>
-            
-            <path class="yellow" d="M423.371,253.534c-11.968-16.432-26.586-30.826-42.988-42.454c-4.666-3.558-10.03-5.185-14.604-4.945
-              c-4.619,0.224-8.433,2.287-10.525,5.79c-2.093,3.512-2.14,7.775-0.791,11.813c1.349,4.053,4.092,7.906,7.999,10.89
-              c13.084,10.775,24.308,23.603,33.159,37.795c8.852,14.192,15.347,29.733,19.207,45.817c3.892,16.068,5.147,32.663,
-              3.767,48.91c-1.364,16.247-5.348,32.136-11.735,46.903c-2.573,6.704-3.069,13.603-1.767,19.913
-              c1.333,6.263,4.496,11.96,9.89,15.216c5.363,3.232,12.092,3.217,18.525-0.109c6.434-3.271,12.495-9.914,15.859-18.711
-              c6.898-19.804,10.51-40.663,10.743-61.412c0.233-20.758-2.898-41.423-9.146-60.978
-              C444.733,288.414,435.354,269.966,423.371,253.534z"/>
-            
-            <path class="yellow" d="M232.724,386.179c5.395-2.256,9.487-6.085,11.58-10.185c2.108-4.1,2.232-8.433,0.232-11.991
-              c-1.999-3.574-5.658-5.744-9.828-6.604c-4.186-0.852-8.884-0.411-13.425,1.488c-15.89,5.938-32.602,9.247-49.313,9.813
-              c-16.728,0.574-33.424-1.573-49.282-6.262c-15.86-4.674-30.866-11.883-44.244-21.192c-13.394-9.309-25.161-20.71-34.756-33.624
-              c-4.528-5.573-10.248-9.456-16.356-11.48c-6.092-1.984-12.618-2.085-18.122,0.961c-5.488,3.031-8.836,8.86-9.177,
-              16.099c-0.372,7.193,2.341,15.766,8.278,23.076c13.704,15.882,29.951,29.439,47.825,40.02
-              c17.859,10.58,37.314,18.207,57.374,22.563c20.045,4.38,40.709,5.488,60.924,3.326C194.665,400.03,214.431,394.566,232.724,386.179z"/>
-            
-            <path class="yellow" d="M503.688,175.72c-13.704-15.882-29.966-29.439-47.825-40.012c-17.858-10.587-37.313-18.207-57.374-22.563
-              c-20.06-4.38-40.709-5.496-60.94-3.326c-20.215,2.155-39.996,7.612-58.273,16.006c-5.395,2.256-9.487,6.076-11.58,
-              10.178c-2.108,4.1-2.232,8.44-0.248,11.999c1.999,3.573,5.674,5.743,9.844,6.596c4.185,0.853,8.882,0.411,
-              13.425-1.488c15.874-5.937,32.602-9.239,49.313-9.813c16.712-0.574,33.423,1.581,49.282,6.27
-              c15.874,4.674,30.865,11.875,44.244,21.184c13.394,9.309,25.16,20.711,34.756,33.632c4.512,5.565,10.232,9.448,
-              16.355,11.472c6.092,1.984,12.619,2.093,18.122-0.954c5.488-3.038,8.836-8.859,9.177-16.099
-              C512.339,191.601,509.61,183.036,503.688,175.72z"/>
-          </g>
-        </svg>
-        <span class="text-xl sm:text-2xl font-bold text-blue-600 tracking-wide">FlexGig</span>
+<body>
+  <header>
+    <div class="user-info">
+      <div class="avatar" id="avatar"></div>
+      <div class="greeting">
+        <span id="greet"></span>
+        <strong id="firstname"></strong>
       </div>
-    <button id="logout-btn" class="h-10 px-4 rounded-full bg-red-600 text-white font-semibold flex items-center gap-2">
-      Logout
-    </button>
+    </div>
+    <div class="support" role="button" aria-label="Support">
+      <svg viewBox="0 0 24 24" aria-hidden>
+        <path d="M12 3C7.03 3 3 6.92 3 12c0 1.87.51 3.62 1.39 5.11L3 21l4.07-1.46A8.96 8.96 0 0 0 12 21c4.97 0 9-3.92 9-9s-4.03-9-9-9z"/>
+      </svg>
+      <span>Support</span>
+    </div>
   </header>
 
-  <main class="container mx-auto mt-20 p-4">
-    <h1 class="text-2xl font-semibold text-center mb-6">Welcome, <span id="user-name">User</span>!</h1>
+  <main>
+    <div id="userProfileDashboardContent" class="user-profile-dashboard-content active">
+      <div class="stack">
+        <!-- Setup Pin -->
+        <div class="card pin">
+          <div style="display:flex;gap:12px;align-items:center">
+            <div class="icon-wrap" aria-hidden>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                <path d="M12 2L4 5v6c0 5.25 3.84 9.74 8 11 4.16-1.26 8-5.75 8-11V5l-8-3z" fill="#FFD700" opacity="0.95"/>
+                <rect x="9" y="10" width="6" height="5" rx="1" fill="#021827"/>
+              </svg>
+            </div>
+            <div>
+              <h4>Setup Pin</h4>
+              <p>Secure your account</p>
+            </div>
+          </div>
+          <svg class="arrow-icon" width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <path d="M9 18l6-6-6-6" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+
+        <!-- Update Profile -->
+        <div class="card update-profile">
+          <div style="display:flex;gap:12px;align-items:center">
+            <div class="icon-wrap" aria-hidden>
+              <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24">
+                <defs>
+                  <linearGradient id="gradProfile" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" style="stop-color:#ff6a00; stop-opacity:1" />
+                    <stop offset="50%" style="stop-color:#ee0979; stop-opacity:1" />
+                    <stop offset="100%" style="stop-color:#8e2de2; stop-opacity:1" />
+                  </linearGradient>
+                </defs>
+                <path fill="url(#gradProfile)" d="M12 12c2.67 0 8 1.34 8 4v2H4v-2c0-2.66 5.33-4 8-4zm0-2a4 4 0 100-8 4 4 0 000 8z"/>
+              </svg>
+            </div>
+            <div>
+              <h4>Update Profile</h4>
+              <p>Keep your account details up to date</p>
+            </div>
+          </div>
+          <svg class="arrow-icon" width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <path d="M9 18l6-6-6-6" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+
+        <!-- Balance -->
+        <div class="balance">
+          <h4>
+            <span class="balance-title">
+              <svg class="wallet-icon" viewBox="16 20 64 54" xmlns="http://www.w3.org/2000/svg">
+                <g id="Wallet">
+                  <path fill="#00A651" d="M77.5,38H77V27.5a.41.41,0,0,0,0-.19.49.49,0,0,0,0-.21.5.5,0,0,0-.53-.47L63,27.45V20.5a.5.5,0,0,0-.5-.5h-29a.5.5,0,0,0-.5.5v8.71l-11.29.9C18.56,30.11,16,32.32,16,35V71.5A2.5,2.5,0,0,0,18.5,74h59A2.5,2.5,0,0,0,80,71.5v-31A2.5,2.5,0,0,0,77.5,38ZM76,27.66V38H63V28.45ZM34,21H62V38H59V27.79a.5.5,0,0,0-.5-.5C56.57,27.29,55,26,55,24.5a.5.5,0,0,0-.5-.5h-12a.5.5,0,0,0-.5.5c0,1.48-2.52,2.79-4.5,2.79a.5.5,0,0,0-.5.5V38H34ZM54,38c-.29-2.62-2.86-4.67-6-4.67S42.32,35.38,42,38H38V28.27c2.17-.18,4.55-1.54,4.94-3.27H54a4.22,4.22,0,0,0,4,3.27V38Zm-1,0H43c.29-2.06,2.41-3.67,5-3.67S52.67,35.94,53,38ZM21.75,31.11,33,30.22V38H17V35C17,32.87,19.11,31.11,21.75,31.11ZM77.5,73h-59A1.5,1.5,0,0,1,17,71.5V39H77.5A1.5,1.5,0,0,1,79,40.5V50H71.5a6.5,6.5,0,0,0,0,13H79v8.5A1.5,1.5,0,0,1,77.5,73ZM79,62H71.5a5.5,5.5,0,0,1,0-11H79Z"/>
+                  <path fill="#FFFFFF" d="M69,56.5A3.5,3.5,0,1,0,72.5,53,3.5,3.5,0,0,0,69,56.5ZM72.5,54A2.5,2.5,0,1,1,70,56.5,2.5,2.5,0,0,1,72.5,54Z"/>
+                </g>
+              </svg>
+              Balance
+            </span>
+          </h4>
+          <p style="color: white; font-weight: 700;">₦0.00</p>
+        </div>
+
+        <!-- Actions -->
+        <div class="actions-row">
+          <div class="card transfer">
+            <div style="display:flex;gap:12px;align-items:center">
+              <div class="icon-wrap">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                  <path d="M12 19V5m-5 5l5-5 5 5" stroke="#FFD700" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </div>
+              <div>
+                <h4>Transfer</h4>
+              </div>
+            </div>
+          </div>
+          <div class="card add-money">
+            <div style="display:flex;gap:12px;align-items:center">
+              <div class="icon-wrap">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                  <path d="M12 19V5m-7 7h14" stroke="#00AAFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </div>
+              <div>
+                <h4>Add Money</h4>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Services -->
+        <div class="shortcuts">
+          <h4>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+              <path d="M3 12h18M3 6h18M3 18h18" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            Services
+          </h4>
+          <div class="short-grid">
+            <div class="short-item">
+              <svg width="36" height="36" fill="#00AAFF">
+                <path d="M4 12h2v6H4zM9 8h2v10H9zM14 5h2v13h-2zM19 3h2v15h-2z"/>
+              </svg>
+              <small>Data</small>
+            </div>
+            <div class="short-item">
+              <svg width="36" height="36" fill="#FFD700">
+                <path d="M7 2h10l3 4v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4l3-2zM12 7a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/>
+              </svg>
+              <small>Airtime</small>
+            </div>
+            <div class="short-item">
+              <svg width="36" height="36" fill="#FFAA00">
+                <path d="M13 2L3 14h7v8l10-12h-7z"/>
+              </svg>
+              <small>Electricity</small>
+            </div>
+            <div class="short-item">
+              <svg width="36" height="36" fill="#7F5FFF">
+                <rect x="3" y="4" width="18" height="12" rx="2"/>
+                <path d="M8 20h8v-2H8z" fill="#4b4b4b"/>
+              </svg>
+              <small>TV</small>
+            </div>
+            <div class="short-item">
+              <svg width="36" height="36" fill="#00DD88">
+                <path d="M7 7h10v3l4-4-4-4v3H7v4zM17 17H7v-3l-4 4 4 4v-3h10v-4z"/>
+              </svg>
+              <small>Convert</small>
+            </div>
+            <div class="short-item">
+              <svg width="36" height="36" fill="#FF6A3D">
+                <path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-7h16zM12 3l2 3h4l-2 3H8L6 6h4l2-3z"/>
+              </svg>
+              <small>Giftcards</small>
+            </div>
+          </div>
+          <div class="recent-transactions">
+            <h4>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                <path d="M12 2v2m0 16v2m10-10h-2M4 12H2m17.36-7.36l-1.42 1.42M6.64 19.36l-1.42-1.42M19.36 19.36l-1.42-1.42M6.64 4.64l-1.42 1.42" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+              Recently Bought Data
+            </h4>
+            <div class="recent-transactions-list"></div>
+          </div>
+
+          <div class="phone-section">
+            <p style="font-size: small;" for="phone-input">Phone Number</p>
+            <div class="phone-input-row">
+              <input
+                type="tel"
+                id="phone-input"
+                class="phone-input"
+                pattern="[0-9]*"
+                inputmode="numeric"
+                placeholder="Enter phone number"
+                autocomplete="tel"
+              />
+              <button class="contact-btn" type="button" aria-label="Pick from contacts">
+                <img src="/frontend/svg/contact-icon.svg" alt="Contact Icon" class="contact-btn contact-btn-svg" />
+              </button>
+            </div>
+          </div>
+
+          <div class="contact-modal" id="contactModal" style="display:none;">
+            <div class="modal-content">
+              <h3>Enter Contact</h3>
+              <input type="text" id="manual-name" placeholder="Name">
+              <input type="text" id="manual-phone" placeholder="Phone number">
+              <button id="modal-save">Save</button>
+              <button id="modal-cancel">Cancel</button>
+            </div>
+          </div>
+
+          <div class="network-provider">
+            <p style="font-size: small;">Network Provider</p>
+            <div class="provider-grid">
+              <div class="slider mtn">
+                <img src="/frontend/svg/MTN-icon.svg" alt="MTN" />
+                <div class="provider-name">MTN</div>
+              </div>
+              <div class="provider-box mtn">
+                <img src="/frontend/svg/MTN-icon.svg" alt="MTN" />
+                <div class="provider-name slider-mtn">MTN</div>
+              </div>
+              <div class="provider-box airtel">
+                <img class="airrr" src="/frontend/svg/airtel-icon.svg" alt="Airtel" />
+                <div class="provider-name slider-airtel">AIRTEL</div>
+              </div>
+              <div class="provider-box glo">
+                <img class="gloo" src="/frontend/svg/GLO-icon.svg" alt="GLO" />
+                <div class="provider-name slider-glo">GLO</div>
+              </div>
+              <div class="provider-box ninemobile">
+                <img src="/frontend/svg/9mobile-icon.svg" alt="9MOBILE" />
+                <div class="provider-name slider-ninemobile">9MOBILE</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="subscription-plan">
+            <p style="font-size: small;">Subscription Plan</p>
+          </div>
+          <div class="plans-row">
+            <div class="plan-box">
+              <div></div>
+              <div></div>
+              <div></div>
+            </div>
+            <div class="plan-box">
+              <div></div>
+              <div></div>
+              <div></div>
+            </div>
+            <div class="see-all-plans">
+              <img style="width: 50px; height: 50px;" src="/frontend/svg/plane.svg" alt="all plans">
+              <span>All Plans</span>
+            </div>
+            <div id="allPlansModal" class="modal-overlay" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="modalTitle" tabindex="-1">
+              <div class="modal-content" role="document">
+                <div class="modal-header">
+                  <div class="pull-handle" aria-hidden="true"></div>
+                  <button class="close-btn" aria-label="Close All Plans">&times;</button>
+                </div>
+                <section class="plan-section awoof-section" data-provider="mtn">
+                  <div class="section-header sticky-header">
+                    <svg class="yellow-circle-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <circle cx="12" cy="12" r="10" fill="#FFD700"/>
+                    </svg>
+                    <h2 id="modalTitle">MTN AWOOF</h2>
+                  </div>
+                  <div class="plans-grid awoof-grid"></div>
+                </section>
+                <section class="plan-section gifting-section" data-provider="mtn">
+                  <div class="section-header">
+                    <svg class="yellow-circle-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <circle cx="12" cy="12" r="10" fill="#FFD700"/>
+                    </svg>
+                    <h2>MTN GIFTING</h2>
+                  </div>
+                  <div class="plans-grid gifting-grid"></div>
+                </section>
+              </div>
+            </div>
+          </div>
+          <button id="continueBtn" class="continue-btn" disabled>Continue</button>
+          <div id="checkoutModal" class="modal" aria-hidden="true">
+            <div class="modal-content">
+              <div class="pull-handle"></div>
+              <button class="close-btn" type="button" aria-label="Close checkout modal">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="12" r="10" fill="#bfc7d3"/>
+                  <path d="M8 8l8 8M16 8l-8 8" stroke="#021827" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+              </button>
+              <div class="section-header">
+                <h2>Confirm</h2>
+              </div>
+              <div class="checkout-content">
+                <div class="send-to-section">
+                  <h3>Send to</h3>
+                  <p id="checkout-phone"></p>
+                </div>
+                <div class="checkout-details">
+                  <div class="details-left">
+                    <p>Service</p>
+                    <p>Price</p>
+                    <p>Data Package</p>
+                    <p>Provider</p>
+                  </div>
+                  <div class="details-right">
+                    <p><span class="data-icon">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                        <rect x="6" y="12" width="2" height="8" fill="#1E90FF"/>
+                        <rect x="10" y="8" width="2" height="12" fill="#1E90FF"/>
+                        <rect x="14" y="4" width="2" height="16" fill="#1E90FF"/>
+                      </svg>
+                    </span>Data</p>
+                    <p id="checkout-price"></p>
+                    <p id="checkout-data"></p>
+                    <p id="checkout-provider"></p>
+                  </div>
+                </div>
+                <button id="payBtn" class="pay-btn" type="button" disabled>Pay</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="recent-transactions">
+          <h4>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+              <path d="M12 2v2m0 16v2m10-10h-2M4 12H2m17.36-7.36l-1.42 1.42M6.64 19.36l-1.42-1.42M19.36 19.36l-1.42-1.42M6.64 4.64l-1.42 1.42" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            Recently Bought Data
+          </h4>
+          <div class="recent-transactions-list"></div>
+        </div>
+      </div>
+      <div class="transactions-section">
+        <div class="transactions-header">
+          <h3>Transactions</h3>
+          <a href="#" class="view-all-link">View All</a>
+        </div>
+        <div class="no-transactions">
+          <svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 24 24" fill="none" stroke="#888" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 7h18v12H3z"/>
+            <path d="M3 7l9 6 9-6"/>
+            <line x1="12" y1="13" x2="12" y2="19"/>
+          </svg>
+          <p>No Transaction Yet</p>
+        </div>
+        <div class="transactions-list"></div>
+      </div>
+      <div id="pinModal" class="pin-modal hidden">
+        <div class="pin-header">
+          <button id="closePinModal" class="back-btn" aria-label="Close">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="white" viewBox="0 0 24 24">
+              <path d="M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z"/>
+            </svg>
+          </button>
+          <h2>Create PIN</h2>
+        </div>
+        <div class="pin-body">
+          <div class="firewall-icon">
+            <svg class="fwall" width="25" height="25" viewBox="0 0 24 24" fill="none">
+              <path d="M12 2L4 5v6c0 5.25 3.84 9.74 8 11 4.16-1.26 8-5.75 8-11V5l-8-3z" fill="#FFD700" opacity="0.95"/>
+              <rect x="9" y="10" width="6" height="5" rx="1" fill="#021827"/>
+            </svg>
+            <p>Create a 4-digit PIN</p>
+          </div>
+          <div class="pin-inputs">
+            <input type="password" maxlength="1" readonly />
+            <input type="password" maxlength="1" readonly />
+            <input type="password" maxlength="1" readonly />
+            <input type="password" maxlength="1" readonly />
+          </div>
+          <div class="pin-keypad">
+            <button>1</button><button>2</button><button>3</button>
+            <button>4</button><button>5</button><button>6</button>
+            <button>7</button><button>8</button><button>9</button>
+            <div></div><button>0</button>
+            <button id="deleteKey" aria-label="Delete">
+              <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M8 6H19C19.5523 6 20 6.44772 20 7V17C20 17.5523 19.5523 18 19 18H8L2 12L8 6Z" fill="white"/>
+                <line x1="10" y1="9" x2="16" y2="15" stroke="black" stroke-width="2" stroke-linecap="round"/>
+                <line x1="16" y1="9" x2="10" y2="15" stroke="black" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div id="pinAlert" class="pin-alert hidden">
+        <p id="pinAlertMsg"></p>
+      </div>
+      <div id="centerAlert" class="pin-alert hidden">
+        <p id="centerAlertMsg"></p>
+      </div>
+    </div>
+    <!-- Update Profile Modal -->
+    <!-- Update Profile Modal -->
+     <!-- Update Profile Modal -->
+<!-- Update Profile Modal -->
+<div id="updateProfileModal" class="modal-overlay" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="updateProfileTitle" tabindex="-1">
+  <div class="modal-content">
+    <div class="modal-header">
+      <button class="back-btn" aria-label="Back to dashboard">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z" fill="white"/>
+        </svg>
+      </button>
+      <h2 id="updateProfileTitle">Update Profile</h2>
+    </div>
+    <form id="updateProfileForm" enctype="multipart/form-data">
+      <div class="profile-picture-section">
+        <div class="profile-picture-preview" id="profilePicturePreview">U</div>
+        <label for="profilePicture" class="profile-picture-label">
+          <span>Change Photo</span>
+          <input type="file" id="profilePicture" name="profilePicture" accept="image/jpeg,image/png,image/gif" hidden>
+        </label>
+        <div class="error-message" id="profilePictureError"></div>
+      </div>
+      <div class="form-group">
+        <label for="fullName">Full Name</label>
+        <input type="text" id="fullName" name="fullName" placeholder="Enter your full name" required>
+        <div class="error-message" id="fullNameError"></div>
+      </div>
+      <div class="form-group">
+        <label for="username">Username</label>
+        <input type="text" id="username" name="username" placeholder="Enter your username" required>
+        <div class="error-message" id="usernameError"></div>
+      </div>
+      <div class="form-group">
+        <label for="phoneNumber">Phone Number</label>
+        <input type="tel" id="phoneNumber" name="phoneNumber" placeholder="Enter your phone number" required>
+        <div class="error-message" id="phoneNumberError"></div>
+      </div>
+      <div class="form-group">
+        <label for="email">Email</label>
+        <input type="email" id="email" name="email" placeholder="Enter your email" readonly>
+      </div>
+      <div class="form-group">
+        <label for="address">Address</label>
+        <input type="text" id="address" name="address" placeholder="Enter your address" required>
+        <div class="error-message" id="addressError"></div>
+      </div>
+      <button type="submit" id="saveProfileBtn" class="save-btn" disabled>Save Changes</button>
+    </form>
+  </div>
+</div>
     
-    <!-- Data Purchase -->
-    <section class="mb-8 p-6 bg-gray-800 rounded-lg shadow-md">
-      <h2 class="text-xl font-medium mb-4">Buy Data</h2>
-      <form id="data-purchase-form" class="space-y-4">
-        <div>
-          <label for="network" class="block text-sm">Network</label>
-          <select id="network" class="w-full p-2 rounded bg-gray-700 text-white">
-            <option value="mtn">MTN</option>
-            <option value="airtel">Airtel</option>
-            <option value="glo">Glo</option>
-            <option value="9mobile">9mobile</option>
-          </select>
-        </div>
-        <div>
-          <label for="data-plan" class="block text-sm">Data Plan</label>
-          <select id="data-plan" class="w-full p-2 rounded bg-gray-700 text-white">
-            <option value="500mb">500MB - ₦200</option>
-            <option value="1gb">1GB - ₦350</option>
-            <option value="2gb">2GB - ₦650</option>
-          </select>
-        </div>
-        <div>
-          <label for="phone-number" class="block text-sm">Phone Number</label>
-          <input type="tel" id="phone-number" class="w-full p-2 rounded bg-gray-700 text-white" placeholder="08012345678">
-        </div>
-        <button type="submit" class="w-full p-2 rounded bg-blue-500 text-white font-semibold hover:bg-blue-600">Purchase</button>
-      </form>
-    </section>
-
-    <!-- Airtime to Cash -->
-    <section class="mb-8 p-6 bg-gray-800 rounded-lg shadow-md">
-      <h2 class="text-xl font-medium mb-4">Convert Airtime to Cash</h2>
-      <form id="airtime-conversion-form" class="space-y-4">
-        <div>
-          <label for="airtime-network" class="block text-sm">Network</label>
-          <select id="airtime-network" class="w-full p-2 rounded bg-gray-700 text-white">
-            <option value="mtn">MTN</option>
-            <option value="airtel">Airtel</option>
-            <option value="glo">Glo</option>
-            <option value="9mobile">9mobile</option>
-          </select>
-        </div>
-        <div>
-          <label for="airtime-amount" class="block text-sm">Airtime Amount (₦)</label>
-          <input type="number" id="airtime-amount" class="w-full p-2 rounded bg-gray-700 text-white" placeholder="1000">
-        </div>
-        <div>
-          <label for="bank-account" class="block text-sm">Bank Account</label>
-          <input type="text" id="bank-account" class="w-full p-2 rounded bg-gray-700 text-white" placeholder="Account Number">
-        </div>
-        <button type="submit" class="w-full p-2 rounded bg-blue-500 text-white font-semibold hover:bg-blue-600">Convert</button>
-      </form>
-    </section>
-
-    <!-- Bill Payments -->
-    <section class="mb-8 p-6 bg-gray-800 rounded-lg shadow-md">
-      <h2 class="text-xl font-medium mb-4">Pay Bills</h2>
-      <form id="bill-payment-form" class="space-y-4">
-        <div>
-          <label for="bill-type" class="block text-sm">Bill Type</label>
-          <select id="bill-type" class="w-full p-2 rounded bg-gray-700 text-white">
-            <option value="electricity">Electricity</option>
-            <option value="cable">Cable TV</option>
-            <option value="internet">Internet</option>
-          </select>
-        </div>
-        <div>
-          <label for="bill-amount" class="block text-sm">Amount (₦)</label>
-          <input type="number" id="bill-amount" class="w-full p-2 rounded bg-gray-700 text-white" placeholder="5000">
-        </div>
-        <button type="submit" class="w-full p-2 rounded bg-blue-500 text-white font-semibold hover:bg-blue-600">Pay</button>
-      </form>
-    </section>
-
-    <!-- Transaction History -->
-    <section class="p-6 bg-gray-800 rounded-lg shadow-md">
-      <h2 class="text-xl font-medium mb-4">Transaction History</h2>
-      <ul id="transaction-history" class="space-y-2">
-        <li class="p-2 bg-gray-700 rounded">No transactions yet.</li>
-      </ul>
-    </section>
   </main>
 
-  <script src="/js/main.js"></script>
-  <script>
-  // Mock form submissions (unchanged)
-  document.getElementById('data-purchase-form').addEventListener('submit', (e) => {
-    e.preventDefault();
-    console.log('dashboard.js: Data purchase submitted', {
-      network: document.getElementById('network').value,
-      plan: document.getElementById('data-plan').value,
-      phone: document.getElementById('phone-number').value
-    });
-    alert('Data purchase initiated! (Mock)');
-  });
+  <nav class="bottom-nav">
+    <a href="#home" class="nav-item">
+      <svg viewBox="0 0 36 36" xmlns="http://www.w3.org/2000/svg" class="icon">
+        <title>house-solid</title>
+        <path d="M33,19a1,1,0,0,1-.71-.29L18,4.41,3.71,18.71a1,1,0,0,1-1.41-1.41l15-15a1,1,0,0,1,1.41,0l15,15A1,1,0,0,1,33,19Z" fill="currentColor"/>
+        <path d="M18,7.79,6,19.83V32a2,2,0,0,0,2,2h7V24h6V34h7a2,2,0,0,0,2-2V19.76Z" fill="currentColor"/>
+      </svg>
 
-  document.getElementById('airtime-conversion-form').addEventListener('submit', (e) => {
-    e.preventDefault();
-    console.log('dashboard.js: Airtime conversion submitted', {
-      network: document.getElementById('airtime-network').value,
-      amount: document.getElementById('airtime-amount').value,
-      account: document.getElementById('bank-account').value
-    });
-    alert('Airtime conversion initiated! (Mock)');
-  });
+      <span>Home</span>
+    </a>
+    <a href="#history" class="nav-item">
+      <svg xmlns="http://www.w3.org/2000/svg" class="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+          d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+      <span>History</span>
+    </a>
+    <a href="#settings" class="nav-item">
+      <img src="/frontend/svg/settings.svg" alt="Settings Icon" class="icon svg-inject">
+      <span>Settings</span>
+    </a>
+  </nav>
 
-  document.getElementById('bill-payment-form').addEventListener('submit', (e) => {
-    e.preventDefault();
-    console.log('dashboard.js: Bill payment submitted', {
-      type: document.getElementById('bill-type').value,
-      amount: document.getElementById('bill-amount').value
-    });
-    alert('Bill payment initiated! (Mock)');
-  });
-</script>
+
+  <script src="/frontend/js/dashboard.js"></script>
 </body>
 </html>

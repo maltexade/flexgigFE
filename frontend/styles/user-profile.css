@@ -1,0 +1,267 @@
+/* Modal Overlay */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent; /* Solid black background */
+  display: none;
+  z-index: 1000;
+  opacity: 1; /* Always visible when shown */
+}
+
+/* Modal Content */
+.modal-content {
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: translateX(-100%); /* Start off-screen to the left */
+  overflow-y: auto;
+  background: #000000; /* Solid black background */
+  display: flex;
+  flex-direction: column;
+  border-radius: 0; /* No border radius for mobile */
+  box-shadow: 0 0 20px rgba(255, 255, 255, 0.1); /* Subtle glow */
+}
+
+/* Modal Header */
+.modal-header {
+  display: flex;
+  align-items: center;
+  padding: 20px 20px 20px 0;
+  position: sticky;
+  top: 0;
+  background: #000000;
+  z-index: 10;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.modal-header h2 {
+  font-size: 1.6rem;
+  color: #ffffff;
+  margin: 0;
+  flex-grow: 1;
+  text-align: center;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.back-btn {
+  background: none;
+  border: none;
+  color: #ffffff;
+  font-size: 1.5rem;
+  cursor: pointer;
+  padding: 8px;
+  position: relative;
+  align-items: center;
+  transition: transform 0.2s ease;
+}
+
+.back-btn:hover {
+  transform: scale(1.1);
+}
+
+.back-btn svg {
+  fill: #ffffff;
+}
+
+/* Profile Picture Section */
+.profile-picture-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 24px;
+}
+
+.profile-picture-preview {
+  width: 110px;
+  height: 110px;
+  border-radius: 50%;
+  background: #333333;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 3rem;
+  color: #ffffff;
+  overflow: hidden;
+  margin-bottom: 16px;
+  border: 2px solid #FFD700;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+}
+
+.profile-picture-label {
+  background: #FFD700;
+  color: #000000;
+  padding: 10px 20px;
+  border-radius: 24px;
+  cursor: pointer;
+  font-size: 1rem;
+  font-weight: 600;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.profile-picture-label:hover {
+  background: #ffca28;
+  transform: translateY(-2px);
+}
+
+/* Form Styles */
+#updateProfileForm {
+  padding: 0 24px 24px;
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.form-group {
+  margin-bottom: 20px;
+}
+
+.form-group label {
+  display: block;
+  color: #ffffff;
+  font-size: 1rem;
+  margin-bottom: 10px;
+  font-weight: 500;
+}
+
+.form-group input {
+  width: 100%;
+  padding: 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: #1a1a1a;
+  color: #ffffff;
+  font-size: 1.1rem;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.form-group input:focus {
+  outline: none;
+  border-color: #FFD700;
+  box-shadow: 0 0 8px rgba(255, 215, 0, 0.3);
+}
+
+.form-group input[readonly] {
+  background: #2a2a2a;
+  opacity: 0.7;
+}
+
+/* Error Messages */
+.error-message {
+  color: #ff4d4d;
+  font-size: 0.85rem;
+  margin-top: 6px;
+  display: none;
+}
+
+.error-message.active {
+  display: block;
+}
+
+/* Save Button */
+.save-btn {
+  width: 100%;
+  padding: 16px;
+  background: #FFD700;
+  color: #000000;
+  border: none;
+  border-radius: 10px;
+  font-size: 1.1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.2s ease;
+  margin-top: auto;
+}
+
+.save-btn:disabled {
+  background: #4b4b4b;
+  cursor: not-allowed;
+}
+
+.save-btn.active {
+  background: #ffca28;
+}
+
+.save-btn:hover:not(:disabled) {
+  background: #ffca28;
+  transform: translateY(-2px);
+}
+
+/* Responsive Design for Tablet */
+@media (min-width: 768px) {
+  .modal-overlay {
+    background: rgba(0, 0, 0, 0.9);
+    display: none;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .modal-content {
+    width: 100%;
+    max-width: 500px;
+    height: auto;
+    max-height: 85vh;
+    border-radius: 16px;
+    box-shadow: 0 8px 30px rgba(255, 255, 255, 0.15);
+  }
+
+  .modal-header {
+    padding: 24px 32px;
+  }
+
+  .modal-header h2 {
+    font-size: 1.8rem;
+  }
+
+  .profile-picture-section {
+    padding: 32px;
+  }
+
+  .profile-picture-preview {
+    width: 120px;
+    height: 120px;
+    font-size: 3.5rem;
+  }
+
+  #updateProfileForm {
+    padding: 0 32px 32px;
+  }
+
+  .save-btn {
+    max-width: 320px;
+    margin: 24px auto 0;
+  }
+}
+
+/* Responsive Design for Desktop */
+@media (min-width: 1024px) {
+  .modal-content {
+    max-width: 600px;
+    max-height: 80vh;
+  }
+
+  .modal-header h2 {
+    font-size: 2rem;
+  }
+
+  .profile-picture-preview {
+    width: 140px;
+    height: 140px;
+    font-size: 4rem;
+  }
+
+  .form-group input {
+    font-size: 1.2rem;
+    padding: 16px;
+  }
+
+  .save-btn {
+    font-size: 1.2rem;
+    padding: 18px;
+    max-width: 360px;
+  }
+}

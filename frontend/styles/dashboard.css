@@ -1,0 +1,1654 @@
+    :root {
+      --bg: #0f0f0f;
+      --card: #151515;
+      --muted: #bfc7d3;
+      --accent-blue: #00aaff;
+      --accent-yellow: #ffcc00;
+      --mtn-yellow: #ffcc00;      /* Bright yellow */
+      --glo-green: #00B140;       /* Glo green */
+      --nine-mobile: #7DB700;     /* Lemon-ish yellow-green */
+      --airtel-red: #FF0000;      /* Airtel red */
+    }
+    *{box-sizing:border-box}
+    body {
+      user-select: none; /* disable text selection */
+      -webkit-user-select: none;
+      -ms-user-select: none;
+      margin: 0;
+      font-family: ui-sans-serif,system-ui,sans-serif,Apple Color Emoji,Segoe UI Emoji,Segoe UI Symbol,Noto Color Emoji;
+      background-color: var(--bg);
+      color: #ffffff;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 18px 22px;
+    }
+    .user-info { display: flex; align-items: center; }
+    .avatar {
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      background: var(--accent-blue);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 20px;
+      margin-right: 12px;
+      color: #021827;
+    }
+    .avatar-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .greeting span { display: block; font-size: 0.85rem; color: var(--muted); }
+    .greeting strong { font-size: 1.15rem; color: #fff; }
+    .support {
+      background: linear-gradient(90deg, var(--accent-blue), rgba(0, 170, 255, 0.9));
+      padding: 10px 14px;
+      border-radius: 16px 16px 16px 6px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .support svg { width: 20px; height: 20px; fill: white; }
+
+    main { padding: 16px; max-width: 1100px; margin: 0 auto; }
+    .stack { display: flex; flex-direction: column; gap: 10px; }
+
+    .card {
+      background: var(--card);
+      border-radius: 12px;
+      padding: 12px 14px;
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.6);
+      border: 1px solid rgba(255, 255, 255, 0.02);
+      justify-content: space-between;
+    }
+    .icon-wrap {
+      width: 48px;
+      height: 48px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(255, 255, 255, 0.03);
+      flex-shrink: 0;
+    }
+    .card h4 { margin: 0; font-size: 1rem; }
+    .card p { margin: 4px 0 0 0; font-size: 0.85rem; color: var(--muted); }
+    .arrow-icon { flex-shrink: 0; }
+
+    .pin .icon-wrap { background: linear-gradient(135deg, rgba(255, 204, 0, 0.12), rgba(255, 204, 0, 0.06)); }
+    .kyc .icon-wrap { background: linear-gradient(135deg, rgba(0, 170, 255, 0.12), rgba(0, 170, 255, 0.06)); }
+    .transfer .icon-wrap { background: linear-gradient(135deg, rgba(255, 204, 0, 0.12), rgba(255, 204, 0, 0.06)); }
+    .add-money .icon-wrap { background: linear-gradient(135deg, rgba(0, 170, 255, 0.12), rgba(0, 170, 255, 0.06)); }
+
+    .balance { padding: 6px 0 0 0; }
+    .balance h4{margin:0;font-size:0.85rem}
+    .balance p { margin: 4px 0 0 0; font-size: 1.7rem; color: var(--muted); }
+
+    /* action row */
+    .actions-row { display:flex; gap:12px; margin-top:10px; }
+    .actions-row .card { flex:1; align-items:center }
+
+/* Services (shortcuts) */
+.shortcuts {
+  background: #1b1c1f;
+  border: 1px solid rgba(255,255,255,0.03);
+  border-radius: 12px;
+  padding: 12px;
+  margin-top: 16px;
+}
+.shortcuts h4 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px 0;
+}
+.short-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr); /* Always 3 columns */
+  gap: 10px;
+}
+.short-item {
+  background: var(--card);
+  border-radius: 10px;
+  padding: 10px;
+  text-align: center;
+  cursor: pointer;
+  position: relative; /* Ensure positioning context for ::after */
+}
+.short-item svg {
+  display: block;
+  margin: 0 auto 6px;
+  width: 28px;
+  height: 28px;
+}
+.short-item small {
+  display: block;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+/* Active service highlight */
+.short-item.active {
+  border: 2px solid var(--accent-blue);
+  border-radius: 12px;
+}
+
+/* Kite-like indicator */
+.short-item.active::after {
+  content: '';
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 10px;
+  height: 10px;
+  background: var(--accent-blue);
+  border-radius: 50%;
+  animation: kitePulse 3s ease-in-out infinite; /* Slower, smoother animation */
+  transition: all 0.5s ease-in-out; /* Smooth transition when active state changes */
+}
+
+/* Kite-like animation with subtle movement */
+@keyframes kitePulse {
+  0%, 100% {
+    transform: scale(1) translate(0, 0); /* Start/end at original position */
+    opacity: 0.9;
+  }
+  50% {
+    transform: scale(1.2) translate(-2px, -2px); /* Smaller scale, slight diagonal shift for kite-like motion */
+    opacity: 0.5;
+  }
+}
+
+/* Remove media queries for short-grid to enforce 3 columns */
+@media (max-width: 900px) {
+  .actions-row { flex-direction: column; }
+}
+@media (max-width: 520px) {
+  /* No change to short-grid */
+}
+/* Provider Grid */
+.provider-grid {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 13px;
+  width: 100%;
+  margin: 0;
+  padding: 0 10px 0 0;
+  box-sizing: border-box;
+  scroll-behavior: auto; /* Fallback for smooth scrolling */
+  -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
+}
+
+@media (min-width: 468px) {
+  .provider-grid {
+    width: 100%;
+    gap: 6px;
+  }
+}
+
+@media (min-width: 608px) {
+  .provider-grid {
+    width: 60%;
+    gap: 15px;
+  }
+}
+
+
+/* Provider Box */
+.provider-box {
+  background-color: rgba(128, 128, 128, 0.159);
+  position: relative;
+  width: 110%;
+  aspect-ratio: 4 / 5;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  clip-path: polygon(
+    0% 0%,
+    85% 0%,
+    100% 15%,
+    100% 100%,
+    0% 100%
+  );
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding-bottom: 12px;
+  transition: 
+    transform 0.35s ease,
+    box-shadow 0.35s ease,
+    background-color 0.35s ease,
+    border 0.35s ease;
+  -webkit-tap-highlight-color: transparent; /* Prevent tap highlight on mobile */
+}
+
+
+
+
+
+.provider-box.selected {
+  transform: scale(1.05) translateY(-6px);
+  background-color: rgba(255, 215, 0, 0.2); /* gold tint example */
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);
+}
+@media (min-width: 468px) {
+  .provider-box {
+    width: 100%; 
+    max-width: 120px;
+  }
+}
+
+.provider-box:hover {
+  transform: scale(1.05);
+}
+
+
+.provider-name {
+  position: absolute;
+  bottom: 1px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: white;
+  font-weight: 200;
+  font-size: 0.8rem;
+  background: transparent;
+  z-index: 1;
+  user-select: none;
+  text-align: center;
+  width: 90%;
+  text-shadow: 0 0 4px rgba(0,0,0,0.7);
+}
+
+.provider-box.active.mtn {
+  background-color: var(--mtn-yellow);
+}
+
+.provider-box.active.glo {
+  background-color: var(--glo-green);
+}
+
+.provider-box.active.ninemobile {
+  background-color: var(--nine-mobile);
+}
+
+.provider-box.active.airtel {
+  background-color: var(--airtel-red);
+}
+.provider-box.active .provider-name {
+  font-weight: 500;
+  color: black;
+  text-decoration: none;
+}
+.provider-box.active.airtel .provider-name {
+  font-weight: bold;
+  color: white;
+}
+
+.subscription-plan {
+    margin: 20px 0 0 0;
+}
+
+.plans-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin: 0;
+  align-items: center;
+}
+
+.plan-box {
+  background-color: rgba(128, 128, 128, 0.159);
+  position: relative;
+  width: 100%;
+  border-radius: 8px;
+  aspect-ratio: 4 / 5;
+  cursor: pointer;
+  transition: transform 0.25s ease;
+  clip-path: polygon(
+    0% 0%,     /* top-left */
+    85% 0%,    /* near top-right */
+    100% 15%,  /* cut-off top-right corner */
+    100% 100%, /* bottom-right */
+    0% 100%    /* bottom-left */
+  );
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding-bottom: 12px; /* space for name */
+  margin: 0;
+}
+@media (min-width: 468px) {
+  .plans-row {
+    width: 100%; 
+    max-width: 350px;
+
+  }
+}
+@media (min-width: 608px) {
+  .plan-box {
+    width: 100%;
+    max-width: 120px; 
+    gap: 1px;
+  }
+}
+
+.plan-price {
+  font-size: 1.1rem;
+  font-weight: normal;
+  align-self: self-start;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.plan-data {
+  font-size: 1rem;
+  color: #ffffff;
+}
+
+.plan-duration {
+  font-size: 0.9rem;
+  color: #afa9a9;
+  align-self: self-start;
+}
+
+.see-all-plans {
+  margin-left: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: #ffffff;
+  font-weight: 500;
+  cursor: pointer; 
+  user-select: none;
+  -webkit-user-select: none;
+  -ms-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+@media (max-width: 520px) {
+   .see-all-plans span {
+    font-size: small;
+    margin-top: 5px;
+    width: 100%;
+    margin-left: 12px;
+
+   }
+}
+.phone-section {
+  margin-top: 18px;
+  padding: 0;
+  background: inherit;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  margin-left: 0;
+}
+.phone-input-row {
+  display: flex;
+  align-items: center;
+  background: var(--card);
+  border-radius: 10px;
+  padding: 6px 10px;
+  gap: 8px;
+  margin-left: 0;
+}
+.phone-input {
+  font-family: inherit;
+  flex: 1;
+  font-size: 1rem;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #fff;
+  outline: none;
+}
+.phone-input::placeholder {
+  color: var(--muted);
+  opacity: 0.8;
+}
+.contact-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 6px; /* slightly more padding for touch targets */
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center; /* center SVG horizontally */
+  transition: background 0.15s;
+  flex-shrink: 0; /* prevent button from shrinking */
+  width: 36px;    /* fix width to keep it aligned */
+  height: 36px;   /* fix height to match input height */
+  position: relative;
+  margin-left: -10px; /* pull button visually into input area */
+  z-index: 2;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;   /* prevent long-press menu on iOS */
+  -webkit-user-select: none;     /* prevent selection on tap */
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+}
+.contact-btn svg {
+  display: block;
+  width: 20px;  /* adjust as needed */
+  height: 20px; /* keep icon size consistent */
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;   /* prevent long-press menu on iOS */
+  -webkit-user-select: none;     /* prevent selection on tap */
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+}
+
+.contact-btn svg {
+  display: block;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;   /* prevent long-press menu on iOS */
+  -webkit-user-select: none;     /* prevent selection on tap */
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+}
+ body.modal-open {
+    overflow: hidden;
+    height: 100vh;
+  }
+
+  /* Modal Overlay */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.85);
+    display: flex;
+    justify-content: center;
+    align-items: flex-end;
+    visibility: hidden;
+    opacity: 0;
+    transition: opacity 0.3s ease, visibility 0.3s ease;
+    z-index: 9999;
+  }
+  .modal-overlay.active {
+    visibility: visible;
+    opacity: 1;
+  }
+
+  /* Modal sliding up */
+  .modal-content {
+    position: relative;
+    top: -12px;
+    background-color: #121212;
+    color: #fff;
+    width: 100%;
+    max-width: 480px;
+    max-height: 85vh;
+    padding: 0px 24px 32px 20px;
+    overflow-y: auto;
+    transform: translateY(100%);
+    transition: transform 0.3s ease;
+      border-top-left-radius: 16px;
+  border-top-right-radius: 16px;
+    display: flex;
+    flex-direction: column;
+    overflow-x: hidden;
+  }
+  .modal-overlay.active .modal-content {
+    transform: translateY(0);
+  }
+
+.modal-header {
+  position: sticky;
+  top: 0;
+  width: calc(100% + 20px);  /* overflow past the modal edges */
+  margin-left: -10px;        /* center the overflow */
+  background-color: #121212;
+  z-index: 10;
+  padding: 12px 0;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  border-top-left-radius: 0; /* ignore parent's curve */
+  border-top-right-radius: 0;
+}
+
+
+/* Pull Handle */
+.pull-handle {
+ width: 48px;
+ height: 5px;
+ background: #ccc;
+ border-radius: 3px;
+ margin: 0 auto;
+ cursor: grab;
+ position: absolute;
+ left: 50%;
+ transform: translateX(-50%);
+}
+
+/* Close Button (now in header) */
+.close-btn {
+ background: transparent;
+ border: none;
+ font-size: 28px;
+ color: #fff;
+ cursor: pointer;
+ font-weight: 700;
+ line-height: 1;
+ padding: 0;
+ -webkit-tap-highlight-color: transparent;
+}
+
+/* Sticky Section Header for MTN AWOOF */
+.sticky-header {
+ position: sticky;
+ top: 50px; /* Below modal-header height */
+ background-color: #121212;
+ z-index: 9;
+ padding: 8px 0;
+ margin-top: 0;
+   border-top-left-radius: 0; /* ignore parent's curve */
+  border-top-right-radius: 0;
+    width: calc(100% + 20px);  /* overflow past the modal edges */
+  margin-left: -10px;
+}
+
+  /* Section header */
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+    justify-content: center; /* center horizontally */
+  }
+  .section-header h2 {
+    font-size: 1.4rem;
+    font-weight: 700;
+    margin: 0;
+  }
+  .yellow-circle-icon {
+    flex-shrink: 0;
+  }
+
+  /* Plans grid */
+  .plans-grid {
+    display: grid;
+    gap: 10px;
+    justify-content: center; /* center horizontally */
+  }
+  .awoof-grid {
+    grid-template-columns: repeat(3, minmax(100px, 1fr));
+    margin-bottom: 32px;
+  }
+  .gifting-grid {
+    grid-template-columns: repeat(3, minmax(100px, 1fr));
+  }
+
+  /* Plan box */
+  .plan-box {
+    background: #222 !important;
+    border-radius: 10px;
+    padding: 10px 14px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.25s ease;
+    min-width: 90px;
+  }
+  .plan-box:hover {
+    background: #333 !important;
+  }
+  .plan-box.selected {
+ transform: scale(1.05);
+}
+/* Plan Box in Modal - Selected State */
+.plans-grid .plan-box.selected {
+  transform: scale(1.05);
+}
+
+  /* Amount */
+  .plan-amount {
+    font-size: 0.95rem;
+    font-weight: 700;
+    margin-bottom: 6px;
+    white-space: nowrap;
+  }
+
+  /* Data (GB) */
+  .plan-data {
+    font-size: 1.3rem;
+    font-weight: 900;
+    margin-bottom: 4px;
+    white-space: nowrap;
+  }
+
+  /* Days */
+  .plan-days {
+    font-size: 0.75rem;
+    color: #aaa;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+  }
+
+  .plan-amount, .plan-days, .plan-data, .plan-duration{
+    margin-left: 13%;
+    text-align: left;
+    width: 100%; /* Ensure text spans the full width for consistent left alignment */
+  }
+
+  /* Responsive */
+  @media (max-width: 520px) {
+    .awoof-grid, .gifting-grid {
+      grid-template-columns: repeat(3, minmax(80px, 1fr));
+    }
+    .plan-box {
+      min-width: 70px;
+      padding: 8px 10px;
+    }
+    .plan-data {
+      font-size: 1.1rem;
+    }
+    .plan-amount {
+      font-size: 0.85rem;
+    }
+    .plan-days {
+      font-size: 0.65rem;
+    }
+  }
+.continue-btn {
+  width: 100%;
+  margin-top: 25px;
+  padding: 12px 20px;        /* merged padding */
+  font-size: 1.1rem;
+  font-weight: 600;
+  border: none;
+  border-radius: 8px;        /* use the larger radius */
+  background-color: #555555; /* default disabled background */
+  color: #FFFFFF;            /* default disabled text */
+  cursor: not-allowed;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.16);
+  transition: 
+    background 0.25s, 
+    color 0.25s, 
+    box-shadow 0.25s, 
+    cursor 0.2s,
+    transform 0.2s;
+}
+
+.continue-btn.active,
+.continue-btn:enabled {
+  background: linear-gradient(90deg, #00aaff 60%, #0088cc 100%);
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0,170,255,0.24);
+  transform: translateY(0); /* optional subtle effect if needed */
+}
+
+/* Only color when selected */
+.plan-box.selected.mtn {
+  background: #FFD700 !important;
+  color: #021827;
+  border: 2px solid #FFD700;
+}
+.plan-box.selected.airtel {
+  background: #e7002a !important;
+  color: #fff;
+  border: 2px solid #e7002a;
+}
+.plan-box.selected.glo {
+  background: #00b055 !important;
+  color: #fff;
+  border: 2px solid #00b055;
+}
+.plan-box.selected.ninemobile {
+  background: #7db700 !important;
+  color: #fff;
+  border: 2px solid #7db700;
+}
+.plan-box {
+  background: transparent;
+  border: 2px solid transparent;
+  color: inherit;
+  align-items: flex-start;
+}
+/* Pull handle style */
+.pull-handle {
+  width: 40px;
+  height: 6px;
+  background: #ccc;
+  border-radius: 3px;
+  margin: 10px auto 18px auto;
+  display: block;
+  cursor: grab;
+}
+body {
+  margin: 0;
+  font-family: sans-serif;
+  background-color: #0f0f0f;
+  color: #fff;
+}
+
+.transactions-section {
+  max-width: 600px;
+  margin: 20px auto;
+  padding: 15px;
+  background-color: #151515;
+  border-radius: 10px;
+}
+
+.transactions-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.transactions-header h3 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.view-all-link {
+  color: #00FF7F;
+  text-decoration: none;
+  font-weight: 500;
+  margin-left: 15px;
+}
+
+.transactions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Transaction item styles */
+.transaction-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 15px;
+  border-radius: 8px;
+  background-color: #1a1a1a;
+  transition: background 0.2s;
+}
+
+.transaction-item.receive {
+  border-left: 4px solid #00FF7F;
+}
+
+.transaction-item.send {
+  border-left: 4px solid #FF4C4C;
+}
+
+.transaction-item .tx-desc {
+  font-size: 0.95rem;
+}
+
+.transaction-item .tx-amount {
+  font-weight: bold;
+}
+
+/* No transaction styles */
+.no-transactions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #888;
+  gap: 10px;
+  padding: 40px 0;
+}
+
+/* Responsive */
+@media screen and (max-width: 500px) {
+  .transactions-section {
+    padding: 10px;
+  }
+
+  .transaction-item {
+    padding: 10px;
+  }
+
+  .transactions-header h3 {
+    font-size: 1rem;
+  }
+
+  .view-all-link {
+    font-size: 0.9rem;
+  }
+}
+
+
+
+/* Broke from this part downward */
+
+
+
+/* Reset and base styles for consistency */
+.provider-box,
+.plan-box {
+  box-sizing: border-box;
+  font-family: Arial, sans-serif; /* Adjust to your preferred font */
+}
+
+/* Smooth transitions for color changes */
+.provider-box .provider-name,
+.plan-box .plan-amount,
+.plan-box .plan-duration,
+.plan-box .plan-days {
+  transition: color 0.3s ease, background-color 0.3s ease;
+}
+
+
+
+
+
+
+
+
+/* Default styles for unselected states */
+.provider-box .provider-name,
+.plan-box .plan-amount,
+.plan-box .plan-duration,
+.plan-box .plan-days {
+  color: #FFFFFF; /* White for high contrast on dark backgrounds */
+}
+
+/* Selected plan box background */
+.plan-box.selected {
+  background-color: #333333; /* Dark gray for selected plan */
+  border: 1px solid #555555; /* Subtle border for definition */
+}
+
+
+
+
+
+
+
+
+/* MTN styles */
+.provider-box.mtn.active .provider-name {
+  color: white; /* Black for MTN, as you confirmed it works */
+}
+.plans-row.mtn .plan-box.selected .plan-amount,
+.plans-row.mtn .plan-box.selected .plan-duration,
+.plan-box.mtn.selected .plan-amount,
+.plan-box.mtn.selected .plan-days {
+  color: #000000; /* Black for consistency with provider name */
+}
+
+/* Airtel styles */
+.provider-box.airtel.active .provider-name {
+  color: white; /* Airtel red */
+}
+.plans-row.airtel .plan-box.selected .plan-amount,
+.plans-row.airtel .plan-box.selected .plan-duration,
+.plan-box.airtel.selected .plan-amount,
+.plan-box.airtel.selected .plan-days {
+  color: #36090c; /* Airtel red */
+}
+/* Glo styles */
+.provider-box.glo.active .provider-name {
+  color: #4dffa3; /* Glo green */
+}
+.plans-row.glo .plan-box.selected .plan-amount,
+.plans-row.glo .plan-box.selected .plan-duration,
+.plan-box.glo.selected .plan-amount,
+.plan-box.glo.selected .plan-days {
+  color: #02341a; /* Glo green */
+}
+
+/* 9mobile styles */
+.provider-box.ninemobile.active .provider-name {
+  color: #008000; /* 9mobile dark green */
+}
+.plans-row.ninemobile .plan-box.selected .plan-amount,
+.plans-row.ninemobile .plan-box.selected .plan-duration,
+.plan-box.ninemobile.selected .plan-amount,
+.plan-box.ninemobile.selected .plan-days {
+  color: #0e570e; /* 9mobile dark green */
+}
+
+/* Ensure provider box styling */
+.provider-box, .img {
+  padding-bottom: 22px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+/* Transactions section */
+.recent-transactions {
+  margin-top: 16px;
+  display: none; /* Hidden by default */
+}
+.recent-transactions.active {
+  display: block; /* Shown when transactions exist */
+}
+.recent-transactions h4 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #fff;
+  font-size: 16px;
+  margin-bottom: 12px;
+}
+.recent-transactions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.recent-transaction-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px;
+  background: #2a2a2a;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.recent-transaction-item:hover {
+  background: #3a3a3a;
+}
+.recent-transaction-item .tx-desc {
+  color: #fff;
+  font-size: 14px;
+}
+.recent-transaction-item .tx-provider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #fff;
+  font-size: 14px;
+}
+.recent-transaction-item svg {
+  width: 20px;
+  height: 20px;
+}
+.transactions-section {
+  margin-top: 24px;
+}
+.transactions-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.transactions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.transaction-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: stretch;
+  padding: 12px;
+  background: #2a2a2a;
+  border-radius: 8px;
+}
+.transaction-item .tx-left {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.transaction-item .tx-icon {
+  width: 28px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+}
+.transaction-item .tx-details {
+  display: flex;
+  flex-direction: column;
+}
+.transaction-item .tx-plan {
+  color: #fff;
+  font-size: 14px;
+  font-weight: bold;
+}
+.transaction-item .tx-datetime {
+  color: #bfc7d3;
+  font-size: 12px;
+  margin-top: 4px;
+}
+.transaction-item .tx-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+.transaction-item .tx-amount {
+  font-size: 14px;
+  font-weight: bold;
+}
+.transaction-item.data .tx-amount {
+  color: #fff; /* White for data purchases */
+}
+.transaction-item.receive .tx-amount {
+  color: #00cc00; /* Green for funding */
+}
+.transaction-item .tx-status {
+  font-size: 12px;
+  margin-top: 4px;
+}
+.transaction-item .tx-status.success {
+  color: #00cc00; /* Green for successful */
+}
+.transaction-item .tx-status.failed {
+  color: #ff4444; /* Red for failed */
+}
+.no-transactions[hidden] {
+  display: none; /* Hide SVG when transactions exist */
+}
+
+.plans-row .plan-box .plan-type-tag {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  font-size: 0.65rem;
+  font-weight: 500;
+  color: var(--muted); /* #bfc7d3 */
+  background: rgba(255, 255, 255, 0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  user-select: none;
+}
+
+.plans-row .plan-box.mtn.selected .plan-type-tag {
+  color: #021827;
+  background: rgba(255, 204, 0, 0.3);
+  box-shadow: 0 0 6px 1px rgba(255, 255, 255, 0.5); /* White glow */
+}
+@media (max-width: 520px) {
+  .plans-row .plan-box.mtn.selected .plan-type-tag {
+    font-size: 0.6rem; /* Smaller for mobile */
+    padding: 1px 4px; /* Tighter padding */
+    bottom: 2px; /* Closer to edge */
+    right: 2px;
+    box-shadow: 0 0 4px 1px rgba(255, 204, 0, 0.8); /* Tighter, brighter glow */
+  }
+  .plans-row .plan-box .plan-type-tag {
+    bottom: 1px;
+    right: 1px;
+    font-size: 0.55rem;
+    font-weight: 500;
+  }
+}
+
+
+/* Checkout Modal */
+#checkoutModal {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: #18191cbe;
+  z-index: 1000;
+  backdrop-filter: blur(5px);
+}
+#checkoutModal.active {
+  display: flex;
+  align-items: flex-end;
+  animation: ease-in 3.5s ease;
+}
+#checkoutModal .modal-content {
+  background: #18191C;
+  width: 100%;
+  max-width: 420px;
+  height: 62vh;
+  border-top-left-radius: 20px;
+  border-top-right-radius: 20px;
+  box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.5);
+  position: relative;
+  transition: transform 0.4s ease, opacity 0.4s ease;
+  transform: translateY(100%);
+  opacity: 0;
+  overflow-y: hidden;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  margin-bottom: 60px;
+}
+#checkoutModal.active .modal-content {
+  transform: translateY(0);
+  opacity: 1;
+}
+
+#checkoutModal .pull-handle {
+  display: none;
+  width: 60px;
+  height: 6px;
+  background: #92918d;
+  border-radius: 3px;
+  opacity: 0.9;
+  transition: opacity 0.3s ease;
+}
+#checkoutModal .pull-handle:hover {
+  opacity: 1;
+}
+#checkoutModal .close-btn {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  background: none;
+  border: none;
+  padding: 10px;
+  cursor: pointer;
+  transition: transform 0.3s ease;
+}
+#checkoutModal .close-btn:hover {
+  transform: scale(1.2);
+}
+#checkoutModal .section-header {
+  text-align: center;
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(255, 215, 0, 0.2);
+}
+#checkoutModal .section-header h2 {
+  font-size: 1.6rem;
+  font-weight: 600;
+  color: #ffffff;
+  margin-top: 15px;
+  letter-spacing: 1px;
+}
+#checkoutModal .send-to-section {
+  padding: 15px;
+  text-align: center;
+  border-radius: 10px;
+  margin: 10px 15px;
+}
+#checkoutModal .send-to-section h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #ffffff;
+  margin: 0 0 6px;
+}
+#checkoutModal .send-to-section p {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #ffffff;
+  margin: 0;
+  font-family: 'Trebuchet MS', Arial, sans-serif;
+}
+#checkoutModal .checkout-details {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 15px;
+  gap: 15px;
+  margin: 10px 15px;
+  border-radius: 10px;
+  flex-wrap: wrap; /* Ensures responsiveness */
+}
+#checkoutModal .details-left,
+#checkoutModal .details-right {
+  flex: 1;
+  min-width: 120px; /* Prevents text squish */
+}
+#checkoutModal .details-left p {
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: #1E90FF;
+  margin: 10px 0;
+  line-height: 1.5;
+}
+#checkoutModal .details-right p {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #ffffff;
+  margin: 10px 0;
+  line-height: 1.5;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-end; /* Always stick right */
+}
+#checkoutModal .details-right svg {
+  width: 18px;
+  height: 18px;
+}
+#checkoutModal .pay-btn {
+  display: block;
+  width: 90%;
+  margin: 20px auto;
+  padding: 14px;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(90deg, #00B13C, #00cc44);
+  border: none;
+  border-radius: 12px;
+  cursor: not-allowed;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+#checkoutModal .pay-btn.active {
+  cursor: pointer;
+}
+#checkoutModal .pay-btn.active:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.4);
+}
+
+/* Mobile Adjustments */
+@media (max-width: 482px) {
+    #checkoutModal .modal-content {
+      position: relative;
+      width: 100%;
+      max-height: 90vh;         /* limit height so it doesn’t cover everything */
+      border-radius: 16px 16px 0 0;
+      margin: 0;
+  }
+  #checkoutModal .pull-handle {
+    display: block;
+    margin: 0 auto;
+    margin-top: 10px;
+  }
+  #checkoutModal .section-header h2 {
+    font-size: 1.4rem;
+  }
+  #checkoutModal .send-to-section {
+    padding: 12px;
+    margin: 8px 12px;
+  }
+  #checkoutModal .send-to-section p {
+    font-size: 1.1rem;
+  }
+  #checkoutModal .checkout-details {
+    padding: 12px;
+    margin: 8px 12px;
+    gap: 10px;
+  }
+  #checkoutModal .details-left p,
+  #checkoutModal .details-right p {
+    font-size: 0.9rem;
+    margin: 8px 0;
+  }
+  #checkoutModal .details-right svg {
+    width: 16px;
+    height: 16px;
+  }
+  #checkoutModal .pay-btn {
+    padding: 12px;
+    font-size: 1rem;
+  }
+}
+
+
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.balance-title {
+  display: flex;
+  align-items: flex-end;
+  gap: 7px; /* space between icon and text */
+}
+
+.wallet-icon {
+  width: 24px;     /* smaller so it lines up better */
+  height: auto;    /* keep proportions */
+  vertical-align: middle; /* aligns with text baseline */
+}
+
+
+.slider {
+  position: absolute;
+  pointer-events: none; /* so clicks pass through */
+  transition: all 0.25s ease; /* smooth movement */
+  z-index: 1;
+  border-radius: 5px;
+  clip-path: polygon(
+    0% 0%,
+    85% 0%,
+    100% 15%,
+    100% 100%,
+    0% 100%
+  );
+}
+.slider.mtn {
+  background-color: var(--mtn-yellow); /* #ffcc00 */
+}
+.slider.airtel {
+  background-color: var(--airtel-red); /* #FF0000 */
+}
+.slider.glo {
+  background-color: var(--glo-green); /* #00B140 */
+}
+.slider.ninemobile {
+  background-color: var(--nine-mobile); /* #D6E806 */
+}
+.slider.mtn .provider-name {
+  color: #000000; /* Black for MTN provider name */
+}
+.slider.airtel .provider-name {
+  color: #ff6872; /* Airtel red */
+}
+.slider.glo .provider-name {
+  color: #4dffa3; /* Glo green */
+}
+.slider.ninemobile .provider-name {
+  color: #008000; /* 9mobile dark green */
+  text-shadow: none !important;
+  font-weight: 600 !important;
+}
+.slider .provider-name {
+  position: absolute;
+  bottom: 1px;
+  transform: translateX(-50%);
+  color: white;
+  font-weight: 500;
+  font-size: 0.8rem;
+  background: transparent;
+  z-index: 1;
+  user-select: none;
+  text-align: center;
+  width: 90%;
+  text-shadow: 0 0 4px rgba(0,0,0,0.7);
+}
+.slider.mtn img {
+  position: absolute;
+  top: 14%;
+  left: 22%;
+  width: 56%;
+  height: auto;
+}
+.slider.airtel img {
+  position: absolute;
+  top: 20%;
+  left: 21%;
+  width: 50%;
+  height: auto;
+}
+.slider.glo img {
+  position: absolute;
+  top: 15%;
+  left: 19%;
+  width: 63%;
+  height: auto;
+}
+.gloo{
+  width: 70px; 
+}
+.slider.ninemobile img {
+  position: absolute;
+  top: 31%;
+  left: 42%;
+  height: auto;
+}
+.airrr {
+  width: 60px;
+}
+.mtn img {
+  width: 70px;
+  top: 10%;
+}
+@media (max-width: 520px) {
+  .mtn img {
+  width: 35px;
+  top: 10%;
+  }
+  .airrr {
+  width: 40px;
+  }
+}
+
+@media (max-width: 465px) {
+  .slider.mtn img {
+    position: absolute;
+    top: 9%;
+    left: 22%;
+    width: 56%;
+    height: auto;
+  }
+  .slider.airtel img {
+    position: absolute;
+    top: 18%;
+    left: 21%;
+    width: 50%;
+    height: auto;
+  }
+  .slider.glo img {
+    position: absolute;
+    top: 15%;
+    left: 19%;
+    width: 63%;
+    height: auto;
+  }
+  .gloo {
+    width: 40px;
+  }
+  .slider.ninemobile img {
+    position: absolute;
+    top: 18%;
+    left: 33%;
+    height: auto;
+  }
+}
+
+/* Fullscreen modal */
+.pin-modal {
+  position: fixed;
+  inset: 0;
+  background: black;
+  color: white;
+  display: flex;
+  flex-direction: column;
+  z-index: 1000;
+}
+
+.pin-modal.hidden {
+  display: none;
+}
+
+/* Header */
+.pin-header {
+  display: flex;
+  align-items: center;
+  padding: 1rem;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+  position: relative;
+}
+
+.pin-header h2 {
+  flex: 1;
+  text-align: center;
+  font-size: 1.25rem;
+  margin: 0;
+}
+
+.back-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  color: white;
+}
+
+/* Body */
+.pin-body {
+  margin-top: 80px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 2rem 1rem;
+}
+
+.firewall-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+.fwall {
+  margin-bottom: 17px;
+}
+
+.pin-body p {
+  font-size: 1rem;
+  margin-bottom: 2rem;
+  font-weight: 500;
+}
+
+/* PIN input boxes */
+.pin-inputs {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 2rem;
+  justify-content: center;
+}
+
+.pin-inputs input {
+  width: 15px; 
+  height: 15px;
+  border: 2px solid rgba(255,255,255,0.5);
+  border-radius: 4px;
+  background: rgb(85, 85, 85);
+  text-align: center;
+  font-size: 0;              /* hide the text/dot */
+  color: transparent;        /* text invisible */
+  caret-color: transparent;  /* no blinking cursor */
+}
+
+/* When the box has a value, fill it with yellow */
+.pin-inputs input.filled {
+  background: rgb(255, 227, 12);
+  border-color: rgb(255, 227, 12);
+}
+
+
+/* Numeric keypad */
+.pin-keypad {
+  display: grid;
+  grid-template-columns: repeat(3, 80px);
+  gap: 1rem;
+  justify-content: center;
+}
+
+#deleteKey{
+  height: 50px;
+  width: 50px;
+  margin-left: 18px;
+  margin-top: 5px;
+}
+
+.pin-keypad button {
+  background: transparent;
+  border: none;
+  border-radius: 12px;
+  font-size: 1.5rem;
+  color: white;
+  height: 60px;
+  cursor: pointer;
+  transition: background 0.2s;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent; /* iOS Safari */
+  -webkit-touch-callout: none;
+}
+
+
+.pin-keypad button:active {
+  background: transparent;
+}
+.pin-keypad button:focus {
+  outline: none;
+}
+.pin-keypad svg {
+  pointer-events: none;
+}
+
+/* Custom PIN Alerts */
+.pin-alert {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  width: 100%;
+  transform: translate(-50%, -50%);
+  font-size: 1rem;
+  font-weight: 400;
+  color: white;
+  text-align: center;
+  font-family: 'Poppins', sans-serif;
+  z-index: 2000;
+  opacity: 0;
+  transition: opacity 0.3s ease-in-out;
+}
+
+.pin-alert.show {
+  opacity: 1;
+}
+
+.pin-alert.hidden {
+  display: none;
+}
+
+
+
+.bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  background: #000; /* black background */
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  padding: 10px 0;
+  margin-top: 0;
+  border-top: 1px solid #333;
+  z-index: 1000;
+}
+
+.nav-item {
+  flex: 1;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.6); /* dim white */
+  text-decoration: none;
+  font-size: 12px;
+  transition: color 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent; /* iOS Safari */
+  -webkit-touch-callout: none;
+
+}
+
+#spanner {
+  margin-bottom: 3px;
+}
+
+.nav-item .icon {
+  width: 22px;
+  height: 22px;
+  margin-bottom: 4px;
+}
+
+.nav-item.active,
+.nav-item:hover {
+  color: #fff; /* full white */
+}

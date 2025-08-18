@@ -1,13 +1,3 @@
-/* main.js — Client auth flow using Firebase Custom Token from your Express session.
-   Pairs with server.js that:
-   - Uses Passport Google OAuth
-   - Creates a Firebase custom token with Admin SDK
-   - Stores it in the session and exposes /api/session
-
-   How config is resolved:
-   - Prefer window.__FIREBASE_CONFIG__ injected in your HTML
-   - Else try meta tags (see getFirebaseConfig())
-*/
 const BACKEND_URL = 'https://api.flexgig.com.ng';
 
 (() => {
@@ -20,7 +10,6 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
     if (window.__FIREBASE_CONFIG__ && typeof window.__FIREBASE_CONFIG__ === 'object') {
       return window.__FIREBASE_CONFIG__;
     }
-
     const meta = (name) => document.querySelector(`meta[name="${name}"]`)?.getAttribute('content') || '';
     const cfg = {
       apiKey: meta('firebase-api-key'),
@@ -32,21 +21,20 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
       messagingSenderId: meta('firebase-messaging-sender-id'),
       measurementId: meta('firebase-measurement-id'),
     };
-
     if (!cfg.apiKey || !cfg.authDomain || !cfg.projectId || !cfg.appId) {
-      console.error('[main.js] Missing Firebase config. Provide window.__FIREBASE_CONFIG__ or meta tags.');
+      console.error('[main.js] Missing Firebase config.');
       throw new Error('Firebase config not found');
     }
     return cfg;
   }
 
   // -----------------------------
-  // Firebase loader (compat CDN)
+  // Firebase loader
   // -----------------------------
   const FIREBASE_SCRIPTS = [
     'https://www.gstatic.com/firebasejs/10.12.4/firebase-app-compat.js',
     'https://www.gstatic.com/firebasejs/10.12.4/firebase-auth-compat.js',
-    'https://www.gstatic.com/firebasejs/10.12.4/firebase-analytics-compat.js', // Added analytics
+    'https://www.gstatic.com/firebasejs/10.12.4/firebase-analytics-compat.js',
   ];
 
   function loadScript(src) {
@@ -74,9 +62,7 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
     try {
       for (const src of FIREBASE_SCRIPTS) {
         const already = Array.from(document.scripts).some((t) => t.src === src);
-        if (!already) {
-          await loadScript(src);
-        }
+        if (!already) await loadScript(src);
       }
       console.log('[main.js] All Firebase scripts loaded');
     } catch (error) {
@@ -94,20 +80,13 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
 
   async function initFirebase() {
     await ensureFirebaseLoaded();
-    if (!window.firebase) {
-      throw new Error('Firebase failed to load after attempts');
-    }
+    if (!window.firebase) throw new Error('Firebase failed to load');
     if (!firebaseApp) {
       try {
         firebaseApp = firebase.initializeApp(getFirebaseConfig());
         firebaseAuth = firebase.auth();
-        try {
-          await firebaseAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
-          console.log('[main.js] Firebase persistence set to LOCAL');
-        } catch (e) {
-          console.warn('[main.js] setPersistence failed, defaulting to in-memory:', e?.message || e);
-        }
-        console.log('[main.js] Firebase initialized successfully');
+        await firebaseAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+        console.log('[main.js] Firebase persistence set to LOCAL');
       } catch (error) {
         console.error('[main.js] Firebase init error:', error);
         throw error;
@@ -170,9 +149,6 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
       if (!ok) {
         console.log('[main.js] No server session, setting unauthenticated UI');
         setUnauthenticatedUI();
-        if (isDashboard()) {
-          setTimeout(() => (location.href = '/'), 400);
-        }
         return null;
       }
       const user = await signInWithCustomToken(token);
@@ -190,10 +166,7 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
 
   function subscribeIdTokenUpdates() {
     if (!firebaseAuth) return;
-    if (idTokenListenerUnsub) {
-      idTokenListenerUnsub();
-      idTokenListenerUnsub = null;
-    }
+    if (idTokenListenerUnsub) idTokenListenerUnsub();
     idTokenListenerUnsub = firebaseAuth.onIdTokenChanged(async (user) => {
       if (!user) return;
       try {
@@ -211,7 +184,6 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
   // -----------------------------
   const qs = (sel) => document.querySelector(sel);
   const qsa = (sel) => Array.from(document.querySelectorAll(sel));
-  const isDashboard = () => /\/dashboard(\.html)?$/i.test(location.pathname);
 
   const UI = {
     loginBtn: null,
@@ -278,11 +250,9 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
     const name = user.displayName || 'Signed in';
     const email = user.email || '';
     const photo = user.photoURL || '';
-
     text(UI.userName, name);
     text(UI.userEmail, email);
     setImg(UI.userPhoto, photo, name);
-
     text(UI.statusText, `Welcome${name ? `, ${name}` : ''}!`);
   }
 
@@ -300,6 +270,42 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
     hide(UI.authedSection);
     const msg = err?.message || String(err) || 'Unknown error';
     text(UI.statusText, `Error: ${msg}`);
+  }
+
+  // -----------------------------
+  // Router
+  // -----------------------------
+  async function loadContent(url) {
+    const content = qs('#content');
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`Failed to load ${url}: ${res.status}`);
+      content.innerHTML = await res.text();
+      console.log(`[main.js] Loaded content from ${url}`);
+    } catch (error) {
+      console.error('[main.js] Error loading content:', error);
+      content.innerHTML = '<p>Error loading page</p>';
+    }
+  }
+
+  function setupRouter() {
+    const router = new Navigo('/', { hash: false });
+    router
+      .on({
+        '/': () => {
+          console.log('[main.js] Routing to home');
+          loadContent('/index.html');
+        },
+        '/dashboard': () => {
+          console.log('[main.js] Routing to dashboard');
+          loadContent('/frontend/html/dashboard.html');
+        },
+      })
+      .notFound(() => {
+        console.log('[main.js] Route not found');
+        qs('#content').innerHTML = '<p>Page not found</p>';
+      })
+      .resolve();
   }
 
   // -----------------------------
@@ -332,7 +338,7 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
   }
 
   // -----------------------------
-  // PWA and modal handling
+  // PWA and modal handling (unchanged)
   // -----------------------------
   let deferredPrompt = null;
   let modalMode = null;
@@ -503,7 +509,7 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
           const userCredential = await auth.signInWithEmailAndPassword(email, password);
           console.log('[main.js] Email sign-in successful:', userCredential.user.uid);
           hideEmailLoginModal();
-          window.location.href = '/dashboard.html?token=' + await userCredential.user.getIdToken();
+          window.location.href = '/dashboard';
         } catch (error) {
           console.error('[main.js] Email sign-in error:', error);
           if (errorElement) {
@@ -669,6 +675,7 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
   async function boot() {
     cacheUI();
     bindEvents();
+    setupRouter();
     if (!UI.authedSection && !UI.unauthSection) {
       const bar = document.createElement('div');
       bar.id = 'auth-container';
