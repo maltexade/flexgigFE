@@ -4,64 +4,61 @@
   <meta charset="UTF-8">
   <meta http-equiv="refresh" content="3.5;url=/frontend/html/dashboard.html">
   <style>
-    /* Background animation */
     body {
-      background: linear-gradient(-45deg, #0d1117, #0a0e14, #101820, #0f172a);
-      background-size: 400% 400%;
-      animation: gradientShift 8s ease infinite;
+      margin: 0;
+      height: 100vh;
       display: flex;
       justify-content: center;
       align-items: center;
-      height: 100vh;
-      margin: 0;
-      font-family: Arial, sans-serif;
-      color: white;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #000000; /* Pure black */
+      color: #f9fafb;
       overflow: hidden;
     }
 
     .container {
       text-align: center;
-      animation: fadeIn 1s ease-in-out;
+      width: 300px;
+      animation: fadeIn 0.8s ease-in-out;
+    }
+
+    /* Loading bar */
+    .loader-bar {
       position: relative;
-      z-index: 2;
-    }
-
-    /* Spinner */
-    .spinner {
-      margin: 20px auto;
-      border: 4px solid rgba(255, 255, 255, 0.05);
-      border-top: 4px solid #1E90FF; /* Blue */
-      border-radius: 50%;
-      width: 80px;
-      height: 80px;
-      animation: spin 1s linear infinite, glowBlue 1.5s ease-in-out infinite alternate;
-    }
-
-    /* Text */
-    .text {
-      font-size: 1.2rem;
-      font-weight: bold;
-      color: #FFD700; /* Yellow */
-      text-shadow: 0 0 4px #FFD700, 0 0 6px rgba(255, 215, 0, 0.5);
-      display: inline-block;
-      white-space: nowrap;
-      border-right: 2px solid #FFD700;
+      width: 100%;
+      height: 6px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 3px;
       overflow: hidden;
-      opacity: 0;
-      transition: opacity 0.3s ease-in;
-      animation: pulseGlow 1.5s infinite alternate;
+      margin-bottom: 20px;
     }
 
-    /* Teleport effect */
-    .fade-out {
-      animation: shrinkFade 0.8s forwards;
+    .loader-fill {
+      width: 0;
+      height: 100%;
+      background: linear-gradient(90deg, #FFD700, #fff1a8, #FFD700);
+      border-radius: 3px;
+      background-size: 200% 100%;
+      animation: fillBar 3s cubic-bezier(0.4, 0, 0.2, 1) forwards, shine 2s linear infinite;
+    }
+
+    /* Text without cursor */
+    .text {
+      font-size: 1.5rem;
+      opacity: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      letter-spacing: 1px;
     }
 
     /* Animations */
-    @keyframes gradientShift {
-      0% { background-position: 0% 50%; }
-      50% { background-position: 100% 50%; }
-      100% { background-position: 0% 50%; }
+    @keyframes fillBar {
+      to { width: 100%; }
+    }
+
+    @keyframes shine {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
     }
 
     @keyframes fadeIn {
@@ -69,29 +66,20 @@
       to { opacity: 1; transform: translateY(0); }
     }
 
-    @keyframes spin {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
+    .fade-out {
+      animation: fadeOutScale 0.8s forwards;
     }
 
-    @keyframes glowBlue {
-      from { box-shadow: 0 0 3px #1E90FF, 0 0 6px rgba(30, 144, 255, 0.5); }
-      to { box-shadow: 0 0 8px #1E90FF, 0 0 12px rgba(30, 144, 255, 0.7); }
-    }
-
-    @keyframes pulseGlow {
-      from { text-shadow: 0 0 4px #FFD700, 0 0 6px rgba(255, 215, 0, 0.5); }
-      to { text-shadow: 0 0 8px #FFD700, 0 0 12px rgba(255, 215, 0, 0.7); }
-    }
-
-    @keyframes shrinkFade {
-      to { opacity: 0; transform: scale(0.3); }
+    @keyframes fadeOutScale {
+      to { opacity: 0; transform: scale(0.95); }
     }
   </style>
 </head>
 <body>
   <div class="container" id="page">
-    <div class="spinner"></div>
+    <div class="loader-bar">
+      <div class="loader-fill"></div>
+    </div>
     <p class="text" id="typing"></p>
   </div>
 
@@ -100,11 +88,6 @@
     const typingElement = document.getElementById("typing");
     let index = 0;
 
-    setTimeout(() => {
-      typingElement.style.opacity = "1";
-      typeEffect();
-    }, 500);
-
     function typeEffect() {
       if (index < text.length) {
         typingElement.textContent += text.charAt(index);
@@ -112,11 +95,15 @@
         setTimeout(typeEffect, 80);
       }
     }
-    
-    // Shrink into screen before redirect
+
+    setTimeout(() => {
+      typeEffect();
+    }, 300);
+
+    // Fade out before redirect
     setTimeout(() => {
       document.getElementById("page").classList.add("fade-out");
-    }, 2800);
+    }, 3200);
   </script>
 </body>
 </html>
