@@ -1,3 +1,28 @@
+async function getSession() {
+  try {
+    const res = await fetch('https://api.flexgig.com.ng/api/session', {
+      credentials: 'include'
+    });
+    if (!res.ok) throw new Error('Not authenticated');
+    
+    const { token } = await res.json();
+    localStorage.setItem('firebaseToken', token);
+    console.log("User is logged in with Firebase token:", token);
+
+    // now load user profile
+    await loadUserProfile(token);
+  } catch (err) {
+    console.error("Session error:", err);
+    window.location.href = '/'; // redirect to login if not authenticated
+  }
+}
+
+// Run this immediately on dashboard load
+getSession();
+
+
+
+
 // --- DATA PLANS DEFINITION ---
 const mtnAwoofPlans = [
   { price: 50, data: '50MB', duration: '1 DAY' },
@@ -2051,148 +2076,150 @@ payBtn.addEventListener('click', () => {
     console.log('[DEBUG] openUpdateProfileModal:', { username, firstName, profilePicture: !!isValidProfilePicture });
   }
 
-function closeUpdateProfileModal() {
-  if (!updateProfileModal) return;
-  updateProfileModal.classList.remove('active');
-  updateProfileModal.setAttribute('aria-hidden', 'true');
-  document.body.classList.remove('modal-open');
-  
-  // Delay display: none to allow slide-out animation to complete
-  setTimeout(() => {
-    updateProfileModal.style.display = 'none';
-  }, 400); // Match the CSS transition duration (0.4s)
-  console.log('[DEBUG] closeUpdateProfileModal: Modal closed');
-}
-
-// Initialize modal event listeners
-if (updateProfileModal) {
-  const backBtn = updateProfileModal.querySelector('.back-btn');
-  backBtn?.addEventListener('click', closeUpdateProfileModal);
-}
-
-// Handle popstate to close modal when navigating back
-window.addEventListener('popstate', (event) => {
-  if (!event.state || event.state.modal !== 'updateProfile') {
-    closeUpdateProfileModal();
+  function closeUpdateProfileModal() {
+    if (!updateProfileModal) return;
+    updateProfileModal.classList.remove('active');
+    updateProfileModal.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('modal-open');
+    
+    // Delay display: none to allow slide-out animation to complete
+    setTimeout(() => {
+      updateProfileModal.style.display = 'none';
+    }, 400); // Match the CSS transition duration (0.4s)
+    console.log('[DEBUG] closeUpdateProfileModal: Modal closed');
   }
-});
 
-// Handle popstate to close modal when navigating back
-window.addEventListener('popstate', (event) => {
-  if (event.state && event.state.modal === 'updateProfile') {
-    // Do nothing if the state is still the modal
-  } else {
-    closeUpdateProfileModal();
-  }
-});
-
-function closeUpdateProfileModal() {
-  if (!updateProfileModal) return;
-  updateProfileModal.classList.remove('active');
-  updateProfileModal.setAttribute('aria-hidden', 'true');
-  document.body.classList.remove('modal-open');
-  console.log('[DEBUG] closeUpdateProfileModal: Modal closed');
-}
-
+  // Initialize modal event listeners
   if (updateProfileModal) {
-  const closeModalBtn = updateProfileModal.querySelector('.close-btn');
-  const backBtn = updateProfileModal.querySelector('.back-btn');
-  closeModalBtn?.addEventListener('click', closeUpdateProfileModal);
-  backBtn?.addEventListener('click', closeUpdateProfileModal);
-}
+    const backBtn = updateProfileModal.querySelector('.back-btn');
+    backBtn?.addEventListener('click', closeUpdateProfileModal);
+  }
 
-  if (profilePictureInput) {
-  profilePictureInput.addEventListener('change', (e) => {
-    const file = e.target.files[0];
-    profilePictureError.textContent = ''; // Clear previous error
-    profilePictureError.classList.remove('active'); // Hide error
-    if (file) {
-      if (file.size > 2 * 1024 * 1024) {
-        profilePictureError.textContent = 'File size must be less than 2MB';
-        profilePictureError.classList.add('active');
-        profilePicturePreview.innerHTML = ''; // Clear preview
-        profilePicturePreview.textContent = (usernameInput.value || fullNameInput.value.split(' ')[0] || 'User').charAt(0).toUpperCase();
-        return;
-      }
-      if (!['image/jpeg', 'image/png', 'image/gif'].includes(file.type)) {
-        profilePictureError.textContent = 'Only JPG, PNG, or GIF files are allowed';
-        profilePictureError.classList.add('active');
-        profilePicturePreview.innerHTML = ''; // Clear preview
-        profilePicturePreview.textContent = (usernameInput.value || fullNameInput.value.split(' ')[0] || 'User').charAt(0).toUpperCase();
-        return;
-      }
-
-      const reader = new FileReader();
-      reader.onload = () => {
-        profilePicturePreview.innerHTML = `<img src="${reader.result}" alt="Profile Picture" class="avatar-img" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`;
-      };
-      reader.readAsDataURL(file);
-    } else {
-      // If no file selected, revert to text-based avatar
-      const displayName = usernameInput.value || fullNameInput.value.split(' ')[0] || 'User';
-      profilePicturePreview.innerHTML = '';
-      profilePicturePreview.textContent = displayName.charAt(0).toUpperCase();
+  // Handle popstate to close modal when navigating back
+  window.addEventListener('popstate', (event) => {
+    if (!event.state || event.state.modal !== 'updateProfile') {
+      closeUpdateProfileModal();
     }
   });
-}
 
-  if (updateProfileForm) {
-  updateProfileForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    if (saveProfileBtn.disabled) return;
-    const formData = new FormData(updateProfileForm);
-    try {
-      const response = await fetch('https://api.flexgig.com.ng/api/profile/update', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('firebaseToken')}`,
-        },
-        body: formData,
-        credentials: 'include',
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.message || 'Failed to update profile');
-      }
-      // Update local storage with new profile data
-      localStorage.setItem('username', formData.get('username') || '');
-      localStorage.setItem('firstName', formData.get('fullName').split(' ')[0] || '');
-      localStorage.setItem('phoneNumber', formData.get('phoneNumber') || '');
-      localStorage.setItem('address', formData.get('address') || '');
-      if (profilePictureInput.files[0]) {
+  // Handle popstate to close modal when navigating back
+  window.addEventListener('popstate', (event) => {
+    if (event.state && event.state.modal === 'updateProfile') {
+      // Do nothing if the state is still the modal
+    } else {
+      closeUpdateProfileModal();
+    }
+  });
+
+  function closeUpdateProfileModal() {
+    if (!updateProfileModal) return;
+    updateProfileModal.classList.remove('active');
+    updateProfileModal.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('modal-open');
+    console.log('[DEBUG] closeUpdateProfileModal: Modal closed');
+  }
+
+  if (updateProfileModal) {
+    const closeModalBtn = updateProfileModal.querySelector('.close-btn');
+    const backBtn = updateProfileModal.querySelector('.back-btn');
+    closeModalBtn?.addEventListener('click', closeUpdateProfileModal);
+    backBtn?.addEventListener('click', closeUpdateProfileModal);
+  }
+
+  if (profilePictureInput) {
+    profilePictureInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      profilePictureError.textContent = ''; // Clear previous error
+      profilePictureError.classList.remove('active'); // Hide error
+      if (file) {
+        if (file.size > 2 * 1024 * 1024) {
+          profilePictureError.textContent = 'File size must be less than 2MB';
+          profilePictureError.classList.add('active');
+          profilePicturePreview.innerHTML = ''; // Clear preview
+          profilePicturePreview.textContent = (usernameInput.value || fullNameInput.value.split(' ')[0] || 'User').charAt(0).toUpperCase();
+          return;
+        }
+        if (!['image/jpeg', 'image/png', 'image/gif'].includes(file.type)) {
+          profilePictureError.textContent = 'Only JPG, PNG, or GIF files are allowed';
+          profilePictureError.classList.add('active');
+          profilePicturePreview.innerHTML = ''; // Clear preview
+          profilePicturePreview.textContent = (usernameInput.value || fullNameInput.value.split(' ')[0] || 'User').charAt(0).toUpperCase();
+          return;
+        }
+
         const reader = new FileReader();
         reader.onload = () => {
-          localStorage.setItem('profilePicture', reader.result);
-          // Update both dashboard and modal avatars
-          updateGreetingAndAvatar(formData.get('username'), formData.get('fullName').split(' ')[0]);
           profilePicturePreview.innerHTML = `<img src="${reader.result}" alt="Profile Picture" class="avatar-img" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`;
         };
-        reader.readAsDataURL(profilePictureInput.files[0]);
+        reader.readAsDataURL(file);
       } else {
-        localStorage.removeItem('profilePicture'); // Clear profile picture
-        // Update both dashboard and modal avatars
-        const displayName = formData.get('username') || formData.get('fullName').split(' ')[0] || 'User';
-        updateGreetingAndAvatar(formData.get('username'), formData.get('fullName').split(' ')[0]);
+        // If no file selected, revert to text-based avatar
+        const displayName = usernameInput.value || fullNameInput.value.split(' ')[0] || 'User';
         profilePicturePreview.innerHTML = '';
         profilePicturePreview.textContent = displayName.charAt(0).toUpperCase();
       }
-      alert('Profile updated successfully!');
-      closeUpdateProfileModal();
-    } catch (err) {
-      console.error('[ERROR] updateProfileForm:', err);
-      alert(`Failed to update profile: ${err.message}`);
-    }
-  });
-}
+    });
+  }
 
-  // --- SVG INJECTION FOR ICONS ---
-  document.querySelectorAll('.svg-inject').forEach(el =>
-  fetch(el.src)
-    .then(r => r.text())
-    .then(svg => {
-      el.outerHTML = svg;
-    })
-);
+  if (updateProfileForm) {
+    updateProfileForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (saveProfileBtn.disabled) return;
+      const formData = new FormData(updateProfileForm);
+      try {
+        const response = await fetch('https://api.flexgig.com.ng/api/profile/update', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('firebaseToken')}`,
+          },
+          body: formData,
+          credentials: 'include',
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.message || 'Failed to update profile');
+        }
+        // Update local storage with new profile data
+        localStorage.setItem('username', formData.get('username') || '');
+        localStorage.setItem('firstName', formData.get('fullName').split(' ')[0] || '');
+        localStorage.setItem('phoneNumber', formData.get('phoneNumber') || '');
+        localStorage.setItem('address', formData.get('address') || '');
+        if (profilePictureInput.files[0]) {
+          const reader = new FileReader();
+          reader.onload = () => {
+            localStorage.setItem('profilePicture', reader.result);
+            // Update both dashboard and modal avatars
+            updateGreetingAndAvatar(formData.get('username'), formData.get('fullName').split(' ')[0]);
+            profilePicturePreview.innerHTML = `<img src="${reader.result}" alt="Profile Picture" class="avatar-img" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`;
+          };
+          reader.readAsDataURL(profilePictureInput.files[0]);
+        } else {
+          localStorage.removeItem('profilePicture'); // Clear profile picture
+          // Update both dashboard and modal avatars
+          const displayName = formData.get('username') || formData.get('fullName').split(' ')[0] || 'User';
+          updateGreetingAndAvatar(formData.get('username'), formData.get('fullName').split(' ')[0]);
+          profilePicturePreview.innerHTML = '';
+          profilePicturePreview.textContent = displayName.charAt(0).toUpperCase();
+        }
+        alert('Profile updated successfully!');
+        closeUpdateProfileModal();
+      } catch (err) {
+        console.error('[ERROR] updateProfileForm:', err);
+        alert(`Failed to update profile: ${err.message}`);
+      }
+    });
+  }
+
+    // --- SVG INJECTION FOR ICONS ---
+    document.querySelectorAll('.svg-inject').forEach(el =>
+    fetch(el.src)
+      .then(r => r.text())
+      .then(svg => {
+        el.outerHTML = svg;
+      })
+  );
+  
+
 
 
 
