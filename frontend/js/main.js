@@ -716,3 +716,27 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
     },
   };
 })();
+
+import Navigo from 'navigo';
+
+const router = new Navigo('/', { hash: false });
+
+router.on({
+  '/': () => {
+    // Load index.html content (already loaded)
+    console.log('Home page loaded');
+  },
+  '/auth/email': () => {
+    window.location.href = '/frontend/html/login.html';
+  },
+  '/dashboard': () => {
+    // Load dashboard.html or check auth
+    if (!localStorage.getItem('accessToken')) {
+      window.location.href = '/frontend/html/login.html';
+    } else {
+      // Load dashboard content
+    }
+  }
+});
+
+router.resolve();
