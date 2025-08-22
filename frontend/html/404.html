@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>404 Not Found</title>
+  <script>
+    if (window.location.pathname === '/auth/email') {
+      window.location.href = '/frontend/html/login.html';
+    } else {
+      document.body.innerHTML = '<h1>404 Not Found</h1><p>Page not found.</p>';
+    }
+  </script>
+</head>
+<body>
+  <h1>404 Not Found</h1>
+  <p>Redirecting...</p>
+</body>
+</html>

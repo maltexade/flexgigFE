@@ -294,11 +294,20 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
       .on({
         '/': () => {
           console.log('[main.js] Routing to home');
-          loadContent('/index.html');
+          // index.html is already loaded
+        },
+        '/auth/email': () => {
+          console.log('[main.js] Routing to email login');
+          window.location.href = '/frontend/html/login.html';
         },
         '/dashboard': () => {
           console.log('[main.js] Routing to dashboard');
-          loadContent('/frontend/html/dashboard.html');
+          if (!localStorage.getItem('accessToken')) {
+            console.log('[main.js] No token, redirecting to login');
+            window.location.href = '/frontend/html/login.html';
+          } else {
+            loadContent('/frontend/html/dashboard.html');
+          }
         },
       })
       .notFound(() => {
@@ -306,6 +315,7 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
         qs('#content').innerHTML = '<p>Page not found</p>';
       })
       .resolve();
+    return router;
   }
 
   // -----------------------------
@@ -472,6 +482,14 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
       UI.logoutBtn.addEventListener('click', (e) => {
         e.preventDefault();
         logoutFlow();
+      });
+    }
+    const emailNavBtn = document.getElementById('emailLoginBtn');
+    if (emailNavBtn) {
+      emailNavBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        console.log('[main.js] Email login button clicked, navigating to /auth/email');
+        router.navigate('/auth/email');
       });
     }
 
@@ -716,27 +734,3 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
     },
   };
 })();
-
-import Navigo from 'navigo';
-
-const router = new Navigo('/', { hash: false });
-
-router.on({
-  '/': () => {
-    // Load index.html content (already loaded)
-    console.log('Home page loaded');
-  },
-  '/auth/email': () => {
-    window.location.href = '/frontend/html/login.html';
-  },
-  '/dashboard': () => {
-    // Load dashboard.html or check auth
-    if (!localStorage.getItem('accessToken')) {
-      window.location.href = '/frontend/html/login.html';
-    } else {
-      // Load dashboard content
-    }
-  }
-});
-
-router.resolve();
