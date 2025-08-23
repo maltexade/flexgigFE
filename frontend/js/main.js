@@ -84,9 +84,11 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
     if (!firebaseApp) {
       try {
         firebaseApp = firebase.initializeApp(getFirebaseConfig());
-        firebaseAuth = firebase.auth();
-        await firebaseAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
-        console.log('[main.js] Firebase persistence set to LOCAL');
+        firebaseAuth = firebase.auth ? firebase.auth() : null;
+        if (firebaseAuth) {
+          await firebaseAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+          console.log('[main.js] Firebase persistence set to LOCAL');
+        }
       } catch (error) {
         console.error('[main.js] Firebase init error:', error);
         throw error;
@@ -275,6 +277,8 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
   // -----------------------------
   // Router
   // -----------------------------
+  let router = null;
+
   async function loadContent(url) {
     const content = qs('#content');
     try {
@@ -289,7 +293,12 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
   }
 
   function setupRouter() {
-    const router = new Navigo('/', { hash: false });
+    if (!window.Navigo) {
+      console.error('[main.js] Navigo is not defined. Ensure Navigo is loaded via CDN.');
+      window.location.href = '/frontend/html/login.html'; // Fallback
+      return;
+    }
+    router = new Navigo('/', { hash: false });
     router
       .on({
         '/': () => {
@@ -315,7 +324,6 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
         qs('#content').innerHTML = '<p>Page not found</p>';
       })
       .resolve();
-    return router;
   }
 
   // -----------------------------
@@ -348,7 +356,7 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
   }
 
   // -----------------------------
-  // PWA and modal handling (unchanged)
+  // PWA and modal handling
   // -----------------------------
   let deferredPrompt = null;
   let modalMode = null;
@@ -448,26 +456,6 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
     }
   }
 
-  function showEmailLoginModal() {
-    console.log('[main.js] Showing email login modal');
-    const modal = document.getElementById('email-login-modal');
-    if (modal) {
-      modal.classList.remove('hidden');
-      document.body.classList.add('modal-open');
-      document.body.style.overflow = 'hidden';
-    }
-  }
-
-  function hideEmailLoginModal() {
-    console.log('[main.js] Hiding email login modal');
-    const modal = document.getElementById('email-login-modal');
-    const error = document.getElementById('email-error');
-    if (modal) modal.classList.add('hidden');
-    if (error) error.classList.add('hidden');
-    document.body.classList.remove('modal-open');
-    document.body.style.overflow = '';
-  }
-
   // -----------------------------
   // Event bindings
   // -----------------------------
@@ -489,10 +477,14 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
       emailNavBtn.addEventListener('click', (e) => {
         e.preventDefault();
         console.log('[main.js] Email login button clicked, navigating to /auth/email');
-        router.navigate('/auth/email');
+        if (router) {
+          router.navigate('/auth/email');
+        } else {
+          console.warn('[main.js] Router not initialized, falling back to direct navigation');
+          window.location.href = '/frontend/html/login.html';
+        }
       });
     }
-
     const openBtn = document.querySelector('.install-app-button');
     if (openBtn) {
       console.log('[main.js] Setting install button display to flex');
@@ -503,49 +495,6 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
         showInstallModal();
       });
     }
-
-    const emailLoginBtn = document.getElementById('email-login-button');
-    if (emailLoginBtn) {
-      emailLoginBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        console.log('[main.js] Email login button clicked');
-        showEmailLoginModal();
-      });
-    }
-
-    const emailLoginForm = document.getElementById('email-login-form');
-    if (emailLoginForm) {
-      emailLoginForm.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        console.log('[main.js] Email login form submitted');
-        const email = document.getElementById('email').value;
-        const password = document.getElementById('password').value;
-        const errorElement = document.getElementById('email-error');
-        try {
-          const { auth } = await initFirebase();
-          console.log('[main.js] Attempting Firebase email sign-in');
-          const userCredential = await auth.signInWithEmailAndPassword(email, password);
-          console.log('[main.js] Email sign-in successful:', userCredential.user.uid);
-          hideEmailLoginModal();
-          window.location.href = '/dashboard';
-        } catch (error) {
-          console.error('[main.js] Email sign-in error:', error);
-          if (errorElement) {
-            errorElement.textContent = error.message;
-            errorElement.classList.remove('hidden');
-          }
-        }
-      });
-    }
-
-    const emailCancelBtn = document.getElementById('email-login-cancel');
-    if (emailCancelBtn) {
-      emailCancelBtn.addEventListener('click', () => {
-        console.log('[main.js] Email login cancel clicked');
-        hideEmailLoginModal();
-      });
-    }
-
     const modalBackdrop = document.getElementById('install-modal');
     if (modalBackdrop) {
       modalBackdrop.addEventListener('click', (e) => {
@@ -555,7 +504,6 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
         }
       });
     }
-
     const confirmBtnMobile = document.getElementById('install-app-confirm-mobile');
     if (confirmBtnMobile) {
       confirmBtnMobile.addEventListener('click', async () => {
@@ -587,7 +535,6 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
         }
       });
     }
-
     const confirmBtnDesktop = document.getElementById('install-app-confirm-desktop');
     if (confirmBtnDesktop) {
       confirmBtnDesktop.addEventListener('click', async () => {
@@ -619,7 +566,6 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
         }
       });
     }
-
     const cancelBtnDesktop = document.getElementById('install-app-cancel-desktop');
     if (cancelBtnDesktop) {
       cancelBtnDesktop.addEventListener('click', () => {
@@ -627,7 +573,6 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
         hideInstallModal();
       });
     }
-
     const box = document.getElementById('install-modal-mobile');
     const handle = document.getElementById('modal-drag-handle');
     if (handle && box) {
@@ -661,7 +606,6 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
         }
       });
     }
-
     window.addEventListener('beforeinstallprompt', (e) => {
       console.log('[main.js] beforeinstallprompt event fired:', e);
       e.preventDefault();
@@ -672,12 +616,10 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
         openBtn.style.display = 'flex';
       }
     });
-
     window.addEventListener('appinstalled', () => {
       console.log('[main.js] PWA installed successfully');
       deferredPrompt = null;
     });
-
     window.addEventListener('resize', () => {
       const modal = document.getElementById('install-modal');
       if (modal && !modal.classList.contains('hidden')) {
