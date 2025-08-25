@@ -228,24 +228,6 @@
     }
   }
 
-  // Simulated verify function
-  function verifyOTP(code) {
-    // Example: you’ll replace this with real server check
-    const correctOTP = "123456";
-
-    if (code === correctOTP) {
-      alert("✅ OTP Verified!");
-    } else {
-      alert("❌ Invalid OTP, please try again.");
-
-      // Clear boxes
-      boxes.forEach(box => box.value = "");
-
-      // Focus back on first box
-      boxes[0].focus();
-    }
-  }
-
   // Handle typing across inputs
   boxes.forEach((box, idx) => {
     box.addEventListener("input", (e) => {
