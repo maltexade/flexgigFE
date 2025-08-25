@@ -68,7 +68,7 @@
     .label { font-size: 14px; color: var(--muted); }
     .input {
       width: 100%;
-      padding: 14px 14px;
+      padding: 14px 40px 14px 14px; /* Add padding-right for eye SVG */
       border-radius: 12px;
       border: 1px solid var(--border);
       background: #0b0d12;
@@ -126,8 +126,27 @@
       text-align: center;
     }
     .loading.active { display: block; }
-    .resend-btn { color: var(--blue); cursor: pointer; }
-    .resend-btn[disabled] { color: var(--muted); cursor: not-allowed; }
+    .resend-btn {
+      color: var(--muted);
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .resend-btn:not([disabled]) { color: var(--blue); }
+    .resend-btn:not([disabled]):hover { color: var(--green); }
+    .resend-btn[disabled] { cursor: not-allowed; }
+    .forgot-password {
+      color: var(--white);
+      text-decoration: none;
+      font-weight: 600;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: rgba(255,255,255,.1);
+      transition: background 0.2s;
+    }
+    .forgot-password:hover {
+      background: rgba(255,255,255,.2);
+      color: var(--green);
+    }
   </style>
 </head>
 <body>
@@ -173,7 +192,7 @@
         <div class="error" id="passwordErr"></div>
       </div>
       <button class="btn" id="loginBtn">Login</button>
-      <p class="hint center"><a href="#" id="forgotPassword">Forgot password?</a></p>
+      <p class="hint center"><a href="#" id="forgotPassword" class="forgot-password">Forgot password?</a></p>
     </div>
 
     <div class="card hidden" id="step-otp">
@@ -301,10 +320,18 @@
       inp.autocomplete = 'one-time-code';
       inp.addEventListener('input', (e) => {
         e.target.value = e.target.value.replace(/\D/g, '');
-        if (e.target.value && i < OTP_LENGTH - 1) otpGrid.children[i + 1].focus();
+        if (e.target.value && i < OTP_LENGTH - 1) {
+          otpGrid.children[i + 1].focus();
+        }
+        if (i === OTP_LENGTH - 1 && e.target.value) {
+          e.target.blur(); // Close keyboard on 6th digit
+          qs('#verifyOtpBtn').click(); // Auto-submit OTP
+        }
       });
       inp.addEventListener('keydown', (e) => {
-        if (e.key === 'Backspace' && !e.target.value && i > 0) otpGrid.children[i - 1].focus();
+        if (e.key === 'Backspace' && !e.target.value && i > 0) {
+          otpGrid.children[i - 1].focus();
+        }
       });
       otpGrid.appendChild(inp);
     }
@@ -319,7 +346,13 @@
         box.value = paste[idx] || '';
       });
       const filled = Math.min(paste.length, OTP_LENGTH) - 1;
-      if (filled >= 0) boxes[filled].focus();
+      if (filled >= 0) {
+        boxes[filled].focus();
+        if (filled === OTP_LENGTH - 1) {
+          boxes[filled].blur(); // Close keyboard on paste
+          qs('#verifyOtpBtn').click(); // Auto-submit OTP
+        }
+      }
     });
 
     // Resend OTP countdown
@@ -327,7 +360,7 @@
       const resendBtn = qs('#resendOtp');
       const countdownEl = qs('#resendCountdown');
       resendBtn.setAttribute('disabled', true);
-      let timeLeft = 300; // 5 minutes in seconds
+      let timeLeft = 120; // 2 minutes in seconds
       countdownEl.classList.remove('hidden');
       countdownEl.textContent = `(Wait ${Math.floor(timeLeft / 60)}:${(timeLeft % 60).toString().padStart(2, '0')})`;
       resendTimer = setInterval(() => {
@@ -428,7 +461,6 @@
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Failed to send reset email');
         qs('#passwordErr').textContent = 'Password reset email sent. Check your inbox.';
-        // Optionally redirect to reset page if token is passed via URL
       } catch (err) {
         qs('#passwordErr').textContent = err.message;
       }
