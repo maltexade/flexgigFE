@@ -20,6 +20,38 @@ async function getSession() {
 // Run this immediately on dashboard load
 getSession();
 
+async function openPinModalForReauth() {
+    try {
+      const res = await fetch('https://api.flexgig.com.ng/api/session', {
+        method: 'GET',
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        console.error('[dashboard.js] openPinModalForReauth: Session invalid');
+        window.location.href = '/'; // Redirect if session is invalid
+        return;
+      }
+      const { user } = await res.json();
+      if (!user.pin) {
+        console.log('[dashboard.js] No PIN set, redirecting to PIN creation');
+        pinModal.classList.remove('hidden');
+        pinTitle.textContent = 'Create PIN';
+        pinSubtitle.textContent = 'Create a 4-digit PIN';
+        step = 'create';
+        resetInputs();
+      } else {
+        pinModal.classList.remove('hidden');
+        pinTitle.textContent = 'Re-enter PIN';
+        pinSubtitle.textContent = 'Enter your 4-digit PIN to continue';
+        resetInputs();
+        step = 'reauth';
+      }
+      console.log('[dashboard.js] PIN modal opened for:', user.pin ? 're-authentication' : 'PIN creation');
+    } catch (err) {
+      console.error('[dashboard.js] openPinModalForReauth error:', err);
+      window.location.href = '/';
+    }
+  }
 
 
 
@@ -187,6 +219,16 @@ async function fetchUserData() {
     }
   }
 }
+
+// In dashboard.js
+const deleteKey = document.getElementById('deleteKey');
+deleteKey.addEventListener('click', () => {
+  if (currentPin.length > 0) {
+    currentPin = currentPin.slice(0, -1);
+    pinInputs[currentPin.length].classList.remove('filled');
+    pinInputs[currentPin.length].value = '';
+  }
+});
 
 document.addEventListener('DOMContentLoaded', fetchUserData);
 
@@ -1773,6 +1815,41 @@ payBtn.addEventListener('click', () => {
     currentPin = "";
     pinInputs.forEach(input => input.classList.remove("filled"));
   }
+  // Open PIN modal for re-authentication
+  // In dashboard.js, modify openPinModalForReauth
+  async function openPinModalForReauth() {
+    try {
+      const res = await fetch('https://api.flexgig.com.ng/api/session', {
+        method: 'GET',
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        console.error('[dashboard.js] openPinModalForReauth: Session invalid');
+        window.location.href = '/'; // Redirect if session is invalid
+        return;
+      }
+      const { user } = await res.json();
+      if (!user.pin) {
+        console.log('[dashboard.js] No PIN set, redirecting to PIN creation');
+        pinModal.classList.remove('hidden');
+        pinTitle.textContent = 'Create PIN';
+        pinSubtitle.textContent = 'Create a 4-digit PIN';
+        step = 'create';
+        resetInputs();
+      } else {
+        pinModal.classList.remove('hidden');
+        pinTitle.textContent = 'Re-enter PIN';
+        pinSubtitle.textContent = 'Enter your 4-digit PIN to continue';
+        resetInputs();
+        step = 'reauth';
+      }
+      console.log('[dashboard.js] PIN modal opened for:', user.pin ? 're-authentication' : 'PIN creation');
+    } catch (err) {
+      console.error('[dashboard.js] openPinModalForReauth error:', err);
+      window.location.href = '/';
+    }
+  }
+
 
   // Show custom alert
   function showAlert(message, autoClose = false) {
@@ -1820,36 +1897,92 @@ payBtn.addEventListener('click', () => {
     }
   });
 
-  // Handle keypad buttons
+  // Update PIN keypad logic to handle reauth step
   keypadButtons.forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const val = btn.textContent.trim();
       if (!val || isNaN(val)) return;
 
       if (currentPin.length < 4) {
         currentPin += val;
-        pinInputs[currentPin.length - 1].classList.add("filled");
+        pinInputs[currentPin.length - 1].classList.add('filled');
+        pinInputs[currentPin.length - 1].value = '*';
       }
 
       if (currentPin.length === 4) {
-        if (step === "create") {
+        if (step === 'create') {
           firstPin = currentPin;
-          step = "confirm";
-          pinTitle.textContent = "Confirm PIN";
-          pinSubtitle.textContent = "Confirm your PIN";
+          step = 'confirm';
+          pinTitle.textContent = 'Confirm PIN';
+          pinSubtitle.textContent = 'Confirm your 4-digit PIN';
           resetInputs();
-        } else if (step === "confirm") {
+        } else if (step === 'confirm') {
           if (currentPin === firstPin) {
-            console.log('[DEBUG] PIN setup successfully:', currentPin);
+            try {
+              // Call server to save PIN (placeholder)
+              await fetch('https://api.flexgig.com.ng/api/save-pin', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pin: currentPin }),
+                credentials: 'include',
+              });
+              localStorage.setItem('userPin', currentPin); // Mock storage
+              console.log('[dashboard.js] PIN setup successfully:', currentPin);
+              showAlert('PIN created successfully!', true);
+              pinModal.classList.add('hidden');
+              resetInputs();
+            } catch (err) {
+              console.error('[dashboard.js] PIN save error:', err);
+              showAlert('Failed to save PIN. Please try again.');
+              resetInputs();
+            }
+          } else {
+            console.error('[dashboard.js] PIN mismatch');
+            showAlert('Oops! The PINs do not match. Please try again.');
+            step = 'create';
+            pinTitle.textContent = 'Create PIN';
+            pinSubtitle.textContent = 'Create a 4-digit PIN';
+            resetInputs();
+          }
+        } else if (step === 'reauth') {
+          try {
+            const res = await fetch('https://api.flexgig.com.ng/api/verify-pin', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ pin: currentPin }),
+              credentials: 'include',
+            });
+            if (!res.ok) {
+              throw new Error('Invalid PIN');
+            }
+            const { token } = await res.json();
+            const sessionRes = await fetch('https://api.flexgig.com.ng/api/session', {
+              method: 'GET',
+              credentials: 'include',
+            });
+            if (!sessionRes.ok) {
+              throw new Error(`Session fetch failed: ${sessionRes.status}`);
+            }
+            const data = await sessionRes.json();
+            localStorage.setItem('accessToken', data.token);
+            localStorage.setItem('userEmail', data.user.email || '');
+            localStorage.setItem('firstName', data.user.fullName?.split(' ')[0] || '');
+            localStorage.setItem('username', data.user.username || '');
+            localStorage.setItem('phoneNumber', data.user.phoneNumber || '');
+            localStorage.setItem('address', data.user.address || '');
+            localStorage.setItem('profilePicture', data.user.profilePicture || '');
+            await updateGreetingAndAvatar(data.user.username, data.user.fullName?.split(' ')[0]);
+            await loadUserProfile(data.token);
+            updateBalanceDisplay();
             pinModal.classList.add('hidden');
             resetInputs();
-          } else {
-            console.error('[ERROR] PIN mismatch');
-            showAlert("Oops! The PINs do not match. Please try again."); // ❌ failure
-            step = "create";
-            pinTitle.textContent = "Create PIN";
-            pinSubtitle.textContent = "Create a 4-digit PIN";
-            resetInputs();
+            console.log('[dashboard.js] PIN re-auth: Session restored, token:', data.token);
+          } catch (err) {
+            console.error('[dashboard.js] PIN re-auth error:', err);
+            showAlert('Invalid PIN or session. Redirecting to login...');
+            setTimeout(() => {
+              window.location.href = '/';
+            }, 1200);
           }
         }
       }

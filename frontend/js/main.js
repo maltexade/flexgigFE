@@ -97,24 +97,40 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
     return { app: firebaseApp, auth: firebaseAuth };
   }
 
-  async function fetchSessionToken() {
+  // In main.js
+  async function getSession() {
+    if (!window.location.pathname.includes('/dashboard')) {
+      console.log('[main.js] getSession: Skipped on non-dashboard page:', window.location.pathname);
+      return null;
+    }
+
     try {
       const res = await fetch('https://api.flexgig.com.ng/api/session', {
         method: 'GET',
-        credentials: 'include', // Ensure cookies are sent
+        credentials: 'include',
       });
       if (!res.ok) {
-        throw new Error(`Session fetch failed: ${res.status} ${await res.text()}`);
+        throw new Error(`Session fetch failed: ${res.status} ${await safeParseError(res)}`);
       }
       const data = await res.json();
       localStorage.setItem('accessToken', data.token);
+      console.log('[main.js] getSession: Session fetched, token:', data.token);
       return data.user;
     } catch (err) {
-      console.error('[main.js] fetchSessionToken error:', err);
-      alert('Session expired. Please log in again.');
-      window.location.href = '/';
+      console.error('[main.js] getSession error:', err);
+      // Trigger PIN modal instead of redirect
+      if (window.location.pathname.includes('/dashboard')) {
+        openPinModalForReauth();
+      }
       throw err;
     }
+  }
+
+  // Function to trigger PIN modal (to be called from dashboard.js)
+  function openPinModalForReauth() {
+    // Dispatch event to dashboard.js to open PIN modal
+    const event = new CustomEvent('openPinModalForReauth');
+    document.dispatchEvent(event);
   }
 
   async function safeParseError(res) {
@@ -308,15 +324,21 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
           console.log('[main.js] Routing to email login');
           window.location.href = '/frontend/html/login.html';
         },
-        '/dashboard': () => {
-          console.log('[main.js] Routing to dashboard');
-          if (!localStorage.getItem('accessToken')) {
-            console.log('[main.js] No token, redirecting to login');
-            window.location.href = '/frontend/html/login.html';
-          } else {
-            loadContent('/frontend/html/dashboard.html');
-          }
-        },
+        '/dashboard': async () => {
+      console.log('[main.js] Routing to dashboard');
+      try {
+        const user = await getSession();
+        if (!user) {
+          console.log('[main.js] No session, redirecting to login');
+          window.location.href = '/frontend/html/login.html';
+          return;
+        }
+        loadContent('/frontend/html/dashboard.html');
+      } catch (err) {
+        console.error('[main.js] Dashboard route error:', err);
+        window.location.href = '/frontend/html/login.html';
+      }
+    },
       })
       .notFound(() => {
         console.log('[main.js] Route not found');
