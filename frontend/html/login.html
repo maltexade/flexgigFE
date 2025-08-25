@@ -193,6 +193,83 @@
     otpGrid.appendChild(inp);
   }
 
+  // Handle paste into any OTP box
+  otpGrid.addEventListener('paste', (e) => {
+    e.preventDefault();
+    const paste = (e.clipboardData || window.clipboardData).getData('text').replace(/\D/g, '');
+    if (!paste) return;
+
+    // Fill each input with corresponding digit
+    const boxes = otpGrid.querySelectorAll('input');
+    boxes.forEach((box, idx) => {
+      box.value = paste[idx] || '';
+    });
+
+    // Focus the last filled input
+    const filled = Math.min(paste.length, OTP_LENGTH) - 1;
+    if (filled >= 0) boxes[filled].focus();
+  });
+
+  const verifyBtn = document.getElementById("verifyBtn");
+  const boxes = otpGrid.querySelectorAll("input");
+
+  // Function to get OTP
+  function getOTP() {
+    let code = "";
+    boxes.forEach(box => code += box.value);
+    return code;
+  }
+
+  // Function to check and trigger verify
+  function checkAndVerify() {
+    const code = getOTP();
+    if (code.length === OTP_LENGTH) {
+      verifyOTP(code); // Call backend verify function
+    }
+  }
+
+  // Simulated verify function
+  function verifyOTP(code) {
+    // Example: you’ll replace this with real server check
+    const correctOTP = "123456";
+
+    if (code === correctOTP) {
+      alert("✅ OTP Verified!");
+    } else {
+      alert("❌ Invalid OTP, please try again.");
+
+      // Clear boxes
+      boxes.forEach(box => box.value = "");
+
+      // Focus back on first box
+      boxes[0].focus();
+    }
+  }
+
+  // Handle typing across inputs
+  boxes.forEach((box, idx) => {
+    box.addEventListener("input", (e) => {
+      if (e.target.value && idx < OTP_LENGTH - 1) {
+        boxes[idx + 1].focus();
+      }
+      checkAndVerify();
+    });
+  });
+
+  // Handle paste
+  otpGrid.addEventListener("paste", (e) => {
+    e.preventDefault();
+    const paste = (e.clipboardData || window.clipboardData).getData("text").replace(/\D/g, "");
+    if (!paste) return;
+
+    boxes.forEach((box, idx) => {
+      box.value = paste[idx] || "";
+    });
+
+    checkAndVerify();
+  });
+
+
   // Step 1: Email continue
   qs('#emailContinue').addEventListener('click', async () => {
     const email = qs('#email').value.trim().toLowerCase();
