@@ -330,14 +330,18 @@
         const { data, error } = await sb.auth.verifyOtp({
           email: currentEmail,
           token: digits,
-          type: 'signup', // Use 'signup' for new users
+          type: 'signup', // For new users
         });
         if (error) throw new Error(error.message);
+        // Get the access token from the session
+        const { data: sessionData, error: sessionError } = await sb.auth.getSession();
+        if (sessionError || !sessionData.session) throw new Error('Failed to get session');
+        const accessToken = sessionData.session.access_token;
         // Fetch JWT from server
         const res = await fetch(`${API_BASE}/auth/login`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: currentEmail }),
+          body: JSON.stringify({ email: currentEmail, access_token: accessToken }),
           credentials: 'include',
         });
         const loginData = await res.json();
@@ -349,7 +353,7 @@
       }
     });
 
-  // Step 3: Set password after OTP
+    // Step 3: Set password after OTP (keep existing, but ensure login uses password)
     qs('#setPwdBtn').addEventListener('click', async () => {
       const p1 = qs('#newPassword').value;
       const p2 = qs('#confirmPassword').value;
@@ -360,7 +364,7 @@
       try {
         const { data, error } = await sb.auth.updateUser({ password: p1 });
         if (error) throw new Error(error.message);
-        // Re-fetch JWT after setting password
+        // Re-fetch JWT with password
         const res = await fetch(`${API_BASE}/auth/login`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
