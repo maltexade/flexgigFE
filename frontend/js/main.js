@@ -99,17 +99,18 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
 
   async function fetchSessionToken() {
     try {
-      const res = await fetch('https://api.flexgig.com.ng/api/session', { credentials: 'include' });
+      const res = await fetch('https://api.flexgig.com.ng/api/session', {
+        method: 'GET',
+        credentials: 'include', // Ensure cookies are sent
+      });
       if (!res.ok) {
         throw new Error(`Session fetch failed: ${res.status} ${await res.text()}`);
       }
       const data = await res.json();
-      // Store access token or user data as needed
       localStorage.setItem('accessToken', data.token);
-      return data.user; // Return user data for frontend use
+      return data.user;
     } catch (err) {
       console.error('[main.js] fetchSessionToken error:', err);
-      // Optional: Show user-friendly message before redirect
       alert('Session expired. Please log in again.');
       window.location.href = '/';
       throw err;
