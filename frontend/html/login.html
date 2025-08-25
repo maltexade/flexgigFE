@@ -253,42 +253,42 @@
 
 
   // Step 1: Email continue
-  qs('#emailContinue').addEventListener('click', async () => {
-    const email = qs('#email').value.trim().toLowerCase();
-    qs('#emailErr').textContent = '';
-    if (!/^\S+@\S+\.\S+$/.test(email)) {
-      qs('#emailErr').textContent = 'Enter a valid email address';
-      return;
-    }
-    currentEmail = email;
-    try {
-      const res = await fetch(`${API_BASE}/auth/check-email`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || json.message || 'Server error');
-
-      if (json.exists) {
-        qs('#pwdFor').textContent = `for ${email}`;
-        show('#step-password');
-      } else {
-        const send = await fetch(`${API_BASE}/auth/send-otp`, {
+    qs('#emailContinue').addEventListener('click', async () => {
+      const email = qs('#email').value.trim().toLowerCase();
+      qs('#emailErr').textContent = '';
+      if (!/^\S+@\S+\.\S+$/.test(email)) {
+        qs('#emailErr').textContent = 'Enter a valid email address';
+        return;
+      }
+      currentEmail = email;
+      try {
+        const res = await fetch(`${API_BASE}/auth/check-email`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email }),
         });
-        const sj = await send.json();
-        if (!send.ok) throw new Error(sj.error || sj.message || 'Failed to send OTP');
-        qs('#otpSentTo').textContent = `Enter the OTP sent to your email ${maskEmail(email)}`;
-        otpGrid.querySelector('input')?.focus();
-        show('#step-otp');
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || json.message || 'Server error');
+
+        if (json.exists) {
+          qs('#pwdFor').textContent = `for ${email}`;
+          show('#step-password');
+        } else {
+          const send = await fetch(`${API_BASE}/auth/send-otp`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email }),
+          });
+          const sj = await send.json();
+          if (!send.ok) throw new Error(sj.error || sj.message || 'Failed to send OTP');
+          qs('#otpSentTo').textContent = `Enter the OTP sent to your email ${maskEmail(email)}`;
+          otpGrid.querySelector('input')?.focus();
+          show('#step-otp');
+        }
+      } catch (err) {
+        qs('#emailErr').textContent = err.message;
       }
-    } catch (err) {
-      qs('#emailErr').textContent = err.message;
-    }
-  });
+    });
 
   // Back links
   qs('#backToEmailPwd').addEventListener('click', (e) => { e.preventDefault(); show('#step-email'); });
@@ -319,62 +319,62 @@
   });
 
   // Step 2b: Verify OTP for new users
-  qs('#verifyOtpBtn').addEventListener('click', async () => {
-    const digits = Array.from(otpGrid.querySelectorAll('input')).map(i => i.value).join('');
-    qs('#otpErr').textContent = '';
-    if (digits.length !== OTP_LENGTH) {
-      qs('#otpErr').textContent = `Enter the ${OTP_LENGTH}-digit code`;
-      return;
-    }
-    try {
-      const { data, error } = await sb.auth.verifyOtp({
-        email: currentEmail,
-        token: digits,
-        type: 'email',
-      });
-      if (error) throw new Error(error.message);
-      // Fetch JWT from server
-      const res = await fetch(`${API_BASE}/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: currentEmail }), // No password needed
-        credentials: 'include',
-      });
-      const loginData = await res.json();
-      if (!res.ok) throw new Error(loginData.error || 'Login failed');
-      localStorage.setItem('accessToken', loginData.token);
-      show('#step-setpwd');
-    } catch (err) {
-      qs('#otpErr').textContent = err.message;
-    }
-  });
+    qs('#verifyOtpBtn').addEventListener('click', async () => {
+      const digits = Array.from(otpGrid.querySelectorAll('input')).map(i => i.value).join('');
+      qs('#otpErr').textContent = '';
+      if (digits.length !== OTP_LENGTH) {
+        qs('#otpErr').textContent = `Enter the ${OTP_LENGTH}-digit code`;
+        return;
+      }
+      try {
+        const { data, error } = await sb.auth.verifyOtp({
+          email: currentEmail,
+          token: digits,
+          type: 'signup', // Use 'signup' for new users
+        });
+        if (error) throw new Error(error.message);
+        // Fetch JWT from server
+        const res = await fetch(`${API_BASE}/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: currentEmail }),
+          credentials: 'include',
+        });
+        const loginData = await res.json();
+        if (!res.ok) throw new Error(loginData.error || 'Login failed');
+        localStorage.setItem('accessToken', loginData.token);
+        show('#step-setpwd');
+      } catch (err) {
+        qs('#otpErr').textContent = err.message || 'Invalid OTP';
+      }
+    });
 
   // Step 3: Set password after OTP
-  qs('#setPwdBtn').addEventListener('click', async () => {
-    const p1 = qs('#newPassword').value;
-    const p2 = qs('#confirmPassword').value;
-    const err = qs('#setPwdErr');
-    err.textContent = '';
-    if (!p1 || p1.length < 8) return err.textContent = 'Password must be at least 8 characters';
-    if (p1 !== p2) return err.textContent = 'Passwords do not match';
-    try {
-      const { data, error } = await sb.auth.updateUser({ password: p1 });
-      if (error) throw new Error(error.message);
-      // Re-fetch JWT after setting password
-      const res = await fetch(`${API_BASE}/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: currentEmail }), // No password needed
-        credentials: 'include',
-      });
-      const loginData = await res.json();
-      if (!res.ok) throw new Error(loginData.error || 'Login failed');
-      localStorage.setItem('accessToken', loginData.token);
-      window.location.href = `${WEB_BASE}/dashboard`;
-    } catch (err) {
-      err.textContent = err.message;
-    }
-  });
+    qs('#setPwdBtn').addEventListener('click', async () => {
+      const p1 = qs('#newPassword').value;
+      const p2 = qs('#confirmPassword').value;
+      const err = qs('#setPwdErr');
+      err.textContent = '';
+      if (!p1 || p1.length < 8) return err.textContent = 'Password must be at least 8 characters';
+      if (p1 !== p2) return err.textContent = 'Passwords do not match';
+      try {
+        const { data, error } = await sb.auth.updateUser({ password: p1 });
+        if (error) throw new Error(error.message);
+        // Re-fetch JWT after setting password
+        const res = await fetch(`${API_BASE}/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: currentEmail, password: p1 }),
+          credentials: 'include',
+        });
+        const loginData = await res.json();
+        if (!res.ok) throw new Error(loginData.error || 'Login failed');
+        localStorage.setItem('accessToken', loginData.token);
+        window.location.href = `${WEB_BASE}/dashboard`;
+      } catch (err) {
+        err.textContent = err.message;
+      }
+    });
 </script>
 </body>
 </html>
