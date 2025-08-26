@@ -156,7 +156,6 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
         const user = await ensureSignedInFromSession();
         if (user) {
           await loadContent('/frontend/html/dashboard.html');
-          // Wait for content to load before triggering getSession
           document.addEventListener('contentLoaded', () => {
             console.log('[DEBUG] main.js: contentLoaded event triggered for dashboard');
             if (window.getSession) {
@@ -170,6 +169,10 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
           window.location.href = '/frontend/html/login.html';
         }
       },
+      '/frontend/html/dashboard.html': () => {
+        console.log('[DEBUG] main.js: Routing to /frontend/html/dashboard.html (fallback)');
+        router.navigate('/dashboard');
+      }
     })
     .notFound(() => {
       console.log('[DEBUG] main.js: Not found route triggered', { path: window.location.pathname, search: window.location.search });
@@ -178,7 +181,12 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
         content.innerHTML = '<p>Page not found</p>';
       } else {
         console.error('[main.js] #content element not found for notFound route');
-        document.body.innerHTML = '<p>Page not found</p>';
+        if (window.location.pathname.includes('dashboard.html')) {
+          console.log('[DEBUG] main.js: Redirecting to /dashboard for dashboard.html');
+          router.navigate('/dashboard');
+        } else {
+          document.body.innerHTML = '<p>Page not found</p>';
+        }
       }
     })
     .resolve();
