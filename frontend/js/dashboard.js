@@ -1,74 +1,60 @@
-// --------------------------
-// Session & Profile Handling
-// --------------------------
-
 async function getSession() {
-    try {
-        console.log('[DEBUG] getSession: Initiating fetch, credentials: include');
-
-        const res = await fetch('https://api.flexgig.com.ng/api/session', {
-            method: 'GET',
-            credentials: 'include',
-            headers: { 'Accept': 'application/json' }
-        });
-
-        console.log('[DEBUG] getSession: Response status', res.status, 'Headers', [...res.headers]);
-
-        if (!res.ok) {
-            const text = await res.text();
-            console.error('[ERROR] getSession: Session API returned error:', res.status, text);
-            if (res.status === 401) {
-                window.location.href = '/'; // redirect to login
-            } else {
-                alert('Something went wrong while loading your session. Please try again.');
-            }
-            return;
-        }
-
-        const { user, token } = await res.json();
-        console.log('[DEBUG] getSession: Raw user data', user, 'Token:', token);
-
-        // Save session info locally
-        localStorage.setItem('userEmail', user.email || '');
-        localStorage.setItem('firstName', user.fullName?.split(' ')[0] || '');
-        localStorage.setItem('username', user.username || '');
-        localStorage.setItem('phoneNumber', user.phoneNumber || '');
-        localStorage.setItem('address', user.address || '');
-        if (token) localStorage.setItem('token', token);
-
-        // Wait for DOM elements to exist
-        let attempts = 0;
-        const maxAttempts = 3;
-        while (attempts < maxAttempts) {
-            const greetEl = document.getElementById('greet');
-            const firstnameEl = document.getElementById('firstname');
-            const avatarEl = document.getElementById('avatar');
-            console.log('[DEBUG] getSession: DOM elements (attempt ' + (attempts + 1) + ')', { greetEl: !!greetEl, firstnameEl: !!firstnameEl, avatarEl: !!avatarEl });
-            if (greetEl && firstnameEl && avatarEl) {
-                await updateGreetingAndAvatar(user.username, user.fullName?.split(' ')[0]);
-                try {
-                    await loadUserProfile(); // profile fetch uses token now
-                } catch (err) {
-                    console.warn('[WARN] getSession: Profile fetch failed, using session data', err.message);
-                }
-                return;
-            }
-            console.warn('[WARN] getSession: DOM elements missing, retrying...', { attempt: attempts + 1 });
-            await new Promise(resolve => setTimeout(resolve, 500));
-            attempts++;
-        }
-
-        console.error('[ERROR] getSession: Missing DOM elements after ' + maxAttempts + ' attempts', {
-            greetEl: !!document.getElementById('greet'),
-            firstnameEl: !!document.getElementById('firstname'),
-            avatarEl: !!document.getElementById('avatar')
-        });
-        alert('Error: Page not fully loaded. Please refresh the page.');
-
-    } catch (err) {
-        console.error('[ERROR] getSession: Failed to fetch session', err.message);
-        alert('Unable to reach the server. Please check your internet connection and try again.');
+  try {
+    console.log('[DEBUG] getSession: Initiating fetch, credentials: include');
+    const res = await fetch('https://api.flexgig.com.ng/api/session', {
+      method: 'GET',
+      credentials: 'include',
+      headers: { 'Accept': 'application/json' }
+    });
+    console.log('[DEBUG] getSession: Response status', res.status, 'Headers', [...res.headers]);
+    if (!res.ok) {
+      const text = await res.text();
+      console.error('[ERROR] getSession: Session API returned error:', res.status, text);
+      if (res.status === 401) {
+        window.location.href = '/';
+      } else {
+        alert('Something went wrong while loading your session. Please try again.');
+      }
+      return;
     }
+    const { user, token } = await res.json(); // Extract token if present
+    console.log('[DEBUG] getSession: Raw user data', user, 'Token', token);
+    localStorage.setItem('userEmail', user.email || '');
+    localStorage.setItem('firstName', user.fullName?.split(' ')[0] || '');
+    localStorage.setItem('username', user.username || '');
+    localStorage.setItem('phoneNumber', user.phoneNumber || '');
+    localStorage.setItem('address', user.address || '');
+    if (token) {
+      localStorage.setItem('authToken', token); // Store token for /api/profile
+      console.log('[DEBUG] getSession: Stored authToken', token);
+    }
+    // Retry DOM check up to 3 times with 500ms delay
+    let attempts = 0;
+    const maxAttempts = 3;
+    while (attempts < maxAttempts) {
+      const greetEl = document.getElementById('greet');
+      const firstnameEl = document.getElementById('firstname');
+      const avatarEl = document.getElementById('avatar');
+      console.log('[DEBUG] getSession: DOM elements (attempt ' + (attempts + 1) + ')', { greetEl: !!greetEl, firstnameEl: !!firstnameEl, avatarEl: !!avatarEl });
+      if (greetEl && firstnameEl && avatarEl) {
+        await updateGreetingAndAvatar(user.username, user.fullName?.split(' ')[0]);
+        try {
+          await loadUserProfile();
+        } catch (err) {
+          console.warn('[WARN] getSession: Profile fetch failed, using session data', err.message);
+        }
+        return;
+      }
+      console.warn('[WARN] getSession: DOM elements missing, retrying...', { attempt: attempts + 1 });
+      await new Promise(resolve => setTimeout(resolve, 500));
+      attempts++;
+    }
+    console.error('[ERROR] getSession: Missing DOM elements after ' + maxAttempts + ' attempts', { greetEl: !!document.getElementById('greet'), firstnameEl: !!document.getElementById('firstname'), avatarEl: !!document.getElementById('avatar') });
+    alert('Error: Page not fully loaded. Please refresh the page.');
+  } catch (err) {
+    console.error('[ERROR] getSession: Failed to fetch session', err.message);
+    alert('Unable to reach the server. Please check your internet connection and try again.');
+  }
 }
 
 // Run getSession after DOM is loaded
@@ -77,52 +63,33 @@ document.addEventListener('DOMContentLoaded', () => {
   getSession();
 });
 
-// --------------------------
-// Load User Profile
-// --------------------------
-
 async function loadUserProfile() {
-    const token = localStorage.getItem('token');
-    if (!token) {
-        console.warn('[WARN] loadUserProfile: No token found, redirecting to login');
-        window.location.href = '/';
-        return;
-    }
-
     try {
-        console.log('[DEBUG] loadUserProfile: Initiating fetch with token');
+        console.log('[DEBUG] loadUserProfile: Initiating fetch, credentials: include');
+        const headers = { 'Accept': 'application/json' };
+        const token = localStorage.getItem('authToken'); // Adjust key based on where token is stored
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+            console.log('[DEBUG] loadUserProfile: Including Authorization header with token');
+        }
         const response = await fetch('https://api.flexgig.com.ng/api/profile', {
             method: 'GET',
-            headers: {
-                'Accept': 'application/json',
-                'Authorization': `Bearer ${token}`
-            }
+            credentials: 'include',
+            headers
         });
-
         console.log('[DEBUG] loadUserProfile: Response status', response.status, 'Headers', [...response.headers]);
-
-        // Read JSON once
-        const data = await response.json();
+        const data = await response.json(); // Read body once
         console.log('[DEBUG] loadUserProfile: Raw response data', data);
-
         if (!response.ok) {
-            if (response.status === 401) {
-                console.warn('[WARN] loadUserProfile: Unauthorized, clearing token and redirecting');
-                localStorage.removeItem('token');
-                window.location.href = '/';
-                return;
-            }
-            throw new Error(`HTTP ${response.status}: ${data.message || 'Unknown error'}`);
+            throw new Error(`HTTP ${response.status}: ${data.error || 'Unknown error'}`);
         }
-
+        console.log('[DEBUG] loadUserProfile: Profile loaded', data);
         const firstnameEl = document.getElementById('firstname');
         const avatarEl = document.getElementById('avatar');
         if (!firstnameEl || !avatarEl) {
             console.error('[ERROR] loadUserProfile: Missing DOM elements', { firstnameEl: !!firstnameEl, avatarEl: !!avatarEl });
             return;
         }
-
-        // Update DOM
         firstnameEl.textContent = data.fullName?.split(' ')[0] || 'User';
         const profilePicture = data.profilePicture || localStorage.getItem('profilePicture');
         const isValidProfilePicture = profilePicture && profilePicture.startsWith('data:image/');
@@ -133,21 +100,18 @@ async function loadUserProfile() {
             avatarEl.innerHTML = '';
             avatarEl.textContent = displayName.charAt(0).toUpperCase();
         }
-
-        // Store locally
         localStorage.setItem('username', data.username || '');
         localStorage.setItem('phoneNumber', data.phoneNumber || '');
         localStorage.setItem('address', data.address || '');
         localStorage.setItem('profilePicture', profilePicture || '');
-
     } catch (err) {
         console.error('[ERROR] loadUserProfile: Failed to fetch profile', err.message);
-
-        // Fallback using localStorage
         const firstnameEl = document.getElementById('firstname');
         const avatarEl = document.getElementById('avatar');
-        if (!firstnameEl || !avatarEl) return;
-
+        if (!firstnameEl || !avatarEl) {
+            console.error('[ERROR] loadUserProfile: Missing DOM elements in catch block', { firstnameEl: !!firstnameEl, avatarEl: !!avatarEl });
+            return;
+        }
         firstnameEl.textContent = localStorage.getItem('firstName') || 'User';
         const profilePicture = localStorage.getItem('profilePicture');
         const isValidProfilePicture = profilePicture && profilePicture.startsWith('data:image/');
@@ -160,14 +124,6 @@ async function loadUserProfile() {
         }
     }
 }
-
-// --------------------------
-// Run after DOM is loaded
-// --------------------------
-document.addEventListener('DOMContentLoaded', () => {
-    console.log('[DEBUG] DOMContentLoaded: Running getSession');
-    getSession();
-});
 
 
 async function openPinModalForReauth() {
