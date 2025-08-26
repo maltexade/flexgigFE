@@ -1,19 +1,18 @@
 async function getSession() {
   try {
-    console.log('[DEBUG] getSession: Initiating fetch, credentials: include'); // Log start
+    console.log('[DEBUG] getSession: Initiating fetch, credentials: include');
     const res = await fetch('https://api.flexgig.com.ng/api/session', {
-      method: 'GET', // Explicitly set method
+      method: 'GET',
       credentials: 'include',
       headers: {
         'Accept': 'application/json'
       }
     });
 
-    console.log('[DEBUG] getSession: Response status', res.status, 'Headers', [...res.headers]); // Log status and headers
+    console.log('[DEBUG] getSession: Response status', res.status, 'Headers', [...res.headers]);
     if (!res.ok) {
       const text = await res.text();
       console.error('[ERROR] getSession: Session API returned error:', res.status, text);
-
       if (res.status === 401) {
         window.location.href = '/';
       } else {
@@ -23,21 +22,42 @@ async function getSession() {
     }
 
     const { user } = await res.json();
-    console.log('[DEBUG] getSession: Raw user data', user); // Already present
+    console.log('[DEBUG] getSession: Raw user data', user);
     localStorage.setItem('userEmail', user.email || '');
     localStorage.setItem('firstName', user.fullName?.split(' ')[0] || '');
     localStorage.setItem('username', user.username || '');
     localStorage.setItem('phoneNumber', user.phoneNumber || '');
     localStorage.setItem('address', user.address || '');
+
+    // Check DOM elements before calling updateGreetingAndAvatar
+    const greetEl = document.getElementById('greet');
+    const firstnameEl = document.getElementById('firstname');
+    const avatarEl = document.getElementById('avatar');
+    console.log('[DEBUG] getSession: DOM elements', { greetEl: !!greetEl, firstnameEl: !!firstnameEl, avatarEl: !!avatarEl });
+
+    if (!greetEl || !firstnameEl || !avatarEl) {
+      console.error('[ERROR] getSession: Missing DOM elements', { greetEl: !!greetEl, firstnameEl: !!firstnameEl, avatarEl: !!avatarEl });
+      alert('Error: Page not fully loaded. Please refresh the page.');
+      return;
+    }
+
     await updateGreetingAndAvatar(user.username, user.fullName?.split(' ')[0]);
     try {
       await loadUserProfile();
     } catch (err) {
-      console.warn('[WARN] getSession: Profile fetch failed, using session data');
+      console.warn('[WARN] getSession: Profile fetch failed, using session data', err.message);
     }
   } catch (err) {
     console.error('[ERROR] getSession: Failed to fetch session', err.message);
-    alert("Unable to reach the server. Please check your internet connection and try again.");
+    const greetEl = document.getElementById('greet');
+    const firstnameEl = document.getElementById('firstname');
+    const avatarEl = document.getElementById('avatar');
+    if (!greetEl || !firstnameEl || !avatarEl) {
+      console.error('[ERROR] getSession: DOM elements missing in catch block', { greetEl: !!greetEl, firstnameEl: !!firstnameEl, avatarEl: !!avatarEl });
+      alert('Error: Page not fully loaded. Please refresh the page.');
+    } else {
+      alert('Unable to reach the server. Please check your internet connection and try again.');
+    }
   }
 }
 
@@ -296,6 +316,12 @@ function updateGreetingAndAvatar(username, firstName) {
   const firstnameEl = document.getElementById('firstname');
   const greetEl = document.getElementById('greet');
   
+  console.log('[DEBUG] updateGreetingAndAvatar: Checking DOM elements', { avatarEl: !!avatarEl, firstnameEl: !!firstnameEl, greetEl: !!greetEl });
+  if (!avatarEl || !firstnameEl || !greetEl) {
+    console.error('[ERROR] updateGreetingAndAvatar: Missing DOM elements', { avatarEl: !!avatarEl, firstnameEl: !!firstnameEl, greetEl: !!greetEl });
+    return;
+  }
+
   // Determine time-based greeting
   const hour = new Date().getHours();
   let greeting = hour < 12 ? 'Good Morning' : hour < 18 ? 'Good Afternoon' : 'Good Evening';
@@ -1807,15 +1833,15 @@ payBtn.addEventListener('click', () => {
   }
 
   // Initialize recent transactions
-  renderRecentTransactions();
+ // renderRecentTransactions();
 
-    payBtn.disabled = true;
-  payBtn.textContent = 'Processing...';
-  setTimeout(() => {
-    // Payment logic
-    payBtn.disabled = false;
-    payBtn.textContent = 'Pay';
-  }, 1000);
+   // payBtn.disabled = true;
+//  payBtn.textContent = 'Processing...';
+//  setTimeout(() => {
+  //  // Payment logic
+    //payBtn.disabled = false;
+    //payBtn.textContent = 'Pay';
+  //}, 1000); 
   // --- ADD MONEY HANDLER ---
   const addMoneyBtn = document.querySelector('.card.add-money');
   addMoneyBtn.addEventListener('click', () => {

@@ -51,27 +51,34 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
   // Session helpers
   // -----------------------------
   async function getSession() {
-    try {
-      const res = await fetch(`${BACKEND_URL}/api/session`, { credentials: 'include' });
-      if (!res.ok) {
-        const text = await res.text();
-        console.error('[main.js] Session API returned error:', res.status, text);
-        if (res.status === 401) {
-          window.location.href = '/frontend/html/login.html';
-        } else {
-          alert('Something went wrong while loading your session. Please try again.');
-        }
-        return null;
+  try {
+    console.log('[DEBUG] main.js: getSession: Initiating fetch');
+    const res = await fetch(`${BACKEND_URL}/api/session`, { credentials: 'include' });
+    console.log('[DEBUG] main.js: getSession: Response status', res.status, 'Headers', [...res.headers]);
+    if (!res.ok) {
+      const text = await res.text();
+      console.error('[main.js] Session API returned error:', res.status, text);
+      if (res.status === 401) {
+        window.location.href = '/frontend/html/login.html';
+      } else {
+        alert('Something went wrong while loading your session. Please try again.');
       }
-      const data = await res.json();
-      console.log('[main.js] getSession: User data:', data.user);
-      return data.user;
-    } catch (err) {
-      console.error('[main.js] Session fetch error:', err);
-      alert('Unable to reach the server. Please check your internet connection and try again.');
       return null;
     }
+    const data = await res.json();
+    console.log('[main.js] getSession: User data:', data.user);
+    return data.user;
+  } catch (err) {
+    console.error('[main.js] Session fetch error:', err);
+    if (!qs('#content')) {
+      console.error('[ERROR] main.js: #content element not found in getSession');
+      alert('Error: Page not fully loaded. Please refresh the page.');
+    } else {
+      alert('Unable to reach the server. Please check your internet connection and try again.');
+    }
+    return null;
   }
+}
 
   async function ensureSignedInFromSession() {
     setLoading(true, 'Checking authentication...');
@@ -115,61 +122,88 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
   // -----------------------------
   let router = null;
   function setupRouter() {
-    if (!window.Navigo) {
-      console.error('[main.js] Navigo is not defined.');
-      return;
-    }
-    router = new Navigo('/', { hash: false });
-
-    router
-      .on({
-        '/': () => { console.log('[main.js] Routing to home'); },
-        '/auth/email': () => { window.location.href = '/frontend/html/login.html'; },
-        '/dashboard': async () => {
-          console.log('[main.js] Routing to dashboard');
-          const content = qs('#content');
-          if (!content) {
-            console.error('[main.js] #content element not found in DOM');
-            setErrorUI(new Error('Content container not found'));
-            return;
-          }
-          const user = await ensureSignedInFromSession();
-          if (user) {
-            await loadContent('/frontend/html/dashboard.html');
-          } else {
-            window.location.href = '/frontend/html/login.html';
-          }
-        },
-      })
-      .notFound(() => {
-        const content = qs('#content');
-        if (content) {
-          content.innerHTML = '<p>Page not found</p>';
-        } else {
-          console.error('[main.js] #content element not found for notFound route');
-          document.body.innerHTML = '<p>Page not found</p>';
-        }
-      })
-      .resolve();
+  if (!window.Navigo) {
+    console.error('[main.js] Navigo is not defined.');
+    return;
   }
+  router = new Navigo('/', { hash: false });
+  console.log('[DEBUG] main.js: Router initialized', { path: window.location.pathname });
+
+  router
+    .on({
+      '/': () => {
+        console.log('[DEBUG] main.js: Routing to /');
+        const content = qs('#content');
+        if (!content) {
+          console.error('[ERROR] main.js: #content element not found for / route');
+          document.body.innerHTML = '<p>Error: Content container not found</p>';
+          return;
+        }
+        loadContent('/frontend/html/login.html');
+      },
+      '/auth/email': () => {
+        console.log('[DEBUG] main.js: Routing to /auth/email');
+        window.location.href = '/frontend/html/login.html';
+      },
+      '/dashboard': async () => {
+        console.log('[DEBUG] main.js: Routing to /dashboard');
+        const content = qs('#content');
+        if (!content) {
+          console.error('[ERROR] main.js: #content element not found for /dashboard');
+          document.body.innerHTML = '<p>Error: Content container not found</p>';
+          return;
+        }
+        const user = await ensureSignedInFromSession();
+        if (user) {
+          await loadContent('/frontend/html/dashboard.html');
+          // Wait for content to load before triggering getSession
+          document.addEventListener('contentLoaded', () => {
+            console.log('[DEBUG] main.js: contentLoaded event triggered for dashboard');
+            if (window.getSession) {
+              window.getSession();
+            } else {
+              console.warn('[WARN] main.js: window.getSession not found');
+            }
+          }, { once: true });
+        } else {
+          console.log('[DEBUG] main.js: No user session, redirecting to login');
+          window.location.href = '/frontend/html/login.html';
+        }
+      },
+    })
+    .notFound(() => {
+      console.log('[DEBUG] main.js: Not found route triggered', { path: window.location.pathname, search: window.location.search });
+      const content = qs('#content');
+      if (content) {
+        content.innerHTML = '<p>Page not found</p>';
+      } else {
+        console.error('[main.js] #content element not found for notFound route');
+        document.body.innerHTML = '<p>Page not found</p>';
+      }
+    })
+    .resolve();
+}
 
   async function loadContent(url) {
-    const content = qs('#content');
-    if (!content) {
-      console.error('[main.js] loadContent: #content element not found');
-      document.body.innerHTML = '<p>Error: Content container not found</p>';
-      return;
-    }
-    try {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`Failed to load ${url}: ${res.status}`);
-      content.innerHTML = await res.text();
-      console.log(`[main.js] Loaded content from ${url}`);
-    } catch (error) {
-      console.error('[main.js] Error loading content:', error);
-      content.innerHTML = '<p>Error loading page</p>';
-    }
+  const content = qs('#content');
+  if (!content) {
+    console.error('[main.js] loadContent: #content element not found');
+    document.body.innerHTML = '<p>Error: Content container not found</p>';
+    return;
   }
+  try {
+    console.log('[DEBUG] main.js: Loading content from', url);
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Failed to load ${url}: ${res.status}`);
+    content.innerHTML = await res.text();
+    console.log('[main.js] Loaded content from', url);
+    // Dispatch event to signal content load
+    document.dispatchEvent(new Event('contentLoaded'));
+  } catch (error) {
+    console.error('[main.js] Error loading content:', error);
+    content.innerHTML = '<p>Error loading page</p>';
+  }
+}
 
   // -----------------------------
   // Actions
