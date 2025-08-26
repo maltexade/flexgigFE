@@ -4,26 +4,42 @@ async function getSession() {
     const res = await fetch('https://api.flexgig.com.ng/api/session', {
       credentials: 'include'
     });
-    if (!res.ok) throw new Error('Not authenticated');
-    
+
+    if (!res.ok) {
+      const text = await res.text();
+      console.error('Session API returned error:', res.status, text);
+
+      if (res.status === 401) {
+        // Only redirect when user is truly unauthenticated
+        window.location.href = '/';
+      } else {
+        // Show friendly message instead of redirecting
+        alert("Something went wrong while loading your session. Please try again.");
+      }
+      return; // stop here
+    }
+
     const { user } = await res.json();
+
     // Store user data in localStorage (no firebaseToken)
     localStorage.setItem('userEmail', user.email || '');
     localStorage.setItem('firstName', user.displayName?.split(' ')[0] || '');
     localStorage.setItem('username', user.username || '');
     localStorage.setItem('phoneNumber', user.phoneNumber || '');
     localStorage.setItem('address', user.address || '');
-    
+
     // Update dashboard avatar
     await updateGreetingAndAvatar(user.username, user.displayName?.split(' ')[0]);
-    
+
     // Load user profile
     await loadUserProfile();
   } catch (err) {
     console.error("Session error:", err);
-    window.location.href = '/'; // Redirect to login if not authenticated
+    alert("Unable to reach the server. Please check your internet connection and try again.");
+    // ❌ No redirect here — only happens on 401 above
   }
 }
+
 
 // Run this immediately on dashboard load
 getSession();
