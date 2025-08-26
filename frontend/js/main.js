@@ -1,3 +1,4 @@
+// main.js
 const BACKEND_URL = 'https://api.flexgig.com.ng';
 
 (() => {
@@ -56,8 +57,11 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
       if (!res.ok) {
         const text = await res.text();
         console.error('Session API returned error:', res.status, text);
-        if (res.status === 401) { window.location.href = '/frontend/html/login.html'; }
-        else { alert('Something went wrong while loading your session. Please try again.'); }
+        if (res.status === 401) {
+          window.location.href = '/frontend/html/login.html';
+        } else {
+          alert('Something went wrong while loading your session. Please try again.');
+        }
         return null;
       }
       const data = await res.json();
@@ -80,7 +84,9 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
       console.error('ensureSignedInFromSession error:', err);
       setErrorUI(err);
       return null;
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   }
 
   function setAuthenticatedUI(user) {
@@ -108,14 +114,17 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
   // Router
   // -----------------------------
   let router = null;
-
   function setupRouter() {
-    if (!window.Navigo) { console.error('Navigo is not defined.'); return; }
+    if (!window.Navigo) {
+      console.error('Navigo is not defined.');
+      return;
+    }
     router = new Navigo('/', { hash: false });
+
     router
       .on({
-        '/': () => console.log('Routing to home'),
-        '/auth/email': () => window.location.href = '/frontend/html/login.html',
+        '/': () => { console.log('Routing to home'); },
+        '/auth/email': () => { window.location.href = '/frontend/html/login.html'; },
         '/dashboard': async () => {
           console.log('Routing to dashboard');
           const user = await ensureSignedInFromSession();
@@ -151,75 +160,9 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
     finally { setLoading(false); localStorage.clear(); location.href = '/'; }
   }
 
-  // -----------------------------
-  // PWA / Install modal
-  // -----------------------------
-  let deferredPrompt = null;
-  let modalMode = null;
-
-  function isDesktopOrTablet() { return window.matchMedia('(min-width: 768px)').matches; }
-
-  function showInstallModal() {
-    modalMode = isDesktopOrTablet() ? 'desktop' : 'mobile';
-    const modal = document.getElementById('install-modal');
-    if (!modal) return;
-    modal.classList.remove('hidden');
-    document.body.classList.add('modal-open');
-    document.body.style.overflow = 'hidden';
-    updateModalBox();
-    hideInstallSuccessUI();
-  }
-
-  function hideInstallModal() {
-    const modalBackdrop = document.getElementById('install-modal');
-    const desk = document.getElementById('install-modal-desktop');
-    document.body.classList.remove('modal-open');
-    document.body.style.overflow = '';
-    hideInstallSuccessUI();
-    if (modalMode === 'desktop' && desk) { desk.classList.remove('show'); setTimeout(() => { if(modalBackdrop) modalBackdrop.classList.add('hidden'); modalMode=null; }, 300); }
-    else setTimeout(() => { if(modalBackdrop) modalBackdrop.classList.add('hidden'); modalMode=null; }, 300);
-  }
-
-  function updateModalBox() {
-    const mob = document.getElementById('install-modal-mobile');
-    const desk = document.getElementById('install-modal-desktop');
-    if (modalMode==='desktop') { if(mob) mob.classList.add('hidden'); if(desk){ desk.classList.remove('hidden'); desk.classList.add('flex'); setTimeout(()=>desk.classList.add('show'),10); } }
-    else { if(desk){ desk.classList.add('hidden'); desk.classList.remove('flex'); desk.classList.remove('show'); } if(mob) mob.classList.remove('hidden'); }
-  }
-
-  function showInstallProgress(show) {
-    const progress = document.getElementById('install-progress');
-    const confirmDesktop = document.getElementById('install-app-confirm-desktop');
-    const cancelDesktop = document.getElementById('install-app-cancel-desktop');
-    const confirmMobile = document.getElementById('install-app-confirm-mobile');
-    if(progress) progress.classList.toggle('hidden', !show);
-    if(confirmDesktop) confirmDesktop.classList.toggle('hidden', show);
-    if(cancelDesktop) cancelDesktop.classList.toggle('hidden', show);
-    if(confirmMobile) confirmMobile.classList.toggle('hidden', show);
-  }
-
-  function showInstallSuccess() { const progress = document.getElementById('install-progress'); const success = document.getElementById('install-success'); if(progress) progress.classList.add('hidden'); if(success) success.classList.remove('hidden'); }
-  function hideInstallSuccessUI() { const progress = document.getElementById('install-progress'); const success = document.getElementById('install-success'); const confirmDesktop = document.getElementById('install-app-confirm-desktop'); const cancelDesktop = document.getElementById('install-app-cancel-desktop'); const confirmMobile = document.getElementById('install-app-confirm-mobile'); if(progress) progress.classList.add('hidden'); if(success) success.classList.add('hidden'); if(confirmDesktop) confirmDesktop.classList.remove('hidden'); if(cancelDesktop) cancelDesktop.classList.remove('hidden'); if(confirmMobile) confirmMobile.classList.remove('hidden'); }
-
-  window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferredPrompt = e; showInstallModal(); });
-
-  // -----------------------------
-  // Bind events
-  // -----------------------------
   function bindEvents() {
-    if(UI.loginBtn) UI.loginBtn.addEventListener('click', e => { e.preventDefault(); goToGoogleAuth(); });
-    if(UI.logoutBtn) UI.logoutBtn.addEventListener('click', e => { e.preventDefault(); logoutFlow(); });
-
-    const confirmDesktop = document.getElementById('install-app-confirm-desktop');
-    const cancelDesktop = document.getElementById('install-app-cancel-desktop');
-    const confirmMobile = document.getElementById('install-app-confirm-mobile');
-    const closeBtns = qsa('.install-modal-close');
-
-    if(confirmDesktop) confirmDesktop.addEventListener('click', async()=>{ if(deferredPrompt){ deferredPrompt.prompt(); const choice = await deferredPrompt.userChoice; deferredPrompt=null; showInstallProgress(true); setTimeout(()=>{ showInstallSuccess(); },500); }});
-    if(confirmMobile) confirmMobile.addEventListener('click', async()=>{ if(deferredPrompt){ deferredPrompt.prompt(); const choice = await deferredPrompt.userChoice; deferredPrompt=null; showInstallProgress(true); setTimeout(()=>{ showInstallSuccess(); },500); }});
-    if(cancelDesktop) cancelDesktop.addEventListener('click', hideInstallModal);
-    closeBtns.forEach(b=>b.addEventListener('click', hideInstallModal));
-    window.addEventListener('resize', updateModalBox);
+    if (UI.loginBtn) UI.loginBtn.addEventListener('click', e => { e.preventDefault(); goToGoogleAuth(); });
+    if (UI.logoutBtn) UI.logoutBtn.addEventListener('click', e => { e.preventDefault(); logoutFlow(); });
   }
 
   // -----------------------------
@@ -232,9 +175,12 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
     await ensureSignedInFromSession();
   }
 
-  if(document.readyState==='loading'){ document.addEventListener('DOMContentLoaded', boot); }
-  else { boot(); }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
 
   // Expose API
-  window.AppAuth = { goToGoogleAuth, logout: logoutFlow, getSession, showInstallModal, hideInstallModal };
+  window.AppAuth = { goToGoogleAuth, logout: logoutFlow, getSession };
 })();
