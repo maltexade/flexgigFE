@@ -1,6 +1,7 @@
+// --- Fetch User Data ---
 async function getSession() {
   try {
-    console.log('[DEBUG] getSession: Initiating fetch, credentials: include');
+    console.log('[DEBUG] getSession: Initiating fetch, credentials: include, time:', new Date().toISOString());
     const res = await fetch('https://api.flexgig.com.ng/api/session', {
       method: 'GET',
       credentials: 'include',
@@ -27,6 +28,7 @@ async function getSession() {
       firstName = firstName.charAt(0).toUpperCase() + firstName.slice(1) || 'User';
     }
 
+    // Update localStorage
     localStorage.setItem('userEmail', user.email || '');
     localStorage.setItem('firstName', firstName);
     localStorage.setItem('username', user.username || ''); // Username can be empty
@@ -35,34 +37,28 @@ async function getSession() {
     localStorage.setItem('fullName', user.fullName || user.email.split('@')[0] || '');
     localStorage.setItem('fullNameEdited', user.fullNameEdited ? 'true' : 'false');
     localStorage.setItem('lastUsernameUpdate', user.lastUsernameUpdate || '');
-
     if (token) {
       localStorage.setItem('authToken', token);
       console.log('[DEBUG] getSession: Stored authToken', token);
     }
 
-    let attempts = 0;
-    const maxAttempts = 3;
-    while (attempts < maxAttempts) {
-      const greetEl = document.getElementById('greet');
-      const firstnameEl = document.getElementById('firstname');
-      const avatarEl = document.getElementById('avatar');
-      console.log('[DEBUG] getSession: DOM elements (attempt ' + (attempts + 1) + ')', { greetEl: !!greetEl, firstnameEl: !!firstnameEl, avatarEl: !!avatarEl });
-      if (greetEl && firstnameEl && avatarEl) {
-        await updateGreetingAndAvatar(user.username, firstName);
-        try {
-          await loadUserProfile();
-        } catch (err) {
-          console.warn('[WARN] getSession: Profile fetch failed, using session data', err.message);
-        }
-        return;
+    // Update DOM
+    const greetEl = document.getElementById('greet');
+    const firstnameEl = document.getElementById('firstname');
+    const avatarEl = document.getElementById('avatar');
+    console.log('[DEBUG] getSession: DOM elements', { greetEl: !!greetEl, firstnameEl: !!firstnameEl, avatarEl: !!avatarEl });
+    if (greetEl && firstnameEl && avatarEl) {
+      await updateGreetingAndAvatar(user.username, firstName);
+      // Only call loadUserProfile if additional profile data is needed
+      try {
+        await loadUserProfile();
+      } catch (err) {
+        console.warn('[WARN] getSession: Profile fetch failed, using session data', err.message);
       }
-      console.warn('[WARN] getSession: DOM elements missing, retrying...', { attempt: attempts + 1 });
-      await new Promise(resolve => setTimeout(resolve, 500));
-      attempts++;
+    } else {
+      console.error('[ERROR] getSession: Missing DOM elements');
+      alert('Error: Page not fully loaded. Please refresh the page.');
     }
-    console.error('[ERROR] getSession: Missing DOM elements after ' + maxAttempts + ' attempts');
-    alert('Error: Page not fully loaded. Please refresh the page.');
   } catch (err) {
     console.error('[ERROR] getSession: Failed to fetch session', err.message);
     alert('Unable to reach the server. Please check your internet connection and try again.');
@@ -75,66 +71,82 @@ document.addEventListener('DOMContentLoaded', () => {
   getSession();
 });
 
+// Remove fetchUserData and consolidate into getSession
 async function loadUserProfile() {
-    try {
-        console.log('[DEBUG] loadUserProfile: Initiating fetch, credentials: include');
-        const headers = { 'Accept': 'application/json' };
-        const token = localStorage.getItem('authToken'); // Adjust key based on where token is stored
-        if (token) {
-            headers['Authorization'] = `Bearer ${token}`;
-            console.log('[DEBUG] loadUserProfile: Including Authorization header with token');
-        }
-        const response = await fetch('https://api.flexgig.com.ng/api/profile', {
-            method: 'GET',
-            credentials: 'include',
-            headers
-        });
-        console.log('[DEBUG] loadUserProfile: Response status', response.status, 'Headers', [...response.headers]);
-        const data = await response.json(); // Read body once
-        console.log('[DEBUG] loadUserProfile: Raw response data', data);
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${data.error || 'Unknown error'}`);
-        }
-        console.log('[DEBUG] loadUserProfile: Profile loaded', data);
-        const firstnameEl = document.getElementById('firstname');
-        const avatarEl = document.getElementById('avatar');
-        if (!firstnameEl || !avatarEl) {
-            console.error('[ERROR] loadUserProfile: Missing DOM elements', { firstnameEl: !!firstnameEl, avatarEl: !!avatarEl });
-            return;
-        }
-        firstnameEl.textContent = data.fullName?.split(' ')[0] || 'User';
-        const profilePicture = data.profilePicture || localStorage.getItem('profilePicture');
-        const isValidProfilePicture = profilePicture && profilePicture.startsWith('data:image/');
-        if (isValidProfilePicture) {
-            avatarEl.innerHTML = `<img src="${profilePicture}" alt="Profile Picture" class="avatar-img" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`;
-        } else {
-            const displayName = data.username || data.fullName?.split(' ')[0] || 'User';
-            avatarEl.innerHTML = '';
-            avatarEl.textContent = displayName.charAt(0).toUpperCase();
-        }
-        localStorage.setItem('username', data.username || '');
-        localStorage.setItem('phoneNumber', data.phoneNumber || '');
-        localStorage.setItem('address', data.address || '');
-        localStorage.setItem('profilePicture', profilePicture || '');
-    } catch (err) {
-        console.error('[ERROR] loadUserProfile: Failed to fetch profile', err.message);
-        const firstnameEl = document.getElementById('firstname');
-        const avatarEl = document.getElementById('avatar');
-        if (!firstnameEl || !avatarEl) {
-            console.error('[ERROR] loadUserProfile: Missing DOM elements in catch block', { firstnameEl: !!firstnameEl, avatarEl: !!avatarEl });
-            return;
-        }
-        firstnameEl.textContent = localStorage.getItem('firstName') || 'User';
-        const profilePicture = localStorage.getItem('profilePicture');
-        const isValidProfilePicture = profilePicture && profilePicture.startsWith('data:image/');
-        if (isValidProfilePicture) {
-            avatarEl.innerHTML = `<img src="${profilePicture}" alt="Profile Picture" class="avatar-img" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`;
-        } else {
-            const displayName = localStorage.getItem('username') || localStorage.getItem('firstName') || 'User';
-            avatarEl.innerHTML = '';
-            avatarEl.textContent = displayName.charAt(0).toUpperCase();
-        }
+  try {
+    console.log('[DEBUG] loadUserProfile: Initiating fetch, credentials: include, time:', new Date().toISOString());
+    const headers = { 'Accept': 'application/json' };
+    const token = localStorage.getItem('authToken');
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+      console.log('[DEBUG] loadUserProfile: Including Authorization header with token');
     }
+    const response = await fetch('https://api.flexgig.com.ng/api/profile', {
+      method: 'GET',
+      credentials: 'include',
+      headers
+    });
+    console.log('[DEBUG] loadUserProfile: Response status', response.status, 'Headers', [...response.headers]);
+    const data = await response.json();
+    console.log('[DEBUG] loadUserProfile: Raw response data', data);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${data.error || 'Unknown error'}`);
+    }
+    console.log('[DEBUG] loadUserProfile: Profile loaded', data);
+
+    // Update localStorage with profile data
+    localStorage.setItem('username', data.username || '');
+    localStorage.setItem('phoneNumber', data.phoneNumber || '');
+    localStorage.setItem('address', data.address || '');
+    localStorage.setItem('profilePicture', data.profilePicture || '');
+    localStorage.setItem('fullName', data.fullName || localStorage.getItem('fullName') || '');
+    localStorage.setItem('fullNameEdited', data.fullNameEdited ? 'true' : 'false');
+    localStorage.setItem('lastUsernameUpdate', data.lastUsernameUpdate || '');
+
+    // Update DOM
+    const firstnameEl = document.getElementById('firstname');
+    const avatarEl = document.getElementById('avatar');
+    if (!firstnameEl || !avatarEl) {
+      console.error('[ERROR] loadUserProfile: Missing DOM elements', { firstnameEl: !!firstnameEl, avatarEl: !!avatarEl });
+      return;
+    }
+    const firstName = data.fullName?.split(' ')[0] || localStorage.getItem('firstName') || 'User';
+    const profilePicture = data.profilePicture || localStorage.getItem('profilePicture');
+    const isValidProfilePicture = profilePicture && profilePicture.startsWith('data:image/');
+    if (isValidProfilePicture) {
+      avatarEl.innerHTML = `<img src="${profilePicture}" alt="Profile Picture" class="avatar-img" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`;
+    } else {
+      const displayName = data.username || firstName || 'User';
+      avatarEl.innerHTML = '';
+      avatarEl.textContent = displayName.charAt(0).toUpperCase();
+    }
+    firstnameEl.textContent = firstName.charAt(0).toUpperCase() + firstName.slice(1);
+
+    // Update profile modal if open
+    if (updateProfileModal.classList.contains('active')) {
+      openUpdateProfileModal(data);
+    }
+  } catch (err) {
+    console.error('[ERROR] loadUserProfile: Failed to fetch profile', err.message);
+    // Fallback to localStorage
+    const firstnameEl = document.getElementById('firstname');
+    const avatarEl = document.getElementById('avatar');
+    if (!firstnameEl || !avatarEl) {
+      console.error('[ERROR] loadUserProfile: Missing DOM elements in catch block', { firstnameEl: !!firstnameEl, avatarEl: !!avatarEl });
+      return;
+    }
+    const firstName = localStorage.getItem('firstName') || 'User';
+    const profilePicture = localStorage.getItem('profilePicture');
+    const isValidProfilePicture = profilePicture && profilePicture.startsWith('data:image/');
+    if (isValidProfilePicture) {
+      avatarEl.innerHTML = `<img src="${profilePicture}" alt="Profile Picture" class="avatar-img" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`;
+    } else {
+      const displayName = localStorage.getItem('username') || firstName || 'User';
+      avatarEl.innerHTML = '';
+      avatarEl.textContent = displayName.charAt(0).toUpperCase();
+    }
+    firstnameEl.textContent = firstName.charAt(0).toUpperCase() + firstName.slice(1);
+  }
 }
 
 
@@ -273,6 +285,7 @@ const ninemobilePlans = [
 let userEmail = localStorage.getItem('userEmail') || '';
 let firstName = localStorage.getItem('firstName') || '';
 
+/*
 // --- Fetch User Data ---
 async function fetchUserData() {
   try {
@@ -340,7 +353,7 @@ async function fetchUserData() {
       profilePicturePreview.textContent = displayName.charAt(0).toUpperCase();
     }
   }
-}
+} */
 
 
 // In dashboard.js
@@ -353,18 +366,19 @@ deleteKey.addEventListener('click', () => {
   }
 });
 
-document.addEventListener('DOMContentLoaded', fetchUserData);
+// document.addEventListener('DOMContentLoaded', fetchUserData);
 
+// Update DOM with greeting and avatar
 function updateGreetingAndAvatar(username, firstName) {
   const avatarEl = document.getElementById('avatar');
   const firstnameEl = document.getElementById('firstname');
   const greetEl = document.getElementById('greet');
-  console.log('[DEBUG] updateGreetingAndAvatar: Checking DOM elements', { avatarEl: !!avatarEl, firstnameEl: !!firstnameEl, greetEl: !!greetEl });
+  console.log('[DEBUG] updateGreetingAndAvatar: Checking DOM elements, time:', new Date().toISOString(), { avatarEl: !!avatarEl, firstnameEl: !!firstnameEl, greetEl: !!greetEl });
   if (!avatarEl || !firstnameEl || !greetEl) {
     console.error('[ERROR] updateGreetingAndAvatar: Missing DOM elements');
     return;
   }
-  const hour = new Date().getHours();
+  const hour = new Date().getHours(); // Uses local time (WAT: 08:03 PM, hour = 20)
   let greeting = hour < 12 ? 'Good Morning' : hour < 18 ? 'Good Afternoon' : 'Good Evening';
   greetEl.textContent = greeting;
   const profilePicture = localStorage.getItem('profilePicture');
@@ -380,6 +394,13 @@ function updateGreetingAndAvatar(username, firstName) {
   }
   console.log('[DEBUG] updateGreetingAndAvatar:', { greeting, username, firstName, displayName });
 }
+
+// Single DOMContentLoaded listener
+document.addEventListener('DOMContentLoaded', () => {
+  console.log('[DEBUG] DOMContentLoaded: Initializing dashboard, time:', new Date().toISOString());
+  getSession();
+  // Remove fetchUserData() call to prevent duplication
+});
 
 let recentTransactions = JSON.parse(localStorage.getItem('recentTransactions')) || [];
 
