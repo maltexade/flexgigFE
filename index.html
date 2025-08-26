@@ -35,10 +35,10 @@
   <link rel="preload" href="frontend/pwa/manifest.json?v=1" as="fetch" crossorigin="anonymous">
   <meta name="theme-color" content="#080808">
 
-  <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
 
-  <script src="https://unpkg.com/navigo@8.11.1/lib/navigo.min.js"></script>
+  <script src="frontend/js/navigo.min.js" defer></script>
+
 
 
 
@@ -89,6 +89,7 @@
 </head>
 
 <body>
+  <div id="content" class="min-h-screen"></div>
   <div id="__next">
     <!-- Theme Toggle Script -->
     <script>
