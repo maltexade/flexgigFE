@@ -1,39 +1,43 @@
-// --- Session Handling ---
 async function getSession() {
   try {
+    console.log('[DEBUG] getSession: Initiating fetch, credentials: include'); // Log start
     const res = await fetch('https://api.flexgig.com.ng/api/session', {
-      credentials: 'include'
+      method: 'GET', // Explicitly set method
+      credentials: 'include',
+      headers: {
+        'Accept': 'application/json'
+      }
     });
 
+    console.log('[DEBUG] getSession: Response status', res.status, 'Headers', [...res.headers]); // Log status and headers
     if (!res.ok) {
       const text = await res.text();
-      console.error('Session API returned error:', res.status, text);
+      console.error('[ERROR] getSession: Session API returned error:', res.status, text);
 
       if (res.status === 401) {
-        // Only redirect when user is truly unauthenticated
         window.location.href = '/';
       } else {
-        // Show friendly message instead of redirecting
         alert("Something went wrong while loading your session. Please try again.");
       }
-      return; // stop here
+      return;
     }
 
     const { user } = await res.json();
-
-    // Store user data in localStorage (no firebaseToken)
-    console.log('[DEBUG] getSession: User data', user); // Add this
+    console.log('[DEBUG] getSession: Raw user data', user); // Already present
     localStorage.setItem('userEmail', user.email || '');
     localStorage.setItem('firstName', user.fullName?.split(' ')[0] || '');
     localStorage.setItem('username', user.username || '');
     localStorage.setItem('phoneNumber', user.phoneNumber || '');
     localStorage.setItem('address', user.address || '');
     await updateGreetingAndAvatar(user.username, user.fullName?.split(' ')[0]);
-    await loadUserProfile();
+    try {
+      await loadUserProfile();
+    } catch (err) {
+      console.warn('[WARN] getSession: Profile fetch failed, using session data');
+    }
   } catch (err) {
-    console.error("Session error:", err);
+    console.error('[ERROR] getSession: Failed to fetch session', err.message);
     alert("Unable to reach the server. Please check your internet connection and try again.");
-    // ❌ No redirect here — only happens on 401 above
   }
 }
 
@@ -43,23 +47,34 @@ getSession();
 
 async function loadUserProfile() {
     try {
+        console.log('[DEBUG] loadUserProfile: Initiating fetch, credentials: include'); // Log start
         const response = await fetch('https://api.flexgig.com.ng/api/profile', {
+            method: 'GET', // Explicitly set method
             credentials: 'include',
+            headers: {
+                'Accept': 'application/json' // Ensure JSON response
+            }
         });
-        if (response.ok) {
-            const data = await response.json();
-            console.log('[DEBUG] loadUserProfile: Profile loaded', data);
-            // Update UI
-            document.getElementById('firstname').textContent = data.fullName?.split(' ')[0] || 'User';
-            document.getElementById('avatar').src = data.profilePicture || '/default-avatar.png';
-            localStorage.setItem('username', data.username || '');
-            localStorage.setItem('phoneNumber', data.phoneNumber || '');
-            localStorage.setItem('address', data.address || '');
-        } else {
-            console.error('[ERROR] loadUserProfile: Failed to fetch profile', response.status, await response.text());
+        console.log('[DEBUG] loadUserProfile: Response status', response.status, 'Headers', [...response.headers]); // Log status and headers
+        const data = await response.json();
+        console.log('[DEBUG] loadUserProfile: Raw response data', data); // Log raw response
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${data.message || await response.text()}`);
         }
+
+        console.log('[DEBUG] loadUserProfile: Profile loaded', data);
+        // Update UI
+        document.getElementById('firstname').textContent = data.fullName?.split(' ')[0] || 'User';
+        document.getElementById('avatar').src = data.profilePicture || '/default-avatar.png';
+        localStorage.setItem('username', data.username || '');
+        localStorage.setItem('phoneNumber', data.phoneNumber || '');
+        localStorage.setItem('address', data.address || '');
     } catch (err) {
-        console.error('[ERROR] loadUserProfile:', err);
+        console.error('[ERROR] loadUserProfile: Failed to fetch profile', err.message);
+        // Fallback to localStorage data
+        document.getElementById('firstname').textContent = localStorage.getItem('firstName') || 'User';
+        document.getElementById('avatar').src = localStorage.getItem('profilePicture') || '/default-avatar.png';
     }
 }
 
@@ -2214,41 +2229,56 @@ async function checkUsernameAvailability(username) {
     addressError.classList.remove('active');
     profilePictureError.textContent = '';
     profilePictureError.classList.remove('active');
-    Object.keys(fieldTouched).forEach(key => fieldTouched[key] = false); // Reset touched states
+    Object.keys(fieldTouched).forEach(key => fieldTouched[key] = false);
 
     // Remove existing input listeners to prevent duplicates
     const inputs = [fullNameInput, usernameInput, phoneNumberInput, addressInput, profilePictureInput];
     inputs.forEach(input => {
-      input.removeEventListener('input', handleInputValidation);
-      input.removeEventListener('change', handleInputValidation);
+      input.removeEventListener('input', validateField);
+      input.removeEventListener('change', validateField);
     });
 
     // Add input listeners for validation
     fullNameInput.addEventListener('input', () => {
       fieldTouched.fullName = true;
       validateField('fullName');
+      validateProfileForm(true);
+      console.log('[DEBUG] fullNameInput input:', { value: fullNameInput.value, valid: validateField('fullName') });
     });
-    usernameInput.addEventListener('input', () => {
+    usernameInput.addEventListener('input', async () => {
       fieldTouched.username = true;
       validateField('username');
+      const isAvailable = await checkUsernameAvailability(usernameInput.value);
+      if (!isAvailable && fieldTouched.username) {
+        usernameError.textContent = 'Username is already taken or invalid';
+        usernameError.classList.add('active');
+      }
+      validateProfileForm(true);
+      console.log('[DEBUG] usernameInput input:', { value: usernameInput.value, valid: validateField('username'), available: isAvailable });
     });
     phoneNumberInput.addEventListener('input', () => {
       fieldTouched.phoneNumber = true;
       validateField('phoneNumber');
+      validateProfileForm(true);
+      console.log('[DEBUG] phoneNumberInput input:', { value: phoneNumberInput.value, valid: validateField('phoneNumber') });
     });
     addressInput.addEventListener('input', () => {
       fieldTouched.address = true;
       validateField('address');
+      validateProfileForm(true);
+      console.log('[DEBUG] addressInput input:', { value: addressInput.value, valid: validateField('address') });
     });
     profilePictureInput.addEventListener('change', () => {
       fieldTouched.profilePicture = true;
       validateField('profilePicture');
+      validateProfileForm(true);
+      console.log('[DEBUG] profilePictureInput change:', { file: profilePictureInput.files[0]?.name, valid: validateField('profilePicture') });
     });
 
     // Initial validation (without showing errors)
     validateProfileForm(false);
-    console.log('[DEBUG] openUpdateProfileModal:', { username, firstName, profilePicture: !!isValidProfilePicture });
-  }
+    console.log('[DEBUG] openUpdateProfileModal: Modal opened', { username, firstName, profilePicture: !!isValidProfilePicture });
+}
 
   function closeUpdateProfileModal() {
     if (!updateProfileModal) return;
