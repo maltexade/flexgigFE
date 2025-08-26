@@ -1,3 +1,4 @@
+// --- Session Handling ---
 async function getSession() {
   try {
     const res = await fetch('https://api.flexgig.com.ng/api/session', {
@@ -5,53 +6,77 @@ async function getSession() {
     });
     if (!res.ok) throw new Error('Not authenticated');
     
-    const { token } = await res.json();
-    localStorage.setItem('firebaseToken', token);
-    console.log("User is logged in with Firebase token:", token);
-
-    // now load user profile
-    await loadUserProfile(token);
+    const { user } = await res.json();
+    // Store user data in localStorage (no firebaseToken)
+    localStorage.setItem('userEmail', user.email || '');
+    localStorage.setItem('firstName', user.displayName?.split(' ')[0] || '');
+    localStorage.setItem('username', user.username || '');
+    localStorage.setItem('phoneNumber', user.phoneNumber || '');
+    localStorage.setItem('address', user.address || '');
+    
+    // Update dashboard avatar
+    await updateGreetingAndAvatar(user.username, user.displayName?.split(' ')[0]);
+    
+    // Load user profile
+    await loadUserProfile();
   } catch (err) {
     console.error("Session error:", err);
-    window.location.href = '/'; // redirect to login if not authenticated
+    window.location.href = '/'; // Redirect to login if not authenticated
   }
 }
 
 // Run this immediately on dashboard load
 getSession();
 
-async function openPinModalForReauth() {
-    try {
-      const res = await fetch('https://api.flexgig.com.ng/api/session', {
-        method: 'GET',
-        credentials: 'include',
-      });
-      if (!res.ok) {
-        console.error('[dashboard.js] openPinModalForReauth: Session invalid');
-        window.location.href = '/'; // Redirect if session is invalid
-        return;
-      }
-      const { user } = await res.json();
-      if (!user.pin) {
-        console.log('[dashboard.js] No PIN set, redirecting to PIN creation');
-        pinModal.classList.remove('hidden');
-        pinTitle.textContent = 'Create PIN';
-        pinSubtitle.textContent = 'Create a 4-digit PIN';
-        step = 'create';
-        resetInputs();
-      } else {
-        pinModal.classList.remove('hidden');
-        pinTitle.textContent = 'Re-enter PIN';
-        pinSubtitle.textContent = 'Enter your 4-digit PIN to continue';
-        resetInputs();
-        step = 'reauth';
-      }
-      console.log('[dashboard.js] PIN modal opened for:', user.pin ? 're-authentication' : 'PIN creation');
-    } catch (err) {
-      console.error('[dashboard.js] openPinModalForReauth error:', err);
-      window.location.href = '/';
+async function loadUserProfile() {
+  try {
+    const response = await fetch('https://api.flexgig.com.ng/api/profile', {
+      credentials: 'include',
+    });
+    if (response.ok) {
+      const data = await response.json();
+      // Update UI or localStorage as needed
+      console.log('[DEBUG] loadUserProfile: Profile loaded', data);
+    } else {
+      console.error('[ERROR] loadUserProfile: Failed to fetch profile');
     }
+  } catch (err) {
+    console.error('[ERROR] loadUserProfile:', err);
   }
+}
+
+async function openPinModalForReauth() {
+  try {
+    const res = await fetch('https://api.flexgig.com.ng/api/session', {
+      method: 'GET',
+      credentials: 'include',
+    });
+    if (!res.ok) {
+      console.error('[dashboard.js] openPinModalForReauth: Session invalid');
+      window.location.href = '/'; // Redirect if session is invalid
+      return;
+    }
+    const { user } = await res.json();
+    if (!user.pin) {
+      console.log('[dashboard.js] No PIN set, redirecting to PIN creation');
+      pinModal.classList.remove('hidden');
+      pinTitle.textContent = 'Create PIN';
+      pinSubtitle.textContent = 'Create a 4-digit PIN';
+      step = 'create';
+      resetInputs();
+    } else {
+      pinModal.classList.remove('hidden');
+      pinTitle.textContent = 'Re-enter PIN';
+      pinSubtitle.textContent = 'Enter your 4-digit PIN to continue';
+      resetInputs();
+      step = 'reauth';
+    }
+    console.log('[dashboard.js] PIN modal opened for:', user.pin ? 're-authentication' : 'PIN creation');
+  } catch (err) {
+    console.error('[dashboard.js] openPinModalForReauth error:', err);
+    window.location.href = '/';
+  }
+}
 
 
 
@@ -155,6 +180,7 @@ const ninemobilePlans = [
 let userEmail = localStorage.getItem('userEmail') || '';
 let firstName = localStorage.getItem('firstName') || '';
 
+// --- Fetch User Data ---
 async function fetchUserData() {
   try {
     const response = await fetch('https://api.flexgig.com.ng/api/session', {
@@ -162,7 +188,6 @@ async function fetchUserData() {
     });
     if (response.ok) {
       const data = await response.json();
-      localStorage.setItem('firebaseToken', data.token);
       userEmail = data.email || userEmail;
       let username = data.username || localStorage.getItem('username') || '';
       firstName = data.displayName?.split(' ')[0] || localStorage.getItem('firstName') || '';
@@ -219,6 +244,7 @@ async function fetchUserData() {
     }
   }
 }
+
 
 // In dashboard.js
 const deleteKey = document.getElementById('deleteKey');
@@ -1899,95 +1925,85 @@ payBtn.addEventListener('click', () => {
 
   // Update PIN keypad logic to handle reauth step
   keypadButtons.forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const val = btn.textContent.trim();
-      if (!val || isNaN(val)) return;
+  btn.addEventListener('click', async () => {
+    const val = btn.textContent.trim();
+    if (!val || isNaN(val)) return;
 
-      if (currentPin.length < 4) {
-        currentPin += val;
-        pinInputs[currentPin.length - 1].classList.add('filled');
-        pinInputs[currentPin.length - 1].value = '*';
-      }
+    if (currentPin.length < 4) {
+      currentPin += val;
+      pinInputs[currentPin.length - 1].classList.add('filled');
+      pinInputs[currentPin.length - 1].value = '*';
+    }
 
-      if (currentPin.length === 4) {
-        if (step === 'create') {
-          firstPin = currentPin;
-          step = 'confirm';
-          pinTitle.textContent = 'Confirm PIN';
-          pinSubtitle.textContent = 'Confirm your 4-digit PIN';
-          resetInputs();
-        } else if (step === 'confirm') {
-          if (currentPin === firstPin) {
-            try {
-              // Call server to save PIN (placeholder)
-              await fetch('https://api.flexgig.com.ng/api/save-pin', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ pin: currentPin }),
-                credentials: 'include',
-              });
-              localStorage.setItem('userPin', currentPin); // Mock storage
-              console.log('[dashboard.js] PIN setup successfully:', currentPin);
-              showAlert('PIN created successfully!', true);
-              pinModal.classList.add('hidden');
-              resetInputs();
-            } catch (err) {
-              console.error('[dashboard.js] PIN save error:', err);
-              showAlert('Failed to save PIN. Please try again.');
-              resetInputs();
-            }
-          } else {
-            console.error('[dashboard.js] PIN mismatch');
-            showAlert('Oops! The PINs do not match. Please try again.');
-            step = 'create';
-            pinTitle.textContent = 'Create PIN';
-            pinSubtitle.textContent = 'Create a 4-digit PIN';
-            resetInputs();
-          }
-        } else if (step === 'reauth') {
+    if (currentPin.length === 4) {
+      if (step === 'create') {
+        firstPin = currentPin;
+        step = 'confirm';
+        pinTitle.textContent = 'Confirm PIN';
+        pinSubtitle.textContent = 'Confirm your 4-digit PIN';
+        resetInputs();
+      } else if (step === 'confirm') {
+        if (currentPin === firstPin) {
           try {
-            const res = await fetch('https://api.flexgig.com.ng/api/verify-pin', {
+            await fetch('https://api.flexgig.com.ng/api/save-pin', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ pin: currentPin }),
               credentials: 'include',
             });
-            if (!res.ok) {
-              throw new Error('Invalid PIN');
-            }
-            const { token } = await res.json();
-            const sessionRes = await fetch('https://api.flexgig.com.ng/api/session', {
-              method: 'GET',
-              credentials: 'include',
-            });
-            if (!sessionRes.ok) {
-              throw new Error(`Session fetch failed: ${sessionRes.status}`);
-            }
-            const data = await sessionRes.json();
-            localStorage.setItem('accessToken', data.token);
-            localStorage.setItem('userEmail', data.user.email || '');
-            localStorage.setItem('firstName', data.user.fullName?.split(' ')[0] || '');
-            localStorage.setItem('username', data.user.username || '');
-            localStorage.setItem('phoneNumber', data.user.phoneNumber || '');
-            localStorage.setItem('address', data.user.address || '');
-            localStorage.setItem('profilePicture', data.user.profilePicture || '');
-            await updateGreetingAndAvatar(data.user.username, data.user.fullName?.split(' ')[0]);
-            await loadUserProfile(data.token);
-            updateBalanceDisplay();
+            localStorage.setItem('userPin', currentPin); // Mock storage
+            console.log('[dashboard.js] PIN setup successfully:', currentPin);
+            showAlert('PIN created successfully!', true);
             pinModal.classList.add('hidden');
             resetInputs();
-            console.log('[dashboard.js] PIN re-auth: Session restored, token:', data.token);
           } catch (err) {
-            console.error('[dashboard.js] PIN re-auth error:', err);
-            showAlert('Invalid PIN or session. Redirecting to login...');
-            setTimeout(() => {
-              window.location.href = '/';
-            }, 1200);
+            console.error('[dashboard.js] PIN save error:', err);
+            showAlert('Failed to save PIN. Please try again.');
+            resetInputs();
           }
+        } else {
+          console.error('[dashboard.js] PIN mismatch');
+          showAlert('Oops! The PINs do not match. Please try again.');
+          step = 'create';
+          pinTitle.textContent = 'Create PIN';
+          pinSubtitle.textContent = 'Create a 4-digit PIN';
+          resetInputs();
+        }
+      } else if (step === 'reauth') {
+        try {
+          const res = await fetch('https://api.flexgig.com.ng/api/verify-pin', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pin: currentPin }),
+            credentials: 'include',
+          });
+          if (!res.ok) {
+            throw new Error('Invalid PIN');
+          }
+          const { user } = await res.json();
+          localStorage.setItem('userEmail', user.email || '');
+          localStorage.setItem('firstName', user.fullName?.split(' ')[0] || '');
+          localStorage.setItem('username', user.username || '');
+          localStorage.setItem('phoneNumber', user.phoneNumber || '');
+          localStorage.setItem('address', user.address || '');
+          localStorage.setItem('profilePicture', user.profilePicture || '');
+          await updateGreetingAndAvatar(user.username, user.fullName?.split(' ')[0]);
+          await loadUserProfile();
+          updateBalanceDisplay();
+          pinModal.classList.add('hidden');
+          resetInputs();
+          console.log('[dashboard.js] PIN re-auth: Session restored');
+        } catch (err) {
+          console.error('[dashboard.js] PIN re-auth error:', err);
+          showAlert('Invalid PIN or session. Redirecting to login...');
+          setTimeout(() => {
+            window.location.href = '/';
+          }, 1200);
         }
       }
-    });
+    }
   });
+});
 
   // Handle delete
   deleteKey.addEventListener('click', () => {
@@ -1999,6 +2015,13 @@ payBtn.addEventListener('click', () => {
 
 
 
+  const fieldTouched = {
+    fullName: false,
+    username: false,
+    phoneNumber: false,
+    address: false,
+    profilePicture: false
+  };
 
   // --- UPDATE PROFILE MODAL --- // --- UPDATE PROFILE MODAL ---
   // --- UPDATE PROFILE MODAL --- // --- UPDATE PROFILE MODAL ---
@@ -2029,30 +2052,30 @@ payBtn.addEventListener('click', () => {
     });
   }
 
-  async function checkUsernameAvailability(username) {
-    if (!username || !/^[a-zA-Z0-9_]{3,20}$/.test(username)) {
-      isUsernameAvailable = false;
-      return false;
-    }
-    try {
-      const response = await fetch('https://api.flexgig.com.ng/api/profile/check-username', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('firebaseToken')}`,
-        },
-        body: JSON.stringify({ username }),
-        credentials: 'include',
-      });
-      const data = await response.json();
-      isUsernameAvailable = response.ok && data.available;
-      return isUsernameAvailable;
-    } catch (err) {
-      console.error('[ERROR] checkUsernameAvailability:', err);
-      isUsernameAvailable = false;
-      return false;
-    }
+  // --- Username Availability Check ---
+async function checkUsernameAvailability(username) {
+  if (!username || !/^[a-zA-Z0-9_]{3,20}$/.test(username)) {
+    isUsernameAvailable = false;
+    return false;
   }
+  try {
+    const response = await fetch('https://api.flexgig.com.ng/api/profile/check-username', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ username }),
+      credentials: 'include',
+    });
+    const data = await response.json();
+    isUsernameAvailable = response.ok && data.available;
+    return isUsernameAvailable;
+  } catch (err) {
+    console.error('[ERROR] checkUsernameAvailability:', err);
+    isUsernameAvailable = false;
+    return false;
+  }
+}
 
   function validateProfileForm(showErrors = true) {
   const isFullNameValid = !fieldTouched.fullName || validateField('fullName');
@@ -2294,6 +2317,7 @@ payBtn.addEventListener('click', () => {
     });
   }
 
+  // --- Profile Update Form Submission ---
   if (updateProfileForm) {
     updateProfileForm.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -2302,9 +2326,6 @@ payBtn.addEventListener('click', () => {
       try {
         const response = await fetch('https://api.flexgig.com.ng/api/profile/update', {
           method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('firebaseToken')}`,
-          },
           body: formData,
           credentials: 'include',
         });
