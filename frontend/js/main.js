@@ -7,31 +7,29 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
   // Session helpers
   // -----------------------------
   async function getSession() {
-    if (!window.location.pathname.includes('/dashboard')) {
-      console.log('[main.js] getSession: Skipped on non-dashboard page:', window.location.pathname);
-      return null;
-    }
-
-    try {
-      const res = await fetch(`${BACKEND_URL}/api/session`, {
-        method: 'GET',
-        credentials: 'include',
-      });
-      if (!res.ok) {
-        throw new Error(`Session fetch failed: ${res.status} ${await safeParseError(res)}`);
-      }
-      const data = await res.json();
-      localStorage.setItem('accessToken', data.token);
-      console.log('[main.js] getSession: Session fetched, token:', data.token);
-      return data.user;
-    } catch (err) {
-      console.error('[main.js] getSession error:', err);
-      if (window.location.pathname.includes('/dashboard')) {
-        openPinModalForReauth();
-      }
-      throw err;
-    }
+  if (!window.location.pathname.includes('/dashboard')) {
+    console.log('[main.js] getSession: Skipped on non-dashboard page:', window.location.pathname);
+    return null;
   }
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/session`, {
+      method: 'GET',
+      credentials: 'include',
+    });
+    if (!res.ok) {
+      throw new Error(`Session fetch failed: ${res.status} ${await safeParseError(res)}`);
+    }
+    const data = await res.json();
+    console.log('[main.js] getSession: Session fetched', data);
+    return data.user;
+  } catch (err) {
+    console.error('[main.js] getSession error:', err);
+    if (window.location.pathname.includes('/dashboard')) {
+      openPinModalForReauth();
+    }
+    throw err;
+  }
+}
 
   function openPinModalForReauth() {
     const event = new CustomEvent('openPinModalForReauth');
@@ -230,6 +228,7 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
     try {
       await fetch(`${BACKEND_URL}/logout`, { method: 'POST', credentials: 'include' });
       console.log('[main.js] Server session ended');
+      localStorage.clear(); // Clear user data
     } catch (e) {
       console.warn('[main.js] logout error:', e?.message || e);
     } finally {
@@ -311,3 +310,63 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
     getSession,
   };
 })();
+
+
+let deferredPrompt;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  const installModal = document.getElementById('install-modal');
+  if (installModal) {
+    installModal.classList.remove('hidden');
+    installModal.setAttribute('aria-hidden', 'false');
+  }
+  console.log('[main.js] beforeinstallprompt fired');
+});
+
+const confirmInstallMobile = document.getElementById('install-app-confirm-mobile');
+const confirmInstallDesktop = document.getElementById('install-app-confirm-desktop');
+const cancelInstallDesktop = document.getElementById('install-app-cancel-desktop');
+
+if (confirmInstallMobile) {
+  confirmInstallMobile.addEventListener('click', () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      deferredPrompt.userChoice.then((choice) => {
+        if (choice.outcome === 'accepted') {
+          document.getElementById('install-success').classList.remove('hidden');
+          console.log('[main.js] PWA installed');
+        }
+        deferredPrompt = null;
+      });
+    }
+  });
+}
+
+if (confirmInstallDesktop) {
+  confirmInstallDesktop.addEventListener('click', () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      deferredPrompt.userChoice.then((choice) => {
+        if (choice.outcome === 'accepted') {
+          document.getElementById('install-success').classList.remove('hidden');
+          console.log('[main.js] PWA installed');
+        }
+        deferredPrompt = null;
+      });
+    }
+  });
+}
+
+if (cancelInstallDesktop) {
+  cancelInstallDesktop.addEventListener('click', () => {
+    const installModalDesktop = document.getElementById('install-modal-desktop');
+    if (installModalDesktop) {
+      installModalDesktop.classList.add('opacity-0', 'scale-95');
+      setTimeout(() => {
+        document.getElementById('install-modal').classList.add('hidden');
+        installModalDesktop.classList.remove('opacity-0', 'scale-95');
+      }, 300);
+    }
+  });
+}
