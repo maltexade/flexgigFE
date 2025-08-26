@@ -22,16 +22,13 @@ async function getSession() {
     const { user } = await res.json();
 
     // Store user data in localStorage (no firebaseToken)
+    console.log('[DEBUG] getSession: User data', user); // Add this
     localStorage.setItem('userEmail', user.email || '');
-    localStorage.setItem('firstName', user.displayName?.split(' ')[0] || '');
+    localStorage.setItem('firstName', user.fullName?.split(' ')[0] || '');
     localStorage.setItem('username', user.username || '');
     localStorage.setItem('phoneNumber', user.phoneNumber || '');
     localStorage.setItem('address', user.address || '');
-
-    // Update dashboard avatar
-    await updateGreetingAndAvatar(user.username, user.displayName?.split(' ')[0]);
-
-    // Load user profile
+    await updateGreetingAndAvatar(user.username, user.fullName?.split(' ')[0]);
     await loadUserProfile();
   } catch (err) {
     console.error("Session error:", err);
@@ -45,20 +42,25 @@ async function getSession() {
 getSession();
 
 async function loadUserProfile() {
-  try {
-    const response = await fetch('https://api.flexgig.com.ng/api/profile', {
-      credentials: 'include',
-    });
-    if (response.ok) {
-      const data = await response.json();
-      // Update UI or localStorage as needed
-      console.log('[DEBUG] loadUserProfile: Profile loaded', data);
-    } else {
-      console.error('[ERROR] loadUserProfile: Failed to fetch profile');
+    try {
+        const response = await fetch('https://api.flexgig.com.ng/api/profile', {
+            credentials: 'include',
+        });
+        if (response.ok) {
+            const data = await response.json();
+            console.log('[DEBUG] loadUserProfile: Profile loaded', data);
+            // Update UI
+            document.getElementById('firstname').textContent = data.fullName?.split(' ')[0] || 'User';
+            document.getElementById('avatar').src = data.profilePicture || '/default-avatar.png';
+            localStorage.setItem('username', data.username || '');
+            localStorage.setItem('phoneNumber', data.phoneNumber || '');
+            localStorage.setItem('address', data.address || '');
+        } else {
+            console.error('[ERROR] loadUserProfile: Failed to fetch profile', response.status, await response.text());
+        }
+    } catch (err) {
+        console.error('[ERROR] loadUserProfile:', err);
     }
-  } catch (err) {
-    console.error('[ERROR] loadUserProfile:', err);
-  }
 }
 
 async function openPinModalForReauth() {
