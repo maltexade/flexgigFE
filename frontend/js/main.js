@@ -4,69 +4,7 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
   'use strict';
 
   // -----------------------------
-  // Session helpers
-  // -----------------------------
-  async function getSession() {
-  if (!window.location.pathname.includes('/dashboard')) {
-    console.log('[main.js] getSession: Skipped on non-dashboard page:', window.location.pathname);
-    return null;
-  }
-  try {
-    const res = await fetch(`${BACKEND_URL}/api/session`, {
-      method: 'GET',
-      credentials: 'include',
-    });
-    if (!res.ok) {
-      throw new Error(`Session fetch failed: ${res.status} ${await safeParseError(res)}`);
-    }
-    const data = await res.json();
-    console.log('[main.js] getSession: Session fetched', data);
-    return data.user;
-  } catch (err) {
-    console.error('[main.js] getSession error:', err);
-    if (window.location.pathname.includes('/dashboard')) {
-      openPinModalForReauth();
-    }
-    throw err;
-  }
-}
-
-  function openPinModalForReauth() {
-    const event = new CustomEvent('openPinModalForReauth');
-    document.dispatchEvent(event);
-  }
-
-  async function safeParseError(res) {
-    try {
-      const t = await res.text();
-      return t.slice(0, 200);
-    } catch {
-      return '';
-    }
-  }
-
-  async function ensureSignedInFromSession() {
-    setLoading(true, 'Checking authentication...');
-    try {
-      const user = await getSession();
-      if (!user) {
-        console.log('[main.js] No session, setting unauthenticated UI');
-        setUnauthenticatedUI();
-        return null;
-      }
-      setAuthenticatedUI(user);
-      return user;
-    } catch (err) {
-      console.error('[main.js] ensureSignedInFromSession error:', err);
-      setErrorUI(err);
-      return null;
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  // -----------------------------
-  // DOM helpers and state
+  // DOM helpers and UI state
   // -----------------------------
   const qs = (sel) => document.querySelector(sel);
   const qsa = (sel) => Array.from(document.querySelectorAll(sel));
@@ -95,67 +33,75 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
     UI.spinner = qs('[data-spinner], #spinner');
   }
 
-  function show(el) {
-    if (el) el.style.display = '';
-  }
-  function hide(el) {
-    if (el) el.style.display = 'none';
-  }
-  function text(el, v) {
-    if (el) el.textContent = v ?? '';
-  }
+  function show(el) { if (el) el.style.display = ''; }
+  function hide(el) { if (el) el.style.display = 'none'; }
+  function text(el, v) { if (el) el.textContent = v ?? ''; }
   function setImg(el, url, alt = '') {
     if (!el) return;
-    if (url) {
-      el.src = url;
-      el.alt = alt;
-      show(el);
-    } else {
-      el.removeAttribute('src');
-      el.alt = '';
-      hide(el);
-    }
+    if (url) { el.src = url; el.alt = alt; show(el); }
+    else { el.removeAttribute('src'); el.alt = ''; hide(el); }
   }
 
   function setLoading(loading, label = '') {
-    if (loading) {
-      show(UI.spinner);
-      text(UI.statusText, label || 'Loading...');
-    } else {
-      hide(UI.spinner);
-      text(UI.statusText, '');
-    }
+    if (loading) { show(UI.spinner); text(UI.statusText, label || 'Loading...'); }
+    else { hide(UI.spinner); text(UI.statusText, ''); }
   }
 
   // -----------------------------
-  // UI states
+  // Session helpers
   // -----------------------------
+  async function getSession() {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/session`, { credentials: 'include' });
+      if (!res.ok) {
+        const text = await res.text();
+        console.error('Session API returned error:', res.status, text);
+        if (res.status === 401) { window.location.href = '/frontend/html/login.html'; }
+        else { alert('Something went wrong while loading your session. Please try again.'); }
+        return null;
+      }
+      const data = await res.json();
+      return data.user;
+    } catch (err) {
+      console.error('Session fetch error:', err);
+      alert('Unable to reach the server. Please check your internet connection and try again.');
+      return null;
+    }
+  }
+
+  async function ensureSignedInFromSession() {
+    setLoading(true, 'Checking authentication...');
+    try {
+      const user = await getSession();
+      if (!user) { setUnauthenticatedUI(); return null; }
+      setAuthenticatedUI(user);
+      return user;
+    } catch (err) {
+      console.error('ensureSignedInFromSession error:', err);
+      setErrorUI(err);
+      return null;
+    } finally { setLoading(false); }
+  }
+
   function setAuthenticatedUI(user) {
-    hide(UI.unauthSection);
-    show(UI.authedSection);
+    hide(UI.unauthSection); show(UI.authedSection);
     const name = user.username || user.fullName || 'Signed in';
-    const email = user.email || '';
-    const photo = user.profilePicture || '';
     text(UI.userName, name);
-    text(UI.userEmail, email);
-    setImg(UI.userPhoto, photo, name);
+    text(UI.userEmail, user.email || '');
+    setImg(UI.userPhoto, user.profilePicture || '', name);
     text(UI.statusText, `Welcome${name ? `, ${name}` : ''}!`);
   }
 
   function setUnauthenticatedUI() {
-    show(UI.unauthSection);
-    hide(UI.authedSection);
+    show(UI.unauthSection); hide(UI.authedSection);
+    text(UI.userName, ''); text(UI.userEmail, '');
     setImg(UI.userPhoto, '');
-    text(UI.userName, '');
-    text(UI.userEmail, '');
     text(UI.statusText, 'You are not signed in.');
   }
 
   function setErrorUI(err) {
-    show(UI.unauthSection);
-    hide(UI.authedSection);
-    const msg = err?.message || String(err) || 'Unknown error';
-    text(UI.statusText, `Error: ${msg}`);
+    show(UI.unauthSection); hide(UI.authedSection);
+    text(UI.statusText, `Error: ${err?.message || String(err)}`);
   }
 
   // -----------------------------
@@ -163,210 +109,132 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
   // -----------------------------
   let router = null;
 
+  function setupRouter() {
+    if (!window.Navigo) { console.error('Navigo is not defined.'); return; }
+    router = new Navigo('/', { hash: false });
+    router
+      .on({
+        '/': () => console.log('Routing to home'),
+        '/auth/email': () => window.location.href = '/frontend/html/login.html',
+        '/dashboard': async () => {
+          console.log('Routing to dashboard');
+          const user = await ensureSignedInFromSession();
+          if (user) loadContent('/frontend/html/dashboard.html');
+        },
+      })
+      .notFound(() => { qs('#content').innerHTML = '<p>Page not found</p>'; })
+      .resolve();
+  }
+
   async function loadContent(url) {
     const content = qs('#content');
     try {
       const res = await fetch(url);
       if (!res.ok) throw new Error(`Failed to load ${url}: ${res.status}`);
       content.innerHTML = await res.text();
-      console.log(`[main.js] Loaded content from ${url}`);
+      console.log(`Loaded content from ${url}`);
     } catch (error) {
-      console.error('[main.js] Error loading content:', error);
+      console.error('Error loading content:', error);
       content.innerHTML = '<p>Error loading page</p>';
     }
-  }
-
-  function setupRouter() {
-    if (!window.Navigo) {
-      console.error('[main.js] Navigo is not defined. Ensure Navigo is loaded via CDN.');
-      window.location.href = '/frontend/html/login.html';
-      return;
-    }
-    router = new Navigo('/', { hash: false });
-    router
-      .on({
-        '/': () => {
-          console.log('[main.js] Routing to home');
-        },
-        '/auth/email': () => {
-          console.log('[main.js] Routing to email login');
-          window.location.href = '/frontend/html/login.html';
-        },
-        '/dashboard': async () => {
-          console.log('[main.js] Routing to dashboard');
-          try {
-            const user = await getSession();
-            if (!user) {
-              console.log('[main.js] No session, redirecting to login');
-              window.location.href = '/frontend/html/login.html';
-              return;
-            }
-            loadContent('/frontend/html/dashboard.html');
-          } catch (err) {
-            console.error('[main.js] Dashboard route error:', err);
-            window.location.href = '/frontend/html/login.html';
-          }
-        },
-      })
-      .notFound(() => {
-        console.log('[main.js] Route not found');
-        qs('#content').innerHTML = '<p>Page not found</p>';
-      })
-      .resolve();
   }
 
   // -----------------------------
   // Actions
   // -----------------------------
-  function goToGoogleAuth() {
-    console.log('[main.js] Initiating Google auth redirect');
-    location.href = `${BACKEND_URL}/auth/google`;
-  }
+  function goToGoogleAuth() { location.href = `${BACKEND_URL}/auth/google`; }
 
   async function logoutFlow() {
     setLoading(true, 'Signing out...');
-    try {
-      await fetch(`${BACKEND_URL}/logout`, { method: 'POST', credentials: 'include' });
-      console.log('[main.js] Server session ended');
-      localStorage.clear(); // Clear user data
-    } catch (e) {
-      console.warn('[main.js] logout error:', e?.message || e);
-    } finally {
-      setLoading(false);
-      location.href = '/';
-    }
+    try { await fetch(`${BACKEND_URL}/logout`, { method: 'POST', credentials: 'include' }); }
+    catch (e) { console.warn('logout error:', e); }
+    finally { setLoading(false); localStorage.clear(); location.href = '/'; }
   }
 
   // -----------------------------
-  // Event bindings
+  // PWA / Install modal
+  // -----------------------------
+  let deferredPrompt = null;
+  let modalMode = null;
+
+  function isDesktopOrTablet() { return window.matchMedia('(min-width: 768px)').matches; }
+
+  function showInstallModal() {
+    modalMode = isDesktopOrTablet() ? 'desktop' : 'mobile';
+    const modal = document.getElementById('install-modal');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+    document.body.classList.add('modal-open');
+    document.body.style.overflow = 'hidden';
+    updateModalBox();
+    hideInstallSuccessUI();
+  }
+
+  function hideInstallModal() {
+    const modalBackdrop = document.getElementById('install-modal');
+    const desk = document.getElementById('install-modal-desktop');
+    document.body.classList.remove('modal-open');
+    document.body.style.overflow = '';
+    hideInstallSuccessUI();
+    if (modalMode === 'desktop' && desk) { desk.classList.remove('show'); setTimeout(() => { if(modalBackdrop) modalBackdrop.classList.add('hidden'); modalMode=null; }, 300); }
+    else setTimeout(() => { if(modalBackdrop) modalBackdrop.classList.add('hidden'); modalMode=null; }, 300);
+  }
+
+  function updateModalBox() {
+    const mob = document.getElementById('install-modal-mobile');
+    const desk = document.getElementById('install-modal-desktop');
+    if (modalMode==='desktop') { if(mob) mob.classList.add('hidden'); if(desk){ desk.classList.remove('hidden'); desk.classList.add('flex'); setTimeout(()=>desk.classList.add('show'),10); } }
+    else { if(desk){ desk.classList.add('hidden'); desk.classList.remove('flex'); desk.classList.remove('show'); } if(mob) mob.classList.remove('hidden'); }
+  }
+
+  function showInstallProgress(show) {
+    const progress = document.getElementById('install-progress');
+    const confirmDesktop = document.getElementById('install-app-confirm-desktop');
+    const cancelDesktop = document.getElementById('install-app-cancel-desktop');
+    const confirmMobile = document.getElementById('install-app-confirm-mobile');
+    if(progress) progress.classList.toggle('hidden', !show);
+    if(confirmDesktop) confirmDesktop.classList.toggle('hidden', show);
+    if(cancelDesktop) cancelDesktop.classList.toggle('hidden', show);
+    if(confirmMobile) confirmMobile.classList.toggle('hidden', show);
+  }
+
+  function showInstallSuccess() { const progress = document.getElementById('install-progress'); const success = document.getElementById('install-success'); if(progress) progress.classList.add('hidden'); if(success) success.classList.remove('hidden'); }
+  function hideInstallSuccessUI() { const progress = document.getElementById('install-progress'); const success = document.getElementById('install-success'); const confirmDesktop = document.getElementById('install-app-confirm-desktop'); const cancelDesktop = document.getElementById('install-app-cancel-desktop'); const confirmMobile = document.getElementById('install-app-confirm-mobile'); if(progress) progress.classList.add('hidden'); if(success) success.classList.add('hidden'); if(confirmDesktop) confirmDesktop.classList.remove('hidden'); if(cancelDesktop) cancelDesktop.classList.remove('hidden'); if(confirmMobile) confirmMobile.classList.remove('hidden'); }
+
+  window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferredPrompt = e; showInstallModal(); });
+
+  // -----------------------------
+  // Bind events
   // -----------------------------
   function bindEvents() {
-    if (UI.loginBtn) {
-      UI.loginBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        goToGoogleAuth();
-      });
-    }
-    if (UI.logoutBtn) {
-      UI.logoutBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        logoutFlow();
-      });
-    }
-    const emailNavBtn = document.getElementById('emailLoginBtn');
-    if (emailNavBtn) {
-      emailNavBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        console.log('[main.js] Email login button clicked, navigating to /auth/email');
-        if (router) {
-          router.navigate('/auth/email');
-        } else {
-          window.location.href = '/frontend/html/login.html';
-        }
-      });
-    }
+    if(UI.loginBtn) UI.loginBtn.addEventListener('click', e => { e.preventDefault(); goToGoogleAuth(); });
+    if(UI.logoutBtn) UI.logoutBtn.addEventListener('click', e => { e.preventDefault(); logoutFlow(); });
+
+    const confirmDesktop = document.getElementById('install-app-confirm-desktop');
+    const cancelDesktop = document.getElementById('install-app-cancel-desktop');
+    const confirmMobile = document.getElementById('install-app-confirm-mobile');
+    const closeBtns = qsa('.install-modal-close');
+
+    if(confirmDesktop) confirmDesktop.addEventListener('click', async()=>{ if(deferredPrompt){ deferredPrompt.prompt(); const choice = await deferredPrompt.userChoice; deferredPrompt=null; showInstallProgress(true); setTimeout(()=>{ showInstallSuccess(); },500); }});
+    if(confirmMobile) confirmMobile.addEventListener('click', async()=>{ if(deferredPrompt){ deferredPrompt.prompt(); const choice = await deferredPrompt.userChoice; deferredPrompt=null; showInstallProgress(true); setTimeout(()=>{ showInstallSuccess(); },500); }});
+    if(cancelDesktop) cancelDesktop.addEventListener('click', hideInstallModal);
+    closeBtns.forEach(b=>b.addEventListener('click', hideInstallModal));
+    window.addEventListener('resize', updateModalBox);
   }
 
   // -----------------------------
-  // Initialization on page load
+  // Initialization
   // -----------------------------
   async function boot() {
     cacheUI();
     bindEvents();
     setupRouter();
-    if (!UI.authedSection && !UI.unauthSection) {
-      const bar = document.createElement('div');
-      bar.id = 'auth-container';
-      bar.style.cssText = 'padding:10px;margin:10px 0;border:1px solid #ddd;border-radius:6px;font-family:system-ui, sans-serif;';
-      const span = document.createElement('span');
-      span.setAttribute('id', 'statusText');
-      bar.appendChild(span);
-      document.body.insertBefore(bar, document.body.firstChild);
-      UI.statusText = span;
-    }
-    if (!UI.spinner) {
-      const sp = document.createElement('div');
-      sp.textContent = '⏳';
-      sp.style.cssText = 'display:none;margin:8px 0;';
-      sp.setAttribute('id', 'spinner');
-      UI.spinner = sp;
-      (UI.statusText?.parentElement || document.body).appendChild(sp);
-    }
     await ensureSignedInFromSession();
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', boot);
-  } else {
-    boot();
-  }
+  if(document.readyState==='loading'){ document.addEventListener('DOMContentLoaded', boot); }
+  else { boot(); }
 
-  // -----------------------------
-  // Expose minimal API
-  // -----------------------------
-  window.AppAuth = {
-    goToGoogleAuth,
-    logout: logoutFlow,
-    getSession,
-  };
+  // Expose API
+  window.AppAuth = { goToGoogleAuth, logout: logoutFlow, getSession, showInstallModal, hideInstallModal };
 })();
-
-
-let deferredPrompt;
-window.addEventListener('beforeinstallprompt', (e) => {
-  e.preventDefault();
-  deferredPrompt = e;
-  const installModal = document.getElementById('install-modal');
-  if (installModal) {
-    installModal.classList.remove('hidden');
-    installModal.setAttribute('aria-hidden', 'false');
-  }
-  console.log('[main.js] beforeinstallprompt fired');
-});
-
-const confirmInstallMobile = document.getElementById('install-app-confirm-mobile');
-const confirmInstallDesktop = document.getElementById('install-app-confirm-desktop');
-const cancelInstallDesktop = document.getElementById('install-app-cancel-desktop');
-
-if (confirmInstallMobile) {
-  confirmInstallMobile.addEventListener('click', () => {
-    if (deferredPrompt) {
-      deferredPrompt.prompt();
-      deferredPrompt.userChoice.then((choice) => {
-        if (choice.outcome === 'accepted') {
-          document.getElementById('install-success').classList.remove('hidden');
-          console.log('[main.js] PWA installed');
-        }
-        deferredPrompt = null;
-      });
-    }
-  });
-}
-
-if (confirmInstallDesktop) {
-  confirmInstallDesktop.addEventListener('click', () => {
-    if (deferredPrompt) {
-      deferredPrompt.prompt();
-      deferredPrompt.userChoice.then((choice) => {
-        if (choice.outcome === 'accepted') {
-          document.getElementById('install-success').classList.remove('hidden');
-          console.log('[main.js] PWA installed');
-        }
-        deferredPrompt = null;
-      });
-    }
-  });
-}
-
-if (cancelInstallDesktop) {
-  cancelInstallDesktop.addEventListener('click', () => {
-    const installModalDesktop = document.getElementById('install-modal-desktop');
-    if (installModalDesktop) {
-      installModalDesktop.classList.add('opacity-0', 'scale-95');
-      setTimeout(() => {
-        document.getElementById('install-modal').classList.add('hidden');
-        installModalDesktop.classList.remove('opacity-0', 'scale-95');
-      }, 300);
-    }
-  });
-}
