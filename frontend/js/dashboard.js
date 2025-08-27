@@ -2169,13 +2169,6 @@ if (updateProfileCard) {
   });
 }
 
-// Nigerian phone number validation (matching server.js)
-const providerPrefixes = {
-  mtn: ['0703', '0706', '0803', '0806', '0810', '0813', '0814', '0816', '0903', '0906', '0913', '0916'],
-  glo: ['0705', '0805', '0807', '0811', '0815', '0905', '0915'],
-  airtel: ['0701', '0708', '0802', '0808', '0812', '0901', '0902', '0904', '0907', '0912'],
-  '9mobile': ['0809', '0817', '0818', '0908', '0909'],
-};
 function isNigeriaMobile(phone) {
   const cleaned = phone.replace(/\s/g, '');
   return /^0[789][01]\d{8}$/.test(cleaned) && Object.values(providerPrefixes).flat().includes(cleaned.slice(0, 4));
