@@ -134,9 +134,8 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
     router
       .on({
         '/': () => {
-          console.log('[DEBUG] main.js: Routing to /');
-          // ✅ Redirect directly to login page
-          window.location.href = '/frontend/html/login.html';
+          console.log('[DEBUG] main.js: Routing to / (homepage)');
+          // ✅ Do nothing, let index.html show as-is
         },
         '/auth/email': () => {
           console.log('[DEBUG] main.js: Routing to /auth/email');
@@ -144,16 +143,10 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
         },
         '/dashboard': async () => {
           console.log('[DEBUG] main.js: Routing to /dashboard');
-          const user = await ensureSignedInFromSession();
-          if (user) {
-            // ✅ Redirect directly to dashboard page
-            window.location.href = '/frontend/html/dashboard.html';
-          } else {
-            console.log('[DEBUG] main.js: No user session, redirecting to login');
-            window.location.href = '/frontend/html/login.html';
-          }
+          window.location.href = '/frontend/html/dashboard.html';
         }
       })
+
       .notFound(() => {
         console.log('[DEBUG] main.js: Not found route triggered', {
           path: window.location.pathname,
@@ -209,7 +202,7 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
     cacheUI();
     bindEvents();
     setupRouter();
-    await ensureSignedInFromSession();
+    // await ensureSignedInFromSession();
   }
 
   if (document.readyState === 'loading') {
