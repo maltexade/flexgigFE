@@ -1,117 +1,475 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Redirecting TO Dashboard</title>
-  <style>
-    body {
-      margin: 0;
-      height: 100vh;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      background-color: #000000;
-      color: #f9fafb;
-      overflow: hidden;
-    }
-
-    .container {
-      text-align: center;
-      width: 300px;
-      animation: fadeIn 0.8s ease-in-out;
-    }
-
-    /* Loading bar */
-    .loader-bar {
-      position: relative;
-      width: 100%;
-      height: 6px;
-      background: rgba(255, 255, 255, 0.1);
-      border-radius: 3px;
-      overflow: hidden;
-      margin-bottom: 20px;
-    }
-
-    .loader-fill {
-      width: 0;
-      height: 100%;
-      background: linear-gradient(90deg, #FFD700, #fff1a8, #FFD700);
-      border-radius: 3px;
-      background-size: 200% 100%;
-      animation: shine 2s linear infinite;
-    }
-
-    /* Text without cursor */
-    .text {
-      font-size: 1.5rem;
-      opacity: 1;
-      white-space: nowrap;
-      overflow: hidden;
-      letter-spacing: 1px;
-    }
-
-    /* Animations */
-    @keyframes shine {
-      0% { background-position: 200% 0; }
-      100% { background-position: -200% 0; }
-    }
-
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(10px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
-    .fade-out {
-      animation: fadeOutScale 0.8s forwards;
-    }
-
-    @keyframes fadeOutScale {
-      to { opacity: 0; transform: scale(0.95); }
-    }
-  </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Network Reseller Dashboard</title>
+  <link rel="stylesheet" href="/frontend/styles/dashboard.css">
+  <link rel="stylesheet" href="/frontend/styles/user-profile.css">
+  <script src="https://unpkg.com/navigo@8.11.1/lib/navigo.min.js" defer></script>
 </head>
 <body>
-  <div class="container" id="page">
-    <div class="loader-bar">
-      <div class="loader-fill" id="loader"></div>
-    </div>
-    <p class="text" id="typing"></p>
+  <div id="content">
+    <header>
+      <div class="user-info">
+        <div class="avatar" id="avatar"></div>
+        <div class="greeting">
+          <span id="greet"></span>
+          <strong id="firstname"></strong>
+        </div>
+      </div>
+      <div class="support" role="button" aria-label="Support">
+        <svg viewBox="0 0 24 24" aria-hidden>
+          <path d="M12 3C7.03 3 3 6.92 3 12c0 1.87.51 3.62 1.39 5.11L3 21l4.07-1.46A8.96 8.96 0 0 0 12 21c4.97 0 9-3.92 9-9s-4.03-9-9-9z"/>
+        </svg>
+        <span>Support</span>
+      </div>
+    </header>
   </div>
 
-  <script>
-    const text = "Redirecting to dashboard...";
-    const typingElement = document.getElementById("typing");
-    const pageContainer = document.getElementById("page");
-    const loader = document.getElementById("loader");
+  <main>
+    <div id="userProfileDashboardContent" class="user-profile-dashboard-content active">
+      <div class="stack">
+        <!-- Setup Pin -->
+        <div class="card pin">
+          <div style="display:flex;gap:12px;align-items:center">
+            <div class="icon-wrap" aria-hidden>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                <path d="M12 2L4 5v6c0 5.25 3.84 9.74 8 11 4.16-1.26 8-5.75 8-11V5l-8-3z" fill="#FFD700" opacity="0.95"/>
+                <rect x="9" y="10" width="6" height="5" rx="1" fill="#021827"/>
+              </svg>
+            </div>
+            <div>
+              <h4>Setup Pin</h4>
+              <p>Secure your account</p>
+            </div>
+          </div>
+          <svg class="arrow-icon" width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <path d="M9 18l6-6-6-6" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
 
-    let index = 0;
-    const typingSpeed = 80; // ms per character
-    const pauseAfterTyping = 500; // ms pause after typing
+        <!-- Update Profile -->
+        <div class="card update-profile">
+          <div style="display:flex;gap:12px;align-items:center">
+            <div class="icon-wrap" aria-hidden>
+              <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24">
+                <defs>
+                  <linearGradient id="gradProfile" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" style="stop-color:#ff6a00; stop-opacity:1" />
+                    <stop offset="50%" style="stop-color:#ee0979; stop-opacity:1" />
+                    <stop offset="100%" style="stop-color:#8e2de2; stop-opacity:1" />
+                  </linearGradient>
+                </defs>
+                <path fill="url(#gradProfile)" d="M12 12c2.67 0 8 1.34 8 4v2H4v-2c0-2.66 5.33-4 8-4zm0-2a4 4 0 100-8 4 4 0 000 8z"/>
+              </svg>
+            </div>
+            <div>
+              <h4>Update Profile</h4>
+              <p>Keep your account details up to date</p>
+            </div>
+          </div>
+          <svg class="arrow-icon" width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <path d="M9 18l6-6-6-6" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
 
-    // Set loader duration to match typing duration
-    const totalTypingTime = text.length * typingSpeed;
-    loader.style.transition = `width ${totalTypingTime}ms linear`;
-    // Start loader
-    setTimeout(() => { loader.style.width = '100%'; }, 300);
+        <!-- Balance -->
+        <div class="balance">
+          <h4>
+            <span class="balance-title">
+              <svg class="wallet-icon" viewBox="16 20 64 54" xmlns="http://www.w3.org/2000/svg">
+                <g id="Wallet">
+                  <path fill="#00A651" d="M77.5,38H77V27.5a.41.41,0,0,0,0-.19.49.49,0,0,0,0-.21.5.5,0,0,0-.53-.47L63,27.45V20.5a.5.5,0,0,0-.5-.5h-29a.5.5,0,0,0-.5.5v8.71l-11.29.9C18.56,30.11,16,32.32,16,35V71.5A2.5,2.5,0,0,0,18.5,74h59A2.5,2.5,0,0,0,80,71.5v-31A2.5,2.5,0,0,0,77.5,38ZM76,27.66V38H63V28.45ZM34,21H62V38H59V27.79a.5.5,0,0,0-.5-.5C56.57,27.29,55,26,55,24.5a.5.5,0,0,0-.5-.5h-12a.5.5,0,0,0-.5.5c0,1.48-2.52,2.79-4.5,2.79a.5.5,0,0,0-.5.5V38H34ZM54,38c-.29-2.62-2.86-4.67-6-4.67S42.32,35.38,42,38H38V28.27c2.17-.18,4.55-1.54,4.94-3.27H54a4.22,4.22,0,0,0,4,3.27V38Zm-1,0H43c.29-2.06,2.41-3.67,5-3.67S52.67,35.94,53,38ZM21.75,31.11,33,30.22V38H17V35C17,32.87,19.11,31.11,21.75,31.11ZM77.5,73h-59A1.5,1.5,0,0,1,17,71.5V39H77.5A1.5,1.5,0,0,1,79,40.5V50H71.5a6.5,6.5,0,0,0,0,13H79v8.5A1.5,1.5,0,0,1,77.5,73ZM79,62H71.5a5.5,5.5,0,0,1,0-11H79Z"/>
+                  <path fill="#FFFFFF" d="M69,56.5A3.5,3.5,0,1,0,72.5,53,3.5,3.5,0,0,0,69,56.5ZM72.5,54A2.5,2.5,0,1,1,70,56.5,2.5,2.5,0,0,1,72.5,54Z"/>
+                </g>
+              </svg>
+              Balance
+            </span>
+          </h4>
+          <p style="color: white; font-weight: 700;">₦0.00</p>
+        </div>
 
-    function typeEffect() {
-      if (index < text.length) {
-        typingElement.textContent += text.charAt(index);
-        index++;
-        setTimeout(typeEffect, typingSpeed);
-      } else {
-        // After typing finishes
-        setTimeout(() => {
-          pageContainer.classList.add("fade-out");
-          pageContainer.addEventListener("animationend", () => {
-            window.location.href = "/frontend/html/dashboard.html";
-          });
-        }, pauseAfterTyping);
-      }
-    }
+        <!-- Actions -->
+        <div class="actions-row">
+          <div class="card transfer">
+            <div style="display:flex;gap:12px;align-items:center">
+              <div class="icon-wrap">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                  <path d="M12 19V5m-5 5l5-5 5 5" stroke="#FFD700" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </div>
+              <div>
+                <h4>Transfer</h4>
+              </div>
+            </div>
+          </div>
+          <div class="card add-money">
+            <div style="display:flex;gap:12px;align-items:center">
+              <div class="icon-wrap">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                  <path d="M12 19V5m-7 7h14" stroke="#00AAFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </div>
+              <div>
+                <h4>Add Money</h4>
+              </div>
+            </div>
+          </div>
+        </div>
 
-    setTimeout(typeEffect, 300);
-  </script>
+        <!-- Services -->
+        <div class="shortcuts">
+          <h4>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+              <path d="M3 12h18M3 6h18M3 18h18" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            Services
+          </h4>
+          <div class="short-grid">
+            <div class="short-item">
+              <svg width="36" height="36" fill="#00AAFF">
+                <path d="M4 12h2v6H4zM9 8h2v10H9zM14 5h2v13h-2zM19 3h2v15h-2z"/>
+              </svg>
+              <small>Data</small>
+            </div>
+            <div class="short-item">
+              <svg width="36" height="36" fill="#FFD700">
+                <path d="M7 2h10l3 4v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4l3-2zM12 7a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/>
+              </svg>
+              <small>Airtime</small>
+            </div>
+            <div class="short-item">
+              <svg width="36" height="36" fill="#FFAA00">
+                <path d="M13 2L3 14h7v8l10-12h-7z"/>
+              </svg>
+              <small>Electricity</small>
+            </div>
+            <div class="short-item">
+              <svg width="36" height="36" fill="#7F5FFF">
+                <rect x="3" y="4" width="18" height="12" rx="2"/>
+                <path d="M8 20h8v-2H8z" fill="#4b4b4b"/>
+              </svg>
+              <small>TV</small>
+            </div>
+            <div class="short-item">
+              <svg width="36" height="36" fill="#00DD88">
+                <path d="M7 7h10v3l4-4-4-4v3H7v4zM17 17H7v-3l-4 4 4 4v-3h10v-4z"/>
+              </svg>
+              <small>Convert</small>
+            </div>
+            <div class="short-item">
+              <svg width="36" height="36" fill="#FF6A3D">
+                <path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-7h16zM12 3l2 3h4l-2 3H8L6 6h4l2-3z"/>
+              </svg>
+              <small>Giftcards</small>
+            </div>
+          </div>
+          <div class="recent-transactions">
+            <h4>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                <path d="M12 2v2m0 16v2m10-10h-2M4 12H2m17.36-7.36l-1.42 1.42M6.64 19.36l-1.42-1.42M19.36 19.36l-1.42-1.42M6.64 4.64l-1.42 1.42" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+              Recently Bought Data
+            </h4>
+            <div class="recent-transactions-list"></div>
+          </div>
+
+          <div class="phone-section">
+            <p style="font-size: small;" for="phone-input">Phone Number</p>
+            <div class="phone-input-row">
+              <input
+                type="tel"
+                id="phone-input"
+                class="phone-input"
+                pattern="[0-9]*"
+                inputmode="numeric"
+                placeholder="Enter phone number"
+                autocomplete="tel"
+              />
+              <button class="contact-btn" type="button" aria-label="Pick from contacts">
+                <img src="/frontend/svg/contact-icon.svg" alt="Contact Icon" class="contact-btn contact-btn-svg" />
+              </button>
+            </div>
+          </div>
+
+          <div class="contact-modal" id="contactModal" style="display:none;">
+            <div class="modal-content">
+              <h3>Enter Contact</h3>
+              <input type="text" id="manual-name" placeholder="Name">
+              <input type="text" id="manual-phone" placeholder="Phone number">
+              <button id="modal-save">Save</button>
+              <button id="modal-cancel">Cancel</button>
+            </div>
+          </div>
+
+          <div class="network-provider">
+            <p style="font-size: small;">Network Provider</p>
+            <div class="provider-grid">
+              <div class="slider mtn">
+                <img src="/frontend/svg/MTN-icon.svg" alt="MTN" />
+                <div class="provider-name">MTN</div>
+              </div>
+              <div class="provider-box mtn">
+                <img src="/frontend/svg/MTN-icon.svg" alt="MTN" />
+                <div class="provider-name slider-mtn">MTN</div>
+              </div>
+              <div class="provider-box airtel">
+                <img class="airrr" src="/frontend/svg/airtel-icon.svg" alt="Airtel" />
+                <div class="provider-name slider-airtel">AIRTEL</div>
+              </div>
+              <div class="provider-box glo">
+                <img class="gloo" src="/frontend/svg/GLO-icon.svg" alt="GLO" />
+                <div class="provider-name slider-glo">GLO</div>
+              </div>
+              <div class="provider-box ninemobile">
+                <img src="/frontend/svg/9mobile-icon.svg" alt="9MOBILE" />
+                <div class="provider-name slider-ninemobile">9MOBILE</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="subscription-plan">
+            <p style="font-size: small;">Subscription Plan</p>
+          </div>
+          <div class="plans-row">
+            <div class="plan-box">
+              <div></div>
+              <div></div>
+              <div></div>
+            </div>
+            <div class="plan-box">
+              <div></div>
+              <div></div>
+              <div></div>
+            </div>
+            <div class="see-all-plans">
+              <img style="width: 50px; height: 50px;" src="/frontend/svg/plane.svg" alt="all plans">
+              <span>All Plans</span>
+            </div>
+            <div id="allPlansModal" class="modal-overlay" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="modalTitle" tabindex="-1">
+              <div class="modal-content" role="document">
+                <div class="modal-header">
+                  <div class="pull-handle" aria-hidden="true"></div>
+                  <button class="close-btn" aria-label="Close All Plans">&times;</button>
+                </div>
+                <section class="plan-section awoof-section" data-provider="mtn">
+                  <div class="section-header sticky-header">
+                    <svg class="yellow-circle-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <circle cx="12" cy="12" r="10" fill="#FFD700"/>
+                    </svg>
+                    <h2 id="modalTitle">MTN AWOOF</h2>
+                  </div>
+                  <div class="plans-grid awoof-grid"></div>
+                </section>
+                <section class="plan-section gifting-section" data-provider="mtn">
+                  <div class="section-header">
+                    <svg class="yellow-circle-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <circle cx="12" cy="12" r="10" fill="#FFD700"/>
+                    </svg>
+                    <h2>MTN GIFTING</h2>
+                  </div>
+                  <div class="plans-grid gifting-grid"></div>
+                </section>
+              </div>
+            </div>
+          </div>
+          <button id="continueBtn" class="continue-btn" disabled>Continue</button>
+          <div id="checkoutModal" class="modal" aria-hidden="true">
+            <div class="modal-content">
+              <div class="pull-handle"></div>
+              <button class="close-btn" type="button" aria-label="Close checkout modal">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="12" r="10" fill="#bfc7d3"/>
+                  <path d="M8 8l8 8M16 8l-8 8" stroke="#021827" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+              </button>
+              <div class="section-header">
+                <h2>Confirm</h2>
+              </div>
+              <div class="checkout-content">
+                <div class="send-to-section">
+                  <h3>Send to</h3>
+                  <p id="checkout-phone"></p>
+                </div>
+                <div class="checkout-details">
+                  <div class="details-left">
+                    <p>Service</p>
+                    <p>Price</p>
+                    <p>Data Package</p>
+                    <p>Provider</p>
+                  </div>
+                  <div class="details-right">
+                    <p><span class="data-icon">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                        <rect x="6" y="12" width="2" height="8" fill="#1E90FF"/>
+                        <rect x="10" y="8" width="2" height="12" fill="#1E90FF"/>
+                        <rect x="14" y="4" width="2" height="16" fill="#1E90FF"/>
+                      </svg>
+                    </span>Data</p>
+                    <p id="checkout-price"></p>
+                    <p id="checkout-data"></p>
+                    <p id="checkout-provider"></p>
+                  </div>
+                </div>
+                <button id="payBtn" class="pay-btn" type="button" disabled>Pay</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="recent-transactions">
+          <h4>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+              <path d="M12 2v2m0 16v2m10-10h-2M4 12H2m17.36-7.36l-1.42 1.42M6.64 19.36l-1.42-1.42M19.36 19.36l-1.42-1.42M6.64 4.64l-1.42 1.42" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            Recently Bought Data
+          </h4>
+          <div class="recent-transactions-list"></div>
+        </div>
+      </div>
+      <div class="transactions-section">
+        <div class="transactions-header">
+          <h3>Transactions</h3>
+          <a href="#" class="view-all-link">View All</a>
+        </div>
+        <div class="no-transactions">
+          <svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 24 24" fill="none" stroke="#888" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 7h18v12H3z"/>
+            <path d="M3 7l9 6 9-6"/>
+            <line x1="12" y1="13" x2="12" y2="19"/>
+          </svg>
+          <p>No Transaction Yet</p>
+        </div>
+        <div class="transactions-list"></div>
+      </div>
+      <div id="pinModal" class="pin-modal hidden">
+        <div class="pin-header">
+          <button id="closePinModal" class="back-btn" aria-label="Close">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="white" viewBox="0 0 24 24">
+              <path d="M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z"/>
+            </svg>
+          </button>
+          <h2>Create PIN</h2>
+        </div>
+        <div class="pin-body">
+          <div class="firewall-icon">
+            <svg class="fwall" width="25" height="25" viewBox="0 0 24 24" fill="none">
+              <path d="M12 2L4 5v6c0 5.25 3.84 9.74 8 11 4.16-1.26 8-5.75 8-11V5l-8-3z" fill="#FFD700" opacity="0.95"/>
+              <rect x="9" y="10" width="6" height="5" rx="1" fill="#021827"/>
+            </svg>
+            <p>Create a 4-digit PIN</p>
+          </div>
+          <div class="pin-inputs">
+            <input type="password" maxlength="1" readonly />
+            <input type="password" maxlength="1" readonly />
+            <input type="password" maxlength="1" readonly />
+            <input type="password" maxlength="1" readonly />
+          </div>
+          <div class="pin-keypad">
+            <button>1</button><button>2</button><button>3</button>
+            <button>4</button><button>5</button><button>6</button>
+            <button>7</button><button>8</button><button>9</button>
+            <div></div><button>0</button>
+            <button id="deleteKey" aria-label="Delete">
+              <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M8 6H19C19.5523 6 20 6.44772 20 7V17C20 17.5523 19.5523 18 19 18H8L2 12L8 6Z" fill="white"/>
+                <line x1="10" y1="9" x2="16" y2="15" stroke="black" stroke-width="2" stroke-linecap="round"/>
+                <line x1="16" y1="9" x2="10" y2="15" stroke="black" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div id="pinAlert" class="pin-alert hidden">
+        <p id="pinAlertMsg"></p>
+      </div>
+      <div id="centerAlert" class="pin-alert hidden">
+        <p id="centerAlertMsg"></p>
+      </div>
+    </div>
+    <!-- Update Profile Modal -->
+    <!-- Update Profile Modal -->
+     <!-- Update Profile Modal -->
+<!-- Update Profile Modal -->
+<div id="updateProfileModal" class="modal-overlay" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="updateProfileTitle" tabindex="-1">
+  <div class="modal-content">
+    <div class="modal-header">
+      <button class="back-btn" aria-label="Back to dashboard">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z" fill="white"/>
+        </svg>
+      </button>
+      <h2 id="updateProfileTitle">Update Profile</h2>
+    </div>
+    <form id="updateProfileForm" enctype="multipart/form-data">
+      <div class="profile-picture-section">
+        <div class="profile-picture-preview" id="profilePicturePreview">U</div>
+        <label for="profilePicture" class="profile-picture-label">
+          <span>Change Photo</span>
+          <input type="file" id="profilePicture" name="profilePicture" accept="image/jpeg,image/png,image/gif" hidden>
+        </label>
+        <div class="error-message" id="profilePictureError"></div>
+      </div>
+      <div class="form-group">
+        <label for="fullName">Full Name</label>
+        <input type="text" id="fullName" name="fullName" placeholder="Enter your full name" required>
+        <div class="error-message" id="fullNameError"></div>
+      </div>
+      <div class="form-group">
+        <label for="username">Username</label>
+        <input type="text" id="username" name="username" placeholder="Enter your username" required>
+        <div class="error-message" id="usernameError"></div>
+      </div>
+      <div class="form-group">
+        <label for="phoneNumber">Phone Number</label>
+        <input type="tel" id="phoneNumber" name="phoneNumber" placeholder="Enter your phone number" required>
+        <div class="error-message" id="phoneNumberError"></div>
+      </div>
+      <div class="form-group">
+        <label for="email">Email</label>
+        <input type="email" id="email" name="email" placeholder="Enter your email" readonly>
+      </div>
+      <div class="form-group">
+        <label for="address">Address</label>
+        <input type="text" id="address" name="address" placeholder="Enter your address" required>
+        <div class="error-message" id="addressError"></div>
+      </div>
+      <button type="submit" id="saveProfileBtn" class="save-btn" disabled>Save Changes</button>
+    </form>
+  </div>
+</div>
+    
+  </main>
+
+  <nav class="bottom-nav">
+    <a href="#home" class="nav-item">
+      <svg viewBox="0 0 36 36" xmlns="http://www.w3.org/2000/svg" class="icon">
+        <title>house-solid</title>
+        <path d="M33,19a1,1,0,0,1-.71-.29L18,4.41,3.71,18.71a1,1,0,0,1-1.41-1.41l15-15a1,1,0,0,1,1.41,0l15,15A1,1,0,0,1,33,19Z" fill="currentColor"/>
+        <path d="M18,7.79,6,19.83V32a2,2,0,0,0,2,2h7V24h6V34h7a2,2,0,0,0,2-2V19.76Z" fill="currentColor"/>
+      </svg>
+
+      <span>Home</span>
+    </a>
+    <a href="#history" class="nav-item">
+      <svg xmlns="http://www.w3.org/2000/svg" class="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+          d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+      <span>History</span>
+    </a>
+    <a href="#settings" class="nav-item">
+      <img src="/frontend/svg/settings.svg" alt="Settings Icon" class="icon svg-inject">
+      <span>Settings</span>
+    </a>
+  </nav>
+
+
+  <script src="/frontend/js/dashboard.js"></script>
+  <script src="/frontend/js/main.js"></script>
+
+
+
+
 </body>
 </html>
