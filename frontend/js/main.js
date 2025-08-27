@@ -152,10 +152,6 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
             console.log('[DEBUG] main.js: No user session, redirecting to login');
             window.location.href = '/frontend/html/login.html';
           }
-        },
-        '/frontend/html/dashboard.html': () => {
-          console.log('[DEBUG] main.js: Routing to /frontend/html/dashboard.html (fallback)');
-          router.navigate('/dashboard');
         }
       })
       .notFound(() => {
