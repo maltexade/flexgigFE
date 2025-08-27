@@ -79,7 +79,9 @@ async function loadUserProfile() {
     const token = localStorage.getItem('authToken');
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
-      console.log('[DEBUG] loadUserProfile: Including Authorization header with token');
+      console.log('[DEBUG] loadUserProfile: Authorization header:', headers['Authorization']);
+    } else {
+      console.log('[DEBUG] loadUserProfile: No token found in localStorage');
     }
     const response = await fetch('https://api.flexgig.com.ng/api/profile', {
       method: 'GET',
@@ -92,7 +94,6 @@ async function loadUserProfile() {
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${data.error || 'Unknown error'}`);
     }
-    console.log('[DEBUG] loadUserProfile: Profile loaded', data);
 
     // Update localStorage with profile data
     localStorage.setItem('username', data.username || '');
@@ -394,13 +395,6 @@ function updateGreetingAndAvatar(username, firstName) {
   }
   console.log('[DEBUG] updateGreetingAndAvatar:', { greeting, username, firstName, displayName });
 }
-
-// Single DOMContentLoaded listener
-document.addEventListener('DOMContentLoaded', () => {
-  console.log('[DEBUG] DOMContentLoaded: Initializing dashboard, time:', new Date().toISOString());
-  getSession();
-  // Remove fetchUserData() call to prevent duplication
-});
 
 let recentTransactions = JSON.parse(localStorage.getItem('recentTransactions')) || [];
 
