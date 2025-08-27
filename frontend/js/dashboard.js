@@ -4,6 +4,8 @@ if (updateProfileModal && updateProfileModal.classList.contains('active')) {
 }
 
 
+
+// --- Fetch User Data ---
 // --- Fetch User Data ---
 async function getSession() {
   try {
@@ -13,6 +15,7 @@ async function getSession() {
       credentials: 'include',
       headers: { 'Accept': 'application/json' }
     });
+
     console.log('[DEBUG] getSession: Response status', res.status, 'Headers', [...res.headers]);
     if (!res.ok) {
       const text = await res.text();
@@ -24,6 +27,7 @@ async function getSession() {
       }
       return;
     }
+
     const { user, token } = await res.json();
     console.log('[DEBUG] getSession: Raw user data', user, 'Token', token);
 
@@ -37,7 +41,7 @@ async function getSession() {
     // Update localStorage
     localStorage.setItem('userEmail', user.email || '');
     localStorage.setItem('firstName', firstName);
-    localStorage.setItem('username', user.username || ''); // Username can be empty
+    localStorage.setItem('username', user.username || '');
     localStorage.setItem('phoneNumber', user.phoneNumber || '');
     localStorage.setItem('address', user.address || '');
     localStorage.setItem('fullName', user.fullName || user.email.split('@')[0] || '');
@@ -52,10 +56,11 @@ async function getSession() {
     const greetEl = document.getElementById('greet');
     const firstnameEl = document.getElementById('firstname');
     const avatarEl = document.getElementById('avatar');
-    console.log('[DEBUG] getSession: DOM elements', { greetEl: !!greetEl, firstnameEl: !!firstnameEl, avatarEl: !!avatarEl });
+
     if (greetEl && firstnameEl && avatarEl) {
+      console.log('[DEBUG] getSession: DOM elements found');
       await updateGreetingAndAvatar(user.username, firstName);
-      // Only call loadUserProfile if additional profile data is needed
+
       try {
         await loadUserProfile();
       } catch (err) {
@@ -63,19 +68,38 @@ async function getSession() {
       }
     } else {
       console.error('[ERROR] getSession: Missing DOM elements');
-      alert('Error: Page not fully loaded. Please refresh the page.');
+      // don’t alert; retry instead
+      throw new Error('DOM not ready');
     }
   } catch (err) {
     console.error('[ERROR] getSession: Failed to fetch session', err.message);
-    alert('Unable to reach the server. Please check your internet connection and try again.');
   }
 }
 
-// Run getSession after DOM is loaded
-document.addEventListener('DOMContentLoaded', () => {
-  console.log('[DEBUG] DOMContentLoaded: Running getSession');
-  getSession();
-});
+// --- Safe wrapper with retries ---
+function safeGetSession(retries = 5) {
+  const greetEl = document.getElementById('greet');
+  const firstnameEl = document.getElementById('firstname');
+  const avatarEl = document.getElementById('avatar');
+
+  if (greetEl && firstnameEl && avatarEl) {
+    getSession();
+  } else if (retries > 0) {
+    console.warn('[WARN] safeGetSession: Elements not ready, retrying...');
+    setTimeout(() => safeGetSession(retries - 1), 300);
+  } else {
+    console.error('[ERROR] safeGetSession: Elements never appeared');
+  }
+}
+
+// Run safeGetSession only on dashboard
+if (window.location.pathname.includes('dashboard.html')) {
+  document.addEventListener('DOMContentLoaded', () => {
+    console.log('[DEBUG] DOMContentLoaded: Running safeGetSession');
+    safeGetSession();
+  });
+}
+
 
 // Remove fetchUserData and consolidate into getSession
 async function loadUserProfile() {
