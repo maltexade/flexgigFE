@@ -2185,6 +2185,11 @@ payBtn.addEventListener('click', () => {
 
 
 // --- UPDATE PROFILE MODAL ---
+// --- UPDATE PROFILE MODAL ---
+// --- UPDATE PROFILE MODAL ---
+// --- UPDATE PROFILE MODAL ---
+// --- UPDATE PROFILE MODAL ---
+
 const updateProfileModal = document.getElementById('updateProfileModal');
 const updateProfileForm = document.getElementById('updateProfileForm');
 const profilePictureInput = document.getElementById('profilePicture');
@@ -2200,135 +2205,146 @@ const usernameError = document.getElementById('usernameError');
 const phoneNumberError = document.getElementById('phoneNumberError');
 const addressError = document.getElementById('addressError');
 const profilePictureError = document.getElementById('profilePictureError');
-const centerAlert = document.getElementById('centerAlert');
-const centerAlertMsg = document.getElementById('centerAlertMsg');
+let isUsernameAvailable = false;
+
+const updateProfileCard = document.querySelector('.card.update-profile');
+if (updateProfileCard) {
+  updateProfileCard.addEventListener('click', () => {
+    console.log('[DEBUG] Update Profile card clicked');
+    openUpdateProfileModal({});
+  });
+}
+
+// --- Username Availability Check ---
+async function checkUsernameAvailability(username) {
+  if (!username || !/^[a-zA-Z0-9_]{3,20}$/.test(username)) {
+    isUsernameAvailable = false;
+    return false;
+  }
+  try {
+    const response = await fetch('https://api.flexgig.com.ng/api/profile/check-username', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ username }),
+      credentials: 'include',
+    });
+    const data = await response.json();
+    isUsernameAvailable = response.ok && data.available;
+    return isUsernameAvailable;
+  } catch (err) {
+    console.error('[ERROR] checkUsernameAvailability:', err);
+    isUsernameAvailable = false;
+    return false;
+  }
+}
 
 const fieldTouched = {
   fullName: false,
   username: false,
   phoneNumber: false,
   address: false,
-  profilePicture: false,
+  profilePicture: false
 };
 
-// Debounce function for username availability check
-function debounce(func, wait) {
-  let timeout;
-  return function (...args) {
-    clearTimeout(timeout);
-    timeout = setTimeout(() => func.apply(this, args), wait);
-  };
-}
-
-// Username availability check
-async function checkUsernameAvailability(username) {
-  if (!username || !/^[a-zA-Z0-9_]{3,20}$/.test(username)) {
-    return { available: false, message: 'Username must be 3–20 characters and contain only letters, numbers, or underscores' };
-  }
-  try {
-    const response = await fetch('https://api.flexgig.com.ng/api/profile/check-username', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username }),
-      credentials: 'include',
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      return { available: false, message: data.message || 'Error checking username availability' };
-    }
-    return { available: data.available, message: data.available ? '' : 'Username is already taken' };
-  } catch (err) {
-    console.error('[ERROR] checkUsernameAvailability:', err);
-    return { available: false, message: 'Error checking username availability' };
-  }
-}
-
-// Validation functions
-function validateFullName(value) {
-  if (!value.trim()) return 'Full name is required';
-  if (value.length < 2 || value.length > 50) return 'Full name must be 2–50 characters';
-  if (!/^[a-zA-Z\s]+$/.test(value)) return 'Full name can only contain letters and spaces';
-  return '';
-}
-
-function validateUsername(value) {
-  if (!value.trim()) return 'Username is required';
-  if (value.length < 3 || value.length > 20) return 'Username must be 3–20 characters';
-  if (!/^[a-zA-Z0-9_]+$/.test(value)) return 'Username can only contain letters, numbers, or underscores';
-  const lastUpdate = localStorage.getItem('lastUsernameUpdate');
-  const currentUsername = localStorage.getItem('username');
-  if (value !== currentUsername && lastUpdate) {
-    const daysSinceUpdate = (Date.now() - new Date(lastUpdate).getTime()) / (1000 * 60 * 60 * 24);
-    if (daysSinceUpdate < 90) {
-      return `You can update your username again in ${Math.ceil(90 - daysSinceUpdate)} days`;
-    }
-  }
-  return '';
-}
-
-function validatePhoneNumber(value) {
-  if (value && !isNigeriaMobile(value)) return 'Enter a valid Nigerian phone number (e.g., 08031234567)';
-  return '';
-}
-
-function validateAddress(value) {
-  if (!value.trim()) return 'Address is required';
-  if (value.length < 5 || value.length > 100) return 'Address must be 5–100 characters';
-  if (!/^[a-zA-Z0-9\s,.-]+$/.test(value)) return 'Address can only contain letters, numbers, spaces, commas, periods, or hyphens';
-  return '';
-}
-
-function validateProfilePicture(file) {
-  if (!file) return ''; // Optional field
-  if (!['image/jpeg', 'image/png', 'image/gif'].includes(file.type)) return 'Only JPEG, PNG, or GIF images are allowed';
-  if (file.size > 2 * 1024 * 1024) return 'Image must be less than 2MB';
-  return '';
-}
-
-// Real-time form validation
 function validateProfileForm(showErrors = true) {
-  const fullNameErrorMsg = fieldTouched.fullName ? validateFullName(fullNameInput.value) : '';
-  const usernameErrorMsg = fieldTouched.username ? validateUsername(usernameInput.value) : '';
-  const phoneNumberErrorMsg = fieldTouched.phoneNumber ? validatePhoneNumber(phoneNumberInput.value) : '';
-  const addressErrorMsg = fieldTouched.address ? validateAddress(addressInput.value) : '';
-  const profilePictureErrorMsg = fieldTouched.profilePicture ? validateProfilePicture(profilePictureInput.files[0]) : '';
+  const isFullNameValid = !fieldTouched.fullName || validateField('fullName');
+  const isUsernameValid = !fieldTouched.username || validateField('username');
+  const isPhoneNumberValid = !fieldTouched.phoneNumber || validateField('phoneNumber');
+  const isAddressValid = !fieldTouched.address || validateField('address');
+  const isProfilePictureValid = !fieldTouched.profilePicture || validateField('profilePicture');
 
-  if (showErrors) {
-    fullNameError.textContent = fullNameErrorMsg;
-    fullNameError.classList.toggle('active', !!fullNameErrorMsg);
-    usernameError.textContent = usernameErrorMsg;
-    usernameError.classList.toggle('active', !!usernameErrorMsg);
-    phoneNumberError.textContent = phoneNumberErrorMsg;
-    phoneNumberError.classList.toggle('active', !!phoneNumberErrorMsg);
-    addressError.textContent = addressErrorMsg;
-    addressError.classList.toggle('active', !!addressErrorMsg);
-    profilePictureError.textContent = profilePictureErrorMsg;
-    profilePictureError.classList.toggle('active', !!profilePictureErrorMsg);
-  }
-
-  const isFormValid = !fullNameErrorMsg && !usernameErrorMsg && !phoneNumberErrorMsg && !addressErrorMsg && !profilePictureErrorMsg;
+  const isFormValid = isFullNameValid && isUsernameValid && isPhoneNumberValid && isAddressValid && isProfilePictureValid;
   saveProfileBtn.disabled = !isFormValid;
 
-  console.log('[DEBUG] validateProfileForm:', {
-    isFormValid,
-    showErrors,
-    fullNameErrorMsg,
-    usernameErrorMsg,
-    phoneNumberErrorMsg,
-    addressErrorMsg,
-    profilePictureErrorMsg,
-    fieldTouched,
-  });
-
-  return isFormValid;
+  console.log('[DEBUG] validateProfileForm:', { isFormValid, showErrors, fieldTouched });
 }
 
-// Open profile modal
-function openUpdateProfileModal(profile) {
-  if (!updateProfileModal) {
-    console.error('[ERROR] openUpdateProfileModal: #updateProfileModal not found');
-    return;
+function validateField(field) {
+  if (!fieldTouched[field]) return true;
+
+  let isValid = true;
+  const inputElement = window[`${field}Input`];
+  const value = inputElement?.value || '';
+  const errorElement = window[`${field}Error`];
+
+  switch (field) {
+    case 'fullName':
+      if (value.trim().length < 2 || !/^[a-zA-Z\s]+$/.test(value)) {
+        errorElement.textContent = 'Full name must be at least 2 characters and contain only letters';
+        errorElement.classList.add('active');
+        inputElement.classList.add('invalid');
+        isValid = false;
+      } else {
+        errorElement.textContent = '';
+        errorElement.classList.remove('active');
+        inputElement.classList.remove('invalid');
+      }
+      break;
+    case 'username':
+      if (value.trim().length < 3 || !/^[a-zA-Z0-9_]+$/.test(value)) {
+        errorElement.textContent = 'Username must be at least 3 characters and contain only letters, numbers, or underscores';
+        errorElement.classList.add('active');
+        inputElement.classList.add('invalid');
+        isValid = false;
+      } else if (!isUsernameAvailable) {
+        errorElement.textContent = 'Username is already taken or invalid';
+        errorElement.classList.add('active');
+        inputElement.classList.add('invalid');
+        isValid = false;
+      } else {
+        errorElement.textContent = '';
+        errorElement.classList.remove('active');
+        inputElement.classList.remove('invalid');
+      }
+      break;
+    case 'phoneNumber':
+      const cleaned = value.replace(/\s/g, '');
+      if (cleaned && !isNigeriaMobile(value)) {
+        errorElement.textContent = 'Please enter a valid Nigerian phone number';
+        errorElement.classList.add('active');
+        inputElement.classList.add('invalid');
+        isValid = false;
+      } else {
+        errorElement.textContent = '';
+        errorElement.classList.remove('active');
+        inputElement.classList.remove('invalid');
+      }
+      break;
+    case 'address':
+      if (value.trim().length < 5) {
+        errorElement.textContent = 'Address must be at least 5 characters long';
+        errorElement.classList.add('active');
+        inputElement.classList.add('invalid');
+        isValid = false;
+      } else {
+        errorElement.textContent = '';
+        errorElement.classList.remove('active');
+        inputElement.classList.remove('invalid');
+      }
+      break;
+    case 'profilePicture':
+      const file = profilePictureInput.files[0];
+      if (file && !['image/jpeg', 'image/png', 'image/gif'].includes(file.type)) {
+        errorElement.textContent = 'Please upload a valid image (JPEG, PNG, or GIF)';
+        errorElement.classList.add('active');
+        isValid = false;
+      } else if (file && file.size > 2 * 1024 * 1024) {
+        errorElement.textContent = 'File size must be less than 2MB';
+        errorElement.classList.add('active');
+        isValid = false;
+      } else {
+        errorElement.textContent = '';
+        errorElement.classList.remove('active');
+      }
+      break;
   }
+  return isValid;
+}
+
+function openUpdateProfileModal(profile) {
+  if (!updateProfileModal) return;
   updateProfileModal.style.display = 'block';
   setTimeout(() => {
     updateProfileModal.classList.add('active');
@@ -2340,17 +2356,16 @@ function openUpdateProfileModal(profile) {
   const fullName = profile?.fullName || localStorage.getItem('fullName') || localStorage.getItem('userEmail')?.split('@')[0] || '';
   const username = profile?.username || localStorage.getItem('username') || '';
   const phoneNumber = profile?.phoneNumber || localStorage.getItem('phoneNumber') || '';
-  const address = profile?.address || localStorage.getItem('address') || '';
   fullNameInput.value = fullName;
   usernameInput.value = username;
   phoneNumberInput.value = phoneNumber;
   emailInput.value = profile?.email || localStorage.getItem('userEmail') || '';
-  addressInput.value = address;
+  addressInput.value = profile?.address || localStorage.getItem('address') || '';
 
   // Disable fields based on rules
   fullNameInput.disabled = localStorage.getItem('fullNameEdited') === 'true';
-  phoneNumberInput.disabled = !!phoneNumber;
-  emailInput.disabled = true;
+  phoneNumberInput.disabled = !!phoneNumber; // Disable if phone number exists
+  emailInput.disabled = true; // Email is never editable
 
   // Set avatar
   const profilePicture = localStorage.getItem('profilePicture');
@@ -2363,143 +2378,281 @@ function openUpdateProfileModal(profile) {
     profilePicturePreview.textContent = displayName.charAt(0).toUpperCase();
   }
 
-  // Reset error messages and touched states
+  // Reset error messages and touched states and invalid classes
+  [fullNameInput, usernameInput, phoneNumberInput, addressInput].forEach(input => input.classList.remove('invalid'));
   fullNameError.textContent = '';
   usernameError.textContent = '';
   phoneNumberError.textContent = '';
   addressError.textContent = '';
   profilePictureError.textContent = '';
-  Object.keys(fieldTouched).forEach(key => (fieldTouched[key] = false));
+  Object.keys(fieldTouched).forEach(key => fieldTouched[key] = false);
 
-  // Remove existing input listeners
+  // Remove existing input listeners to prevent duplicates
   const inputs = [fullNameInput, usernameInput, phoneNumberInput, addressInput, profilePictureInput];
   inputs.forEach(input => {
-    // Clone the input to remove all existing listeners
-    const newInput = input.cloneNode(true);
-    input.parentNode.replaceChild(newInput, input);
-    // Update references to the new input elements
-    if (input.id === 'fullName') fullNameInput = newInput;
-    if (input.id === 'username') usernameInput = newInput;
-    if (input.id === 'phoneNumber') phoneNumberInput = newInput;
-    if (input.id === 'address') addressInput = newInput;
-    if (input.id === 'profilePicture') profilePictureInput = newInput;
+    input.removeEventListener('input', () => {});
+    input.removeEventListener('change', () => {});
+    input.removeEventListener('keypress', () => {});
+    input.removeEventListener('beforeinput', () => {});
+    input.removeEventListener('keydown', () => {});
+    input.removeEventListener('paste', () => {});
   });
 
-  // Add input listeners
+  // Add input listeners for live validation
   fullNameInput.addEventListener('input', () => {
-    fieldTouched.fullName = true;
-    validateProfileForm(true);
+    if (!fullNameInput.disabled) {
+      fieldTouched.fullName = true;
+      validateField('fullName');
+      validateProfileForm(true);
+    }
   });
-
-  const debouncedUsernameCheck = debounce(async () => {
+  usernameInput.addEventListener('input', debounce(async () => {
     fieldTouched.username = true;
-    const usernameValidation = validateUsername(usernameInput.value);
-    if (usernameValidation) {
-      usernameError.textContent = usernameValidation;
+    validateField('username');
+    const lastUpdate = localStorage.getItem('lastUsernameUpdate');
+    if (lastUpdate) {
+      const daysSinceUpdate = (Date.now() - new Date(lastUpdate).getTime()) / (1000 * 60 * 60 * 24);
+      if (daysSinceUpdate < 90) {
+        usernameError.textContent = `You can update your username again in ${Math.ceil(90 - daysSinceUpdate)} days`;
+        usernameError.classList.add('active');
+        usernameInput.classList.add('invalid');
+        isUsernameAvailable = false;
+        validateProfileForm(true);
+        return;
+      }
+    }
+    const isAvailable = await checkUsernameAvailability(usernameInput.value);
+    if (!isAvailable && fieldTouched.username) {
+      usernameError.textContent = 'Username is already taken or invalid';
       usernameError.classList.add('active');
-    } else {
-      const { available, message } = await checkUsernameAvailability(usernameInput.value);
-      usernameError.textContent = message;
-      usernameError.classList.toggle('active', !!message);
+      usernameInput.classList.add('invalid');
+    } else if (isAvailable) {
+      usernameInput.classList.remove('invalid');
     }
     validateProfileForm(true);
-  }, 500);
-
-  usernameInput.addEventListener('input', debouncedUsernameCheck);
-
-  phoneNumberInput.addEventListener('input', () => {
-    fieldTouched.phoneNumber = true;
-    validateProfileForm(true);
-  });
-
+  }, 300));
   addressInput.addEventListener('input', () => {
     fieldTouched.address = true;
+    validateField('address');
     validateProfileForm(true);
   });
-
   profilePictureInput.addEventListener('change', () => {
     fieldTouched.profilePicture = true;
-    const file = profilePictureInput.files[0];
-    const errorMsg = validateProfilePicture(file);
-    profilePictureError.textContent = errorMsg;
-    profilePictureError.classList.toggle('active', !!errorMsg);
-    if (file && !errorMsg) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        profilePicturePreview.innerHTML = `<img src="${reader.result}" alt="Profile Picture" class="avatar-img" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`;
-      };
-      reader.readAsDataURL(file);
-    } else {
-      const displayName = usernameInput.value || fullNameInput.value.split(' ')[0] || 'User';
-      profilePicturePreview.innerHTML = '';
-      profilePicturePreview.textContent = displayName.charAt(0).toUpperCase();
-    }
+    validateField('profilePicture');
     validateProfileForm(true);
   });
 
+  // Add Nigerian phone number validation and formatting (matching dashboard rules)
+  if (!phoneNumberInput.disabled) {
+    phoneNumberInput.addEventListener('keypress', (e) => {
+      if (e.key === '+') {
+        e.preventDefault();
+        console.log('[DEBUG] phoneNumberInput keypress: Blocked + key');
+      }
+    });
+
+    phoneNumberInput.addEventListener('beforeinput', (e) => {
+      const rawInput = phoneNumberInput.value.replace(/\s/g, '');
+      const willPrependZero = rawInput.length === 0 && e.data && /^[789]$/.test(e.data);
+      if ((rawInput.length >= 11 || (rawInput.length >= 10 && willPrependZero)) && e.data && /\d/.test(e.data)) {
+        e.preventDefault();
+        console.log('[DEBUG] phoneNumberInput beforeinput: Blocked input beyond 11 digits');
+        return;
+      }
+      if (e.data && !/^\d$/.test(e.data)) {
+        e.preventDefault();
+        console.log('[DEBUG] phoneNumberInput beforeinput: Blocked non-digit input:', e.data);
+      }
+    });
+
+    phoneNumberInput.addEventListener('keydown', (e) => {
+      const allowedKeys = [
+        'Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab', 'Enter',
+        '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'
+      ];
+      if ((e.ctrlKey || e.metaKey) && ['a', 'c', 'v'].includes(e.key.toLowerCase())) {
+        return;
+      }
+      if (!allowedKeys.includes(e.key)) {
+        e.preventDefault();
+        console.log('[DEBUG] phoneNumberInput keydown: Blocked non-allowed key:', e.key);
+      }
+    });
+
+    phoneNumberInput.addEventListener('paste', (e) => {
+      e.preventDefault();
+      const pastedData = (e.clipboardData || window.clipboardData).getData('text').trim();
+      console.log('[DEBUG] phoneNumberInput paste: Raw pasted data:', pastedData);
+
+      const normalized = normalizePhone(pastedData);
+      if (!normalized) {
+        phoneNumberInput.classList.add('invalid');
+        console.log('[DEBUG] phoneNumberInput paste: Blocked invalid number:', pastedData);
+        alert('Please paste a valid Nigerian phone number (e.g., +2348031234567 or 08031234567).');
+        return;
+      }
+
+      const { value: formatted, cursorOffset } = formatNigeriaNumber(normalized, false, true);
+      if (!formatted) {
+        phoneNumberInput.classList.add('invalid');
+        console.log('[DEBUG] phoneNumberInput paste: Invalid formatted number:', normalized);
+        alert('Invalid phone number format. Please paste a valid Nigerian number.');
+        return;
+      }
+
+      phoneNumberInput.value = formatted;
+      console.log('[DEBUG] phoneNumberInput paste: Accepted and formatted:', formatted);
+
+      const newCursorPosition = formatted.length;
+      phoneNumberInput.setSelectionRange(newCursorPosition, newCursorPosition);
+
+      const prefix = normalized.slice(0, 4);
+      const validPrefixes = Object.values(providerPrefixes).flat();
+      phoneNumberInput.classList.toggle('invalid', normalized.length >= 4 && !validPrefixes.includes(prefix));
+
+      fieldTouched.phoneNumber = true;
+      validateField('phoneNumber');
+      validateProfileForm(true);
+
+      if (normalized.length === 11 && isNigeriaMobile(normalized)) {
+        phoneNumberInput.blur();
+        console.log('[RAW LOG] phoneNumberInput paste: Keyboard closed, valid Nigeria number:', normalized);
+      }
+    });
+
+    phoneNumberInput.addEventListener('input', debounce((e) => {
+      const cursorPosition = phoneNumberInput.selectionStart;
+      const rawInput = phoneNumberInput.value.replace(/\s/g, '');
+      const isInitialDigit = rawInput.length === 1 && /^[789]$/.test(rawInput);
+      const isDelete = e.inputType === 'deleteContentBackward' || e.inputType === 'deleteContentForward';
+
+      if (!rawInput && isDelete) {
+        phoneNumberInput.classList.remove('invalid');
+        validateProfileForm(true);
+        console.log('[DEBUG] phoneNumberInput input: Input cleared, no validation');
+        return;
+      }
+
+      const normalized = normalizePhone(rawInput);
+      if (!normalized && rawInput) {
+        phoneNumberInput.value = rawInput;
+        phoneNumberInput.classList.add('invalid');
+        console.log('[DEBUG] phoneNumberInput input: Invalid number, keeping raw input:', rawInput);
+        validateProfileForm(true);
+        return;
+      }
+
+      let finalNormalized = normalized;
+      if (normalized.length > 11) {
+        finalNormalized = normalized.slice(0, 11);
+        console.log('[DEBUG] phoneNumberInput input: Truncated to 11 digits:', finalNormalized);
+      }
+
+      const { value: formatted, cursorOffset } = formatNigeriaNumber(finalNormalized, isInitialDigit, false);
+      phoneNumberInput.value = formatted;
+
+      let newCursorPosition = cursorPosition;
+      if (isInitialDigit) {
+        newCursorPosition = 2;
+      } else if (finalNormalized.length >= 4 && finalNormalized.length <= 7) {
+        if (cursorPosition > 4) newCursorPosition += 1;
+      } else if (finalNormalized.length > 7) {
+        if (cursorPosition > 4) newCursorPosition += 1;
+        if (cursorPosition > 7) newCursorPosition += 1;
+      }
+      newCursorPosition = Math.min(newCursorPosition, formatted.length);
+      phoneNumberInput.setSelectionRange(newCursorPosition, newCursorPosition);
+
+      const prefix = finalNormalized.slice(0, 4);
+      const validPrefixes = Object.values(providerPrefixes).flat();
+      phoneNumberInput.classList.toggle('invalid', finalNormalized.length >= 4 && !validPrefixes.includes(prefix));
+
+      fieldTouched.phoneNumber = true;
+      validateField('phoneNumber');
+      validateProfileForm(true);
+
+      if (finalNormalized.length === 11 && isNigeriaMobile(finalNormalized)) {
+        phoneNumberInput.blur();
+        console.log('[RAW LOG] phoneNumberInput input: Keyboard closed, valid Nigeria number:', finalNormalized);
+      }
+    }, 50));
+    phoneNumberInput.maxLength = 13; // 11 digits + 2 spaces
+  }
+
   validateProfileForm(false);
-  console.log('[DEBUG] openUpdateProfileModal: Modal opened', { fullName, username, phoneNumber, address });
+  console.log('[DEBUG] openUpdateProfileModal: Modal opened', { fullName, username, phoneNumber });
 }
 
-// Close profile modal
 function closeUpdateProfileModal() {
   if (!updateProfileModal) return;
   updateProfileModal.classList.remove('active');
   updateProfileModal.setAttribute('aria-hidden', 'true');
   document.body.classList.remove('modal-open');
+  
+  // Delay display: none to allow slide-out animation to complete
   setTimeout(() => {
     updateProfileModal.style.display = 'none';
-    centerAlert.classList.add('hidden');
-    updateProfileForm.reset();
-    profilePicturePreview.innerHTML = '';
-    profilePicturePreview.textContent = (localStorage.getItem('username') || localStorage.getItem('fullName')?.split(' ')[0] || 'User').charAt(0).toUpperCase();
-    fullNameError.textContent = '';
-    usernameError.textContent = '';
-    phoneNumberError.textContent = '';
-    addressError.textContent = '';
-    profilePictureError.textContent = '';
-    Object.keys(fieldTouched).forEach(key => (fieldTouched[key] = false));
-    saveProfileBtn.disabled = true;
-  }, 400); // Match CSS transition duration
+  }, 400); // Match the CSS transition duration (0.4s)
   console.log('[DEBUG] closeUpdateProfileModal: Modal closed');
 }
 
 // Initialize modal event listeners
 if (updateProfileModal) {
   const backBtn = updateProfileModal.querySelector('.back-btn');
-  const closeModalBtn = updateProfileModal.querySelector('.close-btn');
   backBtn?.addEventListener('click', closeUpdateProfileModal);
-  closeModalBtn?.addEventListener('click', closeUpdateProfileModal);
-  updateProfileModal.addEventListener('click', e => {
-    if (e.target === updateProfileModal) closeUpdateProfileModal();
-  });
-  window.addEventListener('keydown', e => {
-    if (e.key === 'Escape' && updateProfileModal.classList.contains('active')) {
-      closeUpdateProfileModal();
+}
+
+// Handle popstate to close modal when navigating back
+window.addEventListener('popstate', (event) => {
+  if (!event.state || event.state.modal !== 'updateProfile') {
+    closeUpdateProfileModal();
+  }
+});
+
+if (profilePictureInput) {
+  profilePictureInput.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    profilePictureError.textContent = ''; // Clear previous error
+    profilePictureError.classList.remove('active'); // Hide error
+    if (file) {
+      if (file.size > 2 * 1024 * 1024) {
+        profilePictureError.textContent = 'File size must be less than 2MB';
+        profilePictureError.classList.add('active');
+        profilePicturePreview.innerHTML = ''; // Clear preview
+        profilePicturePreview.textContent = (usernameInput.value || fullNameInput.value.split(' ')[0] || 'User').charAt(0).toUpperCase();
+        return;
+      }
+      if (!['image/jpeg', 'image/png', 'image/gif'].includes(file.type)) {
+        profilePictureError.textContent = 'Only JPG, PNG, or GIF files are allowed';
+        profilePictureError.classList.add('active');
+        profilePicturePreview.innerHTML = ''; // Clear preview
+        profilePicturePreview.textContent = (usernameInput.value || fullNameInput.value.split(' ')[0] || 'User').charAt(0).toUpperCase();
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        profilePicturePreview.innerHTML = `<img src="${reader.result}" alt="Profile Picture" class="avatar-img" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`;
+      };
+      reader.readAsDataURL(file);
+    } else {
+      // If no file selected, revert to text-based avatar
+      const displayName = usernameInput.value || fullNameInput.value.split(' ')[0] || 'User';
+      profilePicturePreview.innerHTML = '';
+      profilePicturePreview.textContent = displayName.charAt(0).toUpperCase();
     }
   });
 }
 
-// Profile update card click
-const updateProfileCard = document.querySelector('.card.update-profile');
-if (updateProfileCard) {
-  updateProfileCard.addEventListener('click', () => {
-    console.log('[DEBUG] Update Profile card clicked');
-    openUpdateProfileModal({});
-    history.pushState({ modal: 'updateProfile' }, '', location.href);
-  });
-}
-
-// Profile form submission
+// --- Profile Update Form Submission ---
 if (updateProfileForm) {
-  updateProfileForm.addEventListener('submit', async e => {
+  updateProfileForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    if (saveProfileBtn.disabled) {
-      console.log('[DEBUG] updateProfileForm: Submission blocked, form invalid');
-      return;
-    }
+    if (saveProfileBtn.disabled) return;
 
     const formData = new FormData(updateProfileForm);
+    const currentUsername = localStorage.getItem('username');
+    const newUsername = formData.get('username');
     const currentPhoneNumber = localStorage.getItem('phoneNumber');
     const newPhoneNumber = formData.get('phoneNumber');
 
@@ -2507,17 +2660,18 @@ if (updateProfileForm) {
     if (currentPhoneNumber && newPhoneNumber !== currentPhoneNumber) {
       phoneNumberError.textContent = 'Phone number cannot be changed once set';
       phoneNumberError.classList.add('active');
-      validateProfileForm(true);
       return;
     }
 
-    // Validate username availability
-    const { available, message } = await checkUsernameAvailability(formData.get('username'));
-    if (!available) {
-      usernameError.textContent = message;
-      usernameError.classList.add('active');
-      validateProfileForm(true);
-      return;
+    // Check username update restriction
+    const lastUpdate = localStorage.getItem('lastUsernameUpdate');
+    if (currentUsername && newUsername !== currentUsername && lastUpdate) {
+      const daysSinceUpdate = (Date.now() - new Date(lastUpdate).getTime()) / (1000 * 60 * 60 * 24);
+      if (daysSinceUpdate < 90) {
+        usernameError.textContent = `You can update your username again in ${Math.ceil(90 - daysSinceUpdate)} days`;
+        usernameError.classList.add('active');
+        return;
+      }
     }
 
     try {
@@ -2533,14 +2687,13 @@ if (updateProfileForm) {
 
       // Update local storage
       const fullName = formData.get('fullName');
-      const newUsername = formData.get('username');
-      localStorage.setItem('username', newUsername);
+      localStorage.setItem('username', newUsername || '');
       localStorage.setItem('firstName', fullName.split(' ')[0] || '');
       localStorage.setItem('fullName', fullName);
       localStorage.setItem('phoneNumber', newPhoneNumber || '');
       localStorage.setItem('address', formData.get('address') || '');
       localStorage.setItem('fullNameEdited', localStorage.getItem('fullNameEdited') === 'true' || fullName !== localStorage.getItem('fullName') ? 'true' : 'false');
-      if (newUsername !== localStorage.getItem('username')) {
+      if (newUsername !== currentUsername) {
         localStorage.setItem('lastUsernameUpdate', new Date().toISOString());
       }
 
@@ -2549,23 +2702,22 @@ if (updateProfileForm) {
         reader.onload = () => {
           localStorage.setItem('profilePicture', reader.result);
           updateGreetingAndAvatar(newUsername, fullName.split(' ')[0]);
+          profilePicturePreview.innerHTML = `<img src="${reader.result}" alt="Profile Picture" class="avatar-img" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`;
         };
         reader.readAsDataURL(profilePictureInput.files[0]);
       } else if (!formData.get('profilePicture')) {
         localStorage.removeItem('profilePicture');
         updateGreetingAndAvatar(newUsername, fullName.split(' ')[0]);
+        profilePicturePreview.innerHTML = '';
+        profilePicturePreview.textContent = (newUsername || fullName.split(' ')[0] || 'User').charAt(0).toUpperCase();
       }
 
-      centerAlertMsg.textContent = 'Profile updated successfully!';
-      centerAlert.classList.remove('hidden');
-      setTimeout(() => {
-        closeUpdateProfileModal();
-      }, 2000);
-      await loadUserProfile(); // Refresh profile data
+    
+      alert('Profile updated successfully!');
+      closeUpdateProfileModal();
     } catch (err) {
       console.error('[ERROR] updateProfileForm:', err);
-      centerAlertMsg.textContent = err.message || 'Failed to update profile';
-      centerAlert.classList.remove('hidden');
+      alert(`Failed to update profile: ${err.message}`);
     }
   });
 }
