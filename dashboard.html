@@ -1,9 +1,8 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="refresh" content="3.5;url=/frontend/html/dashboard.html">
-  <script src="frontend/js/navigo.min.js" defer></script>
+  <title>Redirecting TO Dashboard</title>
   <style>
     body {
       margin: 0;
@@ -12,7 +11,7 @@
       justify-content: center;
       align-items: center;
       font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      background-color: #000000; /* Pure black */
+      background-color: #000000;
       color: #f9fafb;
       overflow: hidden;
     }
@@ -40,7 +39,7 @@
       background: linear-gradient(90deg, #FFD700, #fff1a8, #FFD700);
       border-radius: 3px;
       background-size: 200% 100%;
-      animation: fillBar 3s cubic-bezier(0.4, 0, 0.2, 1) forwards, shine 2s linear infinite;
+      animation: shine 2s linear infinite;
     }
 
     /* Text without cursor */
@@ -53,10 +52,6 @@
     }
 
     /* Animations */
-    @keyframes fillBar {
-      to { width: 100%; }
-    }
-
     @keyframes shine {
       0% { background-position: 200% 0; }
       100% { background-position: -200% 0; }
@@ -79,7 +74,7 @@
 <body>
   <div class="container" id="page">
     <div class="loader-bar">
-      <div class="loader-fill"></div>
+      <div class="loader-fill" id="loader"></div>
     </div>
     <p class="text" id="typing"></p>
   </div>
@@ -87,24 +82,36 @@
   <script>
     const text = "Redirecting to dashboard...";
     const typingElement = document.getElementById("typing");
+    const pageContainer = document.getElementById("page");
+    const loader = document.getElementById("loader");
+
     let index = 0;
+    const typingSpeed = 80; // ms per character
+    const pauseAfterTyping = 500; // ms pause after typing
+
+    // Set loader duration to match typing duration
+    const totalTypingTime = text.length * typingSpeed;
+    loader.style.transition = `width ${totalTypingTime}ms linear`;
+    // Start loader
+    setTimeout(() => { loader.style.width = '100%'; }, 300);
 
     function typeEffect() {
       if (index < text.length) {
         typingElement.textContent += text.charAt(index);
         index++;
-        setTimeout(typeEffect, 80);
+        setTimeout(typeEffect, typingSpeed);
+      } else {
+        // After typing finishes
+        setTimeout(() => {
+          pageContainer.classList.add("fade-out");
+          pageContainer.addEventListener("animationend", () => {
+            window.location.href = "/frontend/html/dashboard.html";
+          });
+        }, pauseAfterTyping);
       }
     }
 
-    setTimeout(() => {
-      typeEffect();
-    }, 300);
-
-    // Fade out before redirect
-    setTimeout(() => {
-      document.getElementById("page").classList.add("fade-out");
-    }, 3200);
+    setTimeout(typeEffect, 300);
   </script>
 </body>
 </html>
