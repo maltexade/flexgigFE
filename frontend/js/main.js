@@ -144,6 +144,11 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
         '/dashboard': async () => {
           console.log('[DEBUG] main.js: Routing to /dashboard');
           window.location.href = '/frontend/html/dashboard.html';
+        },
+        '/dashboard': () => {
+          console.log('[DEBUG] main.js: Routing to /dashboard');
+          // ✅ Point directly to dashboard.html
+          window.location.href = '/frontend/html/dashboard.html';
         }
       })
 
