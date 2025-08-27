@@ -2374,8 +2374,15 @@ function openUpdateProfileModal(profile) {
   // Remove existing input listeners
   const inputs = [fullNameInput, usernameInput, phoneNumberInput, addressInput, profilePictureInput];
   inputs.forEach(input => {
-    input.removeEventListener('input', validateField);
-    input.removeEventListener('change', validateField);
+    // Clone the input to remove all existing listeners
+    const newInput = input.cloneNode(true);
+    input.parentNode.replaceChild(newInput, input);
+    // Update references to the new input elements
+    if (input.id === 'fullName') fullNameInput = newInput;
+    if (input.id === 'username') usernameInput = newInput;
+    if (input.id === 'phoneNumber') phoneNumberInput = newInput;
+    if (input.id === 'address') addressInput = newInput;
+    if (input.id === 'profilePicture') profilePictureInput = newInput;
   });
 
   // Add input listeners
