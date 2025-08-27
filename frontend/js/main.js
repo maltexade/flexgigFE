@@ -203,15 +203,72 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
     console.log('[DEBUG] main.js: Loading content from', url);
     const res = await fetch(url);
     if (!res.ok) throw new Error(`Failed to load ${url}: ${res.status}`);
-    content.innerHTML = await res.text();
+    const text = await res.text();
+
+    // Parse fetched HTML safely
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(text, 'text/html');
+
+    // Prefer <main> fragment, then #content, then body
+    const fragmentSource =
+      doc.querySelector('main') ||
+      doc.getElementById('content') ||
+      doc.body;
+
+    // Replace inner HTML with only the fragment's inner content
+    content.innerHTML = fragmentSource.innerHTML;
+
+    // ----- Handle stylesheets from the fetched doc (avoid duplicates) -----
+    const links = Array.from(doc.querySelectorAll('link[rel="stylesheet"]'));
+    links.forEach(link => {
+      const href = link.getAttribute('href');
+      if (href && !document.querySelector(`link[rel="stylesheet"][href="${href}"]`)) {
+        const newLink = document.createElement('link');
+        newLink.rel = 'stylesheet';
+        newLink.href = href;
+        document.head.appendChild(newLink);
+      }
+    });
+
+    // ----- Handle scripts from the fetched doc (run them, avoid reloading main.js) -----
+    const scripts = Array.from(doc.querySelectorAll('script'));
+    for (const s of scripts) {
+      const src = s.getAttribute('src');
+      if (src) {
+        // don't re-load main.js if it's already present
+        if (document.querySelector(`script[src="${src}"]`)) continue;
+        await new Promise((resolve, reject) => {
+          const el = document.createElement('script');
+          el.src = src;
+          el.async = false; // preserve execution order if multiple
+          el.onload = () => resolve();
+          el.onerror = () => {
+            console.warn('[loadContent] Failed to load script', src);
+            resolve(); // don't block the page, just continue
+          };
+          document.body.appendChild(el);
+        });
+      } else {
+        // inline script: create and execute
+        try {
+          const inline = document.createElement('script');
+          inline.textContent = s.textContent;
+          document.body.appendChild(inline);
+        } catch (e) {
+          console.warn('[loadContent] Inline script execution failed', e);
+        }
+      }
+    }
+
+    // Signal content loaded
     console.log('[main.js] Loaded content from', url);
-    // Dispatch event to signal content load
     document.dispatchEvent(new Event('contentLoaded'));
   } catch (error) {
     console.error('[main.js] Error loading content:', error);
     content.innerHTML = '<p>Error loading page</p>';
   }
 }
+
 
   // -----------------------------
   // Actions
