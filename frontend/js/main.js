@@ -123,44 +123,53 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
   let router = null;
 
   function setupRouter() {
-    if (!window.Navigo) {
-      console.error('[main.js] Navigo is not defined.');
-      return;
-    }
-
-    router = new Navigo('/', { hash: false });
-    console.log('[DEBUG] main.js: Router initialized', { path: window.location.pathname });
-
-    router
-      .on({
-        '/': () => {
-          console.log('[DEBUG] main.js: Routing to / (homepage)');
-          // ✅ Do nothing, let index.html show as-is
-        },
-        '/auth/email': () => {
-          console.log('[DEBUG] main.js: Routing to /auth/email');
-          window.location.href = '/frontend/html/login.html';
-        },
-        '/dashboard': async () => {
-          console.log('[DEBUG] main.js: Routing to /dashboard');
-          window.location.href = '/frontend/html/dashboard.html';
-        },
-        '/dashboard': () => {
-          console.log('[DEBUG] main.js: Routing to /dashboard');
-          // ✅ Point directly to dashboard.html
-          window.location.href = '/frontend/html/dashboard.html';
-        }
-      })
-
-      .notFound(() => {
-        console.log('[DEBUG] main.js: Not found route triggered', {
-          path: window.location.pathname,
-          search: window.location.search
-        });
-        document.body.innerHTML = '<p>Page not found</p>';
-      })
-      .resolve();
+  if (!window.Navigo) {
+    console.error('[main.js] Navigo is not defined.');
+    return;
   }
+
+  router = new Navigo('/', { hash: false });
+  console.log('[DEBUG] main.js: Router initialized', { path: window.location.pathname });
+
+  router
+    .on({
+      '/': () => {
+        console.log('[DEBUG] main.js: Routing to / (homepage)');
+        // Do nothing, let index.html show as-is
+      },
+      '/auth/email': () => {
+        console.log('[DEBUG] main.js: Routing to /auth/email');
+        window.location.href = '/frontend/html/login.html';
+      },
+      '/dashboard': async () => {
+        console.log('[DEBUG] main.js: Routing to /dashboard');
+        // Load dashboard.html content if needed, or let browser handle
+        if (!window.location.pathname.includes('dashboard.html')) {
+          await loadContent('/frontend/html/dashboard.html');
+        }
+        // Ensure session is checked after content loads
+        await ensureSignedInFromSession();
+      },
+      '/frontend/html/dashboard.html': async () => {
+        console.log('[DEBUG] main.js: Routing to /frontend/html/dashboard.html');
+        // Dashboard is already loaded by browser, just check session
+        await ensureSignedInFromSession();
+      }
+    })
+    .notFound(() => {
+      console.log('[DEBUG] main.js: Not found route triggered', {
+        path: window.location.pathname,
+        search: window.location.search
+      });
+      // Only show 404 if not on dashboard
+      if (!window.location.pathname.includes('dashboard.html')) {
+        document.body.innerHTML = '<p>Page not found</p>';
+      } else {
+        console.log('[DEBUG] main.js: Skipping 404 for dashboard.html');
+      }
+    })
+    .resolve();
+}
 
   // 🔹 Keep loadContent in case you use it for smaller includes later
   async function loadContent(url) {
