@@ -92,14 +92,44 @@ function safeGetSession(retries = 5) {
   }
 }
 
-// Run safeGetSession only on dashboard
+// Run observer only on dashboard
 if (window.location.pathname.includes('dashboard.html')) {
-  document.addEventListener('DOMContentLoaded', () => {
-    console.log('[DEBUG] DOMContentLoaded: Running safeGetSession');
-    safeGetSession();
+  window.addEventListener('load', () => { // Or 'DOMContentLoaded' if preferred
+    console.log('[DEBUG] window.load: Starting MutationObserver');
+    observeForElements();
   });
 }
 
+// --- Observer to wait for elements ---
+function observeForElements() {
+  const targetNode = document.body; // Or a specific parent like document.querySelector('.user-greeting')
+  const config = { childList: true, subtree: true }; // Watch for added/removed nodes
+
+  const observer = new MutationObserver((mutations, obs) => {
+    const greetEl = document.getElementById('greet');
+    const firstnameEl = document.getElementById('firstname');
+    const avatarEl = document.getElementById('avatar');
+
+    if (greetEl && firstnameEl && avatarEl) {
+      console.log('[DEBUG] MutationObserver: Elements detected, running getSession');
+      getSession(); // Call directly (no need for safeGetSession retries here)
+      obs.disconnect(); // Stop observing once elements are found
+    }
+  });
+
+  observer.observe(targetNode, config);
+  console.log('[DEBUG] MutationObserver: Started watching for elements');
+  
+  // Fallback: If elements already exist, call immediately
+  const greetEl = document.getElementById('greet');
+  const firstnameEl = document.getElementById('firstname');
+  const avatarEl = document.getElementById('avatar');
+  if (greetEl && firstnameEl && avatarEl) {
+    console.log('[DEBUG] MutationObserver: Elements already present');
+    getSession();
+    observer.disconnect();
+  }
+}
 
 // Remove fetchUserData and consolidate into getSession
 async function loadUserProfile() {
