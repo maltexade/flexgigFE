@@ -121,97 +121,67 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
   // Router
   // -----------------------------
   let router = null;
+
   function setupRouter() {
-  if (!window.Navigo) {
-    console.error('[main.js] Navigo is not defined.');
-    return;
-  }
-  router = new Navigo('/', { hash: false });
-  console.log('[DEBUG] main.js: Router initialized', { path: window.location.pathname });
+    if (!window.Navigo) {
+      console.error('[main.js] Navigo is not defined.');
+      return;
+    }
 
-  router
-    .on({
-      '/': () => {
-        console.log('[DEBUG] main.js: Routing to /');
-        const content = qs('#content');
-        if (!content) {
-          console.error('[ERROR] main.js: #content element not found for / route');
-          document.body.innerHTML = '<p>Error: Content container not found</p>';
-          return;
-        }
-        loadContent('/frontend/html/login.html');
-      },
-      '/auth/email': () => {
-        console.log('[DEBUG] main.js: Routing to /auth/email');
-        window.location.href = '/frontend/html/login.html';
-      },
-      '/dashboard': async () => {
-        console.log('[DEBUG] main.js: Routing to /dashboard');
-        const content = qs('#content');
-        if (!content) {
-          console.error('[ERROR] main.js: #content element not found for /dashboard');
-          document.body.innerHTML = '<p>Error: Content container not found</p>';
-          return;
-        }
-        const user = await ensureSignedInFromSession();
-        if (user) {
-          await loadContent('/frontend/html/dashboard.html');
-          document.addEventListener('contentLoaded', () => {
-            console.log('[DEBUG] main.js: contentLoaded event triggered for dashboard');
-            if (window.getSession) {
-              window.getSession();
-            } else {
-              console.warn('[WARN] main.js: window.getSession not found');
-            }
-          }, { once: true });
-        } else {
-          console.log('[DEBUG] main.js: No user session, redirecting to login');
+    router = new Navigo('/', { hash: false });
+    console.log('[DEBUG] main.js: Router initialized', { path: window.location.pathname });
+
+    router
+      .on({
+        '/': () => {
+          console.log('[DEBUG] main.js: Routing to /');
+          // ✅ Redirect directly to login page
           window.location.href = '/frontend/html/login.html';
-        }
-      },
-      '/frontend/html/dashboard.html': () => {
-        console.log('[DEBUG] main.js: Routing to /frontend/html/dashboard.html (fallback)');
-        router.navigate('/dashboard');
-      }
-    })
-    .notFound(() => {
-      console.log('[DEBUG] main.js: Not found route triggered', { path: window.location.pathname, search: window.location.search });
-      const content = qs('#content');
-      if (content) {
-        content.innerHTML = '<p>Page not found</p>';
-      } else {
-        console.error('[main.js] #content element not found for notFound route');
-        if (window.location.pathname.includes('dashboard.html')) {
-          console.log('[DEBUG] main.js: Redirecting to /dashboard for dashboard.html');
+        },
+        '/auth/email': () => {
+          console.log('[DEBUG] main.js: Routing to /auth/email');
+          window.location.href = '/frontend/html/login.html';
+        },
+        '/dashboard': async () => {
+          console.log('[DEBUG] main.js: Routing to /dashboard');
+          const user = await ensureSignedInFromSession();
+          if (user) {
+            // ✅ Redirect directly to dashboard page
+            window.location.href = '/frontend/html/dashboard.html';
+          } else {
+            console.log('[DEBUG] main.js: No user session, redirecting to login');
+            window.location.href = '/frontend/html/login.html';
+          }
+        },
+        '/frontend/html/dashboard.html': () => {
+          console.log('[DEBUG] main.js: Routing to /frontend/html/dashboard.html (fallback)');
           router.navigate('/dashboard');
-        } else {
-          document.body.innerHTML = '<p>Page not found</p>';
         }
-      }
-    })
-    .resolve();
-}
+      })
+      .notFound(() => {
+        console.log('[DEBUG] main.js: Not found route triggered', {
+          path: window.location.pathname,
+          search: window.location.search
+        });
+        document.body.innerHTML = '<p>Page not found</p>';
+      })
+      .resolve();
+  }
 
+  // 🔹 Keep loadContent in case you use it for smaller includes later
   async function loadContent(url) {
-  const content = qs('#content');
-  if (!content) {
-    console.error('[main.js] loadContent: #content element not found');
-    document.body.innerHTML = '<p>Error: Content container not found</p>';
-    return;
+    try {
+      console.log('[DEBUG] main.js: Loading content from', url);
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`Failed to load ${url}: ${res.status}`);
+      document.body.innerHTML = await res.text();
+      console.log('[main.js] Loaded content from', url);
+    } catch (error) {
+      console.error('[main.js] Error loading content:', error);
+      document.body.innerHTML = '<p>Error loading page</p>';
+    }
   }
-  try {
-    console.log('[DEBUG] main.js: Loading content from', url);
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`Failed to load ${url}: ${res.status}`);
-    content.innerHTML = await res.text();
-    console.log('[main.js] Loaded content from', url);
-    // Dispatch event to signal content load
-    document.dispatchEvent(new Event('contentLoaded'));
-  } catch (error) {
-    console.error('[main.js] Error loading content:', error);
-    content.innerHTML = '<p>Error loading page</p>';
-  }
-}
+
 
   // -----------------------------
   // Actions
