@@ -1,3 +1,9 @@
+const updateProfileModal = document.getElementById('updateProfileModal');
+if (updateProfileModal && updateProfileModal.classList.contains('active')) {
+  openUpdateProfileModal(data);
+}
+
+
 // --- Fetch User Data ---
 async function getSession() {
   try {
