@@ -283,3 +283,17 @@
 #centerAlert:not(.hidden) {
   display: block;
 }
+/* Existing error class */
+#error.active.error {
+  color: #ff4d4f; /* red */
+}
+
+/* Checking availability */
+#error.active.checking {
+  color: #ffffff; /* white */
+}
+
+/* Available username */
+#error.active.available {
+  color: #52c41a; /* green */
+}

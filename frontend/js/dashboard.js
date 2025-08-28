@@ -2169,11 +2169,13 @@ if (updateProfileCard) {
   });
 }
 
-function isNigeriaMobile(phone) {
+// Profile-specific phone number functions
+function isNigeriaMobileProfile(phone) {
   const cleaned = phone.replace(/\s/g, '');
   return /^0[789][01]\d{8}$/.test(cleaned) && Object.values(providerPrefixes).flat().includes(cleaned.slice(0, 4));
 }
-function normalizePhone(input) {
+
+function normalizePhoneProfile(input) {
   if (!input) return '';
   const digits = input.replace(/\D/g, '');
   if (/^234[789]/.test(digits)) return '0' + digits.slice(3);
@@ -2181,8 +2183,9 @@ function normalizePhone(input) {
   if (/^[789]/.test(digits)) return '0' + digits;
   return digits;
 }
-function formatNigeriaNumber(input, isInitialDigit = false, isPaste = false) {
-  const normalized = normalizePhone(input);
+
+function formatNigeriaNumberProfile(input, isInitialDigit = false, isPaste = false) {
+  const normalized = normalizePhoneProfile(input);
   if (!normalized) return { value: '', cursorOffset: 0 };
   let formatted = normalized;
   if (isInitialDigit) {
@@ -2200,7 +2203,7 @@ function formatNigeriaNumber(input, isInitialDigit = false, isPaste = false) {
   return { value: formatted, cursorOffset: isPaste ? formatted.length : 0 };
 }
 
-// Debounce function
+// Debounce function (reused, no conflict as it's generic)
 function debounce(func, wait) {
   let timeout;
   return function (...args) {
@@ -2304,7 +2307,7 @@ function validateField(field) {
       break;
     case 'phoneNumber':
       const cleaned = value.replace(/\s/g, '');
-      if (cleaned && !isNigeriaMobile(cleaned)) {
+      if (cleaned && !isNigeriaMobileProfile(cleaned)) {
         errorElement.textContent = 'Please enter a valid Nigerian phone number';
         errorElement.classList.add('active');
         inputElement.classList.add('invalid');
@@ -2315,18 +2318,37 @@ function validateField(field) {
         inputElement.classList.remove('invalid');
       }
       break;
-    case 'address':
-      if (value.trim().length < 5) {
-        errorElement.textContent = 'Address must be at least 5 characters long';
-        errorElement.classList.add('active');
-        inputElement.classList.add('invalid');
-        isValid = false;
-      } else {
-        errorElement.textContent = '';
-        errorElement.classList.remove('active');
-        inputElement.classList.remove('invalid');
-      }
-      break;
+   case 'address': {
+  const trimmed = value.trim();
+
+  // Empty address is allowed (until user types something or on submit you want to enforce)
+  if (!trimmed) {
+    errorElement.textContent = '';
+    errorElement.classList.remove('active');
+    inputElement.classList.remove('invalid');
+    break;
+  }
+
+  // If non-empty, run validation rules
+  if (trimmed.length < 5) {
+    errorElement.textContent = 'Address must be at least 5 characters long';
+    errorElement.classList.add('active');
+    inputElement.classList.add('invalid');
+    isValid = false;
+  } else if (!/^[a-zA-Z0-9\s,.\-#]+$/.test(trimmed)) {
+    // note: allow comma, dot, dash, hash
+    errorElement.textContent = 'Address contains invalid characters';
+    errorElement.classList.add('active');
+    inputElement.classList.add('invalid');
+    isValid = false;
+  } else {
+    errorElement.textContent = '';
+    errorElement.classList.remove('active');
+    inputElement.classList.remove('invalid');
+  }
+  break;
+}
+
     case 'profilePicture':
       const file = profilePictureInput.files[0];
       if (file && !['image/jpeg', 'image/png', 'image/gif'].includes(file.type)) {
@@ -2365,7 +2387,7 @@ function openUpdateProfileModal(profile) {
   const email = profile?.email || localStorage.getItem('userEmail') || '';
   if (fullNameInput) fullNameInput.value = fullName;
   if (usernameInput) usernameInput.value = username;
-  if (phoneNumberInput) phoneNumberInput.value = phoneNumber ? formatNigeriaNumber(phoneNumber).value : '';
+  if (phoneNumberInput) phoneNumberInput.value = phoneNumber ? formatNigeriaNumberProfile(phoneNumber).value : '';
   if (emailInput) emailInput.value = email;
   if (addressInput) addressInput.value = profile?.address || localStorage.getItem('address') || '';
 
@@ -2376,7 +2398,7 @@ function openUpdateProfileModal(profile) {
 
   // Set avatar
   const profilePicture = localStorage.getItem('profilePicture');
-  const isValidProfilePicture = profilePicture && profilePicture.startsWith('data:image/') || profilePicture.startsWith('https://');
+  const isValidProfilePicture = profilePicture && (profilePicture.startsWith('data:image/') || profilePicture.startsWith('https://'));
   const displayName = username || fullName.split(' ')[0] || 'User';
   if (profilePicturePreview) {
     if (isValidProfilePicture) {
@@ -2413,53 +2435,177 @@ function openUpdateProfileModal(profile) {
   });
 
   // Add input listeners for live validation
-  if (fullNameInput && !fullNameInput.disabled) {
+  // Add input listeners for live validation
+if (fullNameInput) {
+  const fullNameAlreadySet = localStorage.getItem('fullNameEdited') === 'true';
+  if (fullNameAlreadySet) {
+    fullNameInput.disabled = true;
+    fullNameError.textContent = 'Full name can only be set once';
+    fullNameError.classList.add('active');
+    fullNameInput.classList.add('invalid');
+  } else {
+    fullNameInput.disabled = false;
     fullNameInput.addEventListener('input', () => {
       fieldTouched.fullName = true;
-      validateField('fullName');
-      validateProfileForm(true);
-    });
-  }
+      const value = fullNameInput.value.trim();
+      let error = '';
 
-  if (usernameInput) {
-    usernameInput.addEventListener('input', debounce(async () => {
-      fieldTouched.username = true;
-      validateField('username');
-      const lastUpdate = localStorage.getItem('lastUsernameUpdate');
-      if (lastUpdate && usernameInput.value !== localStorage.getItem('username')) {
-        const daysSinceUpdate = (Date.now() - new Date(lastUpdate).getTime()) / (1000 * 60 * 60 * 24);
-        if (daysSinceUpdate < 90) {
-          if (usernameError && usernameInput) {
-            usernameError.textContent = `You can update your username again in ${Math.ceil(90 - daysSinceUpdate)} days`;
-            usernameError.classList.add('active');
-            usernameInput.classList.add('invalid');
-            isUsernameAvailable = false;
-          }
-          validateProfileForm(true);
-          return;
+      // Only validate if user typed something
+      if (value.length > 0) {
+        // First, check for invalid characters
+        if (!/^[a-zA-Z\s'-]+$/.test(value)) {
+          error = 'Full name can only contain letters, spaces, hyphens, or apostrophes';
+        }
+        // Then check length
+        else if (value.length < 2) {
+          error = 'Full name must be at least 2 characters';
+        } else if (value.length > 50) {
+          error = 'Full name cannot exceed 50 characters';
         }
       }
-      const isAvailable = await checkUsernameAvailability(usernameInput.value);
-      if (!isAvailable && fieldTouched.username && usernameError && usernameInput) {
-        usernameError.textContent = 'Username is already taken or invalid';
-        usernameError.classList.add('active');
-        usernameInput.classList.add('invalid');
-      } else if (isAvailable && usernameError && usernameInput) {
-        usernameError.textContent = '';
-        usernameError.classList.remove('active');
-        usernameInput.classList.remove('invalid');
-      }
-      validateProfileForm(true);
-    }, 300));
-  }
 
-  if (addressInput) {
-    addressInput.addEventListener('input', () => {
-      fieldTouched.address = true;
-      validateField('address');
+      // Update error display
+      if (error) {
+        fullNameError.textContent = error;
+        fullNameError.classList.add('active');
+        fullNameInput.classList.add('invalid');
+      } else {
+        fullNameError.textContent = '';
+        fullNameError.classList.remove('active');
+        fullNameInput.classList.remove('invalid');
+      }
+
       validateProfileForm(true);
     });
   }
+}
+
+
+
+  if (usernameInput) {
+  usernameInput.addEventListener('input', debounce(async () => {
+    fieldTouched.username = true;
+    const value = usernameInput.value.trim();
+    const errorEl = usernameError;
+
+    // Reset classes
+    if (errorEl) errorEl.classList.remove('error', 'checking', 'available');
+
+        if (!value) {
+      if (errorEl) errorEl.textContent = '';
+      validateProfileForm(true);
+      return;
+    }
+
+        if (/^\d/.test(value)) {
+      if (errorEl) {
+        errorEl.textContent = 'Username cannot start with a number';
+        errorEl.classList.add('error', 'active'); // red
+      }
+      usernameInput.classList.add('invalid');
+      isUsernameAvailable = false;
+      validateProfileForm(true);
+      return;
+    }
+
+    // --- Validation checks ---
+    if (value.length < 3) {
+      if (errorEl) {
+        errorEl.textContent = 'Username must have at least 3 characters';
+        errorEl.classList.add('error', 'active'); // red
+      }
+      usernameInput.classList.add('invalid');
+      isUsernameAvailable = false;
+      validateProfileForm(true);
+      return;
+    }
+
+    if (value.length > 20) {
+      if (errorEl) {
+        errorEl.textContent = 'Username cannot exceed 20 characters';
+        errorEl.classList.add('error', 'active'); // red
+      }
+      usernameInput.classList.add('invalid');
+      isUsernameAvailable = false;
+      validateProfileForm(true);
+      return;
+    }
+
+    if (!/^[a-zA-Z0-9_]+$/.test(value)) {
+      if (errorEl) {
+        errorEl.textContent = 'Username can only contain letters, numbers, or underscores';
+        errorEl.classList.add('error', 'active'); // red
+      }
+      usernameInput.classList.add('invalid');
+      isUsernameAvailable = false;
+      validateProfileForm(true);
+      return;
+    }
+
+    // Passed all validations → check availability
+    if (errorEl) {
+      errorEl.textContent = 'Checking availability...';
+      errorEl.classList.add('checking', 'active'); // white
+    }
+    usernameInput.classList.remove('invalid');
+
+    // --- Supabase availability check ---
+    const isAvailable = await checkUsernameAvailability(value);
+
+    if (isAvailable) {
+      if (errorEl) {
+        errorEl.textContent = `"${value}" is available`;
+        errorEl.classList.add('available', 'active'); // green
+      }
+      usernameInput.classList.remove('invalid');
+    } else {
+      if (errorEl) {
+        errorEl.textContent = 'Username is already taken';
+        errorEl.classList.add('error', 'active'); // red
+      }
+      usernameInput.classList.add('invalid');
+    }
+
+    validateProfileForm(true);
+  }, 300));
+}
+
+
+  if (addressInput) {
+  const addressAlreadySet = !!(profile?.address || localStorage.getItem('address') || '').trim();
+
+  if (addressAlreadySet) {
+    addressInput.disabled = true;
+    addressError.textContent = 'Address can only be set once';
+    addressError.classList.add('active');
+    addressInput.classList.add('invalid');
+    // Mark touched so validateProfileForm is consistent if you want it considered "set"
+    fieldTouched.address = true;
+  } else {
+    addressInput.disabled = false;
+
+    // Attach listener only once (guard using dataset to avoid duplicates)
+    if (!addressInput.dataset.listenerAttached) {
+      const addressHandler = () => {
+        // mark touched only when user interacts
+        fieldTouched.address = true;
+        // central validation function handles empty vs non-empty correctly
+        validateField('address');
+        validateProfileForm(true);
+      };
+
+      addressInput.addEventListener('input', addressHandler);
+      addressInput.addEventListener('paste', (e) => {
+        // give browser time to update value, then validate
+        setTimeout(addressHandler, 0);
+      });
+
+      addressInput.dataset.listenerAttached = '1';
+    }
+  }
+}
+
+
 
   if (profilePictureInput) {
     profilePictureInput.addEventListener('change', () => {
@@ -2469,7 +2615,7 @@ function openUpdateProfileModal(profile) {
     });
   }
 
-  // Nigerian phone number validation and formatting
+  // Nigerian phone number validation and formatting for profile modal
   if (phoneNumberInput && !phoneNumberInput.disabled) {
     phoneNumberInput.addEventListener('keypress', (e) => {
       if (e.key === '+') {
@@ -2480,17 +2626,25 @@ function openUpdateProfileModal(profile) {
 
     phoneNumberInput.addEventListener('beforeinput', (e) => {
       const rawInput = phoneNumberInput.value.replace(/\s/g, '');
-      const willPrependZero = rawInput.length === 0 && e.data && /^[789]$/.test(e.data);
-      if ((rawInput.length >= 11 || (rawInput.length >= 10 && willPrependZero)) && e.data && /\d/.test(e.data)) {
-        e.preventDefault();
-        console.log('[DEBUG] phoneNumberInput beforeinput: Blocked input beyond 11 digits');
+
+      // Case: First digit typed is 7/8/9 → auto prepend 0
+      if (rawInput.length === 0 && e.data && /^[789]$/.test(e.data)) {
+        e.preventDefault(); // stop default typing
+        phoneNumberInput.value = '0' + e.data;
+
+        // Place cursor at the very end (after 7/8/9)
+        requestAnimationFrame(() => {
+          phoneNumberInput.setSelectionRange(phoneNumberInput.value.length, phoneNumberInput.value.length);
+        });
         return;
       }
+
+      // Block non-digits
       if (e.data && !/^\d$/.test(e.data)) {
         e.preventDefault();
-        console.log('[DEBUG] phoneNumberInput beforeinput: Blocked non-digit input:', e.data);
       }
     });
+
 
     phoneNumberInput.addEventListener('keydown', (e) => {
       const allowedKeys = [
@@ -2511,7 +2665,7 @@ function openUpdateProfileModal(profile) {
       const pastedData = (e.clipboardData || window.clipboardData).getData('text').trim();
       console.log('[DEBUG] phoneNumberInput paste: Raw pasted data:', pastedData);
 
-      const normalized = normalizePhone(pastedData);
+      const normalized = normalizePhoneProfile(pastedData);
       if (!normalized) {
         phoneNumberInput.classList.add('invalid');
         if (phoneNumberError) {
@@ -2522,7 +2676,7 @@ function openUpdateProfileModal(profile) {
         return;
       }
 
-      const { value: formatted, cursorOffset } = formatNigeriaNumber(normalized, false, true);
+      const { value: formatted, cursorOffset } = formatNigeriaNumberProfile(normalized, false, true);
       if (!formatted) {
         phoneNumberInput.classList.add('invalid');
         if (phoneNumberError) {
@@ -2553,7 +2707,7 @@ function openUpdateProfileModal(profile) {
       validateField('phoneNumber');
       validateProfileForm(true);
 
-      if (normalized.length === 11 && isNigeriaMobile(normalized)) {
+      if (normalized.length === 11 && isNigeriaMobileProfile(normalized)) {
         phoneNumberInput.blur();
         console.log('[RAW LOG] phoneNumberInput paste: Keyboard closed, valid Nigeria number:', normalized);
       }
@@ -2576,7 +2730,7 @@ function openUpdateProfileModal(profile) {
         return;
       }
 
-      const normalized = normalizePhone(rawInput);
+      const normalized = normalizePhoneProfile(rawInput);
       if (!normalized && rawInput) {
         phoneNumberInput.value = rawInput;
         phoneNumberInput.classList.add('invalid');
@@ -2595,7 +2749,7 @@ function openUpdateProfileModal(profile) {
         console.log('[DEBUG] phoneNumberInput input: Truncated to 11 digits:', finalNormalized);
       }
 
-      const { value: formatted, cursorOffset } = formatNigeriaNumber(finalNormalized, isInitialDigit, false);
+      const { value: formatted, cursorOffset } = formatNigeriaNumberProfile(finalNormalized, isInitialDigit, false);
       phoneNumberInput.value = formatted;
 
       let newCursorPosition = cursorPosition;
@@ -2612,19 +2766,34 @@ function openUpdateProfileModal(profile) {
 
       const prefix = finalNormalized.slice(0, 4);
       const validPrefixes = Object.values(providerPrefixes).flat();
-      phoneNumberInput.classList.toggle('invalid', finalNormalized.length >= 4 && !validPrefixes.includes(prefix));
-      if (phoneNumberError) {
-        phoneNumberError.textContent = finalNormalized.length >= 4 && !validPrefixes.includes(prefix)
-          ? 'Invalid phone number prefix'
-          : '';
-        phoneNumberError.classList.toggle('active', finalNormalized.length >= 4 && !validPrefixes.includes(prefix));
+
+      let errorMessage = '';
+
+      if (finalNormalized.length >= 4) {
+        if (!validPrefixes.includes(prefix)) {
+          // If exactly 4 digits → prefix error
+          if (finalNormalized.length === 4) {
+            errorMessage = 'Invalid phone number prefix';
+          } else {
+            // More than 4 digits → general error
+            errorMessage = 'Invalid phone number';
+          }
+        }
       }
+
+      phoneNumberInput.classList.toggle('invalid', !!errorMessage);
+
+      if (phoneNumberError) {
+        phoneNumberError.textContent = errorMessage;
+        phoneNumberError.classList.toggle('active', !!errorMessage);
+      }
+
 
       fieldTouched.phoneNumber = true;
       validateField('phoneNumber');
       validateProfileForm(true);
 
-      if (finalNormalized.length === 11 && isNigeriaMobile(finalNormalized)) {
+      if (finalNormalized.length === 11 && isNigeriaMobileProfile(finalNormalized)) {
         phoneNumberInput.blur();
         console.log('[RAW LOG] phoneNumberInput input: Keyboard closed, valid Nigeria number:', finalNormalized);
       }
