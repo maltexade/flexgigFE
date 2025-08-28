@@ -2262,18 +2262,22 @@ function validateProfileForm(showErrors = true) {
   console.log('[DEBUG] validateProfileForm:', { isFormValid, showErrors, fieldTouched });
 }
 
+
+
 function validateField(field) {
   if (!fieldTouched[field]) return true;
 
   let isValid = true;
   const inputElement = window[`${field}Input`];
-  const value = inputElement?.value || '';
   const errorElement = window[`${field}Error`];
 
+  // Safeguard: Skip if elements are missing (e.g., modal not open)
   if (!inputElement || !errorElement) {
-    console.error(`[ERROR] validateField: Missing ${field} input or error element`);
-    return false;
+    console.warn(`[WARN] validateField: Skipping validation for ${field} - elements not found (modal may not be open)`);
+    return true; // Treat as valid to avoid blocking form
   }
+
+  const value = inputElement?.value || '';
 
   switch (field) {
     case 'fullName':
@@ -2318,37 +2322,36 @@ function validateField(field) {
         inputElement.classList.remove('invalid');
       }
       break;
-   case 'address': {
-  const trimmed = value.trim();
+    case 'address': {
+      const trimmed = value.trim();
 
-  // Empty address is allowed (until user types something or on submit you want to enforce)
-  if (!trimmed) {
-    errorElement.textContent = '';
-    errorElement.classList.remove('active');
-    inputElement.classList.remove('invalid');
-    break;
-  }
+      // Empty address is allowed (until user types something or on submit you want to enforce)
+      if (!trimmed) {
+        errorElement.textContent = '';
+        errorElement.classList.remove('active');
+        inputElement.classList.remove('invalid');
+        break;
+      }
 
-  // If non-empty, run validation rules
-  if (trimmed.length < 5) {
-    errorElement.textContent = 'Address must be at least 5 characters long';
-    errorElement.classList.add('active');
-    inputElement.classList.add('invalid');
-    isValid = false;
-  } else if (!/^[a-zA-Z0-9\s,.\-#]+$/.test(trimmed)) {
-    // note: allow comma, dot, dash, hash
-    errorElement.textContent = 'Address contains invalid characters';
-    errorElement.classList.add('active');
-    inputElement.classList.add('invalid');
-    isValid = false;
-  } else {
-    errorElement.textContent = '';
-    errorElement.classList.remove('active');
-    inputElement.classList.remove('invalid');
-  }
-  break;
-}
-
+      // If non-empty, run validation rules
+      if (trimmed.length < 5) {
+        errorElement.textContent = 'Address must be at least 5 characters long';
+        errorElement.classList.add('active');
+        inputElement.classList.add('invalid');
+        isValid = false;
+      } else if (!/^[a-zA-Z0-9\s,.\-#]+$/.test(trimmed)) {
+        // note: allow comma, dot, dash, hash
+        errorElement.textContent = 'Address contains invalid characters';
+        errorElement.classList.add('active');
+        inputElement.classList.add('invalid');
+        isValid = false;
+      } else {
+        errorElement.textContent = '';
+        errorElement.classList.remove('active');
+        inputElement.classList.remove('invalid');
+      }
+      break;
+    }
     case 'profilePicture':
       const file = profilePictureInput.files[0];
       if (file && !['image/jpeg', 'image/png', 'image/gif'].includes(file.type)) {
@@ -2554,7 +2557,7 @@ if (fullNameInput) {
 
     if (isAvailable) {
       if (errorEl) {
-        errorEl.textContent = `"${value}" is available`;
+        errorEl.textContent = `${value} is available`;
         errorEl.classList.add('available', 'active'); // green
       }
       usernameInput.classList.remove('invalid');
