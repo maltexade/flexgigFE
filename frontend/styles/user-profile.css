@@ -193,7 +193,7 @@
 
 /* Responsive Design for Tablet */
 @media (min-width: 768px) {
-  .modal-overlay {
+  .profilemodal-overlay {
     background: rgba(0, 0, 0, 0.9);
     display: none;
     align-items: center;
@@ -239,7 +239,7 @@
 
 /* Responsive Design for Desktop */
 @media (min-width: 1024px) {
-  .modal-content {
+  .profilemodal-content {
     max-width: 600px;
     max-height: 80vh;
   }

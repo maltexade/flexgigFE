@@ -2188,7 +2188,7 @@ function formatNigeriaNumberProfile(input, isInitialDigit = false, isPaste = fal
   const normalized = normalizePhoneProfile(input);
   if (!normalized) return { value: '', cursorOffset: 0 };
   let formatted = normalized;
-  if (isInitialDigit) {
+  if (isInitialDigit && !normalized.startsWith('0')) {
     formatted = '0' + normalized;
   }
   if (formatted.length > 11) {
@@ -2203,7 +2203,7 @@ function formatNigeriaNumberProfile(input, isInitialDigit = false, isPaste = fal
   return { value: formatted, cursorOffset: isPaste ? formatted.length : 0 };
 }
 
-// Debounce function (reused, no conflict as it's generic)
+// Debounce function
 function debounce(func, wait) {
   let timeout;
   return function (...args) {
@@ -2248,6 +2248,12 @@ const fieldTouched = {
 };
 
 function validateProfileForm(showErrors = true) {
+  // Guard: Skip if modal is not active
+  if (!updateProfileModal || !updateProfileModal.classList.contains('active')) {
+    console.log('[DEBUG] validateProfileForm: Skipped - modal not active');
+    return true;
+  }
+
   const isFullNameValid = !fieldTouched.fullName || validateField('fullName');
   const isUsernameValid = !fieldTouched.username || validateField('username');
   const isPhoneNumberValid = !fieldTouched.phoneNumber || validateField('phoneNumber');
@@ -2262,8 +2268,6 @@ function validateProfileForm(showErrors = true) {
   console.log('[DEBUG] validateProfileForm:', { isFormValid, showErrors, fieldTouched });
 }
 
-
-
 function validateField(field) {
   if (!fieldTouched[field]) return true;
 
@@ -2271,19 +2275,17 @@ function validateField(field) {
   const inputElement = window[`${field}Input`];
   const errorElement = window[`${field}Error`];
 
-  // Safeguard: Skip if elements are missing
+  // Safeguard: Skip if elements are missing (e.g., modal not open)
   if (!inputElement || !errorElement) {
-    console.warn(`[WARN] validateField: Skipping validation for ${field} - elements not found`);
-    return true;
+    console.warn(`[WARN] validateField: Skipping validation for ${field} - elements not found (modal may not be open)`);
+    return true; // Treat as valid to avoid blocking form
   }
 
   const value = inputElement?.value || '';
 
   switch (field) {
     case 'fullName':
-      if (localStorage.getItem('fullNameEdited') === 'true') {
-        isValid = true; // Always valid if locked
-      } else if (value.trim().length < 2 || !/^[a-zA-Z\s]{2,}$/.test(value)) {
+      if (value.trim().length < 2 || !/^[a-zA-Z\s]{2,}$/.test(value)) {
         errorElement.textContent = 'Full name must be at least 2 characters and contain only letters';
         errorElement.classList.add('active');
         inputElement.classList.add('invalid');
@@ -2325,9 +2327,7 @@ function validateField(field) {
       break;
     case 'phoneNumber':
       const cleaned = value.replace(/\s/g, '');
-      if (localStorage.getItem('phoneNumber')) {
-        isValid = true; // Always valid if locked
-      } else if (cleaned && !isNigeriaMobileProfile(cleaned)) {
+      if (cleaned && !isNigeriaMobileProfile(cleaned)) {
         errorElement.textContent = 'Please enter a valid Nigerian phone number';
         errorElement.classList.add('active');
         inputElement.classList.add('invalid');
@@ -2338,20 +2338,25 @@ function validateField(field) {
         inputElement.classList.remove('invalid');
       }
       break;
-    case 'address':
+    case 'address': {
       const trimmed = value.trim();
-      if (localStorage.getItem('address')?.trim()) {
-        isValid = true; // Always valid if locked
-      } else if (!trimmed) {
+
+      // Empty address is allowed (until user types something or on submit you want to enforce)
+      if (!trimmed) {
         errorElement.textContent = '';
         errorElement.classList.remove('active');
         inputElement.classList.remove('invalid');
-      } else if (trimmed.length < 5) {
+        break;
+      }
+
+      // If non-empty, run validation rules
+      if (trimmed.length < 5) {
         errorElement.textContent = 'Address must be at least 5 characters long';
         errorElement.classList.add('active');
         inputElement.classList.add('invalid');
         isValid = false;
       } else if (!/^[a-zA-Z0-9\s,.\-#]+$/.test(trimmed)) {
+        // note: allow comma, dot, dash, hash
         errorElement.textContent = 'Address contains invalid characters';
         errorElement.classList.add('active');
         inputElement.classList.add('invalid');
@@ -2362,6 +2367,7 @@ function validateField(field) {
         inputElement.classList.remove('invalid');
       }
       break;
+    }
     case 'profilePicture':
       const file = profilePictureInput.files[0];
       if (file && !['image/jpeg', 'image/png', 'image/gif'].includes(file.type)) {
@@ -2451,133 +2457,155 @@ function openUpdateProfileModal(profile) {
 
   // Add input listeners for live validation
   // Add input listeners for live validation
-  if (fullNameInput) {
-    const fullNameAlreadySet = localStorage.getItem('fullNameEdited') === 'true';
-    if (fullNameAlreadySet) {
-      fullNameInput.disabled = true;
-      // No error message
-    } else {
-      fullNameInput.disabled = false;
-      fullNameInput.addEventListener('input', () => {
-        fieldTouched.fullName = true;
-        const value = fullNameInput.value.trim();
-        let error = '';
+if (fullNameInput) {
+  const fullNameAlreadySet = localStorage.getItem('fullNameEdited') === 'true';
+  if (fullNameAlreadySet) {
+    fullNameInput.disabled = true;
+    // No error message
+  } else {
+    fullNameInput.disabled = false;
+    fullNameInput.addEventListener('input', () => {
+      fieldTouched.fullName = true;
+      const value = fullNameInput.value.trim();
+      let error = '';
 
-        // Only validate if user typed something
-        if (value.length > 0) {
-          if (!/^[a-zA-Z\s'-]+$/.test(value)) {
-            error = 'Full name can only contain letters, spaces, hyphens, or apostrophes';
-          } else if (value.length < 2) {
-            error = 'Full name must be at least 2 characters';
-          } else if (value.length > 50) {
-            error = 'Full name cannot exceed 50 characters';
-          }
+      // Only validate if user typed something
+      if (value.length > 0) {
+        // First, check for invalid characters
+        if (!/^[a-zA-Z\s'-]+$/.test(value)) {
+          error = 'Full name can only contain letters, spaces, hyphens, or apostrophes';
         }
-
-        if (error) {
-          fullNameError.textContent = error;
-          fullNameError.classList.add('active');
-          fullNameInput.classList.add('invalid');
-        } else {
-          fullNameError.textContent = '';
-          fullNameError.classList.remove('active');
-          fullNameInput.classList.remove('invalid');
+        // Then check length
+        else if (value.length < 2) {
+          error = 'Full name must be at least 2 characters';
+        } else if (value.length > 50) {
+          error = 'Full name cannot exceed 50 characters';
         }
+      }
 
-        validateProfileForm(true);
-      });
-    }
+      // Update error display
+      if (error) {
+        fullNameError.textContent = error;
+        fullNameError.classList.add('active');
+        fullNameInput.classList.add('invalid');
+      } else {
+        fullNameError.textContent = '';
+        fullNameError.classList.remove('active');
+        fullNameInput.classList.remove('invalid');
+      }
+
+      validateProfileForm(true);
+    });
   }
+}
 
 
 
   if (usernameInput) {
-  usernameInput.addEventListener('input', debounce(async () => {
-    fieldTouched.username = true;
-    const value = usernameInput.value.trim();
-    const errorEl = usernameError;
+    const lastUpdate = localStorage.getItem('lastUsernameUpdate');
+    const currentUsername = localStorage.getItem('username') || '';
+    let usernameLocked = false;
+    if (lastUpdate && currentUsername) {
+      const daysSinceUpdate = (Date.now() - new Date(lastUpdate).getTime()) / (1000 * 60 * 60 * 24);
+      if (daysSinceUpdate < 90) {
+        usernameLocked = true;
+        usernameInput.disabled = true;
+        if (usernameError) {
+          usernameError.textContent = `You can update your username again in ${Math.ceil(90 - daysSinceUpdate)} days`;
+          usernameError.classList.add('active');
+        }
+      }
+    }
 
-    // Reset classes
-    if (errorEl) errorEl.classList.remove('error', 'checking', 'available');
+    if (!usernameLocked) {
+      usernameInput.disabled = false;
+      usernameInput.addEventListener('input', debounce(async () => {
+        fieldTouched.username = true;
+        const value = usernameInput.value.trim();
+        const errorEl = usernameError;
+
+        // Reset classes
+        if (errorEl) errorEl.classList.remove('error', 'checking', 'available');
 
         if (!value) {
-      if (errorEl) errorEl.textContent = '';
-      validateProfileForm(true);
-      return;
-    }
+          if (errorEl) errorEl.textContent = '';
+          validateProfileForm(true);
+          return;
+        }
 
         if (/^\d/.test(value)) {
-      if (errorEl) {
-        errorEl.textContent = 'Username cannot start with a number';
-        errorEl.classList.add('error', 'active'); // red
-      }
-      usernameInput.classList.add('invalid');
-      isUsernameAvailable = false;
-      validateProfileForm(true);
-      return;
+          if (errorEl) {
+            errorEl.textContent = 'Username cannot start with a number';
+            errorEl.classList.add('error', 'active'); // red
+          }
+          usernameInput.classList.add('invalid');
+          isUsernameAvailable = false;
+          validateProfileForm(true);
+          return;
+        }
+
+        // --- Validation checks ---
+        if (value.length < 3) {
+          if (errorEl) {
+            errorEl.textContent = 'Username must have at least 3 characters';
+            errorEl.classList.add('error', 'active'); // red
+          }
+          usernameInput.classList.add('invalid');
+          isUsernameAvailable = false;
+          validateProfileForm(true);
+          return;
+        }
+
+        if (value.length > 20) {
+          if (errorEl) {
+            errorEl.textContent = 'Username cannot exceed 20 characters';
+            errorEl.classList.add('error', 'active'); // red
+          }
+          usernameInput.classList.add('invalid');
+          isUsernameAvailable = false;
+          validateProfileForm(true);
+          return;
+        }
+
+        if (!/^[a-zA-Z0-9_]+$/.test(value)) {
+          if (errorEl) {
+            errorEl.textContent = 'Username can only contain letters, numbers, or underscores';
+            errorEl.classList.add('error', 'active'); // red
+          }
+          usernameInput.classList.add('invalid');
+          isUsernameAvailable = false;
+          validateProfileForm(true);
+          return;
+        }
+
+        // Passed all validations → check availability
+        if (errorEl) {
+          errorEl.textContent = 'Checking availability...';
+          errorEl.classList.add('checking', 'active'); // white
+        }
+        usernameInput.classList.remove('invalid');
+
+        // --- Supabase availability check ---
+        const isAvailable = await checkUsernameAvailability(value);
+
+        if (isAvailable) {
+          if (errorEl) {
+            errorEl.textContent = `${value} is available`;
+            errorEl.classList.add('available', 'active'); // green
+          }
+          usernameInput.classList.remove('invalid');
+        } else {
+          if (errorEl) {
+            errorEl.textContent = 'Username is already taken';
+            errorEl.classList.add('error', 'active'); // red
+          }
+          usernameInput.classList.add('invalid');
+        }
+
+        validateProfileForm(true);
+      }, 300));
     }
-
-    // --- Validation checks ---
-    if (value.length < 3) {
-      if (errorEl) {
-        errorEl.textContent = 'Username must have at least 3 characters';
-        errorEl.classList.add('error', 'active'); // red
-      }
-      usernameInput.classList.add('invalid');
-      isUsernameAvailable = false;
-      validateProfileForm(true);
-      return;
-    }
-
-    if (value.length > 20) {
-      if (errorEl) {
-        errorEl.textContent = 'Username cannot exceed 20 characters';
-        errorEl.classList.add('error', 'active'); // red
-      }
-      usernameInput.classList.add('invalid');
-      isUsernameAvailable = false;
-      validateProfileForm(true);
-      return;
-    }
-
-    if (!/^[a-zA-Z0-9_]+$/.test(value)) {
-      if (errorEl) {
-        errorEl.textContent = 'Username can only contain letters, numbers, or underscores';
-        errorEl.classList.add('error', 'active'); // red
-      }
-      usernameInput.classList.add('invalid');
-      isUsernameAvailable = false;
-      validateProfileForm(true);
-      return;
-    }
-
-    // Passed all validations → check availability
-    if (errorEl) {
-      errorEl.textContent = 'Checking availability...';
-      errorEl.classList.add('checking', 'active'); // white
-    }
-    usernameInput.classList.remove('invalid');
-
-    // --- Supabase availability check ---
-    const isAvailable = await checkUsernameAvailability(value);
-
-    if (isAvailable) {
-      if (errorEl) {
-        errorEl.textContent = `${value} is available`;
-        errorEl.classList.add('available', 'active'); // green
-      }
-      usernameInput.classList.remove('invalid');
-    } else {
-      if (errorEl) {
-        errorEl.textContent = 'Username is already taken';
-        errorEl.classList.add('error', 'active'); // red
-      }
-      usernameInput.classList.add('invalid');
-    }
-
-    validateProfileForm(true);
-  }, 300));
-}
+  }
 
 
   if (addressInput) {
@@ -3031,7 +3059,7 @@ if (updateProfileForm) {
 
 
 
-
+    
 
 
 
@@ -3044,7 +3072,6 @@ if (updateProfileForm) {
 
   // Watch your steps
 });
-
 
 
 
