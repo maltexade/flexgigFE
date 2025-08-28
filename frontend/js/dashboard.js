@@ -2271,17 +2271,19 @@ function validateField(field) {
   const inputElement = window[`${field}Input`];
   const errorElement = window[`${field}Error`];
 
-  // Safeguard: Skip if elements are missing (e.g., modal not open)
+  // Safeguard: Skip if elements are missing
   if (!inputElement || !errorElement) {
-    console.warn(`[WARN] validateField: Skipping validation for ${field} - elements not found (modal may not be open)`);
-    return true; // Treat as valid to avoid blocking form
+    console.warn(`[WARN] validateField: Skipping validation for ${field} - elements not found`);
+    return true;
   }
 
   const value = inputElement?.value || '';
 
   switch (field) {
     case 'fullName':
-      if (value.trim().length < 2 || !/^[a-zA-Z\s]{2,}$/.test(value)) {
+      if (localStorage.getItem('fullNameEdited') === 'true') {
+        isValid = true; // Always valid if locked
+      } else if (value.trim().length < 2 || !/^[a-zA-Z\s]{2,}$/.test(value)) {
         errorElement.textContent = 'Full name must be at least 2 characters and contain only letters';
         errorElement.classList.add('active');
         inputElement.classList.add('invalid');
@@ -2293,6 +2295,18 @@ function validateField(field) {
       }
       break;
     case 'username':
+      const lastUpdate = localStorage.getItem('lastUsernameUpdate');
+      const currentUsername = localStorage.getItem('username') || '';
+      if (value !== currentUsername && lastUpdate) {
+        const daysSinceUpdate = (Date.now() - new Date(lastUpdate).getTime()) / (1000 * 60 * 60 * 24);
+        if (daysSinceUpdate < 90) {
+          errorElement.textContent = `You can update your username again in ${Math.ceil(90 - daysSinceUpdate)} days`;
+          errorElement.classList.add('active');
+          inputElement.classList.add('invalid');
+          isValid = false;
+          break;
+        }
+      }
       if (value.trim().length < 3 || !/^[a-zA-Z0-9_]{3,20}$/.test(value)) {
         errorElement.textContent = 'Username must be 3-20 characters and contain only letters, numbers, or underscores';
         errorElement.classList.add('active');
@@ -2311,7 +2325,9 @@ function validateField(field) {
       break;
     case 'phoneNumber':
       const cleaned = value.replace(/\s/g, '');
-      if (cleaned && !isNigeriaMobileProfile(cleaned)) {
+      if (localStorage.getItem('phoneNumber')) {
+        isValid = true; // Always valid if locked
+      } else if (cleaned && !isNigeriaMobileProfile(cleaned)) {
         errorElement.textContent = 'Please enter a valid Nigerian phone number';
         errorElement.classList.add('active');
         inputElement.classList.add('invalid');
@@ -2322,25 +2338,20 @@ function validateField(field) {
         inputElement.classList.remove('invalid');
       }
       break;
-    case 'address': {
+    case 'address':
       const trimmed = value.trim();
-
-      // Empty address is allowed (until user types something or on submit you want to enforce)
-      if (!trimmed) {
+      if (localStorage.getItem('address')?.trim()) {
+        isValid = true; // Always valid if locked
+      } else if (!trimmed) {
         errorElement.textContent = '';
         errorElement.classList.remove('active');
         inputElement.classList.remove('invalid');
-        break;
-      }
-
-      // If non-empty, run validation rules
-      if (trimmed.length < 5) {
+      } else if (trimmed.length < 5) {
         errorElement.textContent = 'Address must be at least 5 characters long';
         errorElement.classList.add('active');
         inputElement.classList.add('invalid');
         isValid = false;
       } else if (!/^[a-zA-Z0-9\s,.\-#]+$/.test(trimmed)) {
-        // note: allow comma, dot, dash, hash
         errorElement.textContent = 'Address contains invalid characters';
         errorElement.classList.add('active');
         inputElement.classList.add('invalid');
@@ -2351,7 +2362,6 @@ function validateField(field) {
         inputElement.classList.remove('invalid');
       }
       break;
-    }
     case 'profilePicture':
       const file = profilePictureInput.files[0];
       if (file && !['image/jpeg', 'image/png', 'image/gif'].includes(file.type)) {
@@ -2398,6 +2408,8 @@ function openUpdateProfileModal(profile) {
   if (fullNameInput) fullNameInput.disabled = localStorage.getItem('fullNameEdited') === 'true';
   if (phoneNumberInput) phoneNumberInput.disabled = !!phoneNumber;
   if (emailInput) emailInput.disabled = true;
+  if (addressInput) addressInput.disabled = !!(profile?.address || localStorage.getItem('address')?.trim());
+  if (profilePictureInput) profilePictureInput.disabled = false; // Always editable
 
   // Set avatar
   const profilePicture = localStorage.getItem('profilePicture');
@@ -2439,49 +2451,43 @@ function openUpdateProfileModal(profile) {
 
   // Add input listeners for live validation
   // Add input listeners for live validation
-if (fullNameInput) {
-  const fullNameAlreadySet = localStorage.getItem('fullNameEdited') === 'true';
-  if (fullNameAlreadySet) {
-    fullNameInput.disabled = true;
-    fullNameError.textContent = 'Full name can only be set once';
-    fullNameError.classList.add('active');
-    fullNameInput.classList.add('invalid');
-  } else {
-    fullNameInput.disabled = false;
-    fullNameInput.addEventListener('input', () => {
-      fieldTouched.fullName = true;
-      const value = fullNameInput.value.trim();
-      let error = '';
+  if (fullNameInput) {
+    const fullNameAlreadySet = localStorage.getItem('fullNameEdited') === 'true';
+    if (fullNameAlreadySet) {
+      fullNameInput.disabled = true;
+      // No error message
+    } else {
+      fullNameInput.disabled = false;
+      fullNameInput.addEventListener('input', () => {
+        fieldTouched.fullName = true;
+        const value = fullNameInput.value.trim();
+        let error = '';
 
-      // Only validate if user typed something
-      if (value.length > 0) {
-        // First, check for invalid characters
-        if (!/^[a-zA-Z\s'-]+$/.test(value)) {
-          error = 'Full name can only contain letters, spaces, hyphens, or apostrophes';
+        // Only validate if user typed something
+        if (value.length > 0) {
+          if (!/^[a-zA-Z\s'-]+$/.test(value)) {
+            error = 'Full name can only contain letters, spaces, hyphens, or apostrophes';
+          } else if (value.length < 2) {
+            error = 'Full name must be at least 2 characters';
+          } else if (value.length > 50) {
+            error = 'Full name cannot exceed 50 characters';
+          }
         }
-        // Then check length
-        else if (value.length < 2) {
-          error = 'Full name must be at least 2 characters';
-        } else if (value.length > 50) {
-          error = 'Full name cannot exceed 50 characters';
+
+        if (error) {
+          fullNameError.textContent = error;
+          fullNameError.classList.add('active');
+          fullNameInput.classList.add('invalid');
+        } else {
+          fullNameError.textContent = '';
+          fullNameError.classList.remove('active');
+          fullNameInput.classList.remove('invalid');
         }
-      }
 
-      // Update error display
-      if (error) {
-        fullNameError.textContent = error;
-        fullNameError.classList.add('active');
-        fullNameInput.classList.add('invalid');
-      } else {
-        fullNameError.textContent = '';
-        fullNameError.classList.remove('active');
-        fullNameInput.classList.remove('invalid');
-      }
-
-      validateProfileForm(true);
-    });
+        validateProfileForm(true);
+      });
+    }
   }
-}
 
 
 
@@ -2575,34 +2581,22 @@ if (fullNameInput) {
 
 
   if (addressInput) {
-  const addressAlreadySet = !!(profile?.address || localStorage.getItem('address') || '').trim();
-
+  const addressAlreadySet = !!(profile?.address || localStorage.getItem('address')?.trim());
   if (addressAlreadySet) {
     addressInput.disabled = true;
-    addressError.textContent = 'Address can only be set once';
-    addressError.classList.add('active');
-    addressInput.classList.add('invalid');
-    // Mark touched so validateProfileForm is consistent if you want it considered "set"
-    fieldTouched.address = true;
+    // No error message
   } else {
     addressInput.disabled = false;
-
-    // Attach listener only once (guard using dataset to avoid duplicates)
     if (!addressInput.dataset.listenerAttached) {
       const addressHandler = () => {
-        // mark touched only when user interacts
         fieldTouched.address = true;
-        // central validation function handles empty vs non-empty correctly
         validateField('address');
         validateProfileForm(true);
       };
-
       addressInput.addEventListener('input', addressHandler);
       addressInput.addEventListener('paste', (e) => {
-        // give browser time to update value, then validate
         setTimeout(addressHandler, 0);
       });
-
       addressInput.dataset.listenerAttached = '1';
     }
   }
@@ -2908,12 +2902,21 @@ if (updateProfileForm) {
 
     // Client-side checks for server restrictions
     if (currentPhoneNumber && phoneNumber !== currentPhoneNumber) {
-      if (phoneNumberError) {
-        phoneNumberError.textContent = 'Phone number cannot be changed once set';
-        phoneNumberError.classList.add('active');
-        phoneNumberInput.classList.add('invalid');
-      }
-      return;
+      return; // Silently block without error
+    }
+    // Client-side checks for server restrictions
+    const currentFullName = localStorage.getItem('fullName') || '';
+    const newFullName = formData.get('fullName') || '';
+    if (localStorage.getItem('fullNameEdited') === 'true' && newFullName !== currentFullName) {
+      return; // Silently block without error
+    }
+    if (currentPhoneNumber && phoneNumber !== currentPhoneNumber) {
+      return; // Silently block without error
+    }
+    const currentAddress = localStorage.getItem('address')?.trim() || '';
+    const newAddress = formData.get('address')?.trim() || '';
+    if (currentAddress && newAddress !== currentAddress) {
+      return; // Silently block without error
     }
 
     const lastUpdate = localStorage.getItem('lastUsernameUpdate');
@@ -2983,7 +2986,17 @@ if (updateProfileForm) {
         }
       }
 
-      alert('Profile updated successfully!');
+      // Show slider notification
+      const notification = document.getElementById('profileUpdateNotification');
+      if (notification) {
+        notification.classList.add('active');
+        setTimeout(() => {
+          notification.classList.remove('active');
+        }, 3000); // Hide after 3 seconds
+      } else {
+        console.warn('[WARN] profileUpdateNotification: Element not found');
+      }
+
       closeUpdateProfileModal();
     } catch (err) {
       console.error('[ERROR] updateProfileForm:', err);
@@ -2994,34 +3007,13 @@ if (updateProfileForm) {
           usernameError.classList.add('active');
           usernameInput.classList.add('invalid');
         }
-      } else if (err.message.includes('Full name can only be edited once')) {
-        if (fullNameError) {
-          fullNameError.textContent = 'Full name can only be edited once';
-          fullNameError.classList.add('active');
-          fullNameInput.classList.add('invalid');
-        }
-      } else if (err.message.includes('Phone number cannot be changed once set')) {
-        if (phoneNumberError) {
-          phoneNumberError.textContent = 'Phone number cannot be changed once set';
-          phoneNumberError.classList.add('active');
-          phoneNumberInput.classList.add('invalid');
-        }
-      } else if (err.message.includes('Invalid Nigerian phone number')) {
-        if (phoneNumberError) {
-          phoneNumberError.textContent = 'Invalid Nigerian phone number';
-          phoneNumberError.classList.add('active');
-          phoneNumberInput.classList.add('invalid');
-        }
-      } else if (err.message.includes('Address must be at least 5 characters long')) {
-        if (addressError) {
-          addressError.textContent = 'Address must be at least 5 characters long';
-          addressError.classList.add('active');
-          addressInput.classList.add('invalid');
-        }
-      } else if (err.message.includes('Invalid or mismatched email')) {
-        alert('Email cannot be changed');
       } else {
-        alert(`Failed to update profile: ${err.message}`);
+        // General error without specific field errors
+        const generalError = document.createElement('div');
+        generalError.className = 'error-message active';
+        generalError.textContent = `Failed to update profile: ${err.message}`;
+        updateProfileForm.prepend(generalError);
+        setTimeout(() => generalError.remove(), 3000);
       }
     }
   });

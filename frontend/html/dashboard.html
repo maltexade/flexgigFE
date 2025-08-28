@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Network Reseller Dashboard</title>
+  <title>Dashboard</title>
   <link rel="stylesheet" href="/frontend/styles/dashboard.css">
   <link rel="stylesheet" href="/frontend/styles/user-profile.css">
   <script src="https://unpkg.com/navigo@8.11.1/lib/navigo.min.js" defer></script>
@@ -28,6 +28,10 @@
   </div>
 
   <main>
+    <!-- dashboard.html -->
+    <div id="profileUpdateNotification" class="profile-update-notification" role="alert">
+      Profile updated successfully!
+    </div>
     <div id="userProfileDashboardContent" class="user-profile-dashboard-content active">
       <div class="stack">
         <!-- Setup Pin -->
@@ -463,6 +467,7 @@
       <span>Settings</span>
     </a>
   </nav>
+  
 
 
   <script src="/frontend/js/dashboard.js"></script>
