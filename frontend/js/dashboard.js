@@ -38,7 +38,7 @@ async function getSession() {
       firstName = firstName.charAt(0).toUpperCase() + firstName.slice(1) || 'User';
     }
 
-    // Update localStorage
+    // Update localStorage with session data
     localStorage.setItem('userEmail', user.email || '');
     localStorage.setItem('firstName', firstName);
     localStorage.setItem('username', user.username || '');
@@ -60,16 +60,35 @@ async function getSession() {
 
     if (greetEl && firstnameEl && avatarEl) {
       console.log('[DEBUG] getSession: DOM elements found');
-      await updateGreetingAndAvatar(user.username, firstName);
+      // Set initial DOM values directly from session data
+      const displayName = user.username || firstName || 'User';
+      const profilePicture = user.profilePicture || '';
+      const isValidProfilePicture = profilePicture && profilePicture.startsWith('data:image/');
 
+      // Update greeting
+      const hour = new Date().getHours();
+      greetEl.textContent = hour < 12 ? 'Good Morning' : hour < 18 ? 'Good Afternoon' : 'Good Evening';
+      firstnameEl.textContent = displayName.charAt(0).toUpperCase() + displayName.slice(1);
+
+      // Update avatar
+      if (isValidProfilePicture) {
+        avatarEl.innerHTML = `<img src="${profilePicture}" alt="Profile Picture" class="avatar-img" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`;
+      } else {
+        avatarEl.innerHTML = '';
+        avatarEl.textContent = displayName.charAt(0).toUpperCase();
+      }
+
+      console.log('[DEBUG] getSession: DOM updated', { greeting: greetEl.textContent, displayName, profilePicture });
+
+      // Only call loadUserProfile if necessary (e.g., to fetch additional data)
       try {
         await loadUserProfile();
       } catch (err) {
-        console.warn('[WARN] getSession: Profile fetch failed, using session data', err.message);
+        console.warn('[WARN] getSession: Profile fetch failed, relying on session data', err.message);
+        // DOM already updated, so no further action needed
       }
     } else {
       console.error('[ERROR] getSession: Missing DOM elements');
-      // don’t alert; retry instead
       throw new Error('DOM not ready');
     }
   } catch (err) {
@@ -156,33 +175,56 @@ async function loadUserProfile() {
       throw new Error(`HTTP ${response.status}: ${data.error || 'Unknown error'}`);
     }
 
-    // Update localStorage with profile data
-    localStorage.setItem('username', data.username || '');
-    localStorage.setItem('phoneNumber', data.phoneNumber || '');
-    localStorage.setItem('address', data.address || '');
-    localStorage.setItem('profilePicture', data.profilePicture || '');
-    localStorage.setItem('fullName', data.fullName || localStorage.getItem('fullName') || '');
-    localStorage.setItem('fullNameEdited', data.fullNameEdited ? 'true' : 'false');
-    localStorage.setItem('lastUsernameUpdate', data.lastUsernameUpdate || '');
+    // Update localStorage with profile data only if it differs
+    const currentUsername = localStorage.getItem('username') || '';
+    const currentProfilePicture = localStorage.getItem('profilePicture') || '';
+    if (data.username && data.username !== currentUsername) {
+      localStorage.setItem('username', data.username);
+    }
+    if (data.phoneNumber) {
+      localStorage.setItem('phoneNumber', data.phoneNumber);
+    }
+    if (data.address) {
+      localStorage.setItem('address', data.address);
+    }
+    if (data.profilePicture && data.profilePicture !== currentProfilePicture) {
+      localStorage.setItem('profilePicture', data.profilePicture);
+    }
+    if (data.fullName) {
+      localStorage.setItem('fullName', data.fullName);
+      localStorage.setItem('fullNameEdited', data.fullNameEdited ? 'true' : 'false');
+      localStorage.setItem('firstName', data.fullName.split(' ')[0] || localStorage.getItem('firstName') || 'User');
+    }
+    if (data.lastUsernameUpdate) {
+      localStorage.setItem('lastUsernameUpdate', data.lastUsernameUpdate);
+    }
 
-    // Update DOM
+    // Update DOM only if data has changed
     const firstnameEl = document.getElementById('firstname');
     const avatarEl = document.getElementById('avatar');
     if (!firstnameEl || !avatarEl) {
       console.error('[ERROR] loadUserProfile: Missing DOM elements', { firstnameEl: !!firstnameEl, avatarEl: !!avatarEl });
       return;
     }
+
     const firstName = data.fullName?.split(' ')[0] || localStorage.getItem('firstName') || 'User';
-    const profilePicture = data.profilePicture || localStorage.getItem('profilePicture');
+    const profilePicture = data.profilePicture || localStorage.getItem('profilePicture') || '';
     const isValidProfilePicture = profilePicture && profilePicture.startsWith('data:image/');
-    if (isValidProfilePicture) {
+    const displayName = data.username || firstName || 'User';
+
+    // Only update DOM if values differ from current
+    if (firstnameEl.textContent !== displayName.charAt(0).toUpperCase() + displayName.slice(1)) {
+      firstnameEl.textContent = displayName.charAt(0).toUpperCase() + displayName.slice(1);
+    }
+
+    if (isValidProfilePicture && avatarEl.innerHTML !== `<img src="${profilePicture}" alt="Profile Picture" class="avatar-img" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`) {
       avatarEl.innerHTML = `<img src="${profilePicture}" alt="Profile Picture" class="avatar-img" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`;
-    } else {
-      const displayName = data.username || firstName || 'User';
+    } else if (!isValidProfilePicture && avatarEl.textContent !== displayName.charAt(0).toUpperCase()) {
       avatarEl.innerHTML = '';
       avatarEl.textContent = displayName.charAt(0).toUpperCase();
     }
-    firstnameEl.textContent = firstName.charAt(0).toUpperCase() + firstName.slice(1);
+
+    console.log('[DEBUG] loadUserProfile: DOM updated', { displayName, profilePicture });
 
     // Update profile modal if open
     if (updateProfileModal.classList.contains('active')) {
@@ -190,7 +232,7 @@ async function loadUserProfile() {
     }
   } catch (err) {
     console.error('[ERROR] loadUserProfile: Failed to fetch profile', err.message);
-    // Fallback to localStorage
+    // Fallback to localStorage, but only update if necessary
     const firstnameEl = document.getElementById('firstname');
     const avatarEl = document.getElementById('avatar');
     if (!firstnameEl || !avatarEl) {
@@ -198,16 +240,19 @@ async function loadUserProfile() {
       return;
     }
     const firstName = localStorage.getItem('firstName') || 'User';
-    const profilePicture = localStorage.getItem('profilePicture');
+    const profilePicture = localStorage.getItem('profilePicture') || '';
     const isValidProfilePicture = profilePicture && profilePicture.startsWith('data:image/');
-    if (isValidProfilePicture) {
+    const displayName = localStorage.getItem('username') || firstName || 'User';
+
+    if (firstnameEl.textContent !== displayName.charAt(0).toUpperCase() + displayName.slice(1)) {
+      firstnameEl.textContent = displayName.charAt(0).toUpperCase() + displayName.slice(1);
+    }
+    if (isValidProfilePicture && avatarEl.innerHTML !== `<img src="${profilePicture}" alt="Profile Picture" class="avatar-img" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`) {
       avatarEl.innerHTML = `<img src="${profilePicture}" alt="Profile Picture" class="avatar-img" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`;
-    } else {
-      const displayName = localStorage.getItem('username') || firstName || 'User';
+    } else if (!isValidProfilePicture && avatarEl.textContent !== displayName.charAt(0).toUpperCase()) {
       avatarEl.innerHTML = '';
       avatarEl.textContent = displayName.charAt(0).toUpperCase();
     }
-    firstnameEl.textContent = firstName.charAt(0).toUpperCase() + firstName.slice(1);
   }
 }
 
@@ -366,42 +411,36 @@ deleteKey.addEventListener('click', () => {
 // Update DOM with greeting and avatar
 // Updates the dashboard greeting and avatar based on user data
 function updateGreetingAndAvatar(username, firstName) {
-  // Get DOM elements for greeting, name, and avatar
   const avatarEl = document.getElementById('avatar');
   const firstnameEl = document.getElementById('firstname');
   const greetEl = document.getElementById('greet');
-  // Debug: Log DOM elements to ensure they exist
   console.log('[DEBUG] updateGreetingAndAvatar: Checking DOM elements, time:', new Date().toISOString(), {
     avatarEl: !!avatarEl,
     firstnameEl: !!firstnameEl,
     greetEl: !!greetEl
   });
-  // Check if DOM elements exist
+
   if (!avatarEl || !firstnameEl || !greetEl) {
     console.error('[ERROR] updateGreetingAndAvatar: Missing DOM elements');
     return;
   }
-  // Set greeting based on time of day
+
   const hour = new Date().getHours();
-  let greeting = hour < 12 ? 'Good Morning' : hour < 18 ? 'Good Afternoon' : 'Good Evening';
+  const greeting = hour < 12 ? 'Good Morning' : hour < 18 ? 'Good Afternoon' : 'Good Evening';
   greetEl.textContent = greeting;
-  // Get profile picture from localStorage
-  const profilePicture = localStorage.getItem('profilePicture');
-  // Check if profilePicture is a valid image URL (base64 or HTTPS)
-  const isValidProfilePicture = profilePicture && (profilePicture.startsWith('data:image/') || profilePicture.startsWith('https://'));
-  // Use username or firstName as display name
+
+  const profilePicture = localStorage.getItem('profilePicture') || '';
+  const isValidProfilePicture = profilePicture && profilePicture.startsWith('data:image/');
   const displayName = username || firstName || 'User';
+
   if (isValidProfilePicture) {
-    // Display profile picture as an image
     avatarEl.innerHTML = `<img src="${profilePicture}" alt="Profile Picture" class="avatar-img" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`;
-    firstnameEl.textContent = displayName.charAt(0).toUpperCase() + displayName.slice(1);
   } else {
-    // Fallback to first letter of display name
     avatarEl.innerHTML = '';
     avatarEl.textContent = displayName.charAt(0).toUpperCase();
-    firstnameEl.textContent = displayName.charAt(0).toUpperCase() + displayName.slice(1);
   }
-  // Debug: Log the values used for updating
+  firstnameEl.textContent = displayName.charAt(0).toUpperCase() + displayName.slice(1);
+
   console.log('[DEBUG] updateGreetingAndAvatar:', { greeting, username, firstName, displayName, profilePicture });
 }
 
@@ -2908,11 +2947,7 @@ if (updateProfileCard) {
   updateProfileCard.addEventListener('click', async () => {
     console.log('[DEBUG] Update Profile card clicked');
     try {
-      await openPinModalForReauth();
-      if (!pinModal.classList.contains('hidden')) {
-        console.log('[DEBUG] Update Profile: PIN modal opened, waiting for authentication');
-        return;
-      }
+      // Skip PIN authentication and directly open profile modal
       openUpdateProfileModal({});
     } catch (err) {
       console.error('[ERROR] Update Profile card: Failed to open modal', err);
