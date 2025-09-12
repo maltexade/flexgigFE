@@ -2943,7 +2943,7 @@ if (updateProfileForm) {
     const currentUsername = localStorage.getItem('username') || '';
     const newUsername = formData.get('username')?.trim() || '';
     const currentPhoneNumber = localStorage.getItem('phoneNumber') || '';
-    const profilePictureInput = document.getElementById('profilePictureInput');
+    const profilePictureInput = document.getElementById('profilePicture');
 
     // Restriction checks
     if (currentPhoneNumber && phoneNumber !== currentPhoneNumber) return;
