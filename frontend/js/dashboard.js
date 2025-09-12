@@ -47,6 +47,7 @@ async function getSession() {
     localStorage.setItem('fullName', user.fullName || user.email.split('@')[0] || '');
     localStorage.setItem('fullNameEdited', user.fullNameEdited ? 'true' : 'false');
     localStorage.setItem('lastUsernameUpdate', user.lastUsernameUpdate || '');
+    localStorage.setItem('profilePicture', user.profilePicture || '');
     if (token) {
       localStorage.setItem('authToken', token);
       console.log('[DEBUG] getSession: Stored authToken', token);
@@ -363,30 +364,45 @@ deleteKey.addEventListener('click', () => {
 // document.addEventListener('DOMContentLoaded', fetchUserData);
 
 // Update DOM with greeting and avatar
+// Updates the dashboard greeting and avatar based on user data
 function updateGreetingAndAvatar(username, firstName) {
+  // Get DOM elements for greeting, name, and avatar
   const avatarEl = document.getElementById('avatar');
   const firstnameEl = document.getElementById('firstname');
   const greetEl = document.getElementById('greet');
-  console.log('[DEBUG] updateGreetingAndAvatar: Checking DOM elements, time:', new Date().toISOString(), { avatarEl: !!avatarEl, firstnameEl: !!firstnameEl, greetEl: !!greetEl });
+  // Debug: Log DOM elements to ensure they exist
+  console.log('[DEBUG] updateGreetingAndAvatar: Checking DOM elements, time:', new Date().toISOString(), {
+    avatarEl: !!avatarEl,
+    firstnameEl: !!firstnameEl,
+    greetEl: !!greetEl
+  });
+  // Check if DOM elements exist
   if (!avatarEl || !firstnameEl || !greetEl) {
     console.error('[ERROR] updateGreetingAndAvatar: Missing DOM elements');
     return;
   }
-  const hour = new Date().getHours(); // Uses local time (WAT: 08:03 PM, hour = 20)
+  // Set greeting based on time of day
+  const hour = new Date().getHours();
   let greeting = hour < 12 ? 'Good Morning' : hour < 18 ? 'Good Afternoon' : 'Good Evening';
   greetEl.textContent = greeting;
+  // Get profile picture from localStorage
   const profilePicture = localStorage.getItem('profilePicture');
-  const isValidProfilePicture = profilePicture && profilePicture.startsWith('data:image/');
-  const displayName = username || firstName || 'User'; // Prioritize username
+  // Check if profilePicture is a valid image URL (base64 or HTTPS)
+  const isValidProfilePicture = profilePicture && (profilePicture.startsWith('data:image/') || profilePicture.startsWith('https://'));
+  // Use username or firstName as display name
+  const displayName = username || firstName || 'User';
   if (isValidProfilePicture) {
+    // Display profile picture as an image
     avatarEl.innerHTML = `<img src="${profilePicture}" alt="Profile Picture" class="avatar-img" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`;
     firstnameEl.textContent = displayName.charAt(0).toUpperCase() + displayName.slice(1);
   } else {
+    // Fallback to first letter of display name
     avatarEl.innerHTML = '';
     avatarEl.textContent = displayName.charAt(0).toUpperCase();
     firstnameEl.textContent = displayName.charAt(0).toUpperCase() + displayName.slice(1);
   }
-  console.log('[DEBUG] updateGreetingAndAvatar:', { greeting, username, firstName, displayName });
+  // Debug: Log the values used for updating
+  console.log('[DEBUG] updateGreetingAndAvatar:', { greeting, username, firstName, displayName, profilePicture });
 }
 
 let recentTransactions = JSON.parse(localStorage.getItem('recentTransactions')) || [];
@@ -2925,28 +2941,20 @@ if (updateProfileForm) {
     formData.set('phoneNumber', phoneNumber || '');
 
     const currentUsername = localStorage.getItem('username') || '';
-    const newUsername = formData.get('username') || '';
+    const newUsername = formData.get('username')?.trim() || '';
     const currentPhoneNumber = localStorage.getItem('phoneNumber') || '';
+    const profilePictureInput = document.getElementById('profilePictureInput');
 
-    // Client-side checks for server restrictions
-    if (currentPhoneNumber && phoneNumber !== currentPhoneNumber) {
-      return; // Silently block without error
-    }
-    // Client-side checks for server restrictions
+    // Restriction checks
+    if (currentPhoneNumber && phoneNumber !== currentPhoneNumber) return;
     const currentFullName = localStorage.getItem('fullName') || '';
-    const newFullName = formData.get('fullName') || '';
-    if (localStorage.getItem('fullNameEdited') === 'true' && newFullName !== currentFullName) {
-      return; // Silently block without error
-    }
-    if (currentPhoneNumber && phoneNumber !== currentPhoneNumber) {
-      return; // Silently block without error
-    }
+    const newFullName = formData.get('fullName')?.trim() || '';
+    if (localStorage.getItem('fullNameEdited') === 'true' && newFullName !== currentFullName) return;
     const currentAddress = localStorage.getItem('address')?.trim() || '';
     const newAddress = formData.get('address')?.trim() || '';
-    if (currentAddress && newAddress !== currentAddress) {
-      return; // Silently block without error
-    }
+    if (currentAddress && newAddress !== currentAddress) return;
 
+    // Username cooldown (90 days)
     const lastUpdate = localStorage.getItem('lastUsernameUpdate');
     if (currentUsername && newUsername !== currentUsername && lastUpdate) {
       const daysSinceUpdate = (Date.now() - new Date(lastUpdate).getTime()) / (1000 * 60 * 60 * 24);
@@ -2961,13 +2969,14 @@ if (updateProfileForm) {
     }
 
     try {
-      // Log FormData for debugging
+      // Debug log form data
       const formDataObj = {};
       for (const [key, value] of formData.entries()) {
         formDataObj[key] = value instanceof File ? `File: ${value.name}` : value;
       }
       console.log('[DEBUG] updateProfileForm: Submitting form data:', formDataObj);
 
+      // Submit update
       const response = await fetch('https://api.flexgig.com.ng/api/profile/update', {
         method: 'POST',
         headers: {
@@ -2977,58 +2986,64 @@ if (updateProfileForm) {
         credentials: 'include',
       });
       const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to update profile');
-      }
+      if (!response.ok) throw new Error(data.error || 'Failed to update profile');
 
-      // Update local storage
-      const fullName = formData.get('fullName');
+      // Update localStorage
+      const fullName = newFullName;
       localStorage.setItem('username', newUsername);
       localStorage.setItem('firstName', fullName.split(' ')[0] || '');
       localStorage.setItem('fullName', fullName);
       localStorage.setItem('phoneNumber', phoneNumber || '');
-      localStorage.setItem('address', formData.get('address') || '');
-      localStorage.setItem('fullNameEdited', localStorage.getItem('fullNameEdited') === 'true' || fullName !== localStorage.getItem('fullName') ? 'true' : 'false');
+      localStorage.setItem('address', newAddress);
+      localStorage.setItem(
+        'fullNameEdited',
+        localStorage.getItem('fullNameEdited') === 'true' || fullName !== currentFullName ? 'true' : 'false'
+      );
       if (newUsername !== currentUsername) {
         localStorage.setItem('lastUsernameUpdate', new Date().toISOString());
       }
 
+      // --- Profile Picture Handling (merged with Grok’s fix) ---
       if (profilePictureInput?.files[0]) {
+        // New upload → preview immediately
         const reader = new FileReader();
         reader.onload = () => {
           localStorage.setItem('profilePicture', reader.result);
           updateGreetingAndAvatar(newUsername, fullName.split(' ')[0]);
           if (profilePicturePreview) {
-            profilePicturePreview.innerHTML = `<img src="${reader.result}" alt="Profile Picture" class="avatar-img" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`;
+            profilePicturePreview.innerHTML = `
+              <img src="${reader.result}" alt="Profile Picture" class="avatar-img"
+                style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">
+            `;
           }
         };
         reader.readAsDataURL(profilePictureInput.files[0]);
-      } else if (!formData.get('profilePicture')) {
+      } else {
+        // No new file → use server-returned picture
         localStorage.setItem('profilePicture', data.profile.profilePicture || '');
         updateGreetingAndAvatar(newUsername, fullName.split(' ')[0]);
         if (profilePicturePreview) {
-          profilePicturePreview.innerHTML = data.profile.profilePicture
-            ? `<img src="${data.profile.profilePicture}" alt="Profile Picture" class="avatar-img" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`
-            : '';
-          profilePicturePreview.textContent = data.profile.profilePicture ? '' : (newUsername || fullName.split(' ')[0] || 'User').charAt(0).toUpperCase();
+          if (data.profile.profilePicture) {
+            profilePicturePreview.innerHTML = `
+              <img src="${data.profile.profilePicture}" alt="Profile Picture" class="avatar-img"
+                style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">
+            `;
+          } else {
+            profilePicturePreview.textContent = (newUsername || fullName.split(' ')[0] || 'U').charAt(0).toUpperCase();
+          }
         }
       }
 
-      // Show slider notification
+      // Show success notification
       const notification = document.getElementById('profileUpdateNotification');
       if (notification) {
         notification.classList.add('active');
-        setTimeout(() => {
-          notification.classList.remove('active');
-        }, 3000); // Hide after 3 seconds
-      } else {
-        console.warn('[WARN] profileUpdateNotification: Element not found');
+        setTimeout(() => notification.classList.remove('active'), 3000);
       }
 
       closeUpdateProfileModal();
     } catch (err) {
       console.error('[ERROR] updateProfileForm:', err);
-      // Display specific server error
       if (err.message.includes('Username already taken')) {
         if (usernameError) {
           usernameError.textContent = 'Username is already taken';
@@ -3036,7 +3051,6 @@ if (updateProfileForm) {
           usernameInput.classList.add('invalid');
         }
       } else {
-        // General error without specific field errors
         const generalError = document.createElement('div');
         generalError.className = 'error-message active';
         generalError.textContent = `Failed to update profile: ${err.message}`;
@@ -3046,6 +3060,7 @@ if (updateProfileForm) {
     }
   });
 }
+
 
     // --- SVG INJECTION FOR ICONS ---
     document.querySelectorAll('.svg-inject').forEach(el =>
