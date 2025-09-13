@@ -237,6 +237,7 @@ function observeForElements() {
 async function loadUserProfile() {
   try {
     console.log('[DEBUG] loadUserProfile: Initiating fetch, credentials: include, time:', new Date().toISOString());
+
     const headers = { 'Accept': 'application/json' };
     const token = localStorage.getItem('authToken');
     if (token) {
@@ -245,17 +246,31 @@ async function loadUserProfile() {
     } else {
       console.log('[DEBUG] loadUserProfile: No token found in localStorage');
     }
+
     const response = await fetch('https://api.flexgig.com.ng/api/profile', {
       method: 'GET',
       credentials: 'include',
       headers
     });
+
     console.log('[DEBUG] loadUserProfile: Response status', response.status, 'Headers', [...response.headers]);
-    const data = await response.json();
-    console.log('[DEBUG] loadUserProfile: Raw response data', data);
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${data.error || 'Unknown error'}`);
+
+    const rawText = await response.text().catch(() => '');
+    let parsedData = null;
+    try {
+      parsedData = rawText ? JSON.parse(rawText) : null;
+    } catch (e) {
+      console.warn('[WARN] loadUserProfile: Response is not valid JSON');
     }
+
+    if (!response.ok) {
+      console.error('[ERROR] Profile update failed. Status:', response.status, 'Body:', parsedData || rawText);
+      const serverMsg = (parsedData && (parsedData.error || parsedData.message)) || rawText || `HTTP ${response.status}`;
+      throw new Error(serverMsg);
+    }
+
+    const data = parsedData || {};
+    console.log('[DEBUG] loadUserProfile: Parsed response data', data);
 
     // Update localStorage with profile data only if it differs
     const currentUsername = localStorage.getItem('username') || '';
@@ -294,7 +309,6 @@ async function loadUserProfile() {
     const isValidProfilePicture = profilePicture && profilePicture.startsWith('data:image/');
     const displayName = data.username || firstName || 'User';
 
-    // Only update DOM if values differ from current
     if (firstnameEl.textContent !== displayName.charAt(0).toUpperCase() + displayName.slice(1)) {
       firstnameEl.textContent = displayName.charAt(0).toUpperCase() + displayName.slice(1);
     }
@@ -308,19 +322,20 @@ async function loadUserProfile() {
 
     console.log('[DEBUG] loadUserProfile: DOM updated', { displayName, profilePicture });
 
-    // Update profile modal if open
     if (updateProfileModal.classList.contains('active')) {
       openUpdateProfileModal(data);
     }
+
   } catch (err) {
     console.error('[ERROR] loadUserProfile: Failed to fetch profile', err.message);
-    // Fallback to localStorage, but only update if necessary
+
     const firstnameEl = document.getElementById('firstname');
     const avatarEl = document.getElementById('avatar');
     if (!firstnameEl || !avatarEl) {
       console.error('[ERROR] loadUserProfile: Missing DOM elements in catch block', { firstnameEl: !!firstnameEl, avatarEl: !!avatarEl });
       return;
     }
+
     const firstName = localStorage.getItem('firstName') || 'User';
     const profilePicture = localStorage.getItem('profilePicture') || '';
     const isValidProfilePicture = profilePicture && profilePicture.startsWith('data:image/');
@@ -329,6 +344,7 @@ async function loadUserProfile() {
     if (firstnameEl.textContent !== displayName.charAt(0).toUpperCase() + displayName.slice(1)) {
       firstnameEl.textContent = displayName.charAt(0).toUpperCase() + displayName.slice(1);
     }
+
     if (isValidProfilePicture && avatarEl.innerHTML !== `<img src="${profilePicture}" alt="Profile Picture" class="avatar-img" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`) {
       avatarEl.innerHTML = `<img src="${profilePicture}" alt="Profile Picture" class="avatar-img" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`;
     } else if (!isValidProfilePicture && avatarEl.textContent !== displayName.charAt(0).toUpperCase()) {
@@ -2347,10 +2363,20 @@ if (updateProfileForm) {
       // Include disabled email field value from localStorage
       formData.set('email', localStorage.getItem('userEmail') || '');
 
-      // Clean phone
-      const rawPhone = formData.get('phoneNumber') || '';
-      const cleanedPhone = ('' + rawPhone).replace(/\s/g, '');
-      formData.set('phoneNumber', cleanedPhone);
+      // Full name & username: prefer input value, otherwise fall back to localStorage
+      const fullNameVal = (fullNameInput && fullNameInput.value.trim()) || localStorage.getItem('fullName') || '';
+      const usernameVal = (usernameInput && usernameInput.value.trim()) || localStorage.getItem('username') || '';
+      const addressVal = (addressInput && addressInput.value.trim()) || localStorage.getItem('address') || '';
+
+      // Phone: prefer input value then localStorage; remove formatting spaces
+      let phoneRaw = '';
+      if (phoneNumberInput && phoneNumberInput.value) phoneRaw = phoneNumberInput.value.replace(/\s/g, '');
+      else phoneRaw = (localStorage.getItem('phoneNumber') || '').replace(/\s/g, '');
+
+      formData.set('fullName', fullNameVal);
+      formData.set('username', usernameVal);
+      formData.set('address', addressVal);
+      formData.set('phoneNumber', phoneRaw);
 
       // Ensure file is appended even if input[name] missing
       ensureFileInFormData(formData, profilePictureInput, 'profilePicture');
@@ -2373,13 +2399,23 @@ if (updateProfileForm) {
       });
 
       // Parse response (JSON preferred, fallback to text)
-      let data = null, textBody = '';
-      try { data = await response.clone().json(); } catch (err) { textBody = await response.clone().text(); }
+      // Parse response safely
+      let rawText = '';
+      let parsedData = null;
+      try {
+        rawText = await response.text();
+        parsedData = rawText ? JSON.parse(rawText) : null;
+      } catch (e) {
+        console.warn('[WARN] updateProfileForm: Response is not valid JSON');
+      }
 
       if (!response.ok) {
-        const serverMsg = (data && (data.error || data.message)) || textBody || `HTTP ${response.status}`;
+        console.error('[ERROR] updateProfileForm: Failed response', response.status, parsedData || rawText);
+        const serverMsg = (parsedData && (parsedData.error || parsedData.message)) || rawText || `HTTP ${response.status}`;
         throw new Error(serverMsg);
       }
+
+      const data = parsedData || {};
 
       // Pick up server-returned profile picture (handle multiple shapes)
       let returnedProfilePicture = '';
@@ -2511,12 +2547,12 @@ function debounce(func, wait) {
   };
 }
 
-// --- Username Availability Check ---
 async function checkUsernameAvailability(username) {
   if (!username || !/^[a-zA-Z0-9_]{3,20}$/.test(username)) {
     isUsernameAvailable = false;
     return false;
   }
+
   try {
     const response = await fetch('https://api.flexgig.com.ng/api/profile/check-username', {
       method: 'POST',
@@ -2527,12 +2563,29 @@ async function checkUsernameAvailability(username) {
       body: JSON.stringify({ username }),
       credentials: 'include',
     });
-    const data = await response.json();
-    isUsernameAvailable = response.ok && data.available;
+
+    let rawText = '';
+    let parsedData = null;
+    try {
+      rawText = await response.text();
+      parsedData = rawText ? JSON.parse(rawText) : null;
+    } catch (e) {
+      console.warn('[WARN] checkUsernameAvailability: Response is not valid JSON');
+    }
+
+    if (!response.ok) {
+      console.error('[ERROR] checkUsernameAvailability: Failed response', response.status, parsedData || rawText);
+      const serverMsg = (parsedData && (parsedData.error || parsedData.message)) || rawText || `HTTP ${response.status}`;
+      throw new Error(serverMsg);
+    }
+
+    const data = parsedData || {};
+    isUsernameAvailable = !!data.available;
     console.log('[DEBUG] checkUsernameAvailability:', { username, available: isUsernameAvailable });
     return isUsernameAvailable;
+
   } catch (err) {
-    console.error('[ERROR] checkUsernameAvailability:', err);
+    console.error('[ERROR] checkUsernameAvailability:', err.message || err);
     isUsernameAvailable = false;
     return false;
   }
@@ -2571,8 +2624,24 @@ function validateField(field) {
   if (!fieldTouched[field]) return true;
 
   let isValid = true;
-  const inputElement = window[`${field}Input`];
-  const errorElement = window[`${field}Error`];
+
+    const inputMap = {
+    fullName: fullNameInput,
+    username: usernameInput,
+    phoneNumber: phoneNumberInput,
+    address: addressInput,
+    profilePicture: profilePictureInput
+  };
+  const errorMap = {
+    fullName: fullNameError,
+    username: usernameError,
+    phoneNumber: phoneNumberError,
+    address: addressError,
+    profilePicture: profilePictureError
+  };
+
+  const inputElement = inputMap[field];
+  const errorElement = errorMap[field];
 
   // Safeguard: Skip if elements are missing (e.g., modal not open)
   if (!inputElement || !errorElement) {
