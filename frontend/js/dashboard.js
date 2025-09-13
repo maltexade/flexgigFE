@@ -38,7 +38,7 @@ async function getSession() {
       firstName = firstName.charAt(0).toUpperCase() + firstName.slice(1) || 'User';
     }
 
-    // Update localStorage
+    // Update localStorage with session data
     localStorage.setItem('userEmail', user.email || '');
     localStorage.setItem('firstName', firstName);
     localStorage.setItem('username', user.username || '');
@@ -60,16 +60,35 @@ async function getSession() {
 
     if (greetEl && firstnameEl && avatarEl) {
       console.log('[DEBUG] getSession: DOM elements found');
-      await updateGreetingAndAvatar(user.username, firstName);
+      // Set initial DOM values directly from session data
+      const displayName = user.username || firstName || 'User';
+      const profilePicture = user.profilePicture || '';
+      const isValidProfilePicture = profilePicture && profilePicture.startsWith('data:image/');
 
+      // Update greeting
+      const hour = new Date().getHours();
+      greetEl.textContent = hour < 12 ? 'Good Morning' : hour < 18 ? 'Good Afternoon' : 'Good Evening';
+      firstnameEl.textContent = displayName.charAt(0).toUpperCase() + displayName.slice(1);
+
+      // Update avatar
+      if (isValidProfilePicture) {
+        avatarEl.innerHTML = `<img src="${profilePicture}" alt="Profile Picture" class="avatar-img" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`;
+      } else {
+        avatarEl.innerHTML = '';
+        avatarEl.textContent = displayName.charAt(0).toUpperCase();
+      }
+
+      console.log('[DEBUG] getSession: DOM updated', { greeting: greetEl.textContent, displayName, profilePicture });
+
+      // Only call loadUserProfile if necessary (e.g., to fetch additional data)
       try {
         await loadUserProfile();
       } catch (err) {
-        console.warn('[WARN] getSession: Profile fetch failed, using session data', err.message);
+        console.warn('[WARN] getSession: Profile fetch failed, relying on session data', err.message);
+        // DOM already updated, so no further action needed
       }
     } else {
       console.error('[ERROR] getSession: Missing DOM elements');
-      // don’t alert; retry instead
       throw new Error('DOM not ready');
     }
   } catch (err) {
