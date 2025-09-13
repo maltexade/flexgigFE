@@ -7,20 +7,84 @@ if (updateProfileModal && updateProfileModal.classList.contains('active')) {
 
 // --- Fetch User Data ---
 // --- Fetch User Data ---
+// --- Robust getSession() with guarded updates and stable avatar handling ---
 async function getSession() {
+  // Create a unique load-id so only the latest call can apply DOM updates
+  const loadId = Date.now();
+  window.__lastSessionLoadId = loadId;
+
+  // Small helper: determine if a profile picture string is a usable image source
+  function isValidImageSource(src) {
+    if (!src) return false;
+    // Accept data URIs, absolute http(s) URLs, or root-relative paths
+    return /^(data:image\/|https?:\/\/|\/)/i.test(src);
+  }
+
+  // Helper: apply avatar + greeting + display name to DOM (idempotent)
+  function applySessionToDOM(userObj, derivedFirstName) {
+    // If another getSession started after this one, abort applying
+    if (window.__lastSessionLoadId !== loadId) {
+      console.log('[DEBUG] getSession: stale loadId, abort DOM apply');
+      return;
+    }
+
+    const greetEl = document.getElementById('greet');
+    const firstnameEl = document.getElementById('firstname');
+    const avatarEl = document.getElementById('avatar');
+
+    if (!(greetEl && firstnameEl && avatarEl)) {
+      console.warn('[WARN] getSession: DOM elements not found when applying session');
+      return;
+    }
+
+    // Greeting based on time
+    const hour = new Date().getHours();
+    greetEl.textContent = hour < 12 ? 'Good Morning' : hour < 18 ? 'Good Afternoon' : 'Good Evening';
+
+    // Display name prefers username > firstName > fallback 'User'
+    const displayName = (userObj.username || derivedFirstName || 'User');
+    firstnameEl.textContent = displayName.charAt(0).toUpperCase() + displayName.slice(1);
+
+    // Decide avatar: prefer userObj.profilePicture if valid, else fallback to initial
+    const profilePicture = userObj.profilePicture || '';
+    if (isValidImageSource(profilePicture)) {
+      avatarEl.innerHTML = `<img src="${profilePicture}" alt="Profile Picture" class="avatar-img" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`;
+      avatarEl.removeAttribute('aria-label');
+    } else {
+      avatarEl.innerHTML = '';
+      avatarEl.textContent = displayName.charAt(0).toUpperCase();
+      avatarEl.setAttribute('aria-label', displayName);
+    }
+  }
+
+  // Helper: wait until essential DOM elements are available (small retry loop)
+  async function waitForDomReady(retries = 8, delay = 100) {
+    for (let i = 0; i < retries; i++) {
+      if (document.getElementById('greet') &&
+          document.getElementById('firstname') &&
+          document.getElementById('avatar')) {
+        return true;
+      }
+      await new Promise(r => setTimeout(r, delay));
+    }
+    return false;
+  }
+
   try {
     console.log('[DEBUG] getSession: Initiating fetch, credentials: include, time:', new Date().toISOString());
+
     const res = await fetch('https://api.flexgig.com.ng/api/session', {
       method: 'GET',
       credentials: 'include',
       headers: { 'Accept': 'application/json' }
     });
 
-    console.log('[DEBUG] getSession: Response status', res.status, 'Headers', [...res.headers]);
+    console.log('[DEBUG] getSession: Response status', res.status);
     if (!res.ok) {
-      const text = await res.text();
+      const text = await res.text().catch(() => '');
       console.error('[ERROR] getSession: Session API returned error:', res.status, text);
       if (res.status === 401) {
+        // If unauthorized, send to login
         window.location.href = '/';
       } else {
         alert('Something went wrong while loading your session. Please try again.');
@@ -28,73 +92,91 @@ async function getSession() {
       return;
     }
 
-    const { user, token } = await res.json();
+    const { user = {}, token } = await res.json();
     console.log('[DEBUG] getSession: Raw user data', user, 'Token', token);
 
-    // Derive first name from email if fullName is not set
+    // Derive firstName
     let firstName = user.fullName?.split(' ')[0] || '';
     if (!firstName && user.email) {
       firstName = user.email.split('@')[0].replace(/[^a-zA-Z0-9]/g, '').replace(/(\d+)/, '');
-      firstName = firstName.charAt(0).toUpperCase() + firstName.slice(1) || 'User';
+      firstName = (firstName && firstName.charAt(0).toUpperCase() + firstName.slice(1)) || 'User';
     }
 
-    // Update localStorage with session data
-    localStorage.setItem('userEmail', user.email || '');
-    localStorage.setItem('firstName', firstName);
-    localStorage.setItem('username', user.username || '');
-    localStorage.setItem('phoneNumber', user.phoneNumber || '');
-    localStorage.setItem('address', user.address || '');
-    localStorage.setItem('fullName', user.fullName || user.email.split('@')[0] || '');
-    localStorage.setItem('fullNameEdited', user.fullNameEdited ? 'true' : 'false');
-    localStorage.setItem('lastUsernameUpdate', user.lastUsernameUpdate || '');
-    localStorage.setItem('profilePicture', user.profilePicture || '');
-    if (token) {
-      localStorage.setItem('authToken', token);
-      console.log('[DEBUG] getSession: Stored authToken', token);
-    }
-
-    // Update DOM
-    const greetEl = document.getElementById('greet');
-    const firstnameEl = document.getElementById('firstname');
-    const avatarEl = document.getElementById('avatar');
-
-    if (greetEl && firstnameEl && avatarEl) {
-      console.log('[DEBUG] getSession: DOM elements found');
-      // Set initial DOM values directly from session data
-      const displayName = user.username || firstName || 'User';
-      const profilePicture = user.profilePicture || '';
-      const isValidProfilePicture = profilePicture && profilePicture.startsWith('data:image/');
-
-      // Update greeting
-      const hour = new Date().getHours();
-      greetEl.textContent = hour < 12 ? 'Good Morning' : hour < 18 ? 'Good Afternoon' : 'Good Evening';
-      firstnameEl.textContent = displayName.charAt(0).toUpperCase() + displayName.slice(1);
-
-      // Update avatar
-      if (isValidProfilePicture) {
-        avatarEl.innerHTML = `<img src="${profilePicture}" alt="Profile Picture" class="avatar-img" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`;
-      } else {
-        avatarEl.innerHTML = '';
-        avatarEl.textContent = displayName.charAt(0).toUpperCase();
+    // Write to localStorage early so other code that reads it has a value
+    try {
+      localStorage.setItem('userEmail', user.email || '');
+      localStorage.setItem('firstName', firstName);
+      localStorage.setItem('username', user.username || '');
+      localStorage.setItem('phoneNumber', user.phoneNumber || '');
+      localStorage.setItem('address', user.address || '');
+      localStorage.setItem('fullName', user.fullName || (user.email ? user.email.split('@')[0] : ''));
+      localStorage.setItem('fullNameEdited', user.fullNameEdited ? 'true' : 'false');
+      localStorage.setItem('lastUsernameUpdate', user.lastUsernameUpdate || '');
+      localStorage.setItem('profilePicture', user.profilePicture || '');
+      if (token) {
+        localStorage.setItem('authToken', token);
+        console.log('[DEBUG] getSession: Stored authToken');
       }
+    } catch (err) {
+      console.warn('[WARN] getSession: Failed to write some localStorage keys', err);
+    }
 
-      console.log('[DEBUG] getSession: DOM updated', { greeting: greetEl.textContent, displayName, profilePicture });
+    // Wait briefly for DOM elements to appear (if needed)
+    const domReady = await waitForDomReady();
+    if (!domReady) {
+      console.warn('[WARN] getSession: DOM elements not ready after waiting, will attempt to apply if they exist');
+    }
 
-      // Only call loadUserProfile if necessary (e.g., to fetch additional data)
+    // Apply session data immediately to DOM (fast)
+    applySessionToDOM(user, firstName);
+
+    // Attempt to enrich with loadUserProfile() if available.
+    // If loadUserProfile() provides a more complete profile (esp profilePicture),
+    // use it — but only if this is still the latest getSession() call.
+    if (typeof loadUserProfile === 'function') {
       try {
-        await loadUserProfile();
+        const profileResult = await loadUserProfile(); // expect it to fetch remote profile and possibly update DOM
+        // If loadUserProfile returned data, prefer its profile picture if valid
+        if (window.__lastSessionLoadId !== loadId) {
+          console.log('[DEBUG] getSession: loadUserProfile result is stale, ignoring');
+          return;
+        }
+
+        // If loadUserProfile returns explicit data, merge it; otherwise read localStorage
+        const profileData = profileResult && typeof profileResult === 'object' ? profileResult : {
+          profilePicture: localStorage.getItem('profilePicture') || user.profilePicture || ''
+        };
+
+        // Prefer profileData.profilePicture > user.profilePicture
+        const finalProfilePicture = isValidImageSource(profileData.profilePicture)
+          ? profileData.profilePicture
+          : (isValidImageSource(user.profilePicture) ? user.profilePicture : '');
+
+        // If there's a better picture from profileData, update localStorage & DOM
+        if (finalProfilePicture && finalProfilePicture !== (localStorage.getItem('profilePicture') || '')) {
+          try { localStorage.setItem('profilePicture', finalProfilePicture); } catch (err) { /* ignore */ }
+          // Apply with updated picture
+          applySessionToDOM({ ...user, profilePicture: finalProfilePicture }, firstName);
+        } else {
+          // Ensure DOM still shows what we set earlier (re-apply in case loadUserProfile or other code changed it)
+          applySessionToDOM({ ...user, profilePicture: finalProfilePicture || user.profilePicture }, firstName);
+        }
       } catch (err) {
-        console.warn('[WARN] getSession: Profile fetch failed, relying on session data', err.message);
-        // DOM already updated, so no further action needed
+        console.warn('[WARN] getSession: loadUserProfile failed, relying on session data', err && err.message);
+        // Re-apply session data to ensure it sticks
+        applySessionToDOM(user, firstName);
       }
     } else {
-      console.error('[ERROR] getSession: Missing DOM elements');
-      throw new Error('DOM not ready');
+      // No loadUserProfile function — ensure DOM remains with session info
+      applySessionToDOM(user, firstName);
     }
+
+    console.log('[DEBUG] getSession: Completed (loadId=' + loadId + ')');
   } catch (err) {
-    console.error('[ERROR] getSession: Failed to fetch session', err.message);
+    console.error('[ERROR] getSession: Failed to fetch session', err && err.message ? err.message : err);
   }
 }
+
 
 // --- Safe wrapper with retries ---
 function safeGetSession(retries = 5) {
