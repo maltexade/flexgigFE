@@ -2349,7 +2349,19 @@ if (updateProfileForm) {
     }
 
     // Mark fields touched & validate
-    Object.keys(fieldTouched).forEach(k => fieldTouched[k] = true);
+    Object.keys(fieldTouched).forEach(key => {
+    const inputMap = {
+      fullName: fullNameInput,
+      username: usernameInput,
+      phoneNumber: phoneNumberInput,
+      address: addressInput,
+      profilePicture: profilePictureInput
+    };
+    const el = inputMap[key];
+    // Only mark as touched if element exists and is not disabled.
+    fieldTouched[key] = !!(el && !el.disabled);
+  });
+
     validateProfileForm(true);
     if (saveProfileBtn.disabled) {
       console.log('[DEBUG] updateProfileForm: invalid after validation');
@@ -2621,11 +2633,8 @@ function validateProfileForm(showErrors = true) {
 }
 
 function validateField(field) {
-  if (!fieldTouched[field]) return true;
-
-  let isValid = true;
-
-    const inputMap = {
+  // Map of inputs and error elements
+  const inputMap = {
     fullName: fullNameInput,
     username: usernameInput,
     phoneNumber: phoneNumberInput,
@@ -2640,16 +2649,32 @@ function validateField(field) {
     profilePicture: profilePictureError
   };
 
+  // If the field hasn't been touched, consider it valid
+  if (!fieldTouched[field]) return true;
+
   const inputElement = inputMap[field];
   const errorElement = errorMap[field];
 
-  // Safeguard: Skip if elements are missing (e.g., modal not open)
+  // NEW: If input element is disabled (locked by server rules), skip validation and treat as valid
+  if (inputElement && inputElement.disabled) {
+    // Clear any previous errors just in case
+    if (errorElement) {
+      errorElement.textContent = '';
+      errorElement.classList.remove('active');
+    }
+    if (inputElement) inputElement.classList.remove('invalid');
+    return true;
+  }
+
+  // Safeguard: Skip if elements missing (modal may not be open)
   if (!inputElement || !errorElement) {
     console.warn(`[WARN] validateField: Skipping validation for ${field} - elements not found (modal may not be open)`);
-    return true; // Treat as valid to avoid blocking form
+    return true;
   }
 
   const value = inputElement?.value || '';
+
+  // ... continue with your existing switch (fullName, username, phoneNumber, address, profilePicture) ...
 
   switch (field) {
     case 'fullName':
