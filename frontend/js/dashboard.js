@@ -2252,6 +2252,202 @@ payBtn.addEventListener('click', () => {
   });
 
 
+// --- Helper: get file from input safely and ensure FormData has it ---
+function ensureFileInFormData(formData, inputEl, fieldName = 'profilePicture') {
+  // If the input has a named file already, we assume it's included.
+  try {
+    const existing = formData.get(fieldName);
+    if (existing instanceof File) return; // already present
+  } catch (e) {
+    // ignore
+  }
+
+  // Append file manually if input has files
+  if (inputEl && inputEl.files && inputEl.files[0]) {
+    formData.set(fieldName, inputEl.files[0], inputEl.files[0].name);
+  }
+}
+
+// --- Updated submit handler (replace your existing one) ---
+if (updateProfileForm) {
+  updateProfileForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!saveProfileBtn || saveProfileBtn.disabled) {
+      console.log('[DEBUG] updateProfileForm: Aborted - submit disabled');
+      return;
+    }
+
+    // Mark touched + validate
+    Object.keys(fieldTouched).forEach(k => fieldTouched[k] = true);
+    validateProfileForm(true);
+    if (saveProfileBtn.disabled) {
+      console.log('[DEBUG] updateProfileForm: Aborted - invalid after validation');
+      return;
+    }
+
+    try {
+      // Build FormData
+      const formData = new FormData(updateProfileForm);
+
+      // Ensure email present (disabled inputs aren't included automatically)
+      formData.set('email', localStorage.getItem('userEmail') || '');
+
+      // Clean phone
+      const rawPhone = formData.get('phoneNumber') || '';
+      const cleanedPhone = ('' + rawPhone).replace(/\s/g, '');
+      formData.set('phoneNumber', cleanedPhone);
+
+      // Make sure file is actually included even if input has no name attr
+      ensureFileInFormData(formData, profilePictureInput, 'profilePicture');
+
+      // DEBUG: print what we are about to send (without binary)
+      const dump = {};
+      for (const [k, v] of formData.entries()) {
+        dump[k] = v instanceof File ? `File: ${v.name} (${v.type}, ${v.size})` : v;
+      }
+      console.log('[DEBUG] updateProfileForm: sending formData:', dump);
+
+      // POST to update endpoint
+      const response = await fetch('https://api.flexgig.com.ng/api/profile/update', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('authToken') || ''}`
+          // IMPORTANT: Do NOT set Content-Type when sending FormData
+        },
+        body: formData,
+        credentials: 'include'
+      });
+
+      // Parse response safely (try JSON, fallback to text)
+      let data;
+      let textBody = '';
+      try {
+        data = await response.clone().json();
+      } catch (jsonErr) {
+        textBody = await response.clone().text();
+        console.warn('[DEBUG] updateProfileForm: response not JSON:', textBody);
+      }
+
+      if (!response.ok) {
+        const serverMsg = (data && (data.error || data.message)) || textBody || `Status ${response.status}`;
+        throw new Error(serverMsg);
+      }
+
+      // --- Success: prefer server-returned profile data to update UI immediately ---
+      // Check common possible shapes:
+      //  - { profile: { profilePicture: 'https://...' } }
+      //  - { profilePicture: 'https://...' }
+      //  - { data: { profilePicture: '...' } }
+      let returnedProfilePicture = '';
+      let returnedProfile = null;
+
+      if (data) {
+        if (data.profile && data.profile.profilePicture) {
+          returnedProfilePicture = data.profile.profilePicture;
+          returnedProfile = data.profile;
+        } else if (data.profilePicture) {
+          returnedProfilePicture = data.profilePicture;
+        } else if (data.data && data.data.profilePicture) {
+          returnedProfilePicture = data.data.profilePicture;
+          returnedProfile = data.data;
+        } else if (data.profile && data.profile.picture_url) {
+          returnedProfilePicture = data.profile.picture_url;
+          returnedProfile = data.profile;
+        }
+      }
+
+      // If no returned picture but server returned other profile object, attempt to find any URL
+      if (!returnedProfilePicture && data && data.profile) {
+        // try to find first string that looks like image url
+        for (const v of Object.values(data.profile)) {
+          if (typeof v === 'string' && /^(https?:\/\/|\/|data:image\/)/i.test(v)) {
+            returnedProfilePicture = v;
+            break;
+          }
+        }
+      }
+
+      // Update localStorage using returned server data when available
+      const newUsername = formData.get('username')?.trim() || localStorage.getItem('username') || '';
+      const newFullName = formData.get('fullName')?.trim() || localStorage.getItem('fullName') || '';
+      const newAddress = formData.get('address')?.trim() || localStorage.getItem('address') || '';
+      const newPhone = cleanedPhone || localStorage.getItem('phoneNumber') || '';
+
+      localStorage.setItem('username', newUsername);
+      localStorage.setItem('firstName', newFullName.split(' ')[0] || '');
+      localStorage.setItem('fullName', newFullName);
+      localStorage.setItem('phoneNumber', newPhone);
+      localStorage.setItem('address', newAddress);
+
+      if (returnedProfilePicture) {
+        // canonicalize relative URLs (if server sent relative path)
+        let canonical = returnedProfilePicture;
+        if (canonical.startsWith('/')) {
+          canonical = `${location.protocol}//${location.host}${canonical}`;
+        }
+        localStorage.setItem('profilePicture', canonical);
+      } else {
+        // If server didn't return profilePicture, keep whatever we previewed (but prefer server next time)
+        // Do nothing here to avoid overwriting with empty string
+      }
+
+      // Immediately update the DOM using your function (prefer POST response)
+      updateGreetingAndAvatar(newUsername, newFullName.split(' ')[0] || '');
+
+      // Show success
+      const notification = document.getElementById('profileUpdateNotification');
+      if (notification) {
+        notification.classList.add('active');
+        setTimeout(() => notification.classList.remove('active'), 3000);
+      }
+
+      closeUpdateProfileModal();
+
+      // Finally: refresh server profile but bypass cache (avoid 304)
+      if (typeof loadUserProfile === 'function') {
+        try {
+          // If loadUserProfile accepts options
+          await loadUserProfile({ cacheBust: true });
+        } catch (err) {
+          // fallback: manual GET with no-store
+          try {
+            const r = await fetch(`/api/profile?ts=${Date.now()}`, { method: 'GET', credentials: 'include', headers: { 'Accept': 'application/json', 'Cache-Control': 'no-cache' } });
+            if (r.ok) {
+              const d = await r.json();
+              // normalize server response shape if needed:
+              const pic = (d.profile && d.profile.profilePicture) || d.profilePicture || d.profile?.picture_url || '';
+              if (pic) {
+                const canonical = pic.startsWith('/') ? `${location.protocol}//${location.host}${pic}` : pic;
+                localStorage.setItem('profilePicture', canonical);
+                updateGreetingAndAvatar(newUsername, newFullName.split(' ')[0] || '');
+              }
+            }
+          } catch (e) {
+            console.warn('[WARN] updateProfileForm: fallback loadUserProfile failed', e);
+          }
+        }
+      }
+
+    } catch (err) {
+      console.error('[ERROR] updateProfileForm:', err);
+      // Friendly UI errors
+      if (err.message && err.message.toLowerCase().includes('username')) {
+        if (usernameError) {
+          usernameError.textContent = 'Username is already taken';
+          usernameError.classList.add('active');
+          usernameInput.classList.add('invalid');
+        }
+      } else {
+        const generalError = document.createElement('div');
+        generalError.className = 'error-message active';
+        generalError.textContent = `Failed to update profile: ${err.message || err}`;
+        updateProfileForm.prepend(generalError);
+        setTimeout(() => generalError.remove(), 4000);
+      }
+    }
+  });
+}
+
 
 // --- UPDATE PROFILE MODAL ---
 // --- UPDATE PROFILE MODAL ---
