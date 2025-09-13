@@ -2252,6 +2252,60 @@ payBtn.addEventListener('click', () => {
   });
 
 
+
+// --- UPDATE PROFILE MODAL ---
+// --- UPDATE PROFILE MODAL ---
+// --- UPDATE PROFILE MODAL ---
+const updateProfileModal = document.getElementById('updateProfileModal');
+const updateProfileForm = document.getElementById('updateProfileForm');
+const profilePictureInput = document.getElementById('profilePicture');
+const profilePicturePreview = document.getElementById('profilePicturePreview');
+const fullNameInput = document.getElementById('fullName');
+const usernameInput = document.getElementById('username');
+const phoneNumberInput = document.getElementById('phoneNumber');
+const emailInput = document.getElementById('email');
+const addressInput = document.getElementById('address');
+const saveProfileBtn = document.getElementById('saveProfileBtn');
+const fullNameError = document.getElementById('fullNameError');
+const usernameError = document.getElementById('usernameError');
+const phoneNumberError = document.getElementById('phoneNumberError');
+const addressError = document.getElementById('addressError');
+const profilePictureError = document.getElementById('profilePictureError');
+let isUsernameAvailable = false;
+
+// Validate DOM elements
+const requiredElements = {
+  updateProfileModal,
+  updateProfileForm,
+  profilePictureInput,
+  profilePicturePreview,
+  fullNameInput,
+  usernameInput,
+  phoneNumberInput,
+  emailInput,
+  addressInput,
+  saveProfileBtn,
+  fullNameError,
+  usernameError,
+  phoneNumberError,
+  addressError,
+  profilePictureError
+};
+
+for (const [key, element] of Object.entries(requiredElements)) {
+  if (!element) {
+    console.error(`[ERROR] Missing DOM element: ${key}`);
+  }
+}
+
+const updateProfileCard = document.querySelector('.card.update-profile');
+if (updateProfileCard) {
+  updateProfileCard.addEventListener('click', () => {
+    console.log('[DEBUG] Update Profile card clicked');
+    openUpdateProfileModal({});
+  });
+}
+
 // --- Helper: get file from input safely and ensure FormData has it ---
 // --- Helper: ensure file is in FormData ---
 function ensureFileInFormData(formData, inputEl, fieldName = 'profilePicture') {
@@ -2412,61 +2466,6 @@ if (updateProfileForm) {
   };
 
   updateProfileForm.addEventListener('submit', updateProfileForm.__submitHandler);
-}
-
-
-
-// --- UPDATE PROFILE MODAL ---
-// --- UPDATE PROFILE MODAL ---
-// --- UPDATE PROFILE MODAL ---
-const updateProfileModal = document.getElementById('updateProfileModal');
-const updateProfileForm = document.getElementById('updateProfileForm');
-const profilePictureInput = document.getElementById('profilePicture');
-const profilePicturePreview = document.getElementById('profilePicturePreview');
-const fullNameInput = document.getElementById('fullName');
-const usernameInput = document.getElementById('username');
-const phoneNumberInput = document.getElementById('phoneNumber');
-const emailInput = document.getElementById('email');
-const addressInput = document.getElementById('address');
-const saveProfileBtn = document.getElementById('saveProfileBtn');
-const fullNameError = document.getElementById('fullNameError');
-const usernameError = document.getElementById('usernameError');
-const phoneNumberError = document.getElementById('phoneNumberError');
-const addressError = document.getElementById('addressError');
-const profilePictureError = document.getElementById('profilePictureError');
-let isUsernameAvailable = false;
-
-// Validate DOM elements
-const requiredElements = {
-  updateProfileModal,
-  updateProfileForm,
-  profilePictureInput,
-  profilePicturePreview,
-  fullNameInput,
-  usernameInput,
-  phoneNumberInput,
-  emailInput,
-  addressInput,
-  saveProfileBtn,
-  fullNameError,
-  usernameError,
-  phoneNumberError,
-  addressError,
-  profilePictureError
-};
-
-for (const [key, element] of Object.entries(requiredElements)) {
-  if (!element) {
-    console.error(`[ERROR] Missing DOM element: ${key}`);
-  }
-}
-
-const updateProfileCard = document.querySelector('.card.update-profile');
-if (updateProfileCard) {
-  updateProfileCard.addEventListener('click', () => {
-    console.log('[DEBUG] Update Profile card clicked');
-    openUpdateProfileModal({});
-  });
 }
 
 // Profile-specific phone number functions
