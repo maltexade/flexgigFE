@@ -2737,20 +2737,28 @@ function validateField(field) {
       break;
     }
     case 'profilePicture':
-      const file = profilePictureInput.files[0];
-      if (file && !['image/jpeg', 'image/png', 'image/gif'].includes(file.type)) {
-        errorElement.textContent = 'Please upload a valid image (JPEG, PNG, or GIF)';
-        errorElement.classList.add('active');
+    // DP is optional: only validate if a file was selected
+    if (inputElement.files && inputElement.files.length > 0) {
+      const file = inputElement.files[0];
+      if (!file.type.startsWith('image/')) {
+        errorElement.textContent = 'Profile picture must be an image';
+        errorElement.classList.remove('hidden');
         isValid = false;
-      } else if (file && file.size > 2 * 1024 * 1024) {
-        errorElement.textContent = 'File size must be less than 2MB';
-        errorElement.classList.add('active');
+      } else if (file.size > 2 * 1024 * 1024) { // e.g. 2MB limit
+        errorElement.textContent = 'Profile picture must be less than 2MB';
+        errorElement.classList.remove('hidden');
         isValid = false;
       } else {
         errorElement.textContent = '';
-        errorElement.classList.remove('active');
+        errorElement.classList.add('hidden');
       }
-      break;
+    } else {
+      // No new file selected → still valid
+      errorElement.textContent = '';
+      errorElement.classList.add('hidden');
+    }
+    break;
+
   }
   return isValid;
 }
