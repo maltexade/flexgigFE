@@ -2445,7 +2445,7 @@ if (updateProfileForm) {
       const newUsername = (formData.get('username') || localStorage.getItem('username') || '').trim();
       const newFullName = (formData.get('fullName') || localStorage.getItem('fullName') || '').trim();
       const newAddress = (formData.get('address') || '').trim();
-      const newPhone = cleanedPhone || localStorage.getItem('phoneNumber') || '';
+      const newPhone = phoneRaw || localStorage.getItem('phoneNumber') || '';
 
       localStorage.setItem('username', newUsername);
       localStorage.setItem('firstName', newFullName.split(' ')[0] || '');
