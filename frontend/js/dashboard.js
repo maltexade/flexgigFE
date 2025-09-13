@@ -1,6 +1,6 @@
 const updateProfileModal = document.getElementById('updateProfileModal');
 if (updateProfileModal && updateProfileModal.classList.contains('active')) {
-  openUpdateProfileModal(data);
+  openUpdateProfileModal();
 }
 
 
@@ -2253,35 +2253,36 @@ payBtn.addEventListener('click', () => {
 
 
 // --- Helper: get file from input safely and ensure FormData has it ---
+// --- Helper: ensure file is in FormData ---
 function ensureFileInFormData(formData, inputEl, fieldName = 'profilePicture') {
-  // If the input has a named file already, we assume it's included.
   try {
     const existing = formData.get(fieldName);
-    if (existing instanceof File) return; // already present
-  } catch (e) {
-    // ignore
-  }
+    if (existing instanceof File) return; // already included
+  } catch (e) { /* ignore */ }
 
-  // Append file manually if input has files
   if (inputEl && inputEl.files && inputEl.files[0]) {
     formData.set(fieldName, inputEl.files[0], inputEl.files[0].name);
   }
 }
 
-// --- Updated submit handler (replace your existing one) ---
+// --- SINGLE consolidated submit handler for updateProfileForm ---
 if (updateProfileForm) {
-  updateProfileForm.addEventListener('submit', async (e) => {
+  // Remove previous listener if any (defensive)
+  updateProfileForm.removeEventListener && updateProfileForm.removeEventListener('submit', updateProfileForm.__submitHandler);
+
+  updateProfileForm.__submitHandler = async function (e) {
     e.preventDefault();
+
     if (!saveProfileBtn || saveProfileBtn.disabled) {
-      console.log('[DEBUG] updateProfileForm: Aborted - submit disabled');
+      console.log('[DEBUG] updateProfileForm: submit aborted (disabled)');
       return;
     }
 
-    // Mark touched + validate
+    // Mark fields touched & validate
     Object.keys(fieldTouched).forEach(k => fieldTouched[k] = true);
     validateProfileForm(true);
     if (saveProfileBtn.disabled) {
-      console.log('[DEBUG] updateProfileForm: Aborted - invalid after validation');
+      console.log('[DEBUG] updateProfileForm: invalid after validation');
       return;
     }
 
@@ -2289,7 +2290,7 @@ if (updateProfileForm) {
       // Build FormData
       const formData = new FormData(updateProfileForm);
 
-      // Ensure email present (disabled inputs aren't included automatically)
+      // Include disabled email field value from localStorage
       formData.set('email', localStorage.getItem('userEmail') || '');
 
       // Clean phone
@@ -2297,80 +2298,51 @@ if (updateProfileForm) {
       const cleanedPhone = ('' + rawPhone).replace(/\s/g, '');
       formData.set('phoneNumber', cleanedPhone);
 
-      // Make sure file is actually included even if input has no name attr
+      // Ensure file is appended even if input[name] missing
       ensureFileInFormData(formData, profilePictureInput, 'profilePicture');
 
-      // DEBUG: print what we are about to send (without binary)
-      const dump = {};
+      // Debug: print entries (no binary)
+      const debugObj = {};
       for (const [k, v] of formData.entries()) {
-        dump[k] = v instanceof File ? `File: ${v.name} (${v.type}, ${v.size})` : v;
+        debugObj[k] = v instanceof File ? `File: ${v.name} (${v.type}, ${v.size})` : v;
       }
-      console.log('[DEBUG] updateProfileForm: sending formData:', dump);
+      console.log('[DEBUG] updateProfileForm: sending', debugObj);
 
-      // POST to update endpoint
+      // POST (do NOT set Content-Type when sending FormData)
       const response = await fetch('https://api.flexgig.com.ng/api/profile/update', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('authToken') || ''}`
-          // IMPORTANT: Do NOT set Content-Type when sending FormData
         },
         body: formData,
         credentials: 'include'
       });
 
-      // Parse response safely (try JSON, fallback to text)
-      let data;
-      let textBody = '';
-      try {
-        data = await response.clone().json();
-      } catch (jsonErr) {
-        textBody = await response.clone().text();
-        console.warn('[DEBUG] updateProfileForm: response not JSON:', textBody);
-      }
+      // Parse response (JSON preferred, fallback to text)
+      let data = null, textBody = '';
+      try { data = await response.clone().json(); } catch (err) { textBody = await response.clone().text(); }
 
       if (!response.ok) {
-        const serverMsg = (data && (data.error || data.message)) || textBody || `Status ${response.status}`;
+        const serverMsg = (data && (data.error || data.message)) || textBody || `HTTP ${response.status}`;
         throw new Error(serverMsg);
       }
 
-      // --- Success: prefer server-returned profile data to update UI immediately ---
-      // Check common possible shapes:
-      //  - { profile: { profilePicture: 'https://...' } }
-      //  - { profilePicture: 'https://...' }
-      //  - { data: { profilePicture: '...' } }
+      // Pick up server-returned profile picture (handle multiple shapes)
       let returnedProfilePicture = '';
-      let returnedProfile = null;
-
       if (data) {
-        if (data.profile && data.profile.profilePicture) {
-          returnedProfilePicture = data.profile.profilePicture;
-          returnedProfile = data.profile;
+        if (data.profile && (data.profile.profilePicture || data.profile.picture_url)) {
+          returnedProfilePicture = data.profile.profilePicture || data.profile.picture_url || '';
         } else if (data.profilePicture) {
           returnedProfilePicture = data.profilePicture;
         } else if (data.data && data.data.profilePicture) {
           returnedProfilePicture = data.data.profilePicture;
-          returnedProfile = data.data;
-        } else if (data.profile && data.profile.picture_url) {
-          returnedProfilePicture = data.profile.picture_url;
-          returnedProfile = data.profile;
         }
       }
 
-      // If no returned picture but server returned other profile object, attempt to find any URL
-      if (!returnedProfilePicture && data && data.profile) {
-        // try to find first string that looks like image url
-        for (const v of Object.values(data.profile)) {
-          if (typeof v === 'string' && /^(https?:\/\/|\/|data:image\/)/i.test(v)) {
-            returnedProfilePicture = v;
-            break;
-          }
-        }
-      }
-
-      // Update localStorage using returned server data when available
-      const newUsername = formData.get('username')?.trim() || localStorage.getItem('username') || '';
-      const newFullName = formData.get('fullName')?.trim() || localStorage.getItem('fullName') || '';
-      const newAddress = formData.get('address')?.trim() || localStorage.getItem('address') || '';
+      // Update localStorage from form values and server response
+      const newUsername = (formData.get('username') || localStorage.getItem('username') || '').trim();
+      const newFullName = (formData.get('fullName') || localStorage.getItem('fullName') || '').trim();
+      const newAddress = (formData.get('address') || '').trim();
       const newPhone = cleanedPhone || localStorage.getItem('phoneNumber') || '';
 
       localStorage.setItem('username', newUsername);
@@ -2380,21 +2352,15 @@ if (updateProfileForm) {
       localStorage.setItem('address', newAddress);
 
       if (returnedProfilePicture) {
-        // canonicalize relative URLs (if server sent relative path)
         let canonical = returnedProfilePicture;
-        if (canonical.startsWith('/')) {
-          canonical = `${location.protocol}//${location.host}${canonical}`;
-        }
+        if (canonical.startsWith('/')) canonical = `${location.protocol}//${location.host}${canonical}`;
         localStorage.setItem('profilePicture', canonical);
-      } else {
-        // If server didn't return profilePicture, keep whatever we previewed (but prefer server next time)
-        // Do nothing here to avoid overwriting with empty string
       }
 
-      // Immediately update the DOM using your function (prefer POST response)
-      updateGreetingAndAvatar(newUsername, newFullName.split(' ')[0] || '');
+      // Immediate UI update
+      updateGreetingAndAvatar(newUsername, (newFullName.split(' ')[0] || ''));
 
-      // Show success
+      // Notification
       const notification = document.getElementById('profileUpdateNotification');
       if (notification) {
         notification.classList.add('active');
@@ -2403,34 +2369,32 @@ if (updateProfileForm) {
 
       closeUpdateProfileModal();
 
-      // Finally: refresh server profile but bypass cache (avoid 304)
+      // Try to refresh profile from server but bypass cache to avoid 304
       if (typeof loadUserProfile === 'function') {
         try {
-          // If loadUserProfile accepts options
+          // If loadUserProfile supports options, use cacheBust; otherwise call fallback GET
           await loadUserProfile({ cacheBust: true });
         } catch (err) {
-          // fallback: manual GET with no-store
+          // fallback manual fetch bypassing cache
           try {
-            const r = await fetch(`/api/profile?ts=${Date.now()}`, { method: 'GET', credentials: 'include', headers: { 'Accept': 'application/json', 'Cache-Control': 'no-cache' } });
+            const r = await fetch('/api/profile?ts=' + Date.now(), { method: 'GET', credentials: 'include', headers: { 'Accept': 'application/json', 'Cache-Control': 'no-cache' }});
             if (r.ok) {
               const d = await r.json();
-              // normalize server response shape if needed:
-              const pic = (d.profile && d.profile.profilePicture) || d.profilePicture || d.profile?.picture_url || '';
+              const pic = (d.profile && (d.profile.profilePicture || d.profile.picture_url)) || d.profilePicture || '';
               if (pic) {
                 const canonical = pic.startsWith('/') ? `${location.protocol}//${location.host}${pic}` : pic;
                 localStorage.setItem('profilePicture', canonical);
-                updateGreetingAndAvatar(newUsername, newFullName.split(' ')[0] || '');
+                updateGreetingAndAvatar(newUsername, (newFullName.split(' ')[0] || ''));
               }
             }
           } catch (e) {
-            console.warn('[WARN] updateProfileForm: fallback loadUserProfile failed', e);
+            console.warn('[WARN] updateProfileForm: fallback profile fetch failed', e);
           }
         }
       }
 
     } catch (err) {
       console.error('[ERROR] updateProfileForm:', err);
-      // Friendly UI errors
       if (err.message && err.message.toLowerCase().includes('username')) {
         if (usernameError) {
           usernameError.textContent = 'Username is already taken';
@@ -2445,8 +2409,11 @@ if (updateProfileForm) {
         setTimeout(() => generalError.remove(), 4000);
       }
     }
-  });
+  };
+
+  updateProfileForm.addEventListener('submit', updateProfileForm.__submitHandler);
 }
+
 
 
 // --- UPDATE PROFILE MODAL ---
@@ -3234,129 +3201,7 @@ if (profilePictureInput && profilePicturePreview) {
 }
 
 // --- Profile Update Form Submission ---
-if (updateProfileForm) {
-  updateProfileForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    if (!saveProfileBtn || saveProfileBtn.disabled) {
-      console.log('[DEBUG] updateProfileForm: Form invalid or button disabled, submission aborted');
-      return;
-    }
 
-    // Mark all fields as touched and validate before submission
-    // This ensures errors are shown if any fields are invalid.
-    Object.keys(fieldTouched).forEach(key => fieldTouched[key] = true);
-    validateProfileForm(true);
-    if (saveProfileBtn.disabled) {
-      console.log('[DEBUG] updateProfileForm: Form invalid after validation, submission aborted');
-      return;
-    }
-
-    // Prepare FormData for submission (includes file if uploaded)
-    const formData = new FormData(updateProfileForm);
-    // Ensure email is included (from localStorage, as it's disabled)
-    formData.set('email', localStorage.getItem('userEmail') || '');
-    // Clean phone number: remove spaces for server consistency
-    const phoneNumber = formData.get('phoneNumber')?.replace(/\s/g, '');
-    formData.set('phoneNumber', phoneNumber || '');
-
-    // Get current values for restriction checks
-    const currentUsername = localStorage.getItem('username') || '';
-    const newUsername = formData.get('username')?.trim() || '';
-    const currentPhoneNumber = localStorage.getItem('phoneNumber') || '';
-    const currentFullName = localStorage.getItem('fullName') || '';
-    const newFullName = formData.get('fullName')?.trim() || '';
-    const currentAddress = localStorage.getItem('address')?.trim() || '';
-    const newAddress = formData.get('address')?.trim() || '';
-
-    // Enforce edit restrictions (e.g., phone/address can't be changed if set)
-    if (currentPhoneNumber && phoneNumber !== currentPhoneNumber) return;
-    if (localStorage.getItem('fullNameEdited') === 'true' && newFullName !== currentFullName) return;
-    if (currentAddress && newAddress !== currentAddress) return;
-
-    // Username change cooldown (90 days)
-    const lastUpdate = localStorage.getItem('lastUsernameUpdate');
-    if (currentUsername && newUsername !== currentUsername && lastUpdate) {
-      const daysSinceUpdate = (Date.now() - new Date(lastUpdate).getTime()) / (1000 * 60 * 60 * 24);
-      if (daysSinceUpdate < 90) {
-        if (usernameError) {
-          usernameError.textContent = `You can update your username again in ${Math.ceil(90 - daysSinceUpdate)} days`;
-          usernameError.classList.add('active');
-          usernameInput.classList.add('invalid');
-        }
-        return;
-      }
-    }
-
-    try {
-      // Debug: Log form data being sent (without file contents)
-      const formDataObj = {};
-      for (const [key, value] of formData.entries()) {
-        formDataObj[key] = value instanceof File ? `File: ${value.name}` : value;
-      }
-      console.log('[DEBUG] updateProfileForm: Submitting form data:', formDataObj);
-
-      // Submit to server (server handles file upload and returns updated profile with URL)
-      const response = await fetch('https://api.flexgig.com.ng/api/profile/update', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('authToken') || ''}`
-        },
-        body: formData,
-        credentials: 'include',
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Failed to update profile');
-
-      // Update localStorage with server data (ensures consistency)
-      const fullName = newFullName;
-      localStorage.setItem('username', newUsername);
-      localStorage.setItem('firstName', fullName.split(' ')[0] || '');
-      localStorage.setItem('fullName', fullName);
-      localStorage.setItem('phoneNumber', phoneNumber || '');
-      localStorage.setItem('address', newAddress);
-      localStorage.setItem(
-        'fullNameEdited',
-        localStorage.getItem('fullNameEdited') === 'true' || fullName !== currentFullName ? 'true' : 'false'
-      );
-      if (newUsername !== currentUsername) {
-        localStorage.setItem('lastUsernameUpdate', new Date().toISOString());
-      }
-
-      // Key fix: Set profile picture from server response (URL, not base64)
-      // This ensures the dashboard uses the persistent server-hosted image.
-      localStorage.setItem('profilePicture', data.profile.profilePicture || '');
-
-      // Immediately update dashboard avatar with the new picture
-      updateGreetingAndAvatar(newUsername, fullName.split(' ')[0]);
-
-      // Show success notification
-      const notification = document.getElementById('profileUpdateNotification');
-      if (notification) {
-        notification.classList.add('active');
-        setTimeout(() => notification.classList.remove('active'), 3000);
-      }
-
-      // Close modal and reload profile for full sync
-      closeUpdateProfileModal();
-      await loadUserProfile();  // Ensures any other server changes are pulled (e.g., if server modifies something)
-    } catch (err) {
-      console.error('[ERROR] updateProfileForm:', err);
-      if (err.message.includes('Username already taken')) {
-        if (usernameError) {
-          usernameError.textContent = 'Username is already taken';
-          usernameError.classList.add('active');
-          usernameInput.classList.add('invalid');
-        }
-      } else {
-        const generalError = document.createElement('div');
-        generalError.className = 'error-message active';
-        generalError.textContent = `Failed to update profile: ${err.message}`;
-        updateProfileForm.prepend(generalError);
-        setTimeout(() => generalError.remove(), 3000);
-      }
-    }
-  });
-}
 
 
     // --- SVG INJECTION FOR ICONS ---
