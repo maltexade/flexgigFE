@@ -2674,6 +2674,10 @@ function validateField(field) {
 
   const value = inputElement?.value || '';
 
+  // FIX: Declare and initialize isValid here to avoid ReferenceError.
+  // Default to true (valid) unless proven otherwise in the switch cases.
+  let isValid = true;
+
   // ... continue with your existing switch (fullName, username, phoneNumber, address, profilePicture) ...
 
   switch (field) {
@@ -2762,28 +2766,27 @@ function validateField(field) {
       break;
     }
     case 'profilePicture':
-    // DP is optional: only validate if a file was selected
-    if (inputElement.files && inputElement.files.length > 0) {
-      const file = inputElement.files[0];
-      if (!file.type.startsWith('image/')) {
-        errorElement.textContent = 'Profile picture must be an image';
-        errorElement.classList.remove('hidden');
-        isValid = false;
-      } else if (file.size > 2 * 1024 * 1024) { // e.g. 2MB limit
-        errorElement.textContent = 'Profile picture must be less than 2MB';
-        errorElement.classList.remove('hidden');
-        isValid = false;
+      // DP is optional: only validate if a file was selected
+      if (inputElement.files && inputElement.files.length > 0) {
+        const file = inputElement.files[0];
+        if (!file.type.startsWith('image/')) {
+          errorElement.textContent = 'Profile picture must be an image';
+          errorElement.classList.remove('hidden');
+          isValid = false;
+        } else if (file.size > 2 * 1024 * 1024) { // e.g. 2MB limit
+          errorElement.textContent = 'Profile picture must be less than 2MB';
+          errorElement.classList.remove('hidden');
+          isValid = false;
+        } else {
+          errorElement.textContent = '';
+          errorElement.classList.add('hidden');
+        }
       } else {
+        // No new file selected → still valid
         errorElement.textContent = '';
         errorElement.classList.add('hidden');
       }
-    } else {
-      // No new file selected → still valid
-      errorElement.textContent = '';
-      errorElement.classList.add('hidden');
-    }
-    break;
-
+      break;
   }
   return isValid;
 }
