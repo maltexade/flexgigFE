@@ -3316,6 +3316,30 @@ if (profilePictureInput && profilePicturePreview) {
         el.outerHTML = svg;
       })
     );
+
+
+    // Settings Modal controls
+const settingsBtn = document.getElementById("settingsBtn");
+const settingsModal = document.getElementById("settingsModal");
+const closeSettings = document.getElementById("closeSettings");
+
+if (settingsBtn && settingsModal && closeSettings) {
+  settingsBtn.addEventListener("click", () => {
+    settingsModal.classList.remove("hidden");
+  });
+
+  closeSettings.addEventListener("click", () => {
+    settingsModal.classList.add("hidden");
+  });
+
+  // Close when clicking outside content
+  window.addEventListener("click", (e) => {
+    if (e.target === settingsModal) {
+      settingsModal.classList.add("hidden");
+    }
+  });
+}
+
   
 
 
