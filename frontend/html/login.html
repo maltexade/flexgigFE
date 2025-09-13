@@ -275,14 +275,15 @@
   // --- CONFIG ---
   const API_BASE = 'https://api.flexgig.com.ng';
   const WEB_BASE = 'https://www.flexgig.com.ng';
-  const SUPABASE_URL = "https://bwmappzvptcjxlukccux.supabase.co";
-  const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ3bWFwcHp2cHRjanhsdWtjY3V4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTU0OTMzMjcsImV4cCI6MjA3MTA2OTMyN30.Ra7k6Br6nl1huQQi5DpDuOQSDE-6N1qlhUIvIset0mc";
-  
-  // Initialize Supabase client
-  const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  // Remove Supabase client initialization since we’re using server API
+  // const SUPABASE_URL = "...";
+  // const SUPABASE_ANON_KEY = "...";
+  // const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
   // --- STATE ---
   let currentEmail = '';
+  let accessToken = ''; // For set-password
+  let userUid = ''; // For set-password
   const OTP_LENGTH = 6;
   let resendTimer = null;
 
@@ -293,7 +294,7 @@
     const el = qs(id); 
     el.classList.remove('hidden'); 
     el.classList.add('fade'); 
-    saveState(id); // Save step
+    saveState(id);
   };
   const hideAll = () => ['#step-email', '#step-password', '#step-otp', '#step-setpwd', '#step-resetpwd'].forEach(s => qs(s).classList.add('hidden'));
   const maskEmail = (email) => {
@@ -304,9 +305,9 @@
   };
 
   // Save state to localStorage
-  const saveState = (stepId) => {
+  const saveState = (id) => {
     const state = {
-      step: stepId,
+      step: id,
       email: currentEmail,
       otp: Array.from(otpGrid.querySelectorAll('input')).map(i => i.value).join(''),
     };
@@ -376,10 +377,10 @@
         otpGrid.children[i + 1].focus();
       }
       if (i === OTP_LENGTH - 1 && e.target.value) {
-        e.target.blur(); // Close keyboard on 6th digit
-        qs('#verifyOtpBtn').click(); // Auto-submit OTP
+        e.target.blur();
+        qs('#verifyOtpBtn').click();
       }
-      saveState('#step-otp'); // Save OTP state
+      saveState('#step-otp');
     });
     inp.addEventListener('keydown', (e) => {
       if (e.key === 'Backspace' && !e.target.value && i > 0) {
@@ -389,7 +390,7 @@
     otpGrid.appendChild(inp);
   }
 
-  // Handle OTP paste
+  // OTP paste
   otpGrid.addEventListener('paste', (e) => {
     e.preventDefault();
     const paste = (e.clipboardData || window.clipboardData).getData('text').replace(/\D/g, '');
@@ -402,11 +403,11 @@
     if (filled >= 0) {
       boxes[filled].focus();
       if (filled === OTP_LENGTH - 1) {
-        boxes[filled].blur(); // Close keyboard on paste
-        qs('#verifyOtpBtn').click(); // Auto-submit OTP
+        boxes[filled].blur();
+        qs('#verifyOtpBtn').click();
       }
     }
-    saveState('#step-otp'); // Save OTP state
+    saveState('#step-otp');
   });
 
   // Resend OTP countdown
@@ -414,7 +415,7 @@
     const resendBtn = qs('#resendOtp');
     const countdownEl = qs('#resendCountdown');
     resendBtn.setAttribute('disabled', true);
-    let timeLeft = 120; // 2 minutes in seconds
+    let timeLeft = 120;
     countdownEl.classList.remove('hidden');
     countdownEl.textContent = `(Wait ${Math.floor(timeLeft / 60)}:${(timeLeft % 60).toString().padStart(2, '0')})`;
     resendTimer = setInterval(() => {
@@ -442,31 +443,26 @@
     }
     currentEmail = email;
     try {
-      const res = await fetch(`${API_BASE}/auth/check-email`, {
+      // Check if account exists and has password
+      const loginRes = await fetch(`${API_BASE}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email }),
+        credentials: 'include',
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || json.message || 'Server error');
-      if (json.exists) {
-        qs('#pwdFor').textContent = `for ${email}`;
-        show('#step-password');
-      } else {
-        const send = await fetch(`${API_BASE}/auth/send-otp`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email }),
-        });
-        const sj = await send.json();
-        if (!send.ok) throw new Error(sj.error || sj.message || 'Failed to send OTP');
+      const loginData = await loginRes.json();
+      if (!loginRes.ok) throw new Error(loginData.error?.message || 'Server error');
+      if (loginData.status === 'otp_sent') {
         qs('#otpSentTo').textContent = `Enter the OTP sent to your email ${maskEmail(email)}`;
         otpGrid.querySelector('input')?.focus();
         startResendCountdown();
         show('#step-otp');
+      } else {
+        qs('#pwdFor').textContent = `for ${email}`;
+        show('#step-password');
       }
     } catch (err) {
-      qs('#emailErr').textContent = err.message;
+      qs('#emailErr').textContent = err.message || 'Error checking email';
     } finally {
       qs('#emailLoading').classList.remove('active');
       qs('#emailContinue').removeAttribute('disabled');
@@ -494,10 +490,18 @@
         credentials: 'include',
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Login failed');
-      clearState(); // Clear state on successful login
-      localStorage.setItem('accessToken', data.token);
-      window.location.href = `${WEB_BASE}/dashboard`;
+      if (!res.ok) throw new Error(data.error?.message || 'Login failed');
+      if (data.status === 'otp_sent') {
+        qs('#otpSentTo').textContent = `Enter the OTP sent to your email ${maskEmail(currentEmail)}`;
+        otpGrid.querySelector('input')?.focus();
+        startResendCountdown();
+        show('#step-otp');
+      } else {
+        clearState();
+        document.cookie = `token=${data.token}; path=/; secure; samesite=none`;
+        document.cookie = `rt=${data.refreshToken}; path=/; secure; samesite=none; httponly`;
+        window.location.href = `${WEB_BASE}/dashboard`;
+      }
     } catch (err) {
       qs('#passwordErr').textContent = err.message;
     }
@@ -508,15 +512,18 @@
     e.preventDefault();
     qs('#passwordErr').textContent = '';
     try {
-      const res = await fetch(`${API_BASE}/auth/reset-password`, {
+      const res = await fetch(`${API_BASE}/auth/send-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: currentEmail }),
+        credentials: 'include',
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to send reset email');
-      qs('#passwordErr').textContent = 'Password reset email sent. Check your inbox.';
-      show('#step-resetpwd'); // Save reset step
+      if (!res.ok) throw new Error(data.error?.message || 'Failed to send OTP');
+      qs('#otpSentTo').textContent = `Enter the OTP sent to your email ${maskEmail(currentEmail)}`;
+      otpGrid.querySelector('input')?.focus();
+      startResendCountdown();
+      show('#step-otp');
     } catch (err) {
       qs('#passwordErr').textContent = err.message;
     }
@@ -531,28 +538,21 @@
       return;
     }
     try {
-      const { data, error } = await sb.auth.verifyOtp({
-        email: currentEmail,
-        token: digits,
-        type: 'signup',
-      });
-      if (error) throw new Error(error.message);
-      const { data: sessionData, error: sessionError } = await sb.auth.getSession();
-      if (sessionError || !sessionData.session) throw new Error('Failed to get session');
-      const accessToken = sessionData.session.access_token;
-      const res = await fetch(`${API_BASE}/auth/login`, {
+      const res = await fetch(`${API_BASE}/auth/verify-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: currentEmail, access_token: accessToken }),
+        body: JSON.stringify({ email: currentEmail, token: digits }),
         credentials: 'include',
       });
-      const loginData = await res.json();
-      if (!res.ok) throw new Error(loginData.error || 'Login failed');
-      clearState(); // Clear state on successful OTP verification
-      localStorage.setItem('accessToken', loginData.token);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error?.message || 'Invalid OTP');
+      accessToken = data.token;
+      userUid = data.user.uid;
+      document.cookie = `token=${data.token}; path=/; secure; samesite=none`;
+      clearState();
       show('#step-setpwd');
     } catch (err) {
-      qs('#otpErr').textContent = err.message || 'Invalid OTP';
+      qs('#otpErr').textContent = err.message;
     }
   });
 
@@ -566,12 +566,13 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: currentEmail }),
+        credentials: 'include',
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to resend OTP');
+      if (!res.ok) throw new Error(data.error?.message || 'Failed to resend OTP');
       qs('#otpSentTo').textContent = `New OTP sent to ${maskEmail(currentEmail)}`;
       startResendCountdown();
-      saveState('#step-otp'); // Save OTP step
+      saveState('#step-otp');
     } catch (err) {
       qs('#otpErr').textContent = err.message;
     }
@@ -586,18 +587,29 @@
     if (!p1 || p1.length < 8) return err.textContent = 'Password must be at least 8 characters';
     if (p1 !== p2) return err.textContent = 'Passwords do not match';
     try {
-      const { data, error } = await sb.auth.updateUser({ password: p1 });
-      if (error) throw new Error(error.message);
-      const res = await fetch(`${API_BASE}/auth/login`, {
+      const res = await fetch(`${API_BASE}/auth/set-password`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ uid: userUid, password: p1 }),
+        credentials: 'include',
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error?.message || 'Failed to set password');
+      clearState();
+      // Auto-login after setting password
+      const loginRes = await fetch(`${API_BASE}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: currentEmail, password: p1 }),
         credentials: 'include',
       });
-      const loginData = await res.json();
-      if (!res.ok) throw new Error(loginData.error || 'Login failed');
-      clearState(); // Clear state on successful login
-      localStorage.setItem('accessToken', loginData.token);
+      const loginData = await loginRes.json();
+      if (!loginRes.ok) throw new Error(loginData.error?.message || 'Login failed');
+      document.cookie = `token=${loginData.token}; path=/; secure; samesite=none`;
+      document.cookie = `rt=${loginData.refreshToken}; path=/; secure; samesite=none; httponly`;
       window.location.href = `${WEB_BASE}/dashboard`;
     } catch (err) {
       err.textContent = err.message;
@@ -615,27 +627,44 @@
     if (!p1 || p1.length < 8) return err.textContent = 'Password must be at least 8 characters';
     if (p1 !== p2) return err.textContent = 'Passwords do not match';
     try {
-      const { data, error } = await sb.auth.verifyOtp({
-        email: currentEmail,
-        token: code,
-        type: 'recovery',
+      // Verify OTP for recovery
+      const verifyRes = await fetch(`${API_BASE}/auth/verify-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: currentEmail, token: code }),
+        credentials: 'include',
       });
-      if (error) throw new Error(error.message);
-      const { data: updateData, error: updateError } = await sb.auth.updateUser({ password: p1 });
-      if (updateError) throw new Error(updateError.message);
-      const res = await fetch(`${API_BASE}/auth/login`, {
+      const verifyData = await verifyRes.json();
+      if (!verifyRes.ok) throw new Error(verifyData.error?.message || 'Invalid reset code');
+      accessToken = verifyData.token;
+      userUid = verifyData.user.uid;
+      // Set new password
+      const setRes = await fetch(`${API_BASE}/auth/set-password`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ uid: userUid, password: p1 }),
+        credentials: 'include',
+      });
+      const setData = await setRes.json();
+      if (!setRes.ok) throw new Error(setData.error?.message || 'Failed to set password');
+      // Auto-login
+      const loginRes = await fetch(`${API_BASE}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: currentEmail, password: p1 }),
         credentials: 'include',
       });
-      const loginData = await res.json();
-      if (!res.ok) throw new Error(loginData.error || 'Login failed');
-      clearState(); // Clear state on successful login
-      localStorage.setItem('accessToken', loginData.token);
+      const loginData = await loginRes.json();
+      if (!loginRes.ok) throw new Error(loginData.error?.message || 'Login failed');
+      clearState();
+      document.cookie = `token=${loginData.token}; path=/; secure; samesite=none`;
+      document.cookie = `rt=${loginData.refreshToken}; path=/; secure; samesite=none; httponly`;
       window.location.href = `${WEB_BASE}/dashboard`;
     } catch (err) {
-      err.textContent = err.message || 'Invalid reset code';
+      err.textContent = err.message;
     }
   });
 
@@ -649,7 +678,7 @@
       qs('#resetCode').value = code;
       show('#step-resetpwd');
     } else {
-      restoreState(); // Restore state on load
+      restoreState();
     }
   });
 </script>
