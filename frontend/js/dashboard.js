@@ -2272,6 +2272,8 @@ payBtn.addEventListener('click', () => {
 // --- UPDATE PROFILE MODAL ---
 // --- UPDATE PROFILE MODAL ---
 // --- UPDATE PROFILE MODAL ---
+const updateProfileBtn = document.getElementById('updateProfileBtn'); // dashboard
+const settingsUpdateBtn = document.getElementById('settingsUpdateBtn'); // settings
 const updateProfileModal = document.getElementById('updateProfileModal');
 const updateProfileForm = document.getElementById('updateProfileForm');
 const profilePictureInput = document.getElementById('profilePicture');
@@ -2288,6 +2290,8 @@ const phoneNumberError = document.getElementById('phoneNumberError');
 const addressError = document.getElementById('addressError');
 const profilePictureError = document.getElementById('profilePictureError');
 let isUsernameAvailable = false;
+let lastModalSource = null; // can be 'dashboard' or 'settings'
+
 
 // Validate DOM elements
 const requiredElements = {
@@ -2313,6 +2317,21 @@ for (const [key, element] of Object.entries(requiredElements)) {
     console.error(`[ERROR] Missing DOM element: ${key}`);
   }
 }
+
+if (updateProfileBtn) {
+  updateProfileBtn.addEventListener('click', () => {
+    lastModalSource = 'dashboard';
+    openUpdateProfileModal();
+  });
+}
+
+if (settingsUpdateBtn) {
+  settingsUpdateBtn.addEventListener('click', () => {
+    lastModalSource = 'settings';
+    openUpdateProfileModal();
+  });
+}
+
 
 const updateProfileCard = document.querySelector('.card.update-profile');
 if (updateProfileCard) {
@@ -3235,15 +3254,37 @@ if (fullNameInput) {
 }
 
 function closeUpdateProfileModal() {
-  if (!updateProfileModal) return;
-  updateProfileModal.classList.remove('active');
-  updateProfileModal.setAttribute('aria-hidden', 'true');
-  document.body.classList.remove('modal-open');
-  
-  setTimeout(() => {
-    updateProfileModal.style.display = 'none';
-  }, 400); // Match CSS transition duration
-  console.log('[DEBUG] closeUpdateProfileModal: Modal closed');
+    if (!updateProfileModal) return;
+    updateProfileModal.classList.remove('active');
+    updateProfileModal.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('modal-open');
+    setTimeout(() => {
+        updateProfileModal.style.display = 'none';
+    }, 400);
+    console.log('[DEBUG] closeUpdateProfileModal: Modal closed');
+
+    // Ensure settings-tab is active
+    const tabs = document.querySelectorAll('.nav-link');
+    const settingsTab = document.getElementById('settings-tab');
+    tabs.forEach(t => t.classList.remove('active'));
+    if (settingsTab) settingsTab.classList.add('active');
+
+    // Reopen settings modal if source was settings
+    if (lastModalSource === 'settings') {
+        const settingsModal = document.getElementById('settingsModal') || document.getElementById('settings');
+        if (settingsModal) {
+            settingsModal.style.display = 'flex';
+            document.documentElement.style.overflow = 'hidden';
+            const settingsBtn = document.getElementById('settingsBtn');
+            if (settingsBtn) settingsBtn.classList.add('active');
+        }
+    } else {
+        // Activate dashboard tab
+        const homeTab = document.getElementById('home-tab');
+        if (homeTab) homeTab.classList.add('active');
+    }
+
+    lastModalSource = null;
 }
 
 // Initialize modal event listeners
@@ -3317,7 +3358,6 @@ if (profilePictureInput && profilePicturePreview) {
       })
     );
 
-
 // ---------- Settings modal behavior ----------
 (function () {
   const settingsBtn = document.getElementById('settingsBtn');
@@ -3340,45 +3380,49 @@ if (profilePictureInput && profilePicturePreview) {
   function showModal() {
     modal.style.display = 'flex';
     document.documentElement.style.overflow = 'hidden';
+    if (settingsBtn) settingsBtn.classList.add('active');
   }
   function hideModal() {
     modal.style.display = 'none';
     document.documentElement.style.overflow = '';
+    if (settingsBtn) settingsBtn.classList.remove('active');
   }
 
+  // button → open
   if (settingsBtn) settingsBtn.addEventListener('click', showModal);
+
+  // close buttons
   if (settingsBack) settingsBack.addEventListener('click', hideModal);
   if (closeSettings) closeSettings.addEventListener('click', hideModal);
 
+  // prevent closing when clicking inside modal content
+  const modalContent = modal.querySelector('.settings-content');
+  if (modalContent) {
+    modalContent.addEventListener('click', (e) => e.stopPropagation());
+  }
+
   // close on outside click
-  window.addEventListener('click', (e) => {
+  modal.addEventListener('click', (e) => {
     if (e.target === modal) hideModal();
   });
 
   // populate user info
   async function loadProfileToSettings() {
     try {
-      // try API first
       let profile;
       try {
         const resp = await fetch('/api/profile', { credentials: 'include' });
         if (resp.ok) profile = await resp.json();
       } catch (e) {
-        // ignore api error and fallback to local
         console.warn('Profile fetch failed, falling back to local', e);
       }
 
       if (!profile) {
-        // try localStorage (dev/test mode)
         const local = localStorage.getItem('user') || localStorage.getItem('profile');
         if (local) profile = JSON.parse(local);
       }
-      if (!profile) {
-        // nothing found — leave defaults
-        return;
-      }
+      if (!profile) return;
 
-      // set avatar (profilePicture or profile_picture)
       const avatarUrl = profile.profilePicture || profile.profile_picture || profile.avatar_url || `/frontend/img/avatar-placeholder.png`;
       settingsAvatar.src = avatarUrl;
       settingsUsername.textContent = profile.username || profile.fullName || deriveFullName(profile.email || '');
@@ -3394,18 +3438,23 @@ if (profilePictureInput && profilePicturePreview) {
   // Edit profile action
   if (openUpdateProfile) {
     openUpdateProfile.addEventListener('click', () => {
-      hideModal();
-      // reuse your profile editing path - either open modal or redirect to profile editor
-      // If you have a profile modal on dashboard, trigger it here:
-      const profileOpenBtn = document.getElementById('open-profile-modal-btn');
-      if (profileOpenBtn) profileOpenBtn.click();
-      else window.location.href = '/profile-edit.html'; // fallback page
+      lastModalSource = 'settings';
+      openUpdateProfileModal(); // Directly open updateProfileModal
+      // Remove the hideModal() and profileOpenBtn logic
+    });
+  }
+
+  // Get the profile open button and update profile modal
+  const profileOpenBtn = document.getElementById('profileopenbtn');
+  if (profileOpenBtn) {
+    const updateProfileModal = new bootstrap.Modal(document.getElementById('updateprofile'));
+    profileOpenBtn.addEventListener('click', function () {
+      updateProfileModal.show();
     });
   }
 
   // Help & Support
   if (helpSupportBtn) helpSupportBtn.addEventListener('click', () => {
-    // open support chat or page
     window.location.href = '/help.html';
   });
 
@@ -3428,12 +3477,10 @@ if (profilePictureInput && profilePicturePreview) {
       } catch (err) {
         console.warn('Logout API error (continuing client-side)', err);
       }
-      // clear local client state
       localStorage.removeItem('user');
       localStorage.removeItem('token');
       localStorage.removeItem('profile');
       hideModal();
-      // redirect to login page
       window.location.href = '/frontend/html/login.html';
     });
   }
@@ -3446,7 +3493,6 @@ if (profilePictureInput && profilePicturePreview) {
     localStorage.setItem('dark_mode', enabled ? '1' : '0');
   }
 
-  // initialize theme from storage
   const stored = localStorage.getItem('dark_mode');
   setDarkMode(stored === '1');
 
@@ -3463,6 +3509,11 @@ if (profilePictureInput && profilePicturePreview) {
   });
   obs.observe(modal, { attributes: true, attributeFilter: ['style'] });
 })();
+
+
+
+
+
 
 
   

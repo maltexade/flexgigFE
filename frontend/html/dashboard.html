@@ -469,23 +469,24 @@
   </nav>
 <!-- Settings Modal (full screen) -->
 <div id="settingsModal" class="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" style="display:none;">
-  <div class="settings-header">
-    <button id="settingsBack" class="settings-back" aria-label="Close settings">
-      <!-- back SVG -->
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-      </svg>
-    </button>
+  <div class="settings-content">
+    <div class="settings-header">
+      <button id="settingsBack" class="settings-back" aria-label="Close settings">
+        <!-- back SVG -->
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
 
-    <h3 id="settingsTitle" class="settings-title">Settings</h3>
-  </div>
+      <h3 id="settingsTitle" class="settings-title">Settings</h3>
+    </div>
 
-  <div class="settings-divider"></div>
+    <div class="settings-divider"></div>
 
   <div class="settings-body">
     <!-- Profile row -->
     <div class="settings-profile">
-      <img id="settingsAvatar" class="settings-avatar" src="/frontend/img/avatar-placeholder.png" alt="Profile picture">
+      <img id="settingsAvatar" class="settings-avatar" src="/frontend/img/avatar-placeholder.png">
       <div class="settings-profile-info">
         <div class="settings-username" id="settingsUsername">Your name</div>
         <div class="settings-email" id="settingsEmail">you@example.com</div>
@@ -579,6 +580,8 @@
     </div>
   </div>
 </div>
+</div>
+
 
 
   
