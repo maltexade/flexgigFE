@@ -3454,11 +3454,11 @@ if (profilePictureInput && profilePicturePreview) {
         settingsAvatar.src = avatarUrl.startsWith('/') ? `${location.protocol}//${location.host}${avatarUrl}` : avatarUrl;
 
         // Set username or full name
-        const displayName = profile.username || profile.firstName || profile.fullName || (profile.email ? profile.email.split('@')[0] : 'User');
+        const displayName = profile.username || profile.firstName || profile.fullName || (profile.email ? profile.email.split('@')[0] : 'Loading...');
         settingsUsername.textContent = displayName;
 
         // Set email
-        settingsEmail.textContent = profile.email || 'No email provided';
+        settingsEmail.textContent = profile.email || 'Loading...';
 
         console.log('[DEBUG] loadProfileToSettings: Loaded', { avatarUrl, displayName, email: profile.email });
     } catch (err) {
