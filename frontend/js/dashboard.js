@@ -3409,29 +3409,62 @@ if (profilePictureInput && profilePicturePreview) {
   // populate user info
   async function loadProfileToSettings() {
     try {
-      let profile;
-      try {
-        const resp = await fetch('/api/profile', { credentials: 'include' });
-        if (resp.ok) profile = await resp.json();
-      } catch (e) {
-        console.warn('Profile fetch failed, falling back to local', e);
-      }
+        let profile;
+        // Try fetching from API
+        try {
+            const resp = await fetch('https://api.flexgig.com.ng/api/profile', {
+                credentials: 'include',
+                headers: {
+                    'Authorization': `Bearer ${localStorage.getItem('authToken') || ''}`
+                }
+            });
+            let rawText = await resp.text();
+            try {
+                profile = rawText ? JSON.parse(rawText) : {};
+            } catch (e) {
+                console.warn('[WARN] loadProfileToSettings: Response is not valid JSON', rawText);
+            }
+        } catch (e) {
+            console.warn('[WARN] Profile fetch failed, falling back to local', e);
+        }
 
-      if (!profile) {
-        const local = localStorage.getItem('user') || localStorage.getItem('profile');
-        if (local) profile = JSON.parse(local);
-      }
-      if (!profile) return;
+        // Fallback to localStorage
+        if (!profile) {
+            profile = {
+                profilePicture: localStorage.getItem('profilePicture') || '',
+                username: localStorage.getItem('username') || '',
+                fullName: localStorage.getItem('fullName') || '',
+                firstName: localStorage.getItem('firstName') || '',
+                email: localStorage.getItem('userEmail') || ''
+            };
+        }
 
-      const avatarUrl = profile.profilePicture || profile.profile_picture || profile.avatar_url || `/frontend/img/avatar-placeholder.png`;
-      settingsAvatar.src = avatarUrl;
-      settingsUsername.textContent = profile.username || profile.fullName || deriveFullName(profile.email || '');
-      settingsEmail.textContent = profile.email || '';
+        // Ensure elements exist
+        const settingsAvatar = document.getElementById('settingsAvatar');
+        const settingsUsername = document.getElementById('settingsUsername');
+        const settingsEmail = document.getElementById('settingsEmail');
 
+        if (!settingsAvatar || !settingsUsername || !settingsEmail) {
+            console.error('[ERROR] loadProfileToSettings: Missing DOM elements');
+            return;
+        }
+
+        // Set profile picture
+        const avatarUrl = profile.profilePicture || profile.profile_picture || profile.avatar_url || '/frontend/img/avatar-placeholder.png';
+        settingsAvatar.src = avatarUrl.startsWith('/') ? `${location.protocol}//${location.host}${avatarUrl}` : avatarUrl;
+
+        // Set username or full name
+        const displayName = profile.username || profile.firstName || profile.fullName || (profile.email ? profile.email.split('@')[0] : 'User');
+        settingsUsername.textContent = displayName;
+
+        // Set email
+        settingsEmail.textContent = profile.email || 'No email provided';
+
+        console.log('[DEBUG] loadProfileToSettings: Loaded', { avatarUrl, displayName, email: profile.email });
     } catch (err) {
-      console.error('Failed to load profile to settings', err);
+        console.error('[ERROR] Failed to load profile to settings', err);
     }
-  }
+}
 
   loadProfileToSettings();
 
