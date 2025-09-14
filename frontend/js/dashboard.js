@@ -3318,27 +3318,152 @@ if (profilePictureInput && profilePicturePreview) {
     );
 
 
-    // Settings Modal controls
-const settingsBtn = document.getElementById("settingsBtn");
-const settingsModal = document.getElementById("settingsModal");
-const closeSettings = document.getElementById("closeSettings");
+// ---------- Settings modal behavior ----------
+(function () {
+  const settingsBtn = document.getElementById('settingsBtn');
+  const modal = document.getElementById('settingsModal');
+  const settingsBack = document.getElementById('settingsBack');
+  const closeSettings = document.getElementById('closeSettings'); // may be absent; back button will close
+  const openUpdateProfile = document.getElementById('openUpdateProfile');
+  const logoutBtnModal = document.getElementById('logoutBtnModal');
+  const helpSupportBtn = document.getElementById('helpSupportBtn');
+  const securityBtn = document.getElementById('securityBtn');
+  const referralsBtn = document.getElementById('referralsBtn');
+  const themeToggle = document.getElementById('themeToggle');
+  const settingsAvatar = document.getElementById('settingsAvatar');
+  const settingsUsername = document.getElementById('settingsUsername');
+  const settingsEmail = document.getElementById('settingsEmail');
 
-if (settingsBtn && settingsModal && closeSettings) {
-  settingsBtn.addEventListener("click", () => {
-    settingsModal.classList.remove("hidden");
+  if (!modal) return;
+
+  // open/close helpers
+  function showModal() {
+    modal.style.display = 'flex';
+    document.documentElement.style.overflow = 'hidden';
+  }
+  function hideModal() {
+    modal.style.display = 'none';
+    document.documentElement.style.overflow = '';
+  }
+
+  if (settingsBtn) settingsBtn.addEventListener('click', showModal);
+  if (settingsBack) settingsBack.addEventListener('click', hideModal);
+  if (closeSettings) closeSettings.addEventListener('click', hideModal);
+
+  // close on outside click
+  window.addEventListener('click', (e) => {
+    if (e.target === modal) hideModal();
   });
 
-  closeSettings.addEventListener("click", () => {
-    settingsModal.classList.add("hidden");
-  });
+  // populate user info
+  async function loadProfileToSettings() {
+    try {
+      // try API first
+      let profile;
+      try {
+        const resp = await fetch('/api/profile', { credentials: 'include' });
+        if (resp.ok) profile = await resp.json();
+      } catch (e) {
+        // ignore api error and fallback to local
+        console.warn('Profile fetch failed, falling back to local', e);
+      }
 
-  // Close when clicking outside content
-  window.addEventListener("click", (e) => {
-    if (e.target === settingsModal) {
-      settingsModal.classList.add("hidden");
+      if (!profile) {
+        // try localStorage (dev/test mode)
+        const local = localStorage.getItem('user') || localStorage.getItem('profile');
+        if (local) profile = JSON.parse(local);
+      }
+      if (!profile) {
+        // nothing found — leave defaults
+        return;
+      }
+
+      // set avatar (profilePicture or profile_picture)
+      const avatarUrl = profile.profilePicture || profile.profile_picture || profile.avatar_url || `/frontend/img/avatar-placeholder.png`;
+      settingsAvatar.src = avatarUrl;
+      settingsUsername.textContent = profile.username || profile.fullName || deriveFullName(profile.email || '');
+      settingsEmail.textContent = profile.email || '';
+
+    } catch (err) {
+      console.error('Failed to load profile to settings', err);
     }
+  }
+
+  loadProfileToSettings();
+
+  // Edit profile action
+  if (openUpdateProfile) {
+    openUpdateProfile.addEventListener('click', () => {
+      hideModal();
+      // reuse your profile editing path - either open modal or redirect to profile editor
+      // If you have a profile modal on dashboard, trigger it here:
+      const profileOpenBtn = document.getElementById('open-profile-modal-btn');
+      if (profileOpenBtn) profileOpenBtn.click();
+      else window.location.href = '/profile-edit.html'; // fallback page
+    });
+  }
+
+  // Help & Support
+  if (helpSupportBtn) helpSupportBtn.addEventListener('click', () => {
+    // open support chat or page
+    window.location.href = '/help.html';
   });
-}
+
+  // Security
+  if (securityBtn) securityBtn.addEventListener('click', () => {
+    window.location.href = '/security.html';
+  });
+
+  // Referrals
+  if (referralsBtn) referralsBtn.addEventListener('click', () => {
+    window.location.href = '/referrals.html';
+  });
+
+  // Logout (modal)
+  if (logoutBtnModal) {
+    logoutBtnModal.addEventListener('click', async (e) => {
+      e.preventDefault();
+      try {
+        await fetch('/auth/logout', { method: 'POST', credentials: 'include' });
+      } catch (err) {
+        console.warn('Logout API error (continuing client-side)', err);
+      }
+      // clear local client state
+      localStorage.removeItem('user');
+      localStorage.removeItem('token');
+      localStorage.removeItem('profile');
+      hideModal();
+      // redirect to login page
+      window.location.href = '/frontend/html/login.html';
+    });
+  }
+
+  // Theme toggle
+  function setDarkMode(enabled) {
+    if (enabled) document.documentElement.classList.add('dark-mode');
+    else document.documentElement.classList.remove('dark-mode');
+    if (themeToggle) themeToggle.setAttribute('aria-pressed', !!enabled);
+    localStorage.setItem('dark_mode', enabled ? '1' : '0');
+  }
+
+  // initialize theme from storage
+  const stored = localStorage.getItem('dark_mode');
+  setDarkMode(stored === '1');
+
+  if (themeToggle) {
+    themeToggle.addEventListener('click', () => {
+      const isDark = document.documentElement.classList.contains('dark-mode');
+      setDarkMode(!isDark);
+    });
+  }
+
+  // when the modal opens, refresh profile
+  const obs = new MutationObserver(() => {
+    if (modal.style.display === 'flex') loadProfileToSettings();
+  });
+  obs.observe(modal, { attributes: true, attributeFilter: ['style'] });
+})();
+
 
   
 
