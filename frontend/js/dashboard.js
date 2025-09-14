@@ -3361,7 +3361,7 @@ if (profilePictureInput && profilePicturePreview) {
 // ---------- Settings modal behavior ----------
 (function () {
   const settingsBtn = document.getElementById('settingsBtn');
-  const modal = document.getElementById('settingsModal');
+  const settingsModal = document.getElementById('settingsModal');
   const settingsBack = document.getElementById('settingsBack');
   const closeSettings = document.getElementById('closeSettings'); // may be absent; back button will close
   const openUpdateProfile = document.getElementById('openUpdateProfile');
@@ -3374,16 +3374,16 @@ if (profilePictureInput && profilePicturePreview) {
   const settingsUsername = document.getElementById('settingsUsername');
   const settingsEmail = document.getElementById('settingsEmail');
 
-  if (!modal) return;
+  if (!settingsModal) return;
 
   // open/close helpers
   function showModal() {
-    modal.style.display = 'flex';
+    settingsModal.style.display = 'flex';
     document.documentElement.style.overflow = 'hidden';
     if (settingsBtn) settingsBtn.classList.add('active');
   }
   function hideModal() {
-    modal.style.display = 'none';
+    settingsModal.style.display = 'none';
     document.documentElement.style.overflow = '';
     if (settingsBtn) settingsBtn.classList.remove('active');
   }
@@ -3486,10 +3486,7 @@ if (profilePictureInput && profilePicturePreview) {
     });
   }
 
-  // Help & Support
-  if (helpSupportBtn) helpSupportBtn.addEventListener('click', () => {
-    window.location.href = '/help.html';
-  });
+
 
   // Security
   if (securityBtn) securityBtn.addEventListener('click', () => {
@@ -3542,6 +3539,54 @@ if (profilePictureInput && profilePicturePreview) {
   });
   obs.observe(modal, { attributes: true, attributeFilter: ['style'] });
 })();
+
+// Help & Support (inside settings modal)
+const helpSupportBtn = document.getElementById('helpSupportBtn');
+const helpSupportModal = document.getElementById('helpSupportModal');
+const helpCloseBtn = helpSupportModal?.querySelector('.help-modal-close');
+const settingsModal = document.getElementById('settingsModal');
+
+if (helpSupportBtn && helpSupportModal) {
+  helpSupportBtn.addEventListener('click', () => {
+    console.log('Help & Support clicked');
+
+    // hide settings modal
+    if (settingsModal) {
+      settingsModal.style.display = 'none';
+    }
+
+    // show help modal with animation
+    helpSupportModal.classList.add('active');
+    document.body.classList.add('modal-open');
+  });
+}
+
+// close help modal
+if (helpCloseBtn) {
+  helpCloseBtn.addEventListener('click', () => {
+    console.log('Help & Support closed');
+
+    helpSupportModal.classList.remove('active');
+    document.body.classList.remove('modal-open');
+
+    // re-show settings modal
+    if (settingsModal) {
+      settingsModal.style.display = 'flex';
+    }
+  });
+}
+
+// optional: click background to close
+helpSupportModal?.addEventListener('click', (e) => {
+  if (e.target === helpSupportModal) {
+    helpCloseBtn?.click();
+  }
+});
+
+document.querySelectorAll('.contact-box').forEach(box => {
+  box.addEventListener('contextmenu', e => e.preventDefault());
+});
+
 
 
 

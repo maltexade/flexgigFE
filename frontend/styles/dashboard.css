@@ -1896,3 +1896,210 @@ html.dark-mode .theme-toggle .toggle-knob { transform: translateX(20px); }
   transform: scale(1.4); /* makes it ~35px visually */
   transform-origin: center;
 }
+
+
+/* Help & Support Modal */
+.help-support-modal {
+  position: fixed;
+  inset: 0;
+  background: #000000; /* darker, richer background */
+  color: #ffffff;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100%; /* slightly narrower for a "panel" look */
+  max-width: 500px;
+  z-index: 10001;
+
+  transform: translateX(-100%); /* start off-screen to the left */
+  opacity: 0;
+  transition: transform 0.4s cubic-bezier(0.25, 1, 0.5, 1), opacity 0.4s ease;
+  pointer-events: none;
+  border-radius: 16px; /* rounded edges for a panel feel */
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+  padding: 0 10px;
+}
+
+.help-support-modal.active {
+  transform: translateX(0); /* slide into place */
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Modal Header */
+.help-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  padding: 5px 0px;
+}
+
+.help-modal-header h1 {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: #ffffff;
+}
+
+.help-modal-header .help-modal-close {
+  position: absolute;
+  left: 1px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: #ffffff;
+  cursor: pointer;
+  transition: transform 0.2s ease, color 0.2s ease;
+}
+
+.help-modal-header .help-modal-close:hover {
+  color: #ff6b6b;
+  transform: scale(1.1) translateY(-50%);
+}
+
+.help-modal-body {
+  margin-top: -20px;
+}
+
+
+/* Illustration */
+.support-illustration {
+  flex: 0 0 25vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px;
+}
+.support-illustration img {
+  margin-bottom: -30px;
+}
+
+/* Text */
+.support-text h2 {
+  font-size: 22px;
+  font-weight: 500;
+  margin: 0 0 10px;
+  color: #ffffff;
+  text-align: center;
+
+}
+
+.support-text p {
+  font-size: 15px;
+  color: rgba(255, 255, 255, 0.85);
+  max-width: 360px;
+  margin: 0 auto 15px auto;
+  line-height: 1.5;
+  text-align: center;
+  padding: 0 16px;
+}
+
+/* Contact Icons */
+.support-contact {
+  flex: none; /* remove flex behavior */
+  display: grid;
+  grid-template-columns: repeat(2, 1fr); /* always 2 columns */
+  grid-template-rows: repeat(2, auto);   /* always 2 rows */
+  gap: 10px 20px; /* row gap + column gap */
+  width: 100%;
+  max-width: 400px; /* optional: centers neatly */
+  margin: 0 auto;   /* center horizontally */
+}
+
+
+/* Contact Box */
+.contact-box {
+  flex: 1 1 110px;
+  max-width: 150px;
+  max-height: 110px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  text-align: center;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  -webkit-tap-highlight-color: transparent; /* iOS Safari / Android */
+  -webkit-touch-callout: none;              /* disable long-press menu */
+  user-select: none;                        /* prevent text selection */
+  outline: none; 
+}
+.contact-box:active,
+.contact-box:focus {
+  outline: none;
+  background: rgba(255, 255, 255, 0.08); /* keep original */
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25); /* keep original */
+}
+.contact-link {
+  display: inline-block;
+  text-decoration: none;
+  color: inherit;
+
+  /* kill tap highlight & long-press menu */
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+
+  /* kill selection & outline */
+  user-select: none;
+  outline: none;
+}
+
+.contact-link:focus,
+.contact-link:active,
+.contact-link:visited {
+  text-decoration: none;
+  color: inherit;
+  outline: none;
+}
+
+/* Contact Text */
+.contact-box span {
+  font-size: 15px;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.contact-box small {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* WhatsApp & Telegram */
+.whatsapp {
+  background: #25d366;
+  color: #ffffff;
+  padding: 10px !important;
+}
+
+.telegram {
+  background: #0088cc;
+  color: #ffffff;
+  padding: 10px !important;
+}
+/* Facebook */
+.facebook {
+  background: #1877f2; /* Facebook Blue */
+  color: #ffffff;
+  padding: 10px !important;
+}
+
+/* Twitter */
+.twitter {
+  background: #14171a; /* Twitter Blue */
+  color: #ffffff;
+  padding: 10px !important;
+}
+.twitter svg {
+  transform: scale(0.7); /* 70% of original size */
+  transform-origin: center;
+}
+
+
+
