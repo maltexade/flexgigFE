@@ -3581,8 +3581,6 @@ document.querySelectorAll('.contact-box').forEach(box => {
 
 
 /* ---------- Security modal behavior + WebAuthn integration ---------- */
-
-/* ---------- Security modal behavior + WebAuthn integration ---------- */
 (function (supabase) {
   /* Unique-scoped security modal module (prefix __sec_) */
   const __sec_DEBUG = true;
@@ -3646,90 +3644,98 @@ document.querySelectorAll('.contact-box').forEach(box => {
     if (busy) el.setAttribute('aria-busy', 'true'); else el.removeAttribute('aria-busy');
   }
 
-  /* Async: get current user (use stored authToken and sync with Supabase) */
+  /* Async: get current user (use stored authToken and sync with custom API) */
   let __sec_cachedUser = null;
   async function __sec_getCurrentUser() {
-  try {
-    let sessionData = JSON.parse(localStorage.getItem('authTokenData') || '{}');
-    let user = sessionData.user;
-    let authToken = sessionData.authToken;
+    try {
+      let sessionData = JSON.parse(localStorage.getItem('authTokenData') || '{}');
+      let user = sessionData.user;
+      let authToken = sessionData.authToken;
 
-    if (!user || !authToken) {
-      console.warn('[__sec][warn] Stored authTokenData missing or invalid', sessionData);
-      if (typeof window.getSession === 'function') {
-        const session = await window.getSession();
-        if (session && session.user && session.authToken) {
-          user = session.user;
-          authToken = session.authToken;
-          localStorage.setItem('authTokenData', JSON.stringify({ user, authToken }));
-          console.log('[__sec][info] Retrieved session from getSession');
-          return { user, authToken };
-        } else {
-          console.warn('[__sec][warn] No valid session from getSession', session);
+      // Check if token is expired (parse JWT to get exp)
+      if (authToken) {
+        const payload = authToken.split('.')[1];
+        const decoded = JSON.parse(atob(payload));
+        if (decoded.exp * 1000 < Date.now()) {
+          console.warn('[__sec][warn] Stored token expired, attempting refresh');
+          authToken = null; // Force refresh
         }
       }
-      // Fallback: Try /api/session with stored authToken
-      const token = localStorage.getItem('authToken');
-      if (token) {
-        const res = await fetch('https://api.flexgig.com.ng/api/session', {
-          method: 'GET',
-          credentials: 'include',
-          headers: { 'Accept': 'application/json', 'Authorization': `Bearer ${token}` }
-        });
-        if (res.ok) {
-          const { user: fetchedUser, token: newToken } = await res.json();
-          user = fetchedUser;
-          authToken = newToken;
-          localStorage.setItem('authTokenData', JSON.stringify({ user, authToken: newToken }));
-          console.log('[__sec][info] Retrieved session from /api/session');
-          return { user, authToken };
-        } else if (res.status === 401) {
-          console.log('[__sec][info] Token expired, attempting refresh');
-          const refreshRes = await fetch('https://api.flexgig.com.ng/auth/refresh', {
-            method: 'POST',
+
+      if (!user || !authToken) {
+        console.warn('[__sec][warn] Stored authTokenData missing or invalid', sessionData);
+        if (typeof window.getSession === 'function') {
+          const session = await window.getSession();
+          if (session && session.user && session.authToken) {
+            user = session.user;
+            authToken = session.authToken;
+            localStorage.setItem('authTokenData', JSON.stringify({ user, authToken }));
+            console.log('[__sec][info] Retrieved session from getSession');
+            return { user, authToken };
+          } else {
+            console.warn('[__sec][warn] No valid session from getSession', session);
+          }
+        }
+        // Fallback: Try /api/session with stored authToken
+        const token = localStorage.getItem('authToken');
+        if (token) {
+          const res = await fetch('https://api.flexgig.com.ng/api/session', {
+            method: 'GET',
             credentials: 'include',
-            headers: { 'Accept': 'application/json' }
+            headers: { 'Accept': 'application/json', 'Authorization': `Bearer ${token}` }
           });
-          if (refreshRes.ok) {
-            const { token: newToken } = await refreshRes.json();
-            localStorage.setItem('authToken', newToken);
-            const retryRes = await fetch('https://api.flexgig.com.ng/api/session', {
-              method: 'GET',
+          if (res.ok) {
+            const { user: fetchedUser, token: newToken } = await res.json();
+            user = fetchedUser;
+            authToken = newToken;
+            localStorage.setItem('authTokenData', JSON.stringify({ user, authToken: newToken }));
+            console.log('[__sec][info] Retrieved session from /api/session');
+            return { user, authToken };
+          } else if (res.status === 401) {
+            console.log('[__sec][info] Token expired, attempting refresh');
+            const refreshRes = await fetch('https://api.flexgig.com.ng/auth/refresh', {
+              method: 'POST',
               credentials: 'include',
-              headers: { 'Accept': 'application/json', 'Authorization': `Bearer ${newToken}` }
+              headers: { 'Accept': 'application/json' }
             });
-            if (retryRes.ok) {
-              const { user: fetchedUser, token: finalToken } = await retryRes.json();
-              user = fetchedUser;
-              authToken = finalToken;
-              localStorage.setItem('authTokenData', JSON.stringify({ user, authToken: finalToken }));
-              console.log('[__sec][info] Retrieved session after refresh');
-              return { user, authToken };
+            if (refreshRes.ok) {
+              const { token: newToken } = await refreshRes.json();
+              localStorage.setItem('authToken', newToken);
+              const retryRes = await fetch('https://api.flexgig.com.ng/api/session', {
+                method: 'GET',
+                credentials: 'include',
+                headers: { 'Accept': 'application/json', 'Authorization': `Bearer ${newToken}` }
+              });
+              if (retryRes.ok) {
+                const { user: fetchedUser, token: finalToken } = await retryRes.json();
+                user = fetchedUser;
+                authToken = finalToken;
+                localStorage.setItem('authTokenData', JSON.stringify({ user, authToken: finalToken }));
+                console.log('[__sec][info] Retrieved session after refresh');
+                return { user, authToken };
+              } else {
+                console.error('[__sec][error] Failed to retrieve session after refresh', await retryRes.text());
+              }
             } else {
-              console.error('[__sec][error] Failed to retrieve session after refresh', await retryRes.text());
+              console.error('[__sec][error] Refresh failed', await refreshRes.text());
             }
           } else {
-            console.error('[__sec][error] Refresh failed', await refreshRes.text());
+            console.error('[__sec][error] Failed to fetch session', await res.text());
           }
-        } else {
-          console.error('[__sec][error] Failed to fetch session', await res.text());
         }
       }
-    }
 
-    if (!user || !authToken) {
-      console.error('[__sec][error] No valid session available');
+      if (!user || !authToken) {
+        console.error('[__sec][error] No valid session available');
+        return null;
+      }
+
+      return { user, authToken };
+    } catch (err) {
+      console.error('[__sec][error] Failed to get current user', err.message);
       return null;
     }
-
-    return { user, authToken };
-  } catch (err) {
-    console.error('[__sec][error] Failed to get current user', err.message);
-    return null;
   }
-}
-
-
 
   /* Animation helpers */
   let __sec_hideTimer = null;
@@ -3907,16 +3913,12 @@ document.querySelectorAll('.contact-box').forEach(box => {
   async function startRegistration(userId, username, displayName) {
     try {
       __sec_log.d('startRegistration: starting', { userId, username, displayName });
-      const user = await __sec_getCurrentUser();
-      if (!user || !user.uid) {
-        __sec_log.w('No user session for registration');
-        throw new Error('No user session');
+      const currentUser = await __sec_getCurrentUser();
+      if (!currentUser || !currentUser.authToken) {
+        __sec_log.w('No auth token for registration');
+        throw new Error('No auth token');
       }
-      const token = (await supabase.auth.getSession()).data.session?.access_token;
-      if (!token) {
-        __sec_log.w('No access token available');
-        throw new Error('No access token');
-      }
+      const token = currentUser.authToken;
 
       const optRes = await fetch(`${window.__SEC_API_BASE}/webauthn/register/options`, {
         method: 'POST',
@@ -3962,16 +3964,12 @@ document.querySelectorAll('.contact-box').forEach(box => {
   async function startAuthentication(userId) {
     try {
       __sec_log.d('startAuthentication: starting', { userId });
-      const user = await __sec_getCurrentUser();
-      if (!user || !user.uid) {
-        __sec_log.w('No user session for authentication');
-        throw new Error('No user session');
+      const currentUser = await __sec_getCurrentUser();
+      if (!currentUser || !currentUser.authToken) {
+        __sec_log.w('No auth token for authentication');
+        throw new Error('No auth token');
       }
-      const token = (await supabase.auth.getSession()).data.session?.access_token;
-      if (!token) {
-        __sec_log.w('No access token available');
-        throw new Error('No access token');
-      }
+      const token = currentUser.authToken;
 
       const optRes = await fetch(`${window.__SEC_API_BASE}/webauthn/auth/options`, {
         method: 'POST',
@@ -4018,16 +4016,12 @@ document.querySelectorAll('.contact-box').forEach(box => {
   async function __sec_listAuthenticators(userId) {
     try {
       __sec_log.d('listAuthenticators: starting', { userId });
-      const user = await __sec_getCurrentUser();
-      if (!user || !user.uid) {
-        __sec_log.w('No user session for listing authenticators');
+      const currentUser = await __sec_getCurrentUser();
+      if (!currentUser || !currentUser.authToken) {
+        __sec_log.w('No auth token for listing authenticators');
         return null;
       }
-      const token = (await supabase.auth.getSession()).data.session?.access_token;
-      if (!token) {
-        __sec_log.w('No access token available');
-        return null;
-      }
+      const token = currentUser.authToken;
 
       const r = await fetch(
         `${window.__SEC_API_BASE}/webauthn/authenticators/${encodeURIComponent(userId)}`,
@@ -4057,16 +4051,12 @@ document.querySelectorAll('.contact-box').forEach(box => {
   async function __sec_revokeAuthenticator(userId, credentialID) {
     try {
       __sec_log.d('revokeAuthenticator: starting', { userId, credentialID });
-      const user = await __sec_getCurrentUser();
-      if (!user || !user.uid) {
-        __sec_log.w('No user session for revoking authenticator');
+      const currentUser = await __sec_getCurrentUser();
+      if (!currentUser || !currentUser.authToken) {
+        __sec_log.w('No auth token for revoking authenticator');
         return false;
       }
-      const token = (await supabase.auth.getSession()).data.session?.access_token;
-      if (!token) {
-        __sec_log.w('No access token available');
-        return false;
-      }
+      const token = currentUser.authToken;
 
       const r = await fetch(
         `${window.__SEC_API_BASE}/webauthn/authenticators/${encodeURIComponent(userId)}/revoke`,
@@ -4130,8 +4120,7 @@ document.querySelectorAll('.contact-box').forEach(box => {
             __sec_setChecked(__sec_parentSwitch, false);
             __sec_setBusy(__sec_parentSwitch, false);
             alert('You must be signed in to enable biometrics. Please try logging in again.');
-            // Optionally redirect to login page
-            // window.location.href = '/frontend/html/login.html';
+            window.location.href = '/frontend/html/login.html';
             return;
           }
           const uid = user.uid;
