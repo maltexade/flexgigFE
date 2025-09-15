@@ -3883,7 +3883,7 @@ document.querySelectorAll('.contact-box').forEach(box => {
   /* ---- WebAuthn helper calls to server (list/revoke) ---- */
   async function __sec_listAuthenticators(userId) {
     try {
-      const r = await fetch(`/webauthn/authenticators/${encodeURIComponent(userId)}`, { credentials: 'include' });
+      const r = await fetch(`${window.__SEC_API_BASE}/webauthn/authenticators/${encodeURIComponent(userId)}`, { credentials: 'include' });
       if (!r.ok) {
         __sec_log.w('listAuthenticators failed', r.status);
         return null;
@@ -3898,7 +3898,7 @@ document.querySelectorAll('.contact-box').forEach(box => {
 
   async function __sec_revokeAuthenticator(userId, credentialID) {
     try {
-      const r = await fetch(`/webauthn/authenticators/${encodeURIComponent(userId)}/revoke`, {
+      const r = await fetch(`${window.__SEC_API_BASE}/webauthn/authenticators/${encodeURIComponent(userId)}/revoke`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
