@@ -3934,7 +3934,7 @@ document.querySelectorAll('.contact-box').forEach(box => {
 
   /* ---- WebAuthn register/authenticate flows ---- */
   // Utility to convert base64url string to ArrayBuffer
-// Utility to convert base64url string to ArrayBuffer
+/* ---- WebAuthn utilities ---- */
 function base64urlToArrayBuffer(base64url) {
   try {
     const base64 = base64url.replace(/-/g, '+').replace(/_/g, '/');
@@ -3944,117 +3944,77 @@ function base64urlToArrayBuffer(base64url) {
     for (let i = 0; i < raw.length; i++) {
       buffer[i] = raw.charCodeAt(i);
     }
-    __sec_log.d('base64urlToArrayBuffer: Converted', { input: base64url, byteLength: buffer.length });
-    if (buffer.length > 64) {
-      throw new Error(`Decoded buffer exceeds 64 bytes: ${buffer.length}`);
-    }
+    __sec_log.d('base64urlToArrayBuffer', { input: base64url, len: buffer.length });
     return buffer.buffer;
   } catch (err) {
-    __sec_log.e('base64urlToArrayBuffer: Error', { input: base64url, err });
+    __sec_log.e('base64urlToArrayBuffer error', { input: base64url, err });
     throw new Error(`Failed to decode base64url: ${err.message}`);
   }
 }
 
-// Utility to convert ArrayBuffer to base64url
 function arrayBufferToBase64url(buffer) {
   const bytes = new Uint8Array(buffer);
   let binary = '';
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-// Utility to convert UUID string to 16-byte ArrayBuffer
 function uuidToArrayBuffer(uuid) {
   try {
-    const cleanUuid = uuid.replace(/-/g, '');
-    if (cleanUuid.length !== 32) {
-      throw new Error(`Invalid UUID length: ${cleanUuid.length}`);
-    }
+    const clean = uuid.replace(/-/g, '');
+    if (clean.length !== 32) throw new Error(`Invalid UUID length: ${clean.length}`);
     const buffer = new Uint8Array(16);
-    for (let i = 0; i < 16; i++) {
-      buffer[i] = parseInt(cleanUuid.slice(i * 2, i * 2 + 2), 16);
-    }
-    __sec_log.d('uuidToArrayBuffer: Converted', { uuid, byteLength: buffer.length });
+    for (let i = 0; i < 16; i++) buffer[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
+    __sec_log.d('uuidToArrayBuffer', { uuid, len: buffer.length });
     return buffer.buffer;
   } catch (err) {
-    __sec_log.e('uuidToArrayBuffer: Error', { uuid, err });
+    __sec_log.e('uuidToArrayBuffer error', { uuid, err });
     throw new Error(`Failed to convert UUID: ${err.message}`);
   }
 }
 
-// Updated startRegistration function
+/* ---- Registration flow ---- */
 async function startRegistration(userId, username, displayName) {
   try {
-    __sec_log.d('startRegistration: Starting', { userId, username, displayName });
+    __sec_log.d('startRegistration', { userId, username, displayName });
     const currentUser = await __sec_getCurrentUser();
-    if (!currentUser || !currentUser.authToken) {
-      __sec_log.w('No auth token for registration');
-      throw new Error('No auth token');
-    }
+    if (!currentUser?.authToken) throw new Error('No auth token');
     const token = currentUser.authToken;
 
+    // Get registration options
     const optRes = await fetch('https://api.flexgig.com.ng/webauthn/register/options', {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify({ userId, username, displayName }),
     });
-    if (!optRes.ok) {
-      const errorText = await optRes.text();
-      __sec_log.w('Failed to get registration options', { status: optRes.status, error: errorText });
-      throw new Error(`Failed to get registration options: ${errorText}`);
-    }
+    if (!optRes.ok) throw new Error(`Options failed: ${await optRes.text()}`);
     const options = await optRes.json();
-    __sec_log.d('startRegistration: Raw options', options); // Log full response
+    __sec_log.d('Reg options raw', options);
 
-    // Validate user.id early
-    if (!options.user || !options.user.id) {
-      __sec_log.w('startRegistration: No user.id in options, using input userId');
+    // Fix user.id
+    if (!options.user?.id) {
       options.user = options.user || {};
       options.user.id = uuidToArrayBuffer(userId);
-    } else if (typeof options.user.id !== 'string' || options.user.id.length > 100) {
-      __sec_log.w('startRegistration: Invalid user.id format, using input userId', { userId: options.user.id });
-      options.user.id = uuidToArrayBuffer(userId);
     } else {
-      const userIdBuffer = base64urlToArrayBuffer(options.user.id);
-      if (userIdBuffer.byteLength !== 16) {
-        __sec_log.w('startRegistration: Invalid user.id length, falling back to input userId', {
-          userId: options.user.id,
-          byteLength: userIdBuffer.byteLength
-        });
-        options.user.id = uuidToArrayBuffer(userId);
-      } else {
-        options.user.id = userIdBuffer;
-      }
+      options.user.id = base64urlToArrayBuffer(options.user.id);
     }
 
-    // Convert other fields
+    // Convert challenge + credentials
     options.challenge = base64urlToArrayBuffer(options.challenge);
     if (options.excludeCredentials) {
-      options.excludeCredentials = options.excludeCredentials.map(cred => ({
-        ...cred,
-        id: base64urlToArrayBuffer(cred.id)
+      options.excludeCredentials = options.excludeCredentials.map(c => ({
+        ...c, id: base64urlToArrayBuffer(c.id)
       }));
     }
 
-    __sec_log.d('startRegistration: Converted options', {
-      challengeByteLength: options.challenge.byteLength,
-      userIdByteLength: options.user.id.byteLength,
-      excludeCredentials: options.excludeCredentials
-    });
+    __sec_log.d('Reg options converted', { challenge: options.challenge.byteLength, user: options.user.id.byteLength });
 
+    // Create credential
     const cred = await navigator.credentials.create({ publicKey: options });
-    if (!cred) {
-      __sec_log.w('No credential returned');
-      throw new Error('No credential returned');
-    }
+    if (!cred) throw new Error('No credential returned');
 
-    // Convert credential response fields to base64url for server
+    // Send to server
     const credential = {
       id: cred.id,
       rawId: arrayBufferToBase64url(cred.rawId),
@@ -4065,25 +4025,17 @@ async function startRegistration(userId, username, displayName) {
         transports: cred.response.getTransports ? cred.response.getTransports() : []
       }
     };
-
-    __sec_log.d('startRegistration: Credential prepared', credential);
+    __sec_log.d('Reg credential prepared', credential);
 
     const verifyRes = await fetch('https://api.flexgig.com.ng/webauthn/register/verify', {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify({ userId, credential }),
     });
-    if (!verifyRes.ok) {
-      const errorText = await verifyRes.text();
-      __sec_log.w('Registration verification failed', { status: verifyRes.status, error: errorText });
-      throw new Error(`Registration verification failed: ${errorText}`);
-    }
+    if (!verifyRes.ok) throw new Error(`Verify failed: ${await verifyRes.text()}`);
     const result = await verifyRes.json();
-    __sec_log.i('Registration successful', result);
+    __sec_log.i('Registration success', result);
     return result;
   } catch (err) {
     __sec_log.e('startRegistration error', err);
@@ -4091,58 +4043,69 @@ async function startRegistration(userId, username, displayName) {
   }
 }
 
-  async function startAuthentication(userId) {
-    try {
-      __sec_log.d('startAuthentication: starting', { userId });
-      const currentUser = await __sec_getCurrentUser();
-      if (!currentUser || !currentUser.authToken) {
-        __sec_log.w('No auth token for authentication');
-        throw new Error('No auth token');
-      }
-      const token = currentUser.authToken;
+/* ---- Authentication flow ---- */
+async function startAuthentication(userId) {
+  try {
+    __sec_log.d('startAuthentication', { userId });
+    const currentUser = await __sec_getCurrentUser();
+    if (!currentUser?.authToken) throw new Error('No auth token');
+    const token = currentUser.authToken;
 
-      const optRes = await fetch(`${window.__SEC_API_BASE}/webauthn/auth/options`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-        body: JSON.stringify({ userId }),
-      });
-      if (!optRes.ok) {
-        __sec_log.w('Failed to get authentication options', optRes.status);
-        throw new Error('Failed to get authentication options');
-      }
-      const options = await optRes.json();
+    // Get options
+    const optRes = await fetch('https://api.flexgig.com.ng/webauthn/auth/options', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ userId }),
+    });
+    if (!optRes.ok) throw new Error(`Auth options failed: ${await optRes.text()}`);
+    const options = await optRes.json();
+    __sec_log.d('Auth options raw', options);
 
-      const assertion = await navigator.credentials.get({ publicKey: options });
-      if (!assertion) {
-        __sec_log.w('No assertion returned');
-        throw new Error('No assertion returned');
-      }
-
-      const verifyRes = await fetch(`${window.__SEC_API_BASE}/webauthn/auth/verify`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-        body: JSON.stringify({ userId, credential: assertion }),
-      });
-      if (!verifyRes.ok) {
-        __sec_log.w('Authentication verification failed', verifyRes.status);
-        throw new Error('Authentication verification failed');
-      }
-      const result = await verifyRes.json();
-      __sec_log.i('Authentication successful', result);
-      return result;
-    } catch (err) {
-      __sec_log.e('startAuthentication error', err);
-      throw err;
+    // Convert challenge + credentials
+    options.challenge = base64urlToArrayBuffer(options.challenge);
+    if (options.allowCredentials) {
+      options.allowCredentials = options.allowCredentials.map(c => ({
+        ...c, id: base64urlToArrayBuffer(c.id)
+      }));
     }
+
+    __sec_log.d('Auth options converted', { challenge: options.challenge.byteLength });
+
+    // Request assertion
+    const assertion = await navigator.credentials.get({ publicKey: options });
+    if (!assertion) throw new Error('No assertion returned');
+
+    // Send to server
+    const credential = {
+      id: assertion.id,
+      rawId: arrayBufferToBase64url(assertion.rawId),
+      type: assertion.type,
+      response: {
+        clientDataJSON: arrayBufferToBase64url(assertion.response.clientDataJSON),
+        authenticatorData: arrayBufferToBase64url(assertion.response.authenticatorData),
+        signature: arrayBufferToBase64url(assertion.response.signature),
+        userHandle: assertion.response.userHandle ? arrayBufferToBase64url(assertion.response.userHandle) : null
+      }
+    };
+    __sec_log.d('Auth credential prepared', credential);
+
+    const verifyRes = await fetch('https://api.flexgig.com.ng/webauthn/auth/verify', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ userId, credential }),
+    });
+    if (!verifyRes.ok) throw new Error(`Auth verify failed: ${await verifyRes.text()}`);
+    const result = await verifyRes.json();
+    __sec_log.i('Authentication success', result);
+    return result;
+  } catch (err) {
+    __sec_log.e('startAuthentication error', err);
+    throw err;
   }
+}
+
 
   /* ---- WebAuthn helper calls to server (list/revoke) ---- */
   async function __sec_listAuthenticators(userId) {
@@ -4163,6 +4126,7 @@ async function startRegistration(userId, username, displayName) {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json',
           },
+          credentials: 'include',
         }
       );
 
