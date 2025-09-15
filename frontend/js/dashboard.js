@@ -1,5 +1,5 @@
 window.__SEC_API_BASE = 'https://api.flexgig.com.ng'
-const { startRegistration, startAuthentication } = SimpleWebAuthnBrowser;
+
 
 const updateProfileModal = document.getElementById('updateProfileModal');
 if (updateProfileModal && updateProfileModal.classList.contains('active')) {
@@ -3880,6 +3880,78 @@ document.querySelectorAll('.contact-box').forEach(box => {
       });
     } else __sec_log.d('#changePwdBtn not present');
   }
+
+  /* ---- WebAuthn register/authenticate flows ---- */
+  async function startRegistration(userId, username, displayName) {
+    // 1. Get Supabase token
+    const { data, error } = await supabase.auth.getSession();
+    if (error || !data.session) throw new Error('No Supabase session');
+    const token = data.session.access_token;
+
+    // 2. Request registration options from server
+    const optRes = await fetch(`${window.__SEC_API_BASE}/webauthn/register/options`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ userId, username, displayName }),
+    });
+    if (!optRes.ok) throw new Error('Failed to get registration options');
+    const options = await optRes.json();
+
+    // 3. Call WebAuthn API
+    const cred = await navigator.credentials.create({ publicKey: options });
+    if (!cred) throw new Error('No credential returned');
+
+    // 4. Send back to server for verification
+    const verifyRes = await fetch(`${window.__SEC_API_BASE}/webauthn/register/verify`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ userId, credential: cred }),
+    });
+    if (!verifyRes.ok) throw new Error('Registration verification failed');
+    return await verifyRes.json();
+  }
+
+  async function startAuthentication(userId) {
+    // 1. Get Supabase token
+    const { data, error } = await supabase.auth.getSession();
+    if (error || !data.session) throw new Error('No Supabase session');
+    const token = data.session.access_token;
+
+    // 2. Request authentication options
+    const optRes = await fetch(`${window.__SEC_API_BASE}/webauthn/auth/options`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ userId }),
+    });
+    if (!optRes.ok) throw new Error('Failed to get authentication options');
+    const options = await optRes.json();
+
+    // 3. Call WebAuthn API
+    const assertion = await navigator.credentials.get({ publicKey: options });
+    if (!assertion) throw new Error('No assertion returned');
+
+    // 4. Verify with server
+    const verifyRes = await fetch(`${window.__SEC_API_BASE}/webauthn/auth/verify`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ userId, credential: assertion }),
+    });
+    if (!verifyRes.ok) throw new Error('Authentication verification failed');
+    return await verifyRes.json();
+  }
+
 
   /* ---- WebAuthn helper calls to server (list/revoke) ---- */
   async function __sec_listAuthenticators(userId) {
