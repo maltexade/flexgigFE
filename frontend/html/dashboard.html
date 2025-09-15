@@ -808,7 +808,12 @@
 
   
 
+  <script type="module">
+    import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/module/index.js';
 
+  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  </script>
   <script src="/frontend/js/dashboard.js"></script>
   <script src="/frontend/js/main.js"></script>
 

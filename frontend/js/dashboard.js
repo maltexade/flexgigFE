@@ -4,6 +4,7 @@ window.__SEC_API_BASE = 'https://api.flexgig.com.ng'
 const SUPABASE_URL = 'https://bwmappzvptcjxlukccux.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ3bWFwcHp2cHRjanhsdWtjY3V4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTU0OTMzMjcsImV4cCI6MjA3MTA2OTMyN30.Ra7k6Br6nl1huQQi5DpDuOQSDE-6N1qlhUIvIset0mc';
 
+
 const updateProfileModal = document.getElementById('updateProfileModal');
 if (updateProfileModal && updateProfileModal.classList.contains('active')) {
   openUpdateProfileModal();
@@ -3547,7 +3548,6 @@ const helpSupportBtn = document.getElementById('helpSupportBtn');
 const helpSupportModal = document.getElementById('helpSupportModal');
 const helpCloseBtn = helpSupportModal?.querySelector('.help-modal-close');
 const settingsModal = document.getElementById('settingsModal');
-
 
 if (helpSupportBtn && helpSupportModal) {
   helpSupportBtn.addEventListener('click', () => {
