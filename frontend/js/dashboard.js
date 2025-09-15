@@ -3588,9 +3588,6 @@ document.querySelectorAll('.contact-box').forEach(box => {
   box.addEventListener('contextmenu', e => e.preventDefault());
 });
 
-
-
-
 /* ---------- Security modal behavior + WebAuthn integration ---------- */
 (function (supabase) {
   /* Unique-scoped security modal module (prefix __sec_) */
@@ -3602,7 +3599,7 @@ document.querySelectorAll('.contact-box').forEach(box => {
     e: (...a) => { if (__sec_DEBUG) console.error('[__sec][error]', ...a); },
   };
 
-  __sec_log.d('Security module initializing with supabase:', !!supabase); // Debug to confirm supabase is passed
+  __sec_log.d('Security module initializing with supabase:', !!supabase);
 
   const __sec_q = (sel) => {
     try { return document.querySelector(sel); }
@@ -3613,20 +3610,20 @@ document.querySelectorAll('.contact-box').forEach(box => {
   const __sec_modal = __sec_q('#securityModal');
   const __sec_closeBtn = __sec_q('#securityCloseBtn');
   const __sec_parentSwitch = __sec_q('#biometricsSwitch');
-  const __sec_bioOptions = __sec_q('#biometricsOptions'); // hidden by default in HTML
+  const __sec_bioOptions = __sec_q('#biometricsOptions');
   const __sec_bioLogin = __sec_q('#bioLoginSwitch');
   const __sec_bioTx = __sec_q('#bioTxSwitch');
-  const __sec_pinBtn = __sec_q('#pinToggleBtn');       // will be chevron
-  const __sec_pwdBtn = __sec_q('#changePwdBtn');       // will be chevron
+  const __sec_pinBtn = __sec_q('#pinToggleBtn');
+  const __sec_pwdBtn = __sec_q('#changePwdBtn');
   const __sec_balanceSwitch = __sec_q('#balanceSwitch');
-  const __sec_launcherBtn = __sec_q('#securityBtn');   // optional external launcher
+  const __sec_launcherBtn = __sec_q('#securityBtn');
 
   __sec_log.d('Modal elements:', {
     modal: !!__sec_modal,
     closeBtn: !!__sec_closeBtn,
     launcherBtn: !!__sec_launcherBtn,
     parentSwitch: !!__sec_parentSwitch
-  }); // Debug to check element availability
+  });
 
   /* Storage keys */
   const __sec_KEYS = {
@@ -3655,7 +3652,7 @@ document.querySelectorAll('.contact-box').forEach(box => {
     if (busy) el.setAttribute('aria-busy', 'true'); else el.removeAttribute('aria-busy');
   }
 
-  /* Async: get current user (using Supabase) */
+  /* Async: get current user (align with dashboard.js getSession) */
   let __sec_cachedUser = null;
   async function __sec_getCurrentUser() {
     if (__sec_cachedUser) {
@@ -3664,16 +3661,66 @@ document.querySelectorAll('.contact-box').forEach(box => {
     }
 
     try {
-      __sec_log.d('Fetching user session from Supabase');
-      const { data: { session }, error } = await supabase.auth.getSession();
-      if (error) {
-        __sec_log.e('Supabase session fetch error', error);
-        return null;
+      __sec_log.d('Fetching user session');
+      // First, try to use the session from dashboard.js's getSession
+      let session = null;
+      if (typeof window.getSession === 'function') {
+        __sec_log.d('Attempting to use dashboard.js getSession');
+        const sessionData = await window.getSession();
+        if (sessionData && sessionData.user && sessionData.authToken) {
+          session = {
+            user: {
+              id: sessionData.user.uid,
+              email: sessionData.user.email,
+              user_metadata: {
+                username: sessionData.user.username || null,
+                full_name: sessionData.user.fullName || null
+              }
+            },
+            access_token: sessionData.authToken
+          };
+          __sec_log.d('Session retrieved from getSession', session);
+        } else {
+          __sec_log.w('No valid session from getSession', sessionData);
+        }
+      } else {
+        __sec_log.w('window.getSession not found, falling back to Supabase');
       }
+
+      // Fallback to Supabase client if getSession fails or isn't available
       if (!session || !session.user) {
-        __sec_log.w('No active Supabase session');
+        __sec_log.d('Fetching session from Supabase');
+        const { data: { session: supabaseSession }, error } = await supabase.auth.getSession();
+        if (error) {
+          __sec_log.e('Supabase session fetch error', error);
+        }
+        if (!supabaseSession || !supabaseSession.user) {
+          __sec_log.w('No active Supabase session, attempting refresh');
+          const { data: refreshedSession, error: refreshError } = await supabase.auth.refreshSession();
+          if (refreshError) {
+            __sec_log.e('Supabase session refresh error', refreshError);
+            return null;
+          }
+          session = refreshedSession.session;
+        } else {
+          session = supabaseSession;
+        }
+      }
+
+      if (!session || !session.user) {
+        __sec_log.w('No session available after all attempts');
         return null;
       }
+
+      // Sync Supabase client with session (if using custom getSession)
+      if (session.access_token) {
+        await supabase.auth.setSession({
+          access_token: session.access_token,
+          refresh_token: session.refresh_token || '' // Refresh token may not be available
+        });
+        __sec_log.d('Synced Supabase client with session');
+      }
+
       const user = {
         uid: session.user.id,
         email: session.user.email,
@@ -3865,12 +3912,16 @@ document.querySelectorAll('.contact-box').forEach(box => {
   async function startRegistration(userId, username, displayName) {
     try {
       __sec_log.d('startRegistration: starting', { userId, username, displayName });
-      const { data: { session }, error } = await supabase.auth.getSession();
-      if (error || !session) {
-        __sec_log.w('No Supabase session');
-        throw new Error('No Supabase session');
+      const user = await __sec_getCurrentUser();
+      if (!user || !user.uid) {
+        __sec_log.w('No user session for registration');
+        throw new Error('No user session');
       }
-      const token = session.access_token;
+      const token = (await supabase.auth.getSession()).data.session?.access_token;
+      if (!token) {
+        __sec_log.w('No access token available');
+        throw new Error('No access token');
+      }
 
       const optRes = await fetch(`${window.__SEC_API_BASE}/webauthn/register/options`, {
         method: 'POST',
@@ -3916,12 +3967,16 @@ document.querySelectorAll('.contact-box').forEach(box => {
   async function startAuthentication(userId) {
     try {
       __sec_log.d('startAuthentication: starting', { userId });
-      const { data: { session }, error } = await supabase.auth.getSession();
-      if (error || !session) {
-        __sec_log.w('No Supabase session');
-        throw new Error('No Supabase session');
+      const user = await __sec_getCurrentUser();
+      if (!user || !user.uid) {
+        __sec_log.w('No user session for authentication');
+        throw new Error('No user session');
       }
-      const token = session.access_token;
+      const token = (await supabase.auth.getSession()).data.session?.access_token;
+      if (!token) {
+        __sec_log.w('No access token available');
+        throw new Error('No access token');
+      }
 
       const optRes = await fetch(`${window.__SEC_API_BASE}/webauthn/auth/options`, {
         method: 'POST',
@@ -3968,12 +4023,16 @@ document.querySelectorAll('.contact-box').forEach(box => {
   async function __sec_listAuthenticators(userId) {
     try {
       __sec_log.d('listAuthenticators: starting', { userId });
-      const { data: { session }, error } = await supabase.auth.getSession();
-      if (error || !session) {
-        __sec_log.w('No Supabase session found');
+      const user = await __sec_getCurrentUser();
+      if (!user || !user.uid) {
+        __sec_log.w('No user session for listing authenticators');
         return null;
       }
-      const token = session.access_token;
+      const token = (await supabase.auth.getSession()).data.session?.access_token;
+      if (!token) {
+        __sec_log.w('No access token available');
+        return null;
+      }
 
       const r = await fetch(
         `${window.__SEC_API_BASE}/webauthn/authenticators/${encodeURIComponent(userId)}`,
@@ -4003,12 +4062,16 @@ document.querySelectorAll('.contact-box').forEach(box => {
   async function __sec_revokeAuthenticator(userId, credentialID) {
     try {
       __sec_log.d('revokeAuthenticator: starting', { userId, credentialID });
-      const { data: { session }, error } = await supabase.auth.getSession();
-      if (error || !session) {
-        __sec_log.w('No Supabase session found');
+      const user = await __sec_getCurrentUser();
+      if (!user || !user.uid) {
+        __sec_log.w('No user session for revoking authenticator');
         return false;
       }
-      const token = session.access_token;
+      const token = (await supabase.auth.getSession()).data.session?.access_token;
+      if (!token) {
+        __sec_log.w('No access token available');
+        return false;
+      }
 
       const r = await fetch(
         `${window.__SEC_API_BASE}/webauthn/authenticators/${encodeURIComponent(userId)}/revoke`,
@@ -4071,7 +4134,9 @@ document.querySelectorAll('.contact-box').forEach(box => {
             __sec_log.e('Parent toggle: no current user available');
             __sec_setChecked(__sec_parentSwitch, false);
             __sec_setBusy(__sec_parentSwitch, false);
-            alert('You must be signed in to enable biometrics.');
+            alert('You must be signed in to enable biometrics. Please try logging in again.');
+            // Optionally redirect to login page
+            // window.location.href = '/frontend/html/login.html';
             return;
           }
           const uid = user.uid;
@@ -4281,7 +4346,7 @@ document.querySelectorAll('.contact-box').forEach(box => {
     __sec_log.d('DOM ready, booting immediately');
     setTimeout(__sec_boot, 0);
   }
-})(supabaseClient); // Pass the initialized Supabase client
+})(supabaseClient);
 
 
 
