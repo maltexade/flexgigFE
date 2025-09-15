@@ -4134,25 +4134,42 @@ document.querySelectorAll('.contact-box').forEach(box => {
 
       if (__sec_parentSwitch) {
         const __sec_parentHandler = async () => {
+          __sec_log.d('__sec_parentHandler: Starting');
           __sec_setBusy(__sec_parentSwitch, true);
           const uiOn = __sec_toggleSwitch(__sec_parentSwitch);
-          // Add a small delay to ensure getSession completes
-          await new Promise(resolve => setTimeout(resolve, 100));
+          __sec_log.d('__sec_parentHandler: Toggle state', { uiOn });
 
-          const user = await __sec_getCurrentUser();
-          if (!user || !user.uid) {
-            __sec_log.e('Parent toggle: no current user available');
+          const currentUser = await __sec_getCurrentUser();
+          __sec_log.d('__sec_parentHandler: Retrieved currentUser', currentUser);
+
+          if (!currentUser) {
+            __sec_log.e('__sec_parentHandler: No current user object returned');
             __sec_setChecked(__sec_parentSwitch, false);
             __sec_setBusy(__sec_parentSwitch, false);
             alert('You must be signed in to enable biometrics. Please try logging in again.');
             window.location.href = '/frontend/html/login.html';
             return;
           }
+
+          const { user, authToken } = currentUser;
+          __sec_log.d('__sec_parentHandler: Extracted user and authToken', { user, authToken });
+
+          if (!user || !user.uid) {
+            __sec_log.e('__sec_parentHandler: Invalid user or missing uid', { user });
+            __sec_setChecked(__sec_parentSwitch, false);
+            __sec_setBusy(__sec_parentSwitch, false);
+            alert('You must be signed in to enable biometrics. Please try logging in again.');
+            window.location.href = '/frontend/html/login.html';
+            return;
+          }
+
           const uid = user.uid;
+          __sec_log.d('__sec_parentHandler: Proceeding with uid', uid);
 
           if (uiOn) {
             __sec_log.i('Parent toggle ON requested — checking existing authenticators for user', uid);
             const auths = await __sec_listAuthenticators(uid);
+            __sec_log.d('__sec_parentHandler: Authenticators', auths);
             if (Array.isArray(auths) && auths.length > 0) {
               __sec_log.i('Existing authenticators found — showing children without registering new one');
               __sec_setBiometrics(true, true);
@@ -4177,6 +4194,7 @@ document.querySelectorAll('.contact-box').forEach(box => {
             try {
               __sec_log.i('Parent toggle OFF requested — revoking authenticators for user', uid);
               const auths = await __sec_listAuthenticators(uid);
+              __sec_log.d('__sec_parentHandler: Authenticators to revoke', auths);
               if (Array.isArray(auths) && auths.length > 0) {
                 for (const a of auths) {
                   const credential_id = a.credential_id || a.credentialID || a.credentialId;
@@ -4213,8 +4231,9 @@ document.querySelectorAll('.contact-box').forEach(box => {
           __sec_setBusy(__sec_bioLogin, true);
           const newState = __sec_toggleSwitch(__sec_bioLogin);
           try {
-            const user = await __sec_getCurrentUser();
-            if (!user || !user.uid) throw new Error('Not signed in');
+            const currentUser = await __sec_getCurrentUser();
+            if (!currentUser || !currentUser.user || !currentUser.user.uid) throw new Error('Not signed in');
+            const user = currentUser.user;
 
             if (newState) {
               __sec_log.i('bioLogin enabling: performing authentication test');
@@ -4249,8 +4268,9 @@ document.querySelectorAll('.contact-box').forEach(box => {
           __sec_setBusy(__sec_bioTx, true);
           const newState = __sec_toggleSwitch(__sec_bioTx);
           try {
-            const user = await __sec_getCurrentUser();
-            if (!user || !user.uid) throw new Error('Not signed in');
+            const currentUser = await __sec_getCurrentUser();
+            if (!currentUser || !currentUser.user || !currentUser.user.uid) throw new Error('Not signed in');
+            const user = currentUser.user;
 
             if (newState) {
               __sec_log.i('bioTx enabling: performing authentication test');
@@ -4335,9 +4355,10 @@ document.querySelectorAll('.contact-box').forEach(box => {
   };
 
   /* Boot */
-  function __sec_boot() {
+  async function __sec_boot() {
     try {
       __sec_log.d('Booting security module');
+      await window.getSession(); // Ensure session is stored before proceeding
       __sec_convertRowsToChevron();
       __sec_initFromStorage();
       __sec_wireEvents();
