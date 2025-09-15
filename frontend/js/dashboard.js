@@ -19,43 +19,30 @@ if (updateProfileModal && updateProfileModal.classList.contains('active')) {
 // --- Fetch User Data ---
 // --- Robust getSession() with guarded updates and stable avatar handling ---
 async function getSession() {
-  // Create a unique load-id so only the latest call can apply DOM updates
   const loadId = Date.now();
   window.__lastSessionLoadId = loadId;
 
-  // Small helper: determine if a profile picture string is a usable image source
   function isValidImageSource(src) {
     if (!src) return false;
-    // Accept data URIs, absolute http(s) URLs, or root-relative paths
     return /^(data:image\/|https?:\/\/|\/)/i.test(src);
   }
 
-  // Helper: apply avatar + greeting + display name to DOM (idempotent)
   function applySessionToDOM(userObj, derivedFirstName) {
-    // If another getSession started after this one, abort applying
     if (window.__lastSessionLoadId !== loadId) {
       console.log('[DEBUG] getSession: stale loadId, abort DOM apply');
       return;
     }
-
     const greetEl = document.getElementById('greet');
     const firstnameEl = document.getElementById('firstname');
     const avatarEl = document.getElementById('avatar');
-
     if (!(greetEl && firstnameEl && avatarEl)) {
       console.warn('[WARN] getSession: DOM elements not found when applying session');
       return;
     }
-
-    // Greeting based on time
     const hour = new Date().getHours();
     greetEl.textContent = hour < 12 ? 'Good Morning' : hour < 18 ? 'Good Afternoon' : 'Good Evening';
-
-    // Display name prefers username > firstName > fallback 'User'
     const displayName = (userObj.username || derivedFirstName || 'User');
     firstnameEl.textContent = displayName.charAt(0).toUpperCase() + displayName.slice(1);
-
-    // Decide avatar: prefer userObj.profilePicture if valid, else fallback to initial
     const profilePicture = userObj.profilePicture || '';
     if (isValidImageSource(profilePicture)) {
       avatarEl.innerHTML = `<img src="${profilePicture}" alt="Profile Picture" class="avatar-img" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`;
@@ -67,7 +54,6 @@ async function getSession() {
     }
   }
 
-  // Helper: wait until essential DOM elements are available (small retry loop)
   async function waitForDomReady(retries = 8, delay = 100) {
     for (let i = 0; i < retries; i++) {
       if (document.getElementById('greet') &&
@@ -82,37 +68,53 @@ async function getSession() {
 
   try {
     console.log('[DEBUG] getSession: Initiating fetch, credentials: include, time:', new Date().toISOString());
-
-    const res = await fetch('https://api.flexgig.com.ng/api/session', {
+    let token = localStorage.getItem('authToken') || '';
+    let res = await fetch('https://api.flexgig.com.ng/api/session', {
       method: 'GET',
       credentials: 'include',
-      headers: { 'Accept': 'application/json' }
+      headers: { 'Accept': 'application/json', 'Authorization': `Bearer ${token}` }
     });
 
     console.log('[DEBUG] getSession: Response status', res.status);
+    if (res.status === 401 && token) {
+      console.log('[DEBUG] getSession: Token expired, attempting refresh');
+      const refreshRes = await fetch('https://api.flexgig.com.ng/auth/refresh', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Accept': 'application/json' }
+      });
+      if (refreshRes.ok) {
+        const { token: newToken } = await refreshRes.json();
+        localStorage.setItem('authToken', newToken);
+        token = newToken;
+        res = await fetch('https://api.flexgig.com.ng/api/session', {
+          method: 'GET',
+          credentials: 'include',
+          headers: { 'Accept': 'application/json', 'Authorization': `Bearer ${token}` }
+        });
+      } else {
+        console.error('[ERROR] getSession: Refresh failed', await refreshRes.text());
+        window.location.href = '/';
+        return null;
+      }
+    }
+
     if (!res.ok) {
       const text = await res.text().catch(() => '');
       console.error('[ERROR] getSession: Session API returned error:', res.status, text);
-      if (res.status === 401) {
-        // If unauthorized, send to login
-        window.location.href = '/';
-      } else {
-        alert('Something went wrong while loading your session. Please try again.');
-      }
-      return;
+      window.location.href = '/';
+      return null;
     }
 
-    const { user = {}, token } = await res.json();
-    console.log('[DEBUG] getSession: Raw user data', user, 'Token', token);
+    const { user = {}, token: newToken } = await res.json();
+    console.log('[DEBUG] getSession: Raw user data', user, 'Token', newToken);
 
-    // Derive firstName
     let firstName = user.fullName?.split(' ')[0] || '';
     if (!firstName && user.email) {
       firstName = user.email.split('@')[0].replace(/[^a-zA-Z0-9]/g, '').replace(/(\d+)/, '');
       firstName = (firstName && firstName.charAt(0).toUpperCase() + firstName.slice(1)) || 'User';
     }
 
-    // Write to localStorage early so other code that reads it has a value
     try {
       localStorage.setItem('userEmail', user.email || '');
       localStorage.setItem('firstName', firstName);
@@ -123,69 +125,58 @@ async function getSession() {
       localStorage.setItem('fullNameEdited', user.fullNameEdited ? 'true' : 'false');
       localStorage.setItem('lastUsernameUpdate', user.lastUsernameUpdate || '');
       localStorage.setItem('profilePicture', user.profilePicture || '');
-      if (token) {
-        localStorage.setItem('authToken', token);
-        console.log('[DEBUG] getSession: Stored authToken');
-      }
+      localStorage.setItem('authToken', newToken);
+      localStorage.setItem('authTokenData', JSON.stringify({ user, authToken: newToken }));
+      console.log('[DEBUG] getSession: Stored authToken and authTokenData');
     } catch (err) {
       console.warn('[WARN] getSession: Failed to write some localStorage keys', err);
     }
 
-    // Wait briefly for DOM elements to appear (if needed)
     const domReady = await waitForDomReady();
     if (!domReady) {
       console.warn('[WARN] getSession: DOM elements not ready after waiting, will attempt to apply if they exist');
     }
 
-    // Apply session data immediately to DOM (fast)
     applySessionToDOM(user, firstName);
 
-    // Attempt to enrich with loadUserProfile() if available.
-    // If loadUserProfile() provides a more complete profile (esp profilePicture),
-    // use it — but only if this is still the latest getSession() call.
     if (typeof loadUserProfile === 'function') {
       try {
-        const profileResult = await loadUserProfile(); // expect it to fetch remote profile and possibly update DOM
-        // If loadUserProfile returned data, prefer its profile picture if valid
+        const profileResult = await loadUserProfile();
         if (window.__lastSessionLoadId !== loadId) {
           console.log('[DEBUG] getSession: loadUserProfile result is stale, ignoring');
-          return;
+          return null;
         }
-
-        // If loadUserProfile returns explicit data, merge it; otherwise read localStorage
         const profileData = profileResult && typeof profileResult === 'object' ? profileResult : {
           profilePicture: localStorage.getItem('profilePicture') || user.profilePicture || ''
         };
-
-        // Prefer profileData.profilePicture > user.profilePicture
         const finalProfilePicture = isValidImageSource(profileData.profilePicture)
           ? profileData.profilePicture
           : (isValidImageSource(user.profilePicture) ? user.profilePicture : '');
-
-        // If there's a better picture from profileData, update localStorage & DOM
         if (finalProfilePicture && finalProfilePicture !== (localStorage.getItem('profilePicture') || '')) {
           try { localStorage.setItem('profilePicture', finalProfilePicture); } catch (err) { /* ignore */ }
-          // Apply with updated picture
           applySessionToDOM({ ...user, profilePicture: finalProfilePicture }, firstName);
         } else {
-          // Ensure DOM still shows what we set earlier (re-apply in case loadUserProfile or other code changed it)
           applySessionToDOM({ ...user, profilePicture: finalProfilePicture || user.profilePicture }, firstName);
         }
       } catch (err) {
         console.warn('[WARN] getSession: loadUserProfile failed, relying on session data', err && err.message);
-        // Re-apply session data to ensure it sticks
         applySessionToDOM(user, firstName);
       }
     } else {
-      // No loadUserProfile function — ensure DOM remains with session info
       applySessionToDOM(user, firstName);
     }
 
     console.log('[DEBUG] getSession: Completed (loadId=' + loadId + ')');
+    return { user, authToken: newToken }; // Return for __sec_getCurrentUser
   } catch (err) {
     console.error('[ERROR] getSession: Failed to fetch session', err && err.message ? err.message : err);
+    window.location.href = '/';
+    return null;
   }
 }
+
+// Make getSession globally accessible
+window.getSession = getSession;
 
 
 // --- Safe wrapper with retries ---
@@ -3658,131 +3649,87 @@ document.querySelectorAll('.contact-box').forEach(box => {
   /* Async: get current user (use stored authToken and sync with Supabase) */
   let __sec_cachedUser = null;
   async function __sec_getCurrentUser() {
-    if (__sec_cachedUser) {
-      __sec_log.d('Returning cached user', __sec_cachedUser);
-      return __sec_cachedUser;
-    }
+  try {
+    let sessionData = JSON.parse(localStorage.getItem('authTokenData') || '{}');
+    let user = sessionData.user;
+    let authToken = sessionData.authToken;
 
-    try {
-      __sec_log.d('Fetching user session');
-      let session = null;
-
-      // Try to use stored authToken from dashboard.js getSession
-      const storedToken = localStorage.getItem('authToken');
-      if (storedToken) {
-        __sec_log.d('Found stored authToken, attempting to use it');
-        try {
-          const sessionData = JSON.parse(localStorage.getItem('authTokenData') || '{}');
-          if (sessionData.user && sessionData.user.uid) {
-            session = {
-              user: {
-                id: sessionData.user.uid,
-                email: sessionData.user.email,
-                user_metadata: {
-                  username: sessionData.user.username || null,
-                  full_name: sessionData.user.fullName || null
-                }
-              },
-              access_token: storedToken
-            };
-            __sec_log.d('Session constructed from stored authToken', session);
-          } else {
-            __sec_log.w('Stored authTokenData missing user data', sessionData);
-          }
-        } catch (err) {
-          __sec_log.w('Failed to parse stored authTokenData', err);
+    if (!user || !authToken) {
+      console.warn('[__sec][warn] Stored authTokenData missing or invalid', sessionData);
+      if (typeof window.getSession === 'function') {
+        const session = await window.getSession();
+        if (session && session.user && session.authToken) {
+          user = session.user;
+          authToken = session.authToken;
+          localStorage.setItem('authTokenData', JSON.stringify({ user, authToken }));
+          console.log('[__sec][info] Retrieved session from getSession');
+          return { user, authToken };
+        } else {
+          console.warn('[__sec][warn] No valid session from getSession', session);
         }
-      } else {
-        __sec_log.w('No stored authToken found');
       }
-
-      // Try window.getSession if available
-      if (!session && typeof window.getSession === 'function') {
-        __sec_log.d('Attempting to use dashboard.js getSession');
-        try {
-          const sessionData = await window.getSession();
-          if (sessionData && sessionData.user && sessionData.authToken) {
-            session = {
-              user: {
-                id: sessionData.user.uid,
-                email: sessionData.user.email,
-                user_metadata: {
-                  username: sessionData.user.username || null,
-                  full_name: sessionData.user.fullName || null
-                }
-              },
-              access_token: sessionData.authToken
-            };
-            __sec_log.d('Session retrieved from getSession', session);
-            // Store for future use
-            try {
-              localStorage.setItem('authToken', session.access_token);
-              localStorage.setItem('authTokenData', JSON.stringify(sessionData));
-            } catch (e) {
-              __sec_log.w('Failed to store authToken', e);
+      // Fallback: Try /api/session with stored authToken
+      const token = localStorage.getItem('authToken');
+      if (token) {
+        const res = await fetch('https://api.flexgig.com.ng/api/session', {
+          method: 'GET',
+          credentials: 'include',
+          headers: { 'Accept': 'application/json', 'Authorization': `Bearer ${token}` }
+        });
+        if (res.ok) {
+          const { user: fetchedUser, token: newToken } = await res.json();
+          user = fetchedUser;
+          authToken = newToken;
+          localStorage.setItem('authTokenData', JSON.stringify({ user, authToken: newToken }));
+          console.log('[__sec][info] Retrieved session from /api/session');
+          return { user, authToken };
+        } else if (res.status === 401) {
+          console.log('[__sec][info] Token expired, attempting refresh');
+          const refreshRes = await fetch('https://api.flexgig.com.ng/auth/refresh', {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Accept': 'application/json' }
+          });
+          if (refreshRes.ok) {
+            const { token: newToken } = await refreshRes.json();
+            localStorage.setItem('authToken', newToken);
+            const retryRes = await fetch('https://api.flexgig.com.ng/api/session', {
+              method: 'GET',
+              credentials: 'include',
+              headers: { 'Accept': 'application/json', 'Authorization': `Bearer ${newToken}` }
+            });
+            if (retryRes.ok) {
+              const { user: fetchedUser, token: finalToken } = await retryRes.json();
+              user = fetchedUser;
+              authToken = finalToken;
+              localStorage.setItem('authTokenData', JSON.stringify({ user, authToken: finalToken }));
+              console.log('[__sec][info] Retrieved session after refresh');
+              return { user, authToken };
+            } else {
+              console.error('[__sec][error] Failed to retrieve session after refresh', await retryRes.text());
             }
           } else {
-            __sec_log.w('No valid session from getSession', sessionData);
+            console.error('[__sec][error] Refresh failed', await refreshRes.text());
           }
-        } catch (err) {
-          __sec_log.w('getSession threw error', err);
-        }
-      } else if (!session) {
-        __sec_log.w('window.getSession not found or no session from authToken');
-      }
-
-      // Fallback to Supabase client
-      if (!session || !session.user) {
-        __sec_log.d('Fetching session from Supabase');
-        const { data: { session: supabaseSession }, error } = await supabase.auth.getSession();
-        if (error) {
-          __sec_log.e('Supabase session fetch error', error);
-        }
-        if (!supabaseSession || !supabaseSession.user) {
-          __sec_log.w('No active Supabase session, attempting refresh');
-          const { data: refreshedSession, error: refreshError } = await supabase.auth.refreshSession();
-          if (refreshError) {
-            __sec_log.e('Supabase session refresh error', refreshError.message || refreshError);
-            return null;
-          }
-          session = refreshedSession.session;
         } else {
-          session = supabaseSession;
+          console.error('[__sec][error] Failed to fetch session', await res.text());
         }
       }
+    }
 
-      if (!session || !session.user) {
-        __sec_log.w('No session available after all attempts');
-        return null;
-      }
-
-      // Sync Supabase client with session
-      if (session.access_token) {
-        try {
-          await supabase.auth.setSession({
-            access_token: session.access_token,
-            refresh_token: session.refresh_token || '' // May not be available
-          });
-          __sec_log.d('Synced Supabase client with session');
-        } catch (err) {
-          __sec_log.w('Failed to sync Supabase session', err);
-        }
-      }
-
-      const user = {
-        uid: session.user.id,
-        email: session.user.email,
-        username: session.user.user_metadata?.username || null,
-        fullName: session.user.user_metadata?.full_name || session.user.user_metadata?.fullName || null
-      };
-      __sec_cachedUser = user;
-      __sec_log.i('session fetch success — user', user);
-      return user;
-    } catch (err) {
-      __sec_log.e('getCurrentUser failed', err);
+    if (!user || !authToken) {
+      console.error('[__sec][error] No valid session available');
       return null;
     }
+
+    return { user, authToken };
+  } catch (err) {
+    console.error('[__sec][error] Failed to get current user', err.message);
+    return null;
   }
+}
+
+
 
   /* Animation helpers */
   let __sec_hideTimer = null;
