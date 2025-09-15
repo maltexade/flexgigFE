@@ -3588,6 +3588,9 @@ document.querySelectorAll('.contact-box').forEach(box => {
   box.addEventListener('contextmenu', e => e.preventDefault());
 });
 
+
+/* ---------- Security modal behavior + WebAuthn integration ---------- */
+
 /* ---------- Security modal behavior + WebAuthn integration ---------- */
 (function (supabase) {
   /* Unique-scoped security modal module (prefix __sec_) */
@@ -3652,7 +3655,7 @@ document.querySelectorAll('.contact-box').forEach(box => {
     if (busy) el.setAttribute('aria-busy', 'true'); else el.removeAttribute('aria-busy');
   }
 
-  /* Async: get current user (align with dashboard.js getSession) */
+  /* Async: get current user (use stored authToken and sync with Supabase) */
   let __sec_cachedUser = null;
   async function __sec_getCurrentUser() {
     if (__sec_cachedUser) {
@@ -3662,32 +3665,73 @@ document.querySelectorAll('.contact-box').forEach(box => {
 
     try {
       __sec_log.d('Fetching user session');
-      // First, try to use the session from dashboard.js's getSession
       let session = null;
-      if (typeof window.getSession === 'function') {
-        __sec_log.d('Attempting to use dashboard.js getSession');
-        const sessionData = await window.getSession();
-        if (sessionData && sessionData.user && sessionData.authToken) {
-          session = {
-            user: {
-              id: sessionData.user.uid,
-              email: sessionData.user.email,
-              user_metadata: {
-                username: sessionData.user.username || null,
-                full_name: sessionData.user.fullName || null
-              }
-            },
-            access_token: sessionData.authToken
-          };
-          __sec_log.d('Session retrieved from getSession', session);
-        } else {
-          __sec_log.w('No valid session from getSession', sessionData);
+
+      // Try to use stored authToken from dashboard.js getSession
+      const storedToken = localStorage.getItem('authToken');
+      if (storedToken) {
+        __sec_log.d('Found stored authToken, attempting to use it');
+        try {
+          const sessionData = JSON.parse(localStorage.getItem('authTokenData') || '{}');
+          if (sessionData.user && sessionData.user.uid) {
+            session = {
+              user: {
+                id: sessionData.user.uid,
+                email: sessionData.user.email,
+                user_metadata: {
+                  username: sessionData.user.username || null,
+                  full_name: sessionData.user.fullName || null
+                }
+              },
+              access_token: storedToken
+            };
+            __sec_log.d('Session constructed from stored authToken', session);
+          } else {
+            __sec_log.w('Stored authTokenData missing user data', sessionData);
+          }
+        } catch (err) {
+          __sec_log.w('Failed to parse stored authTokenData', err);
         }
       } else {
-        __sec_log.w('window.getSession not found, falling back to Supabase');
+        __sec_log.w('No stored authToken found');
       }
 
-      // Fallback to Supabase client if getSession fails or isn't available
+      // Try window.getSession if available
+      if (!session && typeof window.getSession === 'function') {
+        __sec_log.d('Attempting to use dashboard.js getSession');
+        try {
+          const sessionData = await window.getSession();
+          if (sessionData && sessionData.user && sessionData.authToken) {
+            session = {
+              user: {
+                id: sessionData.user.uid,
+                email: sessionData.user.email,
+                user_metadata: {
+                  username: sessionData.user.username || null,
+                  full_name: sessionData.user.fullName || null
+                }
+              },
+              access_token: sessionData.authToken
+            };
+            __sec_log.d('Session retrieved from getSession', session);
+            // Store for future use
+            try {
+              localStorage.setItem('authToken', session.access_token);
+              localStorage.setItem('authTokenData', JSON.stringify(sessionData));
+            } catch (e) {
+              __sec_log.w('Failed to store authToken', e);
+            }
+          } else {
+            __sec_log.w('No valid session from getSession', sessionData);
+          }
+        } catch (err) {
+          __sec_log.w('getSession threw error', err);
+        }
+      } else if (!session) {
+        __sec_log.w('window.getSession not found or no session from authToken');
+      }
+
+      // Fallback to Supabase client
       if (!session || !session.user) {
         __sec_log.d('Fetching session from Supabase');
         const { data: { session: supabaseSession }, error } = await supabase.auth.getSession();
@@ -3698,7 +3742,7 @@ document.querySelectorAll('.contact-box').forEach(box => {
           __sec_log.w('No active Supabase session, attempting refresh');
           const { data: refreshedSession, error: refreshError } = await supabase.auth.refreshSession();
           if (refreshError) {
-            __sec_log.e('Supabase session refresh error', refreshError);
+            __sec_log.e('Supabase session refresh error', refreshError.message || refreshError);
             return null;
           }
           session = refreshedSession.session;
@@ -3712,13 +3756,17 @@ document.querySelectorAll('.contact-box').forEach(box => {
         return null;
       }
 
-      // Sync Supabase client with session (if using custom getSession)
+      // Sync Supabase client with session
       if (session.access_token) {
-        await supabase.auth.setSession({
-          access_token: session.access_token,
-          refresh_token: session.refresh_token || '' // Refresh token may not be available
-        });
-        __sec_log.d('Synced Supabase client with session');
+        try {
+          await supabase.auth.setSession({
+            access_token: session.access_token,
+            refresh_token: session.refresh_token || '' // May not be available
+          });
+          __sec_log.d('Synced Supabase client with session');
+        } catch (err) {
+          __sec_log.w('Failed to sync Supabase session', err);
+        }
       }
 
       const user = {
