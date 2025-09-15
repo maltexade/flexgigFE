@@ -1,3 +1,5 @@
+window.__SEC_API_BASE = 'https://api.flexgig.com.ng'
+
 const updateProfileModal = document.getElementById('updateProfileModal');
 if (updateProfileModal && updateProfileModal.classList.contains('active')) {
   openUpdateProfileModal();
@@ -3636,36 +3638,67 @@ document.querySelectorAll('.contact-box').forEach(box => {
   }
 
   /* Async: get current user (use your existing session endpoint) */
+    /* ---- Robust current-user fetch with diagnostics ----
+     Usage: set window.__SEC_API_BASE = 'https://api.flexgig.com.ng' if your API is hosted on a different origin.
+  */
   let __sec_cachedUser = null;
   async function __sec_getCurrentUser() {
+    // Return cached if present
     if (__sec_cachedUser) return __sec_cachedUser;
+
+    // 1) If app already exposes current user object (common pattern), use it
+    if (window.__CURRENT_USER && window.__CURRENT_USER.uid) {
+      __sec_log.d('Using window.__CURRENT_USER fallback', window.__CURRENT_USER);
+      __sec_cachedUser = window.__CURRENT_USER;
+      return __sec_cachedUser;
+    }
+
+    // 2) Decide URL to call — allow overriding by setting window.__SEC_API_BASE
+    const apiBase = (typeof window.__SEC_API_BASE === 'string' && window.__SEC_API_BASE.trim()) ? window.__SEC_API_BASE.replace(/\/+$/,'') : '';
+    // Default (relative) path will be used if apiBase is empty
+    const url = apiBase ? `${apiBase}/api/session` : '/api/session';
+
+    __sec_log.d('Attempting to fetch session from', url);
+
     try {
-      const r = await fetch('/api/session', { credentials: 'include' });
+      const r = await fetch(url, { credentials: 'include', method: 'GET', headers: { 'Accept': 'application/json' } });
+      __sec_log.d('session fetch response status', r.status, { url });
+
+      // helpful debug: inspect cookies visible to JS
+      __sec_log.d('document.cookie (visible to page):', document.cookie);
+
+      let j = null;
+      try { j = await r.json(); } catch (e) { __sec_log.d('session fetch did not return JSON', e); }
+
+      // Log response body for debugging (but avoid leaking secrets to console in prod)
+      __sec_log.d('session fetch response body', j);
+
       if (!r.ok) {
-        __sec_log.w('Session fetch failed', r.status);
+        // 401/403 -> not authenticated
+        __sec_log.w('Session endpoint returned not-ok', { status: r.status, body: j });
+        // Helpful guidance in console
+        if (r.status === 401 || r.status === 403) {
+          __sec_log.i('Not authenticated: check that the server set the refresh cookie (rt) and that it is sent with credentials: include.');
+        }
         return null;
       }
-      const j = await r.json();
-      // expected j.user or j.user.uid depending on your /api/session implementation
-      // your server returns { message: 'Session valid', user: {...}, token: ... }
-      const user = j.user || (j && j.user) || (j && j.uid ? { uid: j.uid, email: j.email } : null);
+
+      // The server returns { message: 'Session valid', user: {...}, token: ... }
+      const user = (j && (j.user || j)) || null;
       if (!user || !user.uid) {
-        // sometimes the access token is returned instead; try top-level
-        if (j && j.user && j.user.uid) __sec_cachedUser = j.user;
-        else {
-          __sec_log.w('session endpoint returned unexpected payload', j);
-          return null;
-        }
-      } else {
-        __sec_cachedUser = user;
+        __sec_log.w('Session endpoint returned unexpected payload (no user.uid)', j);
+        return null;
       }
-      __sec_log.d('current user', __sec_cachedUser);
-      return __sec_cachedUser;
+
+      __sec_cachedUser = user;
+      __sec_log.i('session fetch success — user', user);
+      return user;
     } catch (err) {
-      __sec_log.e('getCurrentUser error', err);
+      __sec_log.e('getCurrentUser fetch failed', err);
       return null;
     }
   }
+
 
   /* Animation helpers (unchanged) */
   let __sec_hideTimer = null;
