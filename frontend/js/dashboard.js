@@ -1,4 +1,13 @@
 window.__SEC_API_BASE = 'https://api.flexgig.com.ng'
+// Import the Supabase client
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+// Your project URL and anon key (get them from Supabase dashboard → Project Settings → API)
+const SUPABASE_URL = 'https://bwmappzvptcjxlukccux.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ3bWFwcHp2cHRjanhsdWtjY3V4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTU0OTMzMjcsImV4cCI6MjA3MTA2OTMyN30.Ra7k6Br6nl1huQQi5DpDuOQSDE-6N1qlhUIvIset0mc';
+
+// Create the Supabase client and make it globally available
+window.supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 
 const updateProfileModal = document.getElementById('updateProfileModal');
