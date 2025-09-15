@@ -3488,10 +3488,6 @@ if (profilePictureInput && profilePicturePreview) {
 
 
 
-  // Security
-  if (securityBtn) securityBtn.addEventListener('click', () => {
-    window.location.href = '/security.html';
-  });
 
   // Referrals
   if (referralsBtn) referralsBtn.addEventListener('click', () => {
@@ -3550,11 +3546,6 @@ if (helpSupportBtn && helpSupportModal) {
   helpSupportBtn.addEventListener('click', () => {
     console.log('Help & Support clicked');
 
-    // hide settings modal
-    if (settingsModal) {
-      settingsModal.style.display = 'none';
-    }
-
     // show help modal with animation
     helpSupportModal.classList.add('active');
     document.body.classList.add('modal-open');
@@ -3587,6 +3578,548 @@ document.querySelectorAll('.contact-box').forEach(box => {
   box.addEventListener('contextmenu', e => e.preventDefault());
 });
 
+
+/* ---------- Security modal behavior + WebAuthn integration ---------- */
+(() => {
+  /* Unique-scoped security modal module (prefix __sec_) */
+  const __sec_DEBUG = true;
+  const __sec_log = {
+    d: (...a) => { if (__sec_DEBUG) console.debug('[__sec][debug]', ...a); },
+    i: (...a) => { if (__sec_DEBUG) console.info('[__sec][info]', ...a); },
+    w: (...a) => { if (__sec_DEBUG) console.warn('[__sec][warn]', ...a); },
+    e: (...a) => { if (__sec_DEBUG) console.error('[__sec][error]', ...a); },
+  };
+
+  const __sec_q = (sel) => {
+    try { return document.querySelector(sel); }
+    catch (err) { __sec_log.e('bad selector', sel, err); return null; }
+  };
+
+  /* Elements — use your IDs */
+  const __sec_modal = __sec_q('#securityModal');
+  const __sec_closeBtn = __sec_q('#securityCloseBtn');
+  const __sec_parentSwitch = __sec_q('#biometricsSwitch');
+  const __sec_bioOptions = __sec_q('#biometricsOptions'); // hidden by default in HTML
+  const __sec_bioLogin = __sec_q('#bioLoginSwitch');
+  const __sec_bioTx = __sec_q('#bioTxSwitch');
+  const __sec_pinBtn = __sec_q('#pinToggleBtn');       // will be chevron
+  const __sec_pwdBtn = __sec_q('#changePwdBtn');       // will be chevron
+  const __sec_balanceSwitch = __sec_q('#balanceSwitch');
+  const __sec_launcherBtn = __sec_q('#securityBtn');   // optional external launcher
+
+  /* Storage keys */
+  const __sec_KEYS = {
+    biom:   'security_biom_enabled',
+    bioLogin: 'security_bio_login',
+    bioTx:  'security_bio_tx',
+    balance: 'security_balance_visible'
+  };
+
+  /* Helpers */
+  const __sec_setChecked = (el, v) => { if (!el) return; el.setAttribute('aria-checked', v ? 'true' : 'false'); };
+  const __sec_isChecked  = (el) => !!el && el.getAttribute('aria-checked') === 'true';
+  function __sec_toggleSwitch(el, forced) {
+    if (!el) return false;
+    const cur = __sec_isChecked(el);
+    const next = (typeof forced === 'boolean') ? forced : !cur;
+    __sec_setChecked(el, next);
+    __sec_log.d('toggle', el && el.id, { cur, next });
+    return next;
+  }
+
+  /* UI lock helpers for async ops */
+  function __sec_setBusy(el, busy=true) {
+    if (!el) return;
+    // disable the element to prevent more clicks
+    try { el.disabled = !!busy; } catch(e) {}
+    if (busy) el.setAttribute('aria-busy','true'); else el.removeAttribute('aria-busy');
+  }
+
+  /* Async: get current user (use your existing session endpoint) */
+  let __sec_cachedUser = null;
+  async function __sec_getCurrentUser() {
+    if (__sec_cachedUser) return __sec_cachedUser;
+    try {
+      const r = await fetch('/api/session', { credentials: 'include' });
+      if (!r.ok) {
+        __sec_log.w('Session fetch failed', r.status);
+        return null;
+      }
+      const j = await r.json();
+      // expected j.user or j.user.uid depending on your /api/session implementation
+      // your server returns { message: 'Session valid', user: {...}, token: ... }
+      const user = j.user || (j && j.user) || (j && j.uid ? { uid: j.uid, email: j.email } : null);
+      if (!user || !user.uid) {
+        // sometimes the access token is returned instead; try top-level
+        if (j && j.user && j.user.uid) __sec_cachedUser = j.user;
+        else {
+          __sec_log.w('session endpoint returned unexpected payload', j);
+          return null;
+        }
+      } else {
+        __sec_cachedUser = user;
+      }
+      __sec_log.d('current user', __sec_cachedUser);
+      return __sec_cachedUser;
+    } catch (err) {
+      __sec_log.e('getCurrentUser error', err);
+      return null;
+    }
+  }
+
+  /* Animation helpers (unchanged) */
+  let __sec_hideTimer = null;
+  function __sec_clearHideTimer() { if (__sec_hideTimer) { clearTimeout(__sec_hideTimer); __sec_hideTimer = null; } }
+
+  function __sec_revealChildrenAnimated() {
+    if (!__sec_bioOptions) return;
+    __sec_clearHideTimer();
+    __sec_bioOptions.classList.remove('no-animate');
+    __sec_bioOptions.hidden = false;
+    requestAnimationFrame(() => __sec_bioOptions.classList.add('show'));
+    const rows = Array.from(__sec_bioOptions.querySelectorAll('.setting-row'));
+    rows.forEach((row,i) => {
+      row.classList.remove('visible');
+      row.style.transitionDelay = `${i * 80}ms`;
+    });
+    requestAnimationFrame(() => rows.forEach(row => row.classList.add('visible')));
+  }
+
+  function __sec_hideChildrenAnimated() {
+    if (!__sec_bioOptions) return;
+    __sec_clearHideTimer();
+    const rows = Array.from(__sec_bioOptions.querySelectorAll('.setting-row'));
+    rows.slice().reverse().forEach((row, idx) => {
+      row.style.transitionDelay = `${idx * 60}ms`;
+      row.classList.remove('visible');
+    });
+    const longest = rows.length * 60 + 220;
+    __sec_hideTimer = setTimeout(() => {
+      __sec_bioOptions.classList.remove('show');
+      rows.forEach(r => { r.style.transitionDelay = ''; });
+      __sec_bioOptions.hidden = true;
+      __sec_hideTimer = null;
+    }, longest);
+  }
+
+  function __sec_revealChildrenNoAnimate() {
+    if (!__sec_bioOptions) return;
+    __sec_clearHideTimer();
+    __sec_bioOptions.classList.remove('show');
+    __sec_bioOptions.classList.add('no-animate');
+    __sec_bioOptions.hidden = false;
+    const rows = Array.from(__sec_bioOptions.querySelectorAll('.setting-row'));
+    rows.forEach(row => { row.classList.add('visible'); row.style.transitionDelay = ''; });
+    requestAnimationFrame(() => __sec_bioOptions.classList.add('show'));
+    setTimeout(() => __sec_bioOptions.classList.remove('no-animate'), 60);
+  }
+
+  /* Set biometric UI state (animate true -> do reveal/hide animations) */
+  function __sec_setBiometrics(parentOn, animate = true) {
+    if (!__sec_parentSwitch) { __sec_log.w('parent switch element missing'); return; }
+    __sec_setChecked(__sec_parentSwitch, parentOn);
+    try { localStorage.setItem(__sec_KEYS.biom, parentOn ? '1' : '0'); } catch(e){}
+
+    if (parentOn) {
+      // restore child stored state or default to true when toggled on
+      const storedLogin = localStorage.getItem(__sec_KEYS.bioLogin) === '1';
+      const storedTx    = localStorage.getItem(__sec_KEYS.bioTx) === '1';
+      if (animate) {
+        __sec_revealChildrenAnimated();
+        setTimeout(() => {
+          __sec_setChecked(__sec_bioLogin, storedLogin || true);
+          __sec_setChecked(__sec_bioTx, storedTx || true);
+        }, 60);
+      } else {
+        __sec_revealChildrenNoAnimate();
+        __sec_setChecked(__sec_bioLogin, storedLogin || true);
+        __sec_setChecked(__sec_bioTx, storedTx || true);
+      }
+      try {
+        localStorage.setItem(__sec_KEYS.bioLogin, __sec_isChecked(__sec_bioLogin) ? '1' : '0');
+        localStorage.setItem(__sec_KEYS.bioTx, __sec_isChecked(__sec_bioTx) ? '1' : '0');
+      } catch(e){}
+      __sec_log.i('biom ON', { storedLogin, storedTx, animate });
+    } else {
+      // turn children off & hide
+      try {
+        localStorage.setItem(__sec_KEYS.bioLogin, '0');
+        localStorage.setItem(__sec_KEYS.bioTx, '0');
+      } catch(e){}
+      if (__sec_bioLogin) __sec_setChecked(__sec_bioLogin, false);
+      if (__sec_bioTx) __sec_setChecked(__sec_bioTx, false);
+      if (animate) __sec_hideChildrenAnimated();
+      else {
+        if (__sec_bioOptions) {
+          __sec_bioOptions.classList.remove('show');
+          __sec_bioOptions.hidden = true;
+          const rows = Array.from(__sec_bioOptions.querySelectorAll('.setting-row'));
+          rows.forEach(r => { r.classList.remove('visible'); r.style.transitionDelay = ''; });
+        }
+      }
+      __sec_log.i('biom OFF', { animate });
+    }
+  }
+
+  /* If both child switches are off, turn the parent off (and hide children) */
+  function __sec_maybeDisableParentIfChildrenOff() {
+    try {
+      // If parent element missing, nothing to do
+      if (!__sec_parentSwitch) return;
+
+      // If either child is missing, don't auto-disable the parent
+      if (!__sec_bioLogin || !__sec_bioTx) return;
+
+      const loginOn = __sec_isChecked(__sec_bioLogin);
+      const txOn    = __sec_isChecked(__sec_bioTx);
+
+      // If both are OFF, switch parent off (animated)
+      if (!loginOn && !txOn && __sec_isChecked(__sec_parentSwitch)) {
+        __sec_log.i('Both biometric children off — turning parent OFF');
+        __sec_setBiometrics(false, true); // animate hide and persist
+      }
+    } catch (err) {
+      __sec_log.e('maybeDisableParentIfChildrenOff error', err);
+    }
+  }
+
+  /* initialize from storage */
+  function __sec_initFromStorage() {
+    try {
+      const biomStored = localStorage.getItem(__sec_KEYS.biom) === '1';
+      const loginStored = localStorage.getItem(__sec_KEYS.bioLogin) === '1';
+      const txStored = localStorage.getItem(__sec_KEYS.bioTx) === '1';
+      const balanceStored = localStorage.getItem(__sec_KEYS.balance) !== '0';
+
+      if (__sec_parentSwitch) __sec_setChecked(__sec_parentSwitch, biomStored);
+
+      if (__sec_bioOptions) {
+        if (biomStored) {
+          __sec_revealChildrenNoAnimate();
+          if (__sec_bioLogin) __sec_setChecked(__sec_bioLogin, loginStored);
+          if (__sec_bioTx) __sec_setChecked(__sec_bioTx, txStored);
+        } else {
+          __sec_bioOptions.hidden = true;
+          __sec_bioOptions.classList.remove('show');
+          if (__sec_bioLogin) __sec_setChecked(__sec_bioLogin, false);
+          if (__sec_bioTx) __sec_setChecked(__sec_bioTx, false);
+        }
+      }
+
+      if (__sec_balanceSwitch) __sec_setChecked(__sec_balanceSwitch, balanceStored);
+
+      __sec_log.d('initFromStorage', { biomStored, loginStored, txStored, balanceStored });
+    } catch (err) {
+      __sec_log.e('initFromStorage error', err);
+    }
+  }
+
+  /* convert pin/pwd rows to chevron buttons & wire event to open external modals */
+  function __sec_convertRowsToChevron() {
+    if (__sec_pinBtn) {
+      __sec_pinBtn.classList.add('chev-btn');
+      __sec_pinBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      __sec_pinBtn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        __sec_log.i('pin row clicked');
+        if (typeof window.openPinModal === 'function') {
+          try { window.openPinModal(); }
+          catch (err) { __sec_log.e('openPinModal threw', err); window.dispatchEvent(new CustomEvent('security:open-pin')); }
+        } else {
+          window.dispatchEvent(new CustomEvent('security:open-pin'));
+        }
+      });
+    } else __sec_log.d('#pinToggleBtn not present');
+
+    if (__sec_pwdBtn) {
+      __sec_pwdBtn.classList.add('chev-btn');
+      __sec_pwdBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      __sec_pwdBtn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        __sec_log.i('change-password row clicked');
+        if (typeof window.openChangePasswordModal === 'function') {
+          try { window.openChangePasswordModal(); }
+          catch (err) { __sec_log.e('openChangePasswordModal threw', err); window.dispatchEvent(new CustomEvent('security:open-change-password')); }
+        } else {
+          window.dispatchEvent(new CustomEvent('security:open-change-password'));
+        }
+      });
+    } else __sec_log.d('#changePwdBtn not present');
+  }
+
+  /* ---- WebAuthn helper calls to server (list/revoke) ---- */
+  async function __sec_listAuthenticators(userId) {
+    try {
+      const r = await fetch(`/webauthn/authenticators/${encodeURIComponent(userId)}`, { credentials: 'include' });
+      if (!r.ok) {
+        __sec_log.w('listAuthenticators failed', r.status);
+        return null;
+      }
+      const j = await r.json();
+      return j;
+    } catch (err) {
+      __sec_log.e('listAuthenticators error', err);
+      return null;
+    }
+  }
+
+  async function __sec_revokeAuthenticator(userId, credentialID) {
+    try {
+      const r = await fetch(`/webauthn/authenticators/${encodeURIComponent(userId)}/revoke`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ credentialID })
+      });
+      if (!r.ok) {
+        __sec_log.w('revokeAuthenticator failed', credentialID, r.status);
+        return false;
+      }
+      return true;
+    } catch (err) {
+      __sec_log.e('revokeAuthenticator error', err);
+      return false;
+    }
+  }
+
+  /* wire events (with WebAuthn integration) */
+  function __sec_wireEvents() {
+    try {
+      if (__sec_launcherBtn) {
+        __sec_launcherBtn.addEventListener('click', (ev) => { ev.preventDefault(); __sec_openModal(); });
+        __sec_log.d('launcher wired (#securityBtn)');
+      } else __sec_log.d('no launcher (#securityBtn) found; use controller.open() to open');
+
+      if (__sec_closeBtn) __sec_closeBtn.addEventListener('click', __sec_closeModal);
+
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && __sec_modal && __sec_modal.classList.contains('active')) __sec_closeModal();
+      });
+
+      if (__sec_parentSwitch) {
+        // replace sync handler with async handler that does registration / list / revoke
+        const __sec_parentHandler = async () => {
+          // quickly lock parent so user can't spam
+          __sec_setBusy(__sec_parentSwitch, true);
+          // UI pre-toggle
+          const uiOn = __sec_toggleSwitch(__sec_parentSwitch);
+
+          // load current user
+          const user = await __sec_getCurrentUser();
+          if (!user || !user.uid) {
+            __sec_log.e('Parent toggle: no current user available');
+            // revert UI
+            __sec_setChecked(__sec_parentSwitch, false);
+            __sec_setBusy(__sec_parentSwitch, false);
+            alert('You must be signed in to enable biometrics.');
+            return;
+          }
+          const uid = user.uid;
+
+          if (uiOn) {
+            // user tries to turn ON: check if there are existing authenticators for this user
+            __sec_log.i('Parent toggle ON requested — checking existing authenticators for user', uid);
+            const auths = await __sec_listAuthenticators(uid);
+            // if auths exist (non-empty array), skip registration prompt and just show children
+            if (Array.isArray(auths) && auths.length > 0) {
+              __sec_log.i('Existing authenticators found — showing children without registering new one');
+              __sec_setBiometrics(true, true);
+              __sec_setBusy(__sec_parentSwitch, false);
+              return;
+            }
+
+            // No existing authenticators — start registration
+            try {
+              __sec_log.i('No authenticators found — starting registration flow');
+              // Keep the parent switch visually on but try registration
+              await startRegistration(uid, user.email || user.username || uid, user.fullName || user.email || uid);
+              // success -> show children and persist states
+              __sec_setBiometrics(true, true);
+              __sec_log.i('Registration successful');
+            } catch (err) {
+              __sec_log.e('Registration failed', err);
+              // revert UI
+              __sec_setChecked(__sec_parentSwitch, false);
+              __sec_setBiometrics(false, false);
+              alert('Biometric registration failed: ' + (err && err.message ? err.message : 'unknown error'));
+            } finally {
+              __sec_setBusy(__sec_parentSwitch, false);
+            }
+          } else {
+            // user turned parent OFF: revoke all authenticators for this user (iterate list)
+            try {
+              __sec_log.i('Parent toggle OFF requested — revoking authenticators for user', uid);
+              const auths = await __sec_listAuthenticators(uid);
+              if (Array.isArray(auths) && auths.length > 0) {
+                // revoke each credential id; server expects credentialID in body
+                for (const a of auths) {
+                  const credential_id = a.credential_id || a.credentialID || a.credentialId;
+                  if (!credential_id) continue;
+                  const ok = await __sec_revokeAuthenticator(uid, credential_id);
+                  __sec_log.d('revoke result', credential_id, ok);
+                }
+              } else {
+                __sec_log.d('No authenticators to revoke for user', uid);
+              }
+              // hide children & clear flags
+              __sec_setBiometrics(false, true);
+            } catch (err) {
+              __sec_log.e('Error revoking authenticators', err);
+              // still hide UI but inform user
+              __sec_setBiometrics(false, true);
+              alert('Warning: failed to revoke authenticator(s) on server. Check console.');
+            } finally {
+              __sec_setBusy(__sec_parentSwitch, false);
+            }
+          }
+        };
+
+        __sec_parentSwitch.addEventListener('click', (e) => { e.preventDefault(); __sec_parentHandler(); });
+        __sec_parentSwitch.addEventListener('keydown', (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); __sec_parentHandler(); } });
+      }
+
+      // bioLogin handler — when enabling require a quick authentication test
+      if (__sec_bioLogin) {
+        __sec_bioLogin.addEventListener('click', async () => {
+          if (!__sec_parentSwitch || !__sec_isChecked(__sec_parentSwitch)) {
+            __sec_log.d('bioLogin click ignored; parent OFF');
+            return;
+          }
+          // optimistic toggle in UI
+          __sec_setBusy(__sec_bioLogin, true);
+          const newState = __sec_toggleSwitch(__sec_bioLogin);
+          try {
+            const user = await __sec_getCurrentUser();
+            if (!user || !user.uid) throw new Error('Not signed in');
+
+            if (newState) {
+              // require a biometric assertion to confirm the authenticator works
+              __sec_log.i('bioLogin enabling: performing authentication test');
+              await startAuthentication(user.uid);
+              localStorage.setItem(__sec_KEYS.bioLogin, '1');
+              __sec_log.i('bioLogin enabled and verified');
+            } else {
+              // user turned OFF locally
+              localStorage.setItem(__sec_KEYS.bioLogin, '0');
+              __sec_maybeDisableParentIfChildrenOff();
+            }
+          } catch (err) {
+            __sec_log.e('bioLogin error or verification failed', err);
+            // revert toggle in UI
+            __sec_setChecked(__sec_bioLogin, false);
+            try { localStorage.setItem(__sec_KEYS.bioLogin, '0'); } catch(e){}
+            alert('Biometric verification failed: ' + (err && err.message ? err.message : 'unknown'));
+          } finally {
+            __sec_setBusy(__sec_bioLogin, false);
+          }
+        });
+
+        __sec_bioLogin.addEventListener('keydown', (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); __sec_bioLogin.click(); } });
+      }
+
+      // bioTx handler — require authentication test when turning ON
+      if (__sec_bioTx) {
+        __sec_bioTx.addEventListener('click', async () => {
+          if (!__sec_parentSwitch || !__sec_isChecked(__sec_parentSwitch)) {
+            __sec_log.d('bioTx click ignored; parent OFF');
+            return;
+          }
+          __sec_setBusy(__sec_bioTx, true);
+          const newState = __sec_toggleSwitch(__sec_bioTx);
+          try {
+            const user = await __sec_getCurrentUser();
+            if (!user || !user.uid) throw new Error('Not signed in');
+
+            if (newState) {
+              __sec_log.i('bioTx enabling: performing authentication test');
+              await startAuthentication(user.uid);
+              localStorage.setItem(__sec_KEYS.bioTx, '1');
+              __sec_log.i('bioTx enabled and verified');
+            } else {
+              localStorage.setItem(__sec_KEYS.bioTx, '0');
+              __sec_maybeDisableParentIfChildrenOff();
+            }
+          } catch (err) {
+            __sec_log.e('bioTx error or verification failed', err);
+            __sec_setChecked(__sec_bioTx, false);
+            try { localStorage.setItem(__sec_KEYS.bioTx, '0'); } catch(e){}
+            alert('Biometric verification failed: ' + (err && err.message ? err.message : 'unknown'));
+          } finally {
+            __sec_setBusy(__sec_bioTx, false);
+          }
+        });
+
+        __sec_bioTx.addEventListener('keydown', (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); __sec_bioTx.click(); } });
+      }
+
+      if (__sec_balanceSwitch) {
+        const __sec_balanceHandler = () => {
+          const on = __sec_toggleSwitch(__sec_balanceSwitch);
+          try { localStorage.setItem(__sec_KEYS.balance, on ? '1' : '0'); } catch(e){}
+          window.dispatchEvent(new CustomEvent('security:balance-visibility-changed', { detail: { visible: on } }));
+          __sec_log.i('balanceSwitch ->', on);
+        };
+        __sec_balanceSwitch.addEventListener('click', __sec_balanceHandler);
+        __sec_balanceSwitch.addEventListener('keydown', (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); __sec_balanceHandler(); } });
+      }
+
+      __sec_log.i('events wired (with WebAuthn integration)');
+    } catch (err) {
+      __sec_log.e('wireEvents error', err);
+    }
+  }
+
+  /* open/close modal with focus handling */
+  let __sec_lastActiveElement = null;
+  function __sec_openModal() {
+    if (!__sec_modal) { __sec_log.e('openModal: #securityModal not found'); return; }
+    __sec_lastActiveElement = document.activeElement;
+    __sec_modal.classList.add('active');
+    __sec_modal.setAttribute('aria-hidden', 'false');
+    try { __sec_modal.scrollTop = 0; } catch(e){}
+    if (__sec_parentSwitch && typeof __sec_parentSwitch.focus === 'function') __sec_parentSwitch.focus();
+    __sec_log.i('modal opened');
+  }
+  function __sec_closeModal() {
+    if (!__sec_modal) return;
+    __sec_modal.classList.remove('active');
+    __sec_modal.setAttribute('aria-hidden', 'true');
+    if (__sec_lastActiveElement && typeof __sec_lastActiveElement.focus === 'function') __sec_lastActiveElement.focus();
+    __sec_log.i('modal closed');
+  }
+
+  /* expose safe controller */
+  window.__secModalController = {
+    open: __sec_openModal,
+    close: __sec_closeModal,
+    getState: () => ({
+      biom: localStorage.getItem(__sec_KEYS.biom),
+      bioLogin: localStorage.getItem(__sec_KEYS.bioLogin),
+      bioTx: localStorage.getItem(__sec_KEYS.bioTx),
+      balance: localStorage.getItem(__sec_KEYS.balance)
+    })
+  };
+
+  /* boot */
+  function __sec_boot() {
+    try {
+      __sec_convertRowsToChevron();
+      __sec_initFromStorage();
+      __sec_wireEvents();
+      __sec_log.i('security module booted (with WebAuthn)');
+    } catch (err) {
+      __sec_log.e('boot error', err);
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', __sec_boot);
+  } else {
+    // DOM already ready
+    setTimeout(__sec_boot, 0);
+  }
+
+})();
 
 
 
