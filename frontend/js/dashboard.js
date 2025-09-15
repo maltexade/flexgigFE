@@ -3589,685 +3589,660 @@ document.querySelectorAll('.contact-box').forEach(box => {
 });
 
 
+
 /* ---------- Security modal behavior + WebAuthn integration ---------- */
 (() => {
-  /* Unique-scoped security modal module (prefix __sec_) */
-  const __sec_DEBUG = true;
-  const __sec_log = {
-    d: (...a) => { if (__sec_DEBUG) console.debug('[__sec][debug]', ...a); },
-    i: (...a) => { if (__sec_DEBUG) console.info('[__sec][info]', ...a); },
-    w: (...a) => { if (__sec_DEBUG) console.warn('[__sec][warn]', ...a); },
-    e: (...a) => { if (__sec_DEBUG) console.error('[__sec][error]', ...a); },
-  };
+  /* Pass supabaseClient to the module */
+  return (supabase) => {
+    /* Unique-scoped security modal module (prefix __sec_) */
+    const __sec_DEBUG = true;
+    const __sec_log = {
+      d: (...a) => { if (__sec_DEBUG) console.debug('[__sec][debug]', ...a); },
+      i: (...a) => { if (__sec_DEBUG) console.info('[__sec][info]', ...a); },
+      w: (...a) => { if (__sec_DEBUG) console.warn('[__sec][warn]', ...a); },
+      e: (...a) => { if (__sec_DEBUG) console.error('[__sec][error]', ...a); },
+    };
 
-  const __sec_q = (sel) => {
-    try { return document.querySelector(sel); }
-    catch (err) { __sec_log.e('bad selector', sel, err); return null; }
-  };
+    const __sec_q = (sel) => {
+      try { return document.querySelector(sel); }
+      catch (err) { __sec_log.e('bad selector', sel, err); return null; }
+    };
 
-  /* Elements — use your IDs */
-  const __sec_modal = __sec_q('#securityModal');
-  const __sec_closeBtn = __sec_q('#securityCloseBtn');
-  const __sec_parentSwitch = __sec_q('#biometricsSwitch');
-  const __sec_bioOptions = __sec_q('#biometricsOptions'); // hidden by default in HTML
-  const __sec_bioLogin = __sec_q('#bioLoginSwitch');
-  const __sec_bioTx = __sec_q('#bioTxSwitch');
-  const __sec_pinBtn = __sec_q('#pinToggleBtn');       // will be chevron
-  const __sec_pwdBtn = __sec_q('#changePwdBtn');       // will be chevron
-  const __sec_balanceSwitch = __sec_q('#balanceSwitch');
-  const __sec_launcherBtn = __sec_q('#securityBtn');   // optional external launcher
+    /* Elements — use your IDs */
+    const __sec_modal = __sec_q('#securityModal');
+    const __sec_closeBtn = __sec_q('#securityCloseBtn');
+    const __sec_parentSwitch = __sec_q('#biometricsSwitch');
+    const __sec_bioOptions = __sec_q('#biometricsOptions'); // hidden by default in HTML
+    const __sec_bioLogin = __sec_q('#bioLoginSwitch');
+    const __sec_bioTx = __sec_q('#bioTxSwitch');
+    const __sec_pinBtn = __sec_q('#pinToggleBtn');       // will be chevron
+    const __sec_pwdBtn = __sec_q('#changePwdBtn');       // will be chevron
+    const __sec_balanceSwitch = __sec_q('#balanceSwitch');
+    const __sec_launcherBtn = __sec_q('#securityBtn');   // optional external launcher
 
-  /* Storage keys */
-  const __sec_KEYS = {
-    biom:   'security_biom_enabled',
-    bioLogin: 'security_bio_login',
-    bioTx:  'security_bio_tx',
-    balance: 'security_balance_visible'
-  };
+    /* Storage keys */
+    const __sec_KEYS = {
+      biom: 'security_biom_enabled',
+      bioLogin: 'security_bio_login',
+      bioTx: 'security_bio_tx',
+      balance: 'security_balance_visible'
+    };
 
-  /* Helpers */
-  const __sec_setChecked = (el, v) => { if (!el) return; el.setAttribute('aria-checked', v ? 'true' : 'false'); };
-  const __sec_isChecked  = (el) => !!el && el.getAttribute('aria-checked') === 'true';
-  function __sec_toggleSwitch(el, forced) {
-    if (!el) return false;
-    const cur = __sec_isChecked(el);
-    const next = (typeof forced === 'boolean') ? forced : !cur;
-    __sec_setChecked(el, next);
-    __sec_log.d('toggle', el && el.id, { cur, next });
-    return next;
-  }
-
-  /* UI lock helpers for async ops */
-  function __sec_setBusy(el, busy=true) {
-    if (!el) return;
-    // disable the element to prevent more clicks
-    try { el.disabled = !!busy; } catch(e) {}
-    if (busy) el.setAttribute('aria-busy','true'); else el.removeAttribute('aria-busy');
-  }
-
-  /* Async: get current user (use your existing session endpoint) */
-    /* ---- Robust current-user fetch with diagnostics ----
-     Usage: set window.__SEC_API_BASE = 'https://api.flexgig.com.ng' if your API is hosted on a different origin.
-  */
-  let __sec_cachedUser = null;
-  async function __sec_getCurrentUser() {
-    // Return cached if present
-    if (__sec_cachedUser) return __sec_cachedUser;
-
-    // 1) If app already exposes current user object (common pattern), use it
-    if (window.__CURRENT_USER && window.__CURRENT_USER.uid) {
-      __sec_log.d('Using window.__CURRENT_USER fallback', window.__CURRENT_USER);
-      __sec_cachedUser = window.__CURRENT_USER;
-      return __sec_cachedUser;
+    /* Helpers */
+    const __sec_setChecked = (el, v) => { if (!el) return; el.setAttribute('aria-checked', v ? 'true' : 'false'); };
+    const __sec_isChecked = (el) => !!el && el.getAttribute('aria-checked') === 'true';
+    function __sec_toggleSwitch(el, forced) {
+      if (!el) return false;
+      const cur = __sec_isChecked(el);
+      const next = (typeof forced === 'boolean') ? forced : !cur;
+      __sec_setChecked(el, next);
+      __sec_log.d('toggle', el && el.id, { cur, next });
+      return next;
     }
 
-    // 2) Decide URL to call — allow overriding by setting window.__SEC_API_BASE
-    const apiBase = (typeof window.__SEC_API_BASE === 'string' && window.__SEC_API_BASE.trim()) ? window.__SEC_API_BASE.replace(/\/+$/,'') : '';
-    // Default (relative) path will be used if apiBase is empty
-    const url = apiBase ? `${apiBase}/api/session` : '/api/session';
+    /* UI lock helpers for async ops */
+    function __sec_setBusy(el, busy = true) {
+      if (!el) return;
+      try { el.disabled = !!busy; } catch (e) {}
+      if (busy) el.setAttribute('aria-busy', 'true'); else el.removeAttribute('aria-busy');
+    }
 
-    __sec_log.d('Attempting to fetch session from', url);
+    /* Async: get current user (using Supabase instead of custom endpoint) */
+    let __sec_cachedUser = null;
+    async function __sec_getCurrentUser() {
+      if (__sec_cachedUser) {
+        __sec_log.d('Returning cached user', __sec_cachedUser);
+        return __sec_cachedUser;
+      }
 
-    try {
-      const r = await fetch(url, { credentials: 'include', method: 'GET', headers: { 'Accept': 'application/json' } });
-      __sec_log.d('session fetch response status', r.status, { url });
-
-      // helpful debug: inspect cookies visible to JS
-      __sec_log.d('document.cookie (visible to page):', document.cookie);
-
-      let j = null;
-      try { j = await r.json(); } catch (e) { __sec_log.d('session fetch did not return JSON', e); }
-
-      // Log response body for debugging (but avoid leaking secrets to console in prod)
-      __sec_log.d('session fetch response body', j);
-
-      if (!r.ok) {
-        // 401/403 -> not authenticated
-        __sec_log.w('Session endpoint returned not-ok', { status: r.status, body: j });
-        // Helpful guidance in console
-        if (r.status === 401 || r.status === 403) {
-          __sec_log.i('Not authenticated: check that the server set the refresh cookie (rt) and that it is sent with credentials: include.');
+      try {
+        __sec_log.d('Fetching user session from Supabase');
+        const { data: { session }, error } = await supabase.auth.getSession();
+        if (error) {
+          __sec_log.e('Supabase session fetch error', error);
+          return null;
         }
+        if (!session || !session.user) {
+          __sec_log.w('No active Supabase session');
+          return null;
+        }
+        const user = {
+          uid: session.user.id,
+          email: session.user.email,
+          username: session.user.user_metadata?.username || null,
+          fullName: session.user.user_metadata?.full_name || session.user.user_metadata?.fullName || null
+        };
+        __sec_cachedUser = user;
+        __sec_log.i('session fetch success — user', user);
+        return user;
+      } catch (err) {
+        __sec_log.e('getCurrentUser failed', err);
         return null;
       }
-
-      // The server returns { message: 'Session valid', user: {...}, token: ... }
-      const user = (j && (j.user || j)) || null;
-      if (!user || !user.uid) {
-        __sec_log.w('Session endpoint returned unexpected payload (no user.uid)', j);
-        return null;
-      }
-
-      __sec_cachedUser = user;
-      __sec_log.i('session fetch success — user', user);
-      return user;
-    } catch (err) {
-      __sec_log.e('getCurrentUser fetch failed', err);
-      return null;
     }
-  }
 
-  /* Animation helpers (unchanged) */
-  let __sec_hideTimer = null;
-  function __sec_clearHideTimer() { if (__sec_hideTimer) { clearTimeout(__sec_hideTimer); __sec_hideTimer = null; } }
+    /* Animation helpers (unchanged) */
+    let __sec_hideTimer = null;
+    function __sec_clearHideTimer() { if (__sec_hideTimer) { clearTimeout(__sec_hideTimer); __sec_hideTimer = null; } }
 
-  function __sec_revealChildrenAnimated() {
-    if (!__sec_bioOptions) return;
-    __sec_clearHideTimer();
-    __sec_bioOptions.classList.remove('no-animate');
-    __sec_bioOptions.hidden = false;
-    requestAnimationFrame(() => __sec_bioOptions.classList.add('show'));
-    const rows = Array.from(__sec_bioOptions.querySelectorAll('.setting-row'));
-    rows.forEach((row,i) => {
-      row.classList.remove('visible');
-      row.style.transitionDelay = `${i * 80}ms`;
-    });
-    requestAnimationFrame(() => rows.forEach(row => row.classList.add('visible')));
-  }
+    function __sec_revealChildrenAnimated() {
+      if (!__sec_bioOptions) return;
+      __sec_clearHideTimer();
+      __sec_bioOptions.classList.remove('no-animate');
+      __sec_bioOptions.hidden = false;
+      requestAnimationFrame(() => __sec_bioOptions.classList.add('show'));
+      const rows = Array.from(__sec_bioOptions.querySelectorAll('.setting-row'));
+      rows.forEach((row, i) => {
+        row.classList.remove('visible');
+        row.style.transitionDelay = `${i * 80}ms`;
+      });
+      requestAnimationFrame(() => rows.forEach(row => row.classList.add('visible')));
+    }
 
-  function __sec_hideChildrenAnimated() {
-    if (!__sec_bioOptions) return;
-    __sec_clearHideTimer();
-    const rows = Array.from(__sec_bioOptions.querySelectorAll('.setting-row'));
-    rows.slice().reverse().forEach((row, idx) => {
-      row.style.transitionDelay = `${idx * 60}ms`;
-      row.classList.remove('visible');
-    });
-    const longest = rows.length * 60 + 220;
-    __sec_hideTimer = setTimeout(() => {
+    function __sec_hideChildrenAnimated() {
+      if (!__sec_bioOptions) return;
+      __sec_clearHideTimer();
+      const rows = Array.from(__sec_bioOptions.querySelectorAll('.setting-row'));
+      rows.slice().reverse().forEach((row, idx) => {
+        row.style.transitionDelay = `${idx * 60}ms`;
+        row.classList.remove('visible');
+      });
+      const longest = rows.length * 60 + 220;
+      __sec_hideTimer = setTimeout(() => {
+        __sec_bioOptions.classList.remove('show');
+        rows.forEach(r => { r.style.transitionDelay = ''; });
+        __sec_bioOptions.hidden = true;
+        __sec_hideTimer = null;
+      }, longest);
+    }
+
+    function __sec_revealChildrenNoAnimate() {
+      if (!__sec_bioOptions) return;
+      __sec_clearHideTimer();
       __sec_bioOptions.classList.remove('show');
-      rows.forEach(r => { r.style.transitionDelay = ''; });
-      __sec_bioOptions.hidden = true;
-      __sec_hideTimer = null;
-    }, longest);
-  }
+      __sec_bioOptions.classList.add('no-animate');
+      __sec_bioOptions.hidden = false;
+      const rows = Array.from(__sec_bioOptions.querySelectorAll('.setting-row'));
+      rows.forEach(row => { row.classList.add('visible'); row.style.transitionDelay = ''; });
+      requestAnimationFrame(() => __sec_bioOptions.classList.add('show'));
+      setTimeout(() => __sec_bioOptions.classList.remove('no-animate'), 60);
+    }
 
-  function __sec_revealChildrenNoAnimate() {
-    if (!__sec_bioOptions) return;
-    __sec_clearHideTimer();
-    __sec_bioOptions.classList.remove('show');
-    __sec_bioOptions.classList.add('no-animate');
-    __sec_bioOptions.hidden = false;
-    const rows = Array.from(__sec_bioOptions.querySelectorAll('.setting-row'));
-    rows.forEach(row => { row.classList.add('visible'); row.style.transitionDelay = ''; });
-    requestAnimationFrame(() => __sec_bioOptions.classList.add('show'));
-    setTimeout(() => __sec_bioOptions.classList.remove('no-animate'), 60);
-  }
+    /* Set biometric UI state (animate true -> do reveal/hide animations) */
+    function __sec_setBiometrics(parentOn, animate = true) {
+      if (!__sec_parentSwitch) { __sec_log.w('parent switch element missing'); return; }
+      __sec_setChecked(__sec_parentSwitch, parentOn);
+      try { localStorage.setItem(__sec_KEYS.biom, parentOn ? '1' : '0'); } catch (e) {}
 
-  /* Set biometric UI state (animate true -> do reveal/hide animations) */
-  function __sec_setBiometrics(parentOn, animate = true) {
-    if (!__sec_parentSwitch) { __sec_log.w('parent switch element missing'); return; }
-    __sec_setChecked(__sec_parentSwitch, parentOn);
-    try { localStorage.setItem(__sec_KEYS.biom, parentOn ? '1' : '0'); } catch(e){}
-
-    if (parentOn) {
-      // restore child stored state or default to true when toggled on
-      const storedLogin = localStorage.getItem(__sec_KEYS.bioLogin) === '1';
-      const storedTx    = localStorage.getItem(__sec_KEYS.bioTx) === '1';
-      if (animate) {
-        __sec_revealChildrenAnimated();
-        setTimeout(() => {
+      if (parentOn) {
+        const storedLogin = localStorage.getItem(__sec_KEYS.bioLogin) === '1';
+        const storedTx = localStorage.getItem(__sec_KEYS.bioTx) === '1';
+        if (animate) {
+          __sec_revealChildrenAnimated();
+          setTimeout(() => {
+            __sec_setChecked(__sec_bioLogin, storedLogin || true);
+            __sec_setChecked(__sec_bioTx, storedTx || true);
+          }, 60);
+        } else {
+          __sec_revealChildrenNoAnimate();
           __sec_setChecked(__sec_bioLogin, storedLogin || true);
           __sec_setChecked(__sec_bioTx, storedTx || true);
-        }, 60);
+        }
+        try {
+          localStorage.setItem(__sec_KEYS.bioLogin, __sec_isChecked(__sec_bioLogin) ? '1' : '0');
+          localStorage.setItem(__sec_KEYS.bioTx, __sec_isChecked(__sec_bioTx) ? '1' : '0');
+        } catch (e) {}
+        __sec_log.i('biom ON', { storedLogin, storedTx, animate });
       } else {
-        __sec_revealChildrenNoAnimate();
-        __sec_setChecked(__sec_bioLogin, storedLogin || true);
-        __sec_setChecked(__sec_bioTx, storedTx || true);
+        try {
+          localStorage.setItem(__sec_KEYS.bioLogin, '0');
+          localStorage.setItem(__sec_KEYS.bioTx, '0');
+        } catch (e) {}
+        if (__sec_bioLogin) __sec_setChecked(__sec_bioLogin, false);
+        if (__sec_bioTx) __sec_setChecked(__sec_bioTx, false);
+        if (animate) __sec_hideChildrenAnimated();
+        else {
+          if (__sec_bioOptions) {
+            __sec_bioOptions.classList.remove('show');
+            __sec_bioOptions.hidden = true;
+            const rows = Array.from(__sec_bioOptions.querySelectorAll('.setting-row'));
+            rows.forEach(r => { r.classList.remove('visible'); r.style.transitionDelay = ''; });
+          }
+        }
+        __sec_log.i('biom OFF', { animate });
       }
+    }
+
+    /* If both child switches are off, turn the parent off (and hide children) */
+    function __sec_maybeDisableParentIfChildrenOff() {
       try {
-        localStorage.setItem(__sec_KEYS.bioLogin, __sec_isChecked(__sec_bioLogin) ? '1' : '0');
-        localStorage.setItem(__sec_KEYS.bioTx, __sec_isChecked(__sec_bioTx) ? '1' : '0');
-      } catch(e){}
-      __sec_log.i('biom ON', { storedLogin, storedTx, animate });
-    } else {
-      // turn children off & hide
+        if (!__sec_parentSwitch) return;
+        if (!__sec_bioLogin || !__sec_bioTx) return;
+        const loginOn = __sec_isChecked(__sec_bioLogin);
+        const txOn = __sec_isChecked(__sec_bioTx);
+        if (!loginOn && !txOn && __sec_isChecked(__sec_parentSwitch)) {
+          __sec_log.i('Both biometric children off — turning parent OFF');
+          __sec_setBiometrics(false, true);
+        }
+      } catch (err) {
+        __sec_log.e('maybeDisableParentIfChildrenOff error', err);
+      }
+    }
+
+    /* Initialize from storage */
+    function __sec_initFromStorage() {
       try {
-        localStorage.setItem(__sec_KEYS.bioLogin, '0');
-        localStorage.setItem(__sec_KEYS.bioTx, '0');
-      } catch(e){}
-      if (__sec_bioLogin) __sec_setChecked(__sec_bioLogin, false);
-      if (__sec_bioTx) __sec_setChecked(__sec_bioTx, false);
-      if (animate) __sec_hideChildrenAnimated();
-      else {
+        const biomStored = localStorage.getItem(__sec_KEYS.biom) === '1';
+        const loginStored = localStorage.getItem(__sec_KEYS.bioLogin) === '1';
+        const txStored = localStorage.getItem(__sec_KEYS.bioTx) === '1';
+        const balanceStored = localStorage.getItem(__sec_KEYS.balance) !== '0';
+
+        if (__sec_parentSwitch) __sec_setChecked(__sec_parentSwitch, biomStored);
+
         if (__sec_bioOptions) {
-          __sec_bioOptions.classList.remove('show');
-          __sec_bioOptions.hidden = true;
-          const rows = Array.from(__sec_bioOptions.querySelectorAll('.setting-row'));
-          rows.forEach(r => { r.classList.remove('visible'); r.style.transitionDelay = ''; });
+          if (biomStored) {
+            __sec_revealChildrenNoAnimate();
+            if (__sec_bioLogin) __sec_setChecked(__sec_bioLogin, loginStored);
+            if (__sec_bioTx) __sec_setChecked(__sec_bioTx, txStored);
+          } else {
+            __sec_bioOptions.hidden = true;
+            __sec_bioOptions.classList.remove('show');
+            if (__sec_bioLogin) __sec_setChecked(__sec_bioLogin, false);
+            if (__sec_bioTx) __sec_setChecked(__sec_bioTx, false);
+          }
         }
+
+        if (__sec_balanceSwitch) __sec_setChecked(__sec_balanceSwitch, balanceStored);
+
+        __sec_log.d('initFromStorage', { biomStored, loginStored, txStored, balanceStored });
+      } catch (err) {
+        __sec_log.e('initFromStorage error', err);
       }
-      __sec_log.i('biom OFF', { animate });
     }
-  }
 
-  /* If both child switches are off, turn the parent off (and hide children) */
-  function __sec_maybeDisableParentIfChildrenOff() {
-    try {
-      // If parent element missing, nothing to do
-      if (!__sec_parentSwitch) return;
+    /* Convert pin/pwd rows to chevron buttons & wire events */
+    function __sec_convertRowsToChevron() {
+      if (__sec_pinBtn) {
+        __sec_pinBtn.classList.add('chev-btn');
+        __sec_pinBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+        __sec_pinBtn.addEventListener('click', (ev) => {
+          ev.preventDefault();
+          __sec_log.i('pin row clicked');
+          if (typeof window.openPinModal === 'function') {
+            try { window.openPinModal(); }
+            catch (err) { __sec_log.e('openPinModal threw', err); window.dispatchEvent(new CustomEvent('security:open-pin')); }
+          } else {
+            window.dispatchEvent(new CustomEvent('security:open-pin'));
+          }
+        });
+      } else __sec_log.d('#pinToggleBtn not present');
 
-      // If either child is missing, don't auto-disable the parent
-      if (!__sec_bioLogin || !__sec_bioTx) return;
-
-      const loginOn = __sec_isChecked(__sec_bioLogin);
-      const txOn    = __sec_isChecked(__sec_bioTx);
-
-      // If both are OFF, switch parent off (animated)
-      if (!loginOn && !txOn && __sec_isChecked(__sec_parentSwitch)) {
-        __sec_log.i('Both biometric children off — turning parent OFF');
-        __sec_setBiometrics(false, true); // animate hide and persist
-      }
-    } catch (err) {
-      __sec_log.e('maybeDisableParentIfChildrenOff error', err);
+      if (__sec_pwdBtn) {
+        __sec_pwdBtn.classList.add('chev-btn');
+        __sec_pwdBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+        __sec_pwdBtn.addEventListener('click', (ev) => {
+          ev.preventDefault();
+          __sec_log.i('change-password row clicked');
+          if (typeof window.openChangePasswordModal === 'function') {
+            try { window.openChangePasswordModal(); }
+            catch (err) { __sec_log.e('openChangePasswordModal threw', err); window.dispatchEvent(new CustomEvent('security:open-change-password')); }
+          } else {
+            window.dispatchEvent(new CustomEvent('security:open-change-password'));
+          }
+        });
+      } else __sec_log.d('#changePwdBtn not present');
     }
-  }
 
-  /* initialize from storage */
-  function __sec_initFromStorage() {
-    try {
-      const biomStored = localStorage.getItem(__sec_KEYS.biom) === '1';
-      const loginStored = localStorage.getItem(__sec_KEYS.bioLogin) === '1';
-      const txStored = localStorage.getItem(__sec_KEYS.bioTx) === '1';
-      const balanceStored = localStorage.getItem(__sec_KEYS.balance) !== '0';
-
-      if (__sec_parentSwitch) __sec_setChecked(__sec_parentSwitch, biomStored);
-
-      if (__sec_bioOptions) {
-        if (biomStored) {
-          __sec_revealChildrenNoAnimate();
-          if (__sec_bioLogin) __sec_setChecked(__sec_bioLogin, loginStored);
-          if (__sec_bioTx) __sec_setChecked(__sec_bioTx, txStored);
-        } else {
-          __sec_bioOptions.hidden = true;
-          __sec_bioOptions.classList.remove('show');
-          if (__sec_bioLogin) __sec_setChecked(__sec_bioLogin, false);
-          if (__sec_bioTx) __sec_setChecked(__sec_bioTx, false);
+    /* ---- WebAuthn register/authenticate flows ---- */
+    async function startRegistration(userId, username, displayName) {
+      try {
+        __sec_log.d('startRegistration: starting', { userId, username, displayName });
+        const { data: { session }, error } = await supabase.auth.getSession();
+        if (error || !session) {
+          __sec_log.w('No Supabase session');
+          throw new Error('No Supabase session');
         }
-      }
+        const token = session.access_token;
 
-      if (__sec_balanceSwitch) __sec_setChecked(__sec_balanceSwitch, balanceStored);
-
-      __sec_log.d('initFromStorage', { biomStored, loginStored, txStored, balanceStored });
-    } catch (err) {
-      __sec_log.e('initFromStorage error', err);
-    }
-  }
-
-  /* convert pin/pwd rows to chevron buttons & wire event to open external modals */
-  function __sec_convertRowsToChevron() {
-    if (__sec_pinBtn) {
-      __sec_pinBtn.classList.add('chev-btn');
-      __sec_pinBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-      __sec_pinBtn.addEventListener('click', (ev) => {
-        ev.preventDefault();
-        __sec_log.i('pin row clicked');
-        if (typeof window.openPinModal === 'function') {
-          try { window.openPinModal(); }
-          catch (err) { __sec_log.e('openPinModal threw', err); window.dispatchEvent(new CustomEvent('security:open-pin')); }
-        } else {
-          window.dispatchEvent(new CustomEvent('security:open-pin'));
-        }
-      });
-    } else __sec_log.d('#pinToggleBtn not present');
-
-    if (__sec_pwdBtn) {
-      __sec_pwdBtn.classList.add('chev-btn');
-      __sec_pwdBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-      __sec_pwdBtn.addEventListener('click', (ev) => {
-        ev.preventDefault();
-        __sec_log.i('change-password row clicked');
-        if (typeof window.openChangePasswordModal === 'function') {
-          try { window.openChangePasswordModal(); }
-          catch (err) { __sec_log.e('openChangePasswordModal threw', err); window.dispatchEvent(new CustomEvent('security:open-change-password')); }
-        } else {
-          window.dispatchEvent(new CustomEvent('security:open-change-password'));
-        }
-      });
-    } else __sec_log.d('#changePwdBtn not present');
-  }
-
-  /* ---- WebAuthn register/authenticate flows ---- */
-  async function startRegistration(userId, username, displayName) {
-    // 1. Get Supabase token
-    const { data, error } = await supabase.auth.getSession();
-    if (error || !data.session) throw new Error('No Supabase session');
-    const token = data.session.access_token;
-
-    // 2. Request registration options from server
-    const optRes = await fetch(`${window.__SEC_API_BASE}/webauthn/register/options`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ userId, username, displayName }),
-    });
-    if (!optRes.ok) throw new Error('Failed to get registration options');
-    const options = await optRes.json();
-
-    // 3. Call WebAuthn API
-    const cred = await navigator.credentials.create({ publicKey: options });
-    if (!cred) throw new Error('No credential returned');
-
-    // 4. Send back to server for verification
-    const verifyRes = await fetch(`${window.__SEC_API_BASE}/webauthn/register/verify`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ userId, credential: cred }),
-    });
-    if (!verifyRes.ok) throw new Error('Registration verification failed');
-    return await verifyRes.json();
-  }
-
-  async function startAuthentication(userId) {
-    // 1. Get Supabase token
-    const { data, error } = await supabase.auth.getSession();
-    if (error || !data.session) throw new Error('No Supabase session');
-    const token = data.session.access_token;
-
-    // 2. Request authentication options
-    const optRes = await fetch(`${window.__SEC_API_BASE}/webauthn/auth/options`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ userId }),
-    });
-    if (!optRes.ok) throw new Error('Failed to get authentication options');
-    const options = await optRes.json();
-
-    // 3. Call WebAuthn API
-    const assertion = await navigator.credentials.get({ publicKey: options });
-    if (!assertion) throw new Error('No assertion returned');
-
-    // 4. Verify with server
-    const verifyRes = await fetch(`${window.__SEC_API_BASE}/webauthn/auth/verify`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ userId, credential: assertion }),
-    });
-    if (!verifyRes.ok) throw new Error('Authentication verification failed');
-    return await verifyRes.json();
-  }
-
-
-  /* ---- WebAuthn helper calls to server (list/revoke) ---- */
-  async function __sec_listAuthenticators(userId) {
-    try {
-      // Get Supabase access token
-      const { data, error } = await supabase.auth.getSession();
-      if (error || !data.session) {
-        __sec_log.w('No Supabase session found');
-        return null;
-      }
-      const token = data.session.access_token;
-
-      const r = await fetch(
-        `${window.__SEC_API_BASE}/webauthn/authenticators/${encodeURIComponent(userId)}`,
-        {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
-
-      if (!r.ok) {
-        __sec_log.w('listAuthenticators failed', r.status);
-        return null;
-      }
-
-      const j = await r.json();
-      return j;
-    } catch (err) {
-      __sec_log.e('listAuthenticators error', err);
-      return null;
-    }
-  }
-
-
-  async function __sec_revokeAuthenticator(userId, credentialID) {
-    try {
-      // Get Supabase access token
-      const { data, error } = await supabase.auth.getSession();
-      if (error || !data.session) {
-        __sec_log.w('No Supabase session found');
-        return false;
-      }
-      const token = data.session.access_token;
-
-      const r = await fetch(
-        `${window.__SEC_API_BASE}/webauthn/authenticators/${encodeURIComponent(userId)}/revoke`,
-        {
+        const optRes = await fetch(`${window.__SEC_API_BASE}/webauthn/register/options`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ credentialID }),
+          body: JSON.stringify({ userId, username, displayName }),
+        });
+        if (!optRes.ok) {
+          __sec_log.w('Failed to get registration options', optRes.status);
+          throw new Error('Failed to get registration options');
         }
-      );
+        const options = await optRes.json();
 
-      if (!r.ok) {
-        __sec_log.w('revokeAuthenticator failed', credentialID, r.status);
+        const cred = await navigator.credentials.create({ publicKey: options });
+        if (!cred) {
+          __sec_log.w('No credential returned');
+          throw new Error('No credential returned');
+        }
+
+        const verifyRes = await fetch(`${window.__SEC_API_BASE}/webauthn/register/verify`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ userId, credential: cred }),
+        });
+        if (!verifyRes.ok) {
+          __sec_log.w('Registration verification failed', verifyRes.status);
+          throw new Error('Registration verification failed');
+        }
+        const result = await verifyRes.json();
+        __sec_log.i('Registration successful', result);
+        return result;
+      } catch (err) {
+        __sec_log.e('startRegistration error', err);
+        throw err;
+      }
+    }
+
+    async function startAuthentication(userId) {
+      try {
+        __sec_log.d('startAuthentication: starting', { userId });
+        const { data: { session }, error } = await supabase.auth.getSession();
+        if (error || !session) {
+          __sec_log.w('No Supabase session');
+          throw new Error('No Supabase session');
+        }
+        const token = session.access_token;
+
+        const optRes = await fetch(`${window.__SEC_API_BASE}/webauthn/auth/options`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ userId }),
+        });
+        if (!optRes.ok) {
+          __sec_log.w('Failed to get authentication options', optRes.status);
+          throw new Error('Failed to get authentication options');
+        }
+        const options = await optRes.json();
+
+        const assertion = await navigator.credentials.get({ publicKey: options });
+        if (!assertion) {
+          __sec_log.w('No assertion returned');
+          throw new Error('No assertion returned');
+        }
+
+        const verifyRes = await fetch(`${window.__SEC_API_BASE}/webauthn/auth/verify`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ userId, credential: assertion }),
+        });
+        if (!verifyRes.ok) {
+          __sec_log.w('Authentication verification failed', verifyRes.status);
+          throw new Error('Authentication verification failed');
+        }
+        const result = await verifyRes.json();
+        __sec_log.i('Authentication successful', result);
+        return result;
+      } catch (err) {
+        __sec_log.e('startAuthentication error', err);
+        throw err;
+      }
+    }
+
+    /* ---- WebAuthn helper calls to server (list/revoke) ---- */
+    async function __sec_listAuthenticators(userId) {
+      try {
+        __sec_log.d('listAuthenticators: starting', { userId });
+        const { data: { session }, error } = await supabase.auth.getSession();
+        if (error || !session) {
+          __sec_log.w('No Supabase session found');
+          return null;
+        }
+        const token = session.access_token;
+
+        const r = await fetch(
+          `${window.__SEC_API_BASE}/webauthn/authenticators/${encodeURIComponent(userId)}`,
+          {
+            method: 'GET',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+          }
+        );
+
+        if (!r.ok) {
+          __sec_log.w('listAuthenticators failed', r.status);
+          return null;
+        }
+
+        const j = await r.json();
+        __sec_log.d('listAuthenticators success', j);
+        return j;
+      } catch (err) {
+        __sec_log.e('listAuthenticators error', err);
+        return null;
+      }
+    }
+
+    async function __sec_revokeAuthenticator(userId, credentialID) {
+      try {
+        __sec_log.d('revokeAuthenticator: starting', { userId, credentialID });
+        const { data: { session }, error } = await supabase.auth.getSession();
+        if (error || !session) {
+          __sec_log.w('No Supabase session found');
+          return false;
+        }
+        const token = session.access_token;
+
+        const r = await fetch(
+          `${window.__SEC_API_BASE}/webauthn/authenticators/${encodeURIComponent(userId)}/revoke`,
+          {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ credentialID }),
+          }
+        );
+
+        if (!r.ok) {
+          __sec_log.w('revokeAuthenticator failed', credentialID, r.status);
+          return false;
+        }
+
+        __sec_log.i('revokeAuthenticator success', credentialID);
+        return true;
+      } catch (err) {
+        __sec_log.e('revokeAuthenticator error', err);
         return false;
       }
-
-      return true;
-    } catch (err) {
-      __sec_log.e('revokeAuthenticator error', err);
-      return false;
     }
-  }
 
+    /* Wire events (with WebAuthn integration) */
+    function __sec_wireEvents() {
+      try {
+        if (__sec_launcherBtn) {
+          __sec_launcherBtn.addEventListener('click', (ev) => { ev.preventDefault(); __sec_openModal(); });
+          __sec_log.d('launcher wired (#securityBtn)');
+        } else __sec_log.d('no launcher (#securityBtn) found; use controller.open() to open');
 
-  /* wire events (with WebAuthn integration) */
-  function __sec_wireEvents() {
-    try {
-      if (__sec_launcherBtn) {
-        __sec_launcherBtn.addEventListener('click', (ev) => { ev.preventDefault(); __sec_openModal(); });
-        __sec_log.d('launcher wired (#securityBtn)');
-      } else __sec_log.d('no launcher (#securityBtn) found; use controller.open() to open');
+        if (__sec_closeBtn) __sec_closeBtn.addEventListener('click', __sec_closeModal);
 
-      if (__sec_closeBtn) __sec_closeBtn.addEventListener('click', __sec_closeModal);
+        document.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape' && __sec_modal && __sec_modal.classList.contains('active')) __sec_closeModal();
+        });
 
-      document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && __sec_modal && __sec_modal.classList.contains('active')) __sec_closeModal();
-      });
+        if (__sec_parentSwitch) {
+          const __sec_parentHandler = async () => {
+            __sec_setBusy(__sec_parentSwitch, true);
+            const uiOn = __sec_toggleSwitch(__sec_parentSwitch);
 
-      if (__sec_parentSwitch) {
-        // replace sync handler with async handler that does registration / list / revoke
-        const __sec_parentHandler = async () => {
-          // quickly lock parent so user can't spam
-          __sec_setBusy(__sec_parentSwitch, true);
-          // UI pre-toggle
-          const uiOn = __sec_toggleSwitch(__sec_parentSwitch);
-
-          // load current user
-          const user = await __sec_getCurrentUser();
-          if (!user || !user.uid) {
-            __sec_log.e('Parent toggle: no current user available');
-            // revert UI
-            __sec_setChecked(__sec_parentSwitch, false);
-            __sec_setBusy(__sec_parentSwitch, false);
-            alert('You must be signed in to enable biometrics.');
-            return;
-          }
-          const uid = user.uid;
-
-          if (uiOn) {
-            // user tries to turn ON: check if there are existing authenticators for this user
-            __sec_log.i('Parent toggle ON requested — checking existing authenticators for user', uid);
-            const auths = await __sec_listAuthenticators(uid);
-            // if auths exist (non-empty array), skip registration prompt and just show children
-            if (Array.isArray(auths) && auths.length > 0) {
-              __sec_log.i('Existing authenticators found — showing children without registering new one');
-              __sec_setBiometrics(true, true);
+            const user = await __sec_getCurrentUser();
+            if (!user || !user.uid) {
+              __sec_log.e('Parent toggle: no current user available');
+              __sec_setChecked(__sec_parentSwitch, false);
               __sec_setBusy(__sec_parentSwitch, false);
+              alert('You must be signed in to enable biometrics.');
               return;
             }
+            const uid = user.uid;
 
-            // No existing authenticators — start registration
-            try {
-              __sec_log.i('No authenticators found — starting registration flow');
-              // Keep the parent switch visually on but try registration
-              await startRegistration(uid, user.email || user.username || uid, user.fullName || user.email || uid);
-              // success -> show children and persist states
-              __sec_setBiometrics(true, true);
-              __sec_log.i('Registration successful');
-            } catch (err) {
-              __sec_log.e('Registration failed', err);
-              // revert UI
-              __sec_setChecked(__sec_parentSwitch, false);
-              __sec_setBiometrics(false, false);
-              alert('Biometric registration failed: ' + (err && err.message ? err.message : 'unknown error'));
-            } finally {
-              __sec_setBusy(__sec_parentSwitch, false);
-            }
-          } else {
-            // user turned parent OFF: revoke all authenticators for this user (iterate list)
-            try {
-              __sec_log.i('Parent toggle OFF requested — revoking authenticators for user', uid);
+            if (uiOn) {
+              __sec_log.i('Parent toggle ON requested — checking existing authenticators for user', uid);
               const auths = await __sec_listAuthenticators(uid);
               if (Array.isArray(auths) && auths.length > 0) {
-                // revoke each credential id; server expects credentialID in body
-                for (const a of auths) {
-                  const credential_id = a.credential_id || a.credentialID || a.credentialId;
-                  if (!credential_id) continue;
-                  const ok = await __sec_revokeAuthenticator(uid, credential_id);
-                  __sec_log.d('revoke result', credential_id, ok);
-                }
-              } else {
-                __sec_log.d('No authenticators to revoke for user', uid);
+                __sec_log.i('Existing authenticators found — showing children without registering new one');
+                __sec_setBiometrics(true, true);
+                __sec_setBusy(__sec_parentSwitch, false);
+                return;
               }
-              // hide children & clear flags
-              __sec_setBiometrics(false, true);
+
+              try {
+                __sec_log.i('No authenticators found — starting registration flow');
+                await startRegistration(uid, user.email || user.username || uid, user.fullName || user.email || uid);
+                __sec_setBiometrics(true, true);
+                __sec_log.i('Registration successful');
+              } catch (err) {
+                __sec_log.e('Registration failed', err);
+                __sec_setChecked(__sec_parentSwitch, false);
+                __sec_setBiometrics(false, false);
+                alert('Biometric registration failed: ' + (err.message || 'unknown error'));
+              } finally {
+                __sec_setBusy(__sec_parentSwitch, false);
+              }
+            } else {
+              try {
+                __sec_log.i('Parent toggle OFF requested — revoking authenticators for user', uid);
+                const auths = await __sec_listAuthenticators(uid);
+                if (Array.isArray(auths) && auths.length > 0) {
+                  for (const a of auths) {
+                    const credential_id = a.credential_id || a.credentialID || a.credentialId;
+                    if (!credential_id) continue;
+                    const ok = await __sec_revokeAuthenticator(uid, credential_id);
+                    __sec_log.d('revoke result', credential_id, ok);
+                  }
+                } else {
+                  __sec_log.d('No authenticators to revoke for user', uid);
+                }
+                __sec_setBiometrics(false, true);
+              } catch (err) {
+                __sec_log.e('Error revoking authenticators', err);
+                __sec_setBiometrics(false, true);
+                alert('Warning: failed to revoke authenticator(s) on server. Check console.');
+              } finally {
+                __sec_setBusy(__sec_parentSwitch, false);
+              }
+            }
+          };
+
+          __sec_parentSwitch.addEventListener('click', (e) => { e.preventDefault(); __sec_parentHandler(); });
+          __sec_parentSwitch.addEventListener('keydown', (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); __sec_parentHandler(); } });
+        }
+
+        if (__sec_bioLogin) {
+          __sec_bioLogin.addEventListener('click', async () => {
+            if (!__sec_parentSwitch || !__sec_isChecked(__sec_parentSwitch)) {
+              __sec_log.d('bioLogin click ignored; parent OFF');
+              return;
+            }
+            __sec_setBusy(__sec_bioLogin, true);
+            const newState = __sec_toggleSwitch(__sec_bioLogin);
+            try {
+              const user = await __sec_getCurrentUser();
+              if (!user || !user.uid) throw new Error('Not signed in');
+
+              if (newState) {
+                __sec_log.i('bioLogin enabling: performing authentication test');
+                await startAuthentication(user.uid);
+                localStorage.setItem(__sec_KEYS.bioLogin, '1');
+                __sec_log.i('bioLogin enabled and verified');
+              } else {
+                localStorage.setItem(__sec_KEYS.bioLogin, '0');
+                __sec_maybeDisableParentIfChildrenOff();
+              }
             } catch (err) {
-              __sec_log.e('Error revoking authenticators', err);
-              // still hide UI but inform user
-              __sec_setBiometrics(false, true);
-              alert('Warning: failed to revoke authenticator(s) on server. Check console.');
+              __sec_log.e('bioLogin error or verification failed', err);
+              __sec_setChecked(__sec_bioLogin, false);
+              try { localStorage.setItem(__sec_KEYS.bioLogin, '0'); } catch (e) {}
+              alert('Biometric verification failed: ' + (err.message || 'unknown'));
             } finally {
-              __sec_setBusy(__sec_parentSwitch, false);
+              __sec_setBusy(__sec_bioLogin, false);
             }
-          }
-        };
+          });
 
-        __sec_parentSwitch.addEventListener('click', (e) => { e.preventDefault(); __sec_parentHandler(); });
-        __sec_parentSwitch.addEventListener('keydown', (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); __sec_parentHandler(); } });
-      }
+          __sec_bioLogin.addEventListener('keydown', (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); __sec_bioLogin.click(); } });
+        }
 
-      // bioLogin handler — when enabling require a quick authentication test
-      if (__sec_bioLogin) {
-        __sec_bioLogin.addEventListener('click', async () => {
-          if (!__sec_parentSwitch || !__sec_isChecked(__sec_parentSwitch)) {
-            __sec_log.d('bioLogin click ignored; parent OFF');
-            return;
-          }
-          // optimistic toggle in UI
-          __sec_setBusy(__sec_bioLogin, true);
-          const newState = __sec_toggleSwitch(__sec_bioLogin);
-          try {
-            const user = await __sec_getCurrentUser();
-            if (!user || !user.uid) throw new Error('Not signed in');
-
-            if (newState) {
-              // require a biometric assertion to confirm the authenticator works
-              __sec_log.i('bioLogin enabling: performing authentication test');
-              await startAuthentication(user.uid);
-              localStorage.setItem(__sec_KEYS.bioLogin, '1');
-              __sec_log.i('bioLogin enabled and verified');
-            } else {
-              // user turned OFF locally
-              localStorage.setItem(__sec_KEYS.bioLogin, '0');
-              __sec_maybeDisableParentIfChildrenOff();
+        if (__sec_bioTx) {
+          __sec_bioTx.addEventListener('click', async () => {
+            if (!__sec_parentSwitch || !__sec_isChecked(__sec_parentSwitch)) {
+              __sec_log.d('bioTx click ignored; parent OFF');
+              return;
             }
-          } catch (err) {
-            __sec_log.e('bioLogin error or verification failed', err);
-            // revert toggle in UI
-            __sec_setChecked(__sec_bioLogin, false);
-            try { localStorage.setItem(__sec_KEYS.bioLogin, '0'); } catch(e){}
-            alert('Biometric verification failed: ' + (err && err.message ? err.message : 'unknown'));
-          } finally {
-            __sec_setBusy(__sec_bioLogin, false);
-          }
-        });
+            __sec_setBusy(__sec_bioTx, true);
+            const newState = __sec_toggleSwitch(__sec_bioTx);
+            try {
+              const user = await __sec_getCurrentUser();
+              if (!user || !user.uid) throw new Error('Not signed in');
 
-        __sec_bioLogin.addEventListener('keydown', (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); __sec_bioLogin.click(); } });
-      }
-
-      // bioTx handler — require authentication test when turning ON
-      if (__sec_bioTx) {
-        __sec_bioTx.addEventListener('click', async () => {
-          if (!__sec_parentSwitch || !__sec_isChecked(__sec_parentSwitch)) {
-            __sec_log.d('bioTx click ignored; parent OFF');
-            return;
-          }
-          __sec_setBusy(__sec_bioTx, true);
-          const newState = __sec_toggleSwitch(__sec_bioTx);
-          try {
-            const user = await __sec_getCurrentUser();
-            if (!user || !user.uid) throw new Error('Not signed in');
-
-            if (newState) {
-              __sec_log.i('bioTx enabling: performing authentication test');
-              await startAuthentication(user.uid);
-              localStorage.setItem(__sec_KEYS.bioTx, '1');
-              __sec_log.i('bioTx enabled and verified');
-            } else {
-              localStorage.setItem(__sec_KEYS.bioTx, '0');
-              __sec_maybeDisableParentIfChildrenOff();
+              if (newState) {
+                __sec_log.i('bioTx enabling: performing authentication test');
+                await startAuthentication(user.uid);
+                localStorage.setItem(__sec_KEYS.bioTx, '1');
+                __sec_log.i('bioTx enabled and verified');
+              } else {
+                localStorage.setItem(__sec_KEYS.bioTx, '0');
+                __sec_maybeDisableParentIfChildrenOff();
+              }
+            } catch (err) {
+              __sec_log.e('bioTx error or verification failed', err);
+              __sec_setChecked(__sec_bioTx, false);
+              try { localStorage.setItem(__sec_KEYS.bioTx, '0'); } catch (e) {}
+              alert('Biometric verification failed: ' + (err.message || 'unknown'));
+            } finally {
+              __sec_setBusy(__sec_bioTx, false);
             }
-          } catch (err) {
-            __sec_log.e('bioTx error or verification failed', err);
-            __sec_setChecked(__sec_bioTx, false);
-            try { localStorage.setItem(__sec_KEYS.bioTx, '0'); } catch(e){}
-            alert('Biometric verification failed: ' + (err && err.message ? err.message : 'unknown'));
-          } finally {
-            __sec_setBusy(__sec_bioTx, false);
-          }
-        });
+          });
 
-        __sec_bioTx.addEventListener('keydown', (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); __sec_bioTx.click(); } });
+          __sec_bioTx.addEventListener('keydown', (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); __sec_bioTx.click(); } });
+        }
+
+        if (__sec_balanceSwitch) {
+          const __sec_balanceHandler = () => {
+            const on = __sec_toggleSwitch(__sec_balanceSwitch);
+            try { localStorage.setItem(__sec_KEYS.balance, on ? '1' : '0'); } catch (e) {}
+            window.dispatchEvent(new CustomEvent('security:balance-visibility-changed', { detail: { visible: on } }));
+            __sec_log.i('balanceSwitch ->', on);
+          };
+          __sec_balanceSwitch.addEventListener('click', __sec_balanceHandler);
+          __sec_balanceSwitch.addEventListener('keydown', (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); __sec_balanceHandler(); } });
+        }
+
+        __sec_log.i('events wired (with WebAuthn integration)');
+      } catch (err) {
+        __sec_log.e('wireEvents error', err);
       }
-
-      if (__sec_balanceSwitch) {
-        const __sec_balanceHandler = () => {
-          const on = __sec_toggleSwitch(__sec_balanceSwitch);
-          try { localStorage.setItem(__sec_KEYS.balance, on ? '1' : '0'); } catch(e){}
-          window.dispatchEvent(new CustomEvent('security:balance-visibility-changed', { detail: { visible: on } }));
-          __sec_log.i('balanceSwitch ->', on);
-        };
-        __sec_balanceSwitch.addEventListener('click', __sec_balanceHandler);
-        __sec_balanceSwitch.addEventListener('keydown', (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); __sec_balanceHandler(); } });
-      }
-
-      __sec_log.i('events wired (with WebAuthn integration)');
-    } catch (err) {
-      __sec_log.e('wireEvents error', err);
     }
-  }
 
-  /* open/close modal with focus handling */
-  let __sec_lastActiveElement = null;
-  function __sec_openModal() {
-    if (!__sec_modal) { __sec_log.e('openModal: #securityModal not found'); return; }
-    __sec_lastActiveElement = document.activeElement;
-    __sec_modal.classList.add('active');
-    __sec_modal.setAttribute('aria-hidden', 'false');
-    try { __sec_modal.scrollTop = 0; } catch(e){}
-    if (__sec_parentSwitch && typeof __sec_parentSwitch.focus === 'function') __sec_parentSwitch.focus();
-    __sec_log.i('modal opened');
-  }
-  function __sec_closeModal() {
-    if (!__sec_modal) return;
-    __sec_modal.classList.remove('active');
-    __sec_modal.setAttribute('aria-hidden', 'true');
-    if (__sec_lastActiveElement && typeof __sec_lastActiveElement.focus === 'function') __sec_lastActiveElement.focus();
-    __sec_log.i('modal closed');
-  }
+    /* Open/close modal with focus handling */
+    let __sec_lastActiveElement = null;
+    function __sec_openModal() {
+      if (!__sec_modal) { __sec_log.e('openModal: #securityModal not found'); return; }
+      __sec_lastActiveElement = document.activeElement;
+      __sec_modal.classList.add('active');
+      __sec_modal.setAttribute('aria-hidden', 'false');
+      try { __sec_modal.scrollTop = 0; } catch (e) {}
+      if (__sec_parentSwitch && typeof __sec_parentSwitch.focus === 'function') __sec_parentSwitch.focus();
+      __sec_log.i('modal opened');
+    }
+    function __sec_closeModal() {
+      if (!__sec_modal) return;
+      __sec_modal.classList.remove('active');
+      __sec_modal.setAttribute('aria-hidden', 'true');
+      if (__sec_lastActiveElement && typeof __sec_lastActiveElement.focus === 'function') __sec_lastActiveElement.focus();
+      __sec_log.i('modal closed');
+    }
 
-  /* expose safe controller */
-  window.__secModalController = {
-    open: __sec_openModal,
-    close: __sec_closeModal,
-    getState: () => ({
-      biom: localStorage.getItem(__sec_KEYS.biom),
-      bioLogin: localStorage.getItem(__sec_KEYS.bioLogin),
-      bioTx: localStorage.getItem(__sec_KEYS.bioTx),
-      balance: localStorage.getItem(__sec_KEYS.balance)
-    })
+    /* Expose safe controller */
+    window.__secModalController = {
+      open: __sec_openModal,
+      close: __sec_closeModal,
+      getState: () => ({
+        biom: localStorage.getItem(__sec_KEYS.biom),
+        bioLogin: localStorage.getItem(__sec_KEYS.bioLogin),
+        bioTx: localStorage.getItem(__sec_KEYS.bioTx),
+        balance: localStorage.getItem(__sec_KEYS.balance)
+      })
+    };
+
+    /* Boot */
+    function __sec_boot() {
+      try {
+        __sec_convertRowsToChevron();
+        __sec_initFromStorage();
+        __sec_wireEvents();
+        __sec_log.i('security module booted (with WebAuthn)');
+      } catch (err) {
+        __sec_log.e('boot error', err);
+      }
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', __sec_boot);
+    } else {
+      setTimeout(__sec_boot, 0);
+    }
   };
-
-  /* boot */
-  function __sec_boot() {
-    try {
-      __sec_convertRowsToChevron();
-      __sec_initFromStorage();
-      __sec_wireEvents();
-      __sec_log.i('security module booted (with WebAuthn)');
-    } catch (err) {
-      __sec_log.e('boot error', err);
-    }
-  }
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', __sec_boot);
-  } else {
-    // DOM already ready
-    setTimeout(__sec_boot, 0);
-  }
-
-})();
+})(supabaseClient); // Pass the initialized Supabase client
 
 
 
