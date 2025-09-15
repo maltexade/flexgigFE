@@ -4001,6 +4001,7 @@ async function startRegistration(userId, username, displayName) {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
+      credentials: 'include',
       body: JSON.stringify({ userId, username, displayName }),
     });
     if (!optRes.ok) {
@@ -4073,6 +4074,7 @@ async function startRegistration(userId, username, displayName) {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
+      credentials: 'include',
       body: JSON.stringify({ userId, credential }),
     });
     if (!verifyRes.ok) {
@@ -4105,6 +4107,7 @@ async function startRegistration(userId, username, displayName) {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
+        credentials: 'include',
         body: JSON.stringify({ userId }),
       });
       if (!optRes.ok) {
@@ -4125,6 +4128,7 @@ async function startRegistration(userId, username, displayName) {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
+        credentials: 'include',
         body: JSON.stringify({ userId, credential: assertion }),
       });
       if (!verifyRes.ok) {
@@ -4194,6 +4198,7 @@ async function startRegistration(userId, username, displayName) {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json',
           },
+          credentials: 'include',
           body: JSON.stringify({ credentialID }),
         }
       );
