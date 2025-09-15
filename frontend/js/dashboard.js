@@ -3933,56 +3933,97 @@ document.querySelectorAll('.contact-box').forEach(box => {
   }
 
   /* ---- WebAuthn register/authenticate flows ---- */
-  async function startRegistration(userId, username, displayName) {
-    try {
-      __sec_log.d('startRegistration: starting', { userId, username, displayName });
-      const currentUser = await __sec_getCurrentUser();
-      if (!currentUser || !currentUser.authToken) {
-        __sec_log.w('No auth token for registration');
-        throw new Error('No auth token');
-      }
-      const token = currentUser.authToken;
-
-      const optRes = await fetch(`${window.__SEC_API_BASE}/webauthn/register/options`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ userId, username, displayName }),
-      });
-      if (!optRes.ok) {
-        __sec_log.w('Failed to get registration options', optRes.status);
-        throw new Error('Failed to get registration options');
-      }
-      const options = await optRes.json();
-
-      const cred = await navigator.credentials.create({ publicKey: options });
-      if (!cred) {
-        __sec_log.w('No credential returned');
-        throw new Error('No credential returned');
-      }
-
-      const verifyRes = await fetch(`${window.__SEC_API_BASE}/webauthn/register/verify`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ userId, credential: cred }),
-      });
-      if (!verifyRes.ok) {
-        __sec_log.w('Registration verification failed', verifyRes.status);
-        throw new Error('Registration verification failed');
-      }
-      const result = await verifyRes.json();
-      __sec_log.i('Registration successful', result);
-      return result;
-    } catch (err) {
-      __sec_log.e('startRegistration error', err);
-      throw err;
-    }
+  // Utility to convert base64url string to ArrayBuffer
+function base64urlToArrayBuffer(base64url) {
+  // Replace base64url characters (-, _) with standard base64 (+, /) and add padding
+  const base64 = base64url.replace(/-/g, '+').replace(/_/g, '/');
+  const padding = '='.repeat((4 - (base64.length % 4)) % 4);
+  const raw = atob(base64 + padding);
+  const buffer = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) {
+    buffer[i] = raw.charCodeAt(i);
   }
+  return buffer.buffer;
+}
+
+// Updated startRegistration function
+async function startRegistration(userId, username, displayName) {
+  try {
+    __sec_log.d('startRegistration: starting', { userId, username, displayName });
+    const currentUser = await __sec_getCurrentUser();
+    if (!currentUser || !currentUser.authToken) {
+      __sec_log.w('No auth token for registration');
+      throw new Error('No auth token');
+    }
+    const token = currentUser.authToken;
+
+    const optRes = await fetch('https://api.flexgig.com.ng/webauthn/register/options', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ userId, username, displayName }),
+    });
+    if (!optRes.ok) {
+      const errorText = await optRes.text();
+      __sec_log.w('Failed to get registration options', { status: optRes.status, error: errorText });
+      throw new Error(`Failed to get registration options: ${errorText}`);
+    }
+    const options = await optRes.json();
+    __sec_log.d('startRegistration: Received options', options);
+
+    // Convert base64url fields to ArrayBuffer
+    options.challenge = base64urlToArrayBuffer(options.challenge);
+    options.user.id = base64urlToArrayBuffer(options.user.id);
+    if (options.excludeCredentials) {
+      options.excludeCredentials = options.excludeCredentials.map(cred => ({
+        ...cred,
+        id: base64urlToArrayBuffer(cred.id)
+      }));
+    }
+
+    __sec_log.d('startRegistration: Converted options', options);
+
+    const cred = await navigator.credentials.create({ publicKey: options });
+    if (!cred) {
+      __sec_log.w('No credential returned');
+      throw new Error('No credential returned');
+    }
+
+    // Convert credential response fields to base64url for server
+    const credential = {
+      id: cred.id,
+      rawId: base64url.encode(Buffer.from(cred.rawId)),
+      type: cred.type,
+      response: {
+        clientDataJSON: base64url.encode(Buffer.from(cred.response.clientDataJSON)),
+        attestationObject: base64url.encode(Buffer.from(cred.response.attestationObject)),
+        transports: cred.response.getTransports ? cred.response.getTransports() : []
+      }
+    };
+
+    const verifyRes = await fetch('https://api.flexgig.com.ng/webauthn/register/verify', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ userId, credential }),
+    });
+    if (!verifyRes.ok) {
+      const errorText = await verifyRes.text();
+      __sec_log.w('Registration verification failed', { status: verifyRes.status, error: errorText });
+      throw new Error(`Registration verification failed: ${errorText}`);
+    }
+    const result = await verifyRes.json();
+    __sec_log.i('Registration successful', result);
+    return result;
+  } catch (err) {
+    __sec_log.e('startRegistration error', err);
+    throw err;
+  }
+}
 
   async function startAuthentication(userId) {
     try {
