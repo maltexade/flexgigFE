@@ -3645,94 +3645,117 @@ document.querySelectorAll('.contact-box').forEach(box => {
   }
 
   /* Async: get current user (use stored authToken and sync with custom API) */
-  let __sec_cachedUser = null;
   async function __sec_getCurrentUser() {
     try {
+      __sec_log.d('__sec_getCurrentUser: Starting');
       let sessionData = JSON.parse(localStorage.getItem('authTokenData') || '{}');
+      __sec_log.d('__sec_getCurrentUser: Retrieved authTokenData', sessionData);
       let user = sessionData.user;
       let authToken = sessionData.authToken;
 
       // Check if token is expired (parse JWT to get exp)
       if (authToken) {
-        const payload = authToken.split('.')[1];
-        const decoded = JSON.parse(atob(payload));
-        if (decoded.exp * 1000 < Date.now()) {
-          console.warn('[__sec][warn] Stored token expired, attempting refresh');
-          authToken = null; // Force refresh
+        try {
+          const payload = authToken.split('.')[1];
+          const decoded = JSON.parse(atob(payload));
+          __sec_log.d('__sec_getCurrentUser: Decoded JWT', { iat: decoded.iat, exp: decoded.exp });
+          if (decoded.exp * 1000 < Date.now()) {
+            __sec_log.w('Stored token expired, attempting refresh', { exp: decoded.exp });
+            authToken = null; // Force refresh
+          }
+        } catch (err) {
+          __sec_log.e('__sec_getCurrentUser: Failed to parse JWT', err);
+          authToken = null;
         }
+      } else {
+        __sec_log.w('__sec_getCurrentUser: No authToken in sessionData');
       }
 
       if (!user || !authToken) {
-        console.warn('[__sec][warn] Stored authTokenData missing or invalid', sessionData);
+        __sec_log.w('Stored authTokenData missing or invalid', { user: !!user, authToken: !!authToken });
         if (typeof window.getSession === 'function') {
+          __sec_log.d('__sec_getCurrentUser: Attempting window.getSession');
           const session = await window.getSession();
+          __sec_log.d('__sec_getCurrentUser: window.getSession result', session);
           if (session && session.user && session.authToken) {
             user = session.user;
             authToken = session.authToken;
             localStorage.setItem('authTokenData', JSON.stringify({ user, authToken }));
-            console.log('[__sec][info] Retrieved session from getSession');
+            __sec_log.i('Retrieved session from getSession', { user, authToken });
             return { user, authToken };
           } else {
-            console.warn('[__sec][warn] No valid session from getSession', session);
+            __sec_log.w('No valid session from getSession', session);
           }
+        } else {
+          __sec_log.w('window.getSession not available');
         }
+
         // Fallback: Try /api/session with stored authToken
         const token = localStorage.getItem('authToken');
+        __sec_log.d('__sec_getCurrentUser: Retrieved authToken from localStorage', token);
         if (token) {
+          __sec_log.d('__sec_getCurrentUser: Fetching /api/session with token');
           const res = await fetch('https://api.flexgig.com.ng/api/session', {
             method: 'GET',
             credentials: 'include',
             headers: { 'Accept': 'application/json', 'Authorization': `Bearer ${token}` }
           });
+          __sec_log.d('__sec_getCurrentUser: /api/session response', { status: res.status, ok: res.ok });
           if (res.ok) {
             const { user: fetchedUser, token: newToken } = await res.json();
             user = fetchedUser;
             authToken = newToken;
             localStorage.setItem('authTokenData', JSON.stringify({ user, authToken: newToken }));
-            console.log('[__sec][info] Retrieved session from /api/session');
+            __sec_log.i('Retrieved session from /api/session', { user, authToken });
             return { user, authToken };
           } else if (res.status === 401) {
-            console.log('[__sec][info] Token expired, attempting refresh');
+            __sec_log.i('Token expired, attempting refresh');
             const refreshRes = await fetch('https://api.flexgig.com.ng/auth/refresh', {
               method: 'POST',
               credentials: 'include',
               headers: { 'Accept': 'application/json' }
             });
+            __sec_log.d('__sec_getCurrentUser: /auth/refresh response', { status: refreshRes.status, ok: refreshRes.ok });
             if (refreshRes.ok) {
               const { token: newToken } = await refreshRes.json();
               localStorage.setItem('authToken', newToken);
+              __sec_log.d('__sec_getCurrentUser: Refreshed token', newToken);
               const retryRes = await fetch('https://api.flexgig.com.ng/api/session', {
                 method: 'GET',
                 credentials: 'include',
                 headers: { 'Accept': 'application/json', 'Authorization': `Bearer ${newToken}` }
               });
+              __sec_log.d('__sec_getCurrentUser: Retry /api/session response', { status: retryRes.status, ok: retryRes.ok });
               if (retryRes.ok) {
                 const { user: fetchedUser, token: finalToken } = await retryRes.json();
                 user = fetchedUser;
                 authToken = finalToken;
                 localStorage.setItem('authTokenData', JSON.stringify({ user, authToken: finalToken }));
-                console.log('[__sec][info] Retrieved session after refresh');
+                __sec_log.i('Retrieved session after refresh', { user, authToken });
                 return { user, authToken };
               } else {
-                console.error('[__sec][error] Failed to retrieve session after refresh', await retryRes.text());
+                __sec_log.e('Failed to retrieve session after refresh', await retryRes.text());
               }
             } else {
-              console.error('[__sec][error] Refresh failed', await refreshRes.text());
+              __sec_log.e('Refresh failed', await refreshRes.text());
             }
           } else {
-            console.error('[__sec][error] Failed to fetch session', await res.text());
+            __sec_log.e('Failed to fetch session', { status: res.status, text: await res.text() });
           }
+        } else {
+          __sec_log.w('No authToken in localStorage');
         }
       }
 
       if (!user || !authToken) {
-        console.error('[__sec][error] No valid session available');
+        __sec_log.e('No valid session available', { user: !!user, authToken: !!authToken });
         return null;
       }
 
+      __sec_log.i('Returning valid session', { user, authToken });
       return { user, authToken };
     } catch (err) {
-      console.error('[__sec][error] Failed to get current user', err.message);
+      __sec_log.e('Failed to get current user', err.message);
       return null;
     }
   }
@@ -4113,6 +4136,8 @@ document.querySelectorAll('.contact-box').forEach(box => {
         const __sec_parentHandler = async () => {
           __sec_setBusy(__sec_parentSwitch, true);
           const uiOn = __sec_toggleSwitch(__sec_parentSwitch);
+          // Add a small delay to ensure getSession completes
+          await new Promise(resolve => setTimeout(resolve, 100));
 
           const user = await __sec_getCurrentUser();
           if (!user || !user.uid) {
