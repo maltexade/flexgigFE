@@ -3945,6 +3945,9 @@ function base64urlToArrayBuffer(base64url) {
       buffer[i] = raw.charCodeAt(i);
     }
     __sec_log.d('base64urlToArrayBuffer: Converted', { input: base64url, byteLength: buffer.length });
+    if (buffer.length > 64) {
+      throw new Error(`Decoded buffer exceeds 64 bytes: ${buffer.length}`);
+    }
     return buffer.buffer;
   } catch (err) {
     __sec_log.e('base64urlToArrayBuffer: Error', { input: base64url, err });
@@ -3960,6 +3963,25 @@ function arrayBufferToBase64url(buffer) {
     binary += String.fromCharCode(bytes[i]);
   }
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+// Utility to convert UUID string to 16-byte ArrayBuffer
+function uuidToArrayBuffer(uuid) {
+  try {
+    const cleanUuid = uuid.replace(/-/g, '');
+    if (cleanUuid.length !== 32) {
+      throw new Error(`Invalid UUID length: ${cleanUuid.length}`);
+    }
+    const buffer = new Uint8Array(16);
+    for (let i = 0; i < 16; i++) {
+      buffer[i] = parseInt(cleanUuid.slice(i * 2, i * 2 + 2), 16);
+    }
+    __sec_log.d('uuidToArrayBuffer: Converted', { uuid, byteLength: buffer.length });
+    return buffer.buffer;
+  } catch (err) {
+    __sec_log.e('uuidToArrayBuffer: Error', { uuid, err });
+    throw new Error(`Failed to convert UUID: ${err.message}`);
+  }
 }
 
 // Updated startRegistration function
@@ -3998,18 +4020,17 @@ async function startRegistration(userId, username, displayName) {
     if (options.user && options.user.id) {
       const userIdBuffer = base64urlToArrayBuffer(options.user.id);
       if (userIdBuffer.byteLength !== 16) {
-        __sec_log.e('startRegistration: Invalid user.id length', { userId: options.user.id, byteLength: userIdBuffer.byteLength });
-        throw new Error(`User handle must be 16 bytes, got ${userIdBuffer.byteLength}`);
+        __sec_log.w('startRegistration: Invalid user.id length, falling back to input userId', {
+          userId: options.user.id,
+          byteLength: userIdBuffer.byteLength
+        });
+        options.user.id = uuidToArrayBuffer(userId);
+      } else {
+        options.user.id = userIdBuffer;
       }
-      options.user.id = userIdBuffer;
     } else {
-      __sec_log.w('startRegistration: No user.id in options, falling back to input userId');
-      const fallbackBuffer = Buffer.from(userId.replace(/-/g, ''), 'hex');
-      if (fallbackBuffer.length !== 16) {
-        __sec_log.e('startRegistration: Invalid fallback userId length', { userId, byteLength: fallbackBuffer.length });
-        throw new Error(`Fallback user handle must be 16 bytes, got ${fallbackBuffer.length}`);
-      }
-      options.user.id = fallbackBuffer.buffer;
+      __sec_log.w('startRegistration: No user.id in options, using input userId');
+      options.user.id = uuidToArrayBuffer(userId);
     }
     if (options.excludeCredentials) {
       options.excludeCredentials = options.excludeCredentials.map(cred => ({
