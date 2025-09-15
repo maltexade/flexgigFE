@@ -4009,15 +4009,17 @@ async function startRegistration(userId, username, displayName) {
       throw new Error(`Failed to get registration options: ${errorText}`);
     }
     const options = await optRes.json();
-    __sec_log.d('startRegistration: Received options', {
-      challenge: options.challenge,
-      userId: options.user.id,
-      excludeCredentials: options.excludeCredentials
-    });
+    __sec_log.d('startRegistration: Raw options', options); // Log full response
 
-    // Convert base64url fields to ArrayBuffer
-    options.challenge = base64urlToArrayBuffer(options.challenge);
-    if (options.user && options.user.id) {
+    // Validate user.id early
+    if (!options.user || !options.user.id) {
+      __sec_log.w('startRegistration: No user.id in options, using input userId');
+      options.user = options.user || {};
+      options.user.id = uuidToArrayBuffer(userId);
+    } else if (typeof options.user.id !== 'string' || options.user.id.length > 100) {
+      __sec_log.w('startRegistration: Invalid user.id format, using input userId', { userId: options.user.id });
+      options.user.id = uuidToArrayBuffer(userId);
+    } else {
       const userIdBuffer = base64urlToArrayBuffer(options.user.id);
       if (userIdBuffer.byteLength !== 16) {
         __sec_log.w('startRegistration: Invalid user.id length, falling back to input userId', {
@@ -4028,10 +4030,10 @@ async function startRegistration(userId, username, displayName) {
       } else {
         options.user.id = userIdBuffer;
       }
-    } else {
-      __sec_log.w('startRegistration: No user.id in options, using input userId');
-      options.user.id = uuidToArrayBuffer(userId);
     }
+
+    // Convert other fields
+    options.challenge = base64urlToArrayBuffer(options.challenge);
     if (options.excludeCredentials) {
       options.excludeCredentials = options.excludeCredentials.map(cred => ({
         ...cred,
