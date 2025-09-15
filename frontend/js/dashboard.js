@@ -3934,22 +3934,39 @@ document.querySelectorAll('.contact-box').forEach(box => {
 
   /* ---- WebAuthn register/authenticate flows ---- */
   // Utility to convert base64url string to ArrayBuffer
+// Utility to convert base64url string to ArrayBuffer
 function base64urlToArrayBuffer(base64url) {
-  // Replace base64url characters (-, _) with standard base64 (+, /) and add padding
-  const base64 = base64url.replace(/-/g, '+').replace(/_/g, '/');
-  const padding = '='.repeat((4 - (base64.length % 4)) % 4);
-  const raw = atob(base64 + padding);
-  const buffer = new Uint8Array(raw.length);
-  for (let i = 0; i < raw.length; i++) {
-    buffer[i] = raw.charCodeAt(i);
+  try {
+    // Replace base64url characters (-, _) with standard base64 (+, /) and add padding
+    const base64 = base64url.replace(/-/g, '+').replace(/_/g, '/');
+    const padding = '='.repeat((4 - (base64.length % 4)) % 4);
+    const raw = atob(base64 + padding);
+    const buffer = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) {
+      buffer[i] = raw.charCodeAt(i);
+    }
+    __sec_log.d('base64urlToArrayBuffer: Converted', { input: base64url, byteLength: buffer.length });
+    return buffer.buffer;
+  } catch (err) {
+    __sec_log.e('base64urlToArrayBuffer: Error', { input: base64url, err });
+    throw new Error(`Failed to decode base64url: ${err.message}`);
   }
-  return buffer.buffer;
+}
+
+// Utility to convert ArrayBuffer to base64url (for credential response)
+function arrayBufferToBase64url(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 // Updated startRegistration function
 async function startRegistration(userId, username, displayName) {
   try {
-    __sec_log.d('startRegistration: starting', { userId, username, displayName });
+    __sec_log.d('startRegistration: Starting', { userId, username, displayName });
     const currentUser = await __sec_getCurrentUser();
     if (!currentUser || !currentUser.authToken) {
       __sec_log.w('No auth token for registration');
@@ -3971,11 +3988,26 @@ async function startRegistration(userId, username, displayName) {
       throw new Error(`Failed to get registration options: ${errorText}`);
     }
     const options = await optRes.json();
-    __sec_log.d('startRegistration: Received options', options);
+    __sec_log.d('startRegistration: Received options', {
+      challenge: options.challenge,
+      userId: options.user.id,
+      excludeCredentials: options.excludeCredentials
+    });
 
     // Convert base64url fields to ArrayBuffer
     options.challenge = base64urlToArrayBuffer(options.challenge);
-    options.user.id = base64urlToArrayBuffer(options.user.id);
+    // Decode user.id (base64url of 16-byte UUID) to ensure 16 bytes
+    if (options.user && options.user.id) {
+      const userIdBuffer = base64urlToArrayBuffer(options.user.id);
+      if (userIdBuffer.byteLength > 64) {
+        __sec_log.e('startRegistration: User ID exceeds 64 bytes', { byteLength: userIdBuffer.byteLength });
+        throw new Error('User handle exceeds 64 bytes');
+      }
+      options.user.id = userIdBuffer;
+    } else {
+      __sec_log.w('startRegistration: No user.id in options, falling back to input userId');
+      options.user.id = base64urlToArrayBuffer(base64url.encode(Buffer.from(userId)));
+    }
     if (options.excludeCredentials) {
       options.excludeCredentials = options.excludeCredentials.map(cred => ({
         ...cred,
@@ -3983,7 +4015,11 @@ async function startRegistration(userId, username, displayName) {
       }));
     }
 
-    __sec_log.d('startRegistration: Converted options', options);
+    __sec_log.d('startRegistration: Converted options', {
+      challengeByteLength: options.challenge.byteLength,
+      userIdByteLength: options.user.id.byteLength,
+      excludeCredentials: options.excludeCredentials
+    });
 
     const cred = await navigator.credentials.create({ publicKey: options });
     if (!cred) {
@@ -3994,14 +4030,16 @@ async function startRegistration(userId, username, displayName) {
     // Convert credential response fields to base64url for server
     const credential = {
       id: cred.id,
-      rawId: base64url.encode(Buffer.from(cred.rawId)),
+      rawId: arrayBufferToBase64url(cred.rawId),
       type: cred.type,
       response: {
-        clientDataJSON: base64url.encode(Buffer.from(cred.response.clientDataJSON)),
-        attestationObject: base64url.encode(Buffer.from(cred.response.attestationObject)),
+        clientDataJSON: arrayBufferToBase64url(cred.response.clientDataJSON),
+        attestationObject: arrayBufferToBase64url(cred.response.attestationObject),
         transports: cred.response.getTransports ? cred.response.getTransports() : []
       }
     };
+
+    __sec_log.d('startRegistration: Credential prepared', credential);
 
     const verifyRes = await fetch('https://api.flexgig.com.ng/webauthn/register/verify', {
       method: 'POST',
