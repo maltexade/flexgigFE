@@ -3937,7 +3937,6 @@ document.querySelectorAll('.contact-box').forEach(box => {
 // Utility to convert base64url string to ArrayBuffer
 function base64urlToArrayBuffer(base64url) {
   try {
-    // Replace base64url characters (-, _) with standard base64 (+, /) and add padding
     const base64 = base64url.replace(/-/g, '+').replace(/_/g, '/');
     const padding = '='.repeat((4 - (base64.length % 4)) % 4);
     const raw = atob(base64 + padding);
@@ -3953,7 +3952,7 @@ function base64urlToArrayBuffer(base64url) {
   }
 }
 
-// Utility to convert ArrayBuffer to base64url (for credential response)
+// Utility to convert ArrayBuffer to base64url
 function arrayBufferToBase64url(buffer) {
   const bytes = new Uint8Array(buffer);
   let binary = '';
@@ -3996,17 +3995,21 @@ async function startRegistration(userId, username, displayName) {
 
     // Convert base64url fields to ArrayBuffer
     options.challenge = base64urlToArrayBuffer(options.challenge);
-    // Decode user.id (base64url of 16-byte UUID) to ensure 16 bytes
     if (options.user && options.user.id) {
       const userIdBuffer = base64urlToArrayBuffer(options.user.id);
-      if (userIdBuffer.byteLength > 64) {
-        __sec_log.e('startRegistration: User ID exceeds 64 bytes', { byteLength: userIdBuffer.byteLength });
-        throw new Error('User handle exceeds 64 bytes');
+      if (userIdBuffer.byteLength !== 16) {
+        __sec_log.e('startRegistration: Invalid user.id length', { userId: options.user.id, byteLength: userIdBuffer.byteLength });
+        throw new Error(`User handle must be 16 bytes, got ${userIdBuffer.byteLength}`);
       }
       options.user.id = userIdBuffer;
     } else {
       __sec_log.w('startRegistration: No user.id in options, falling back to input userId');
-      options.user.id = base64urlToArrayBuffer(base64url.encode(Buffer.from(userId)));
+      const fallbackBuffer = Buffer.from(userId.replace(/-/g, ''), 'hex');
+      if (fallbackBuffer.length !== 16) {
+        __sec_log.e('startRegistration: Invalid fallback userId length', { userId, byteLength: fallbackBuffer.length });
+        throw new Error(`Fallback user handle must be 16 bytes, got ${fallbackBuffer.length}`);
+      }
+      options.user.id = fallbackBuffer.buffer;
     }
     if (options.excludeCredentials) {
       options.excludeCredentials = options.excludeCredentials.map(cred => ({
