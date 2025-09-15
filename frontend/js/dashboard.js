@@ -1,4 +1,5 @@
 window.__SEC_API_BASE = 'https://api.flexgig.com.ng'
+const { startRegistration, startAuthentication } = SimpleWebAuthnBrowser;
 
 const updateProfileModal = document.getElementById('updateProfileModal');
 if (updateProfileModal && updateProfileModal.classList.contains('active')) {
@@ -3883,11 +3884,30 @@ document.querySelectorAll('.contact-box').forEach(box => {
   /* ---- WebAuthn helper calls to server (list/revoke) ---- */
   async function __sec_listAuthenticators(userId) {
     try {
-      const r = await fetch(`${window.__SEC_API_BASE}/webauthn/authenticators/${encodeURIComponent(userId)}`, { credentials: 'include' });
+      // Get Supabase access token
+      const { data, error } = await supabase.auth.getSession();
+      if (error || !data.session) {
+        __sec_log.w('No Supabase session found');
+        return null;
+      }
+      const token = data.session.access_token;
+
+      const r = await fetch(
+        `${window.__SEC_API_BASE}/webauthn/authenticators/${encodeURIComponent(userId)}`,
+        {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
       if (!r.ok) {
         __sec_log.w('listAuthenticators failed', r.status);
         return null;
       }
+
       const j = await r.json();
       return j;
     } catch (err) {
@@ -3896,24 +3916,41 @@ document.querySelectorAll('.contact-box').forEach(box => {
     }
   }
 
+
   async function __sec_revokeAuthenticator(userId, credentialID) {
     try {
-      const r = await fetch(`${window.__SEC_API_BASE}/webauthn/authenticators/${encodeURIComponent(userId)}/revoke`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ credentialID })
-      });
+      // Get Supabase access token
+      const { data, error } = await supabase.auth.getSession();
+      if (error || !data.session) {
+        __sec_log.w('No Supabase session found');
+        return false;
+      }
+      const token = data.session.access_token;
+
+      const r = await fetch(
+        `${window.__SEC_API_BASE}/webauthn/authenticators/${encodeURIComponent(userId)}/revoke`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ credentialID }),
+        }
+      );
+
       if (!r.ok) {
         __sec_log.w('revokeAuthenticator failed', credentialID, r.status);
         return false;
       }
+
       return true;
     } catch (err) {
       __sec_log.e('revokeAuthenticator error', err);
       return false;
     }
   }
+
 
   /* wire events (with WebAuthn integration) */
   function __sec_wireEvents() {
