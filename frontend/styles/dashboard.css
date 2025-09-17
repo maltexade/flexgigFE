@@ -1458,7 +1458,7 @@
   color: white;
   display: flex;
   flex-direction: column;
-  z-index: 1000;
+  z-index: 10002;
 }
 
 .pin-modal.hidden {
@@ -1514,6 +1514,11 @@
   font-size: 1rem;
   margin-bottom: 2rem;
   font-weight: 500;
+}
+.pin-modal h2 {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
 }
 
 /* PIN input boxes */
@@ -2146,7 +2151,25 @@ html.dark-mode .theme-toggle .toggle-knob { transform: translateX(20px); }
   background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
 }
 .security-modal-header h1 { margin:0; font-size:20px; font-weight:700; color:#fff; }
-.security-modal-close { position:absolute; left:14px; top:50%; transform:translateY(-50%); background:none; border:none; color:#fff; padding:8px; border-radius:8px; cursor:pointer; }
+.security-modal-close {
+  position: absolute;
+  top: 30px;
+  left: 0;              /* stick to extreme left */
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: #fff;
+  padding: 12px;        /* slightly larger click area */
+  border-radius: 0 8px 8px 0; /* round only right side */
+  cursor: pointer;
+}
+
+@media (min-width: 768px) {
+  .security-modal-close {
+    left: 0; /* extreme left on desktop too */
+  }
+}
+
 .security-modal-close:focus { outline: 2px solid rgba(255,255,255,0.12); }
 
 /* body */

@@ -48,7 +48,7 @@
     <div id="userProfileDashboardContent" class="user-profile-dashboard-content active">
       <div class="stack">
         <!-- Setup Pin -->
-        <div class="card pin">
+        <div class="card pin" id="dashboardPinCard">
           <div style="display:flex;gap:12px;align-items:center">
             <div class="icon-wrap" aria-hidden>
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
@@ -65,6 +65,7 @@
             <path d="M9 18l6-6-6-6" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
         </div>
+
 
         <!-- Update Profile -->
         <div class="card update-profile">
@@ -675,13 +676,14 @@
 
 <!-- Security Modal HTML -->
 <div class="security-modal" id="securityModal" aria-hidden="true" role="dialog" aria-labelledby="securityTitle" aria-modal="true">
-    <div class="security-modal-header">
       <button class="security-modal-close" id="securityCloseBtn" aria-label="Close security modal">
         <!-- left-chevron -->
         <svg width="25" height="25" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
           <path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
       </button>
+    <div class="security-modal-header">
+
       <h1 id="securityTitle">Security</h1>
     </div>
 
@@ -726,32 +728,16 @@
         </div>
 
         <!-- Account PIN -->
-        <div class="setting-row" role="listitem" aria-labelledby="pinLabel">
+        <div class="setting-row pin-row" id="securityPinRow" role="button" aria-labelledby="pinLabel">
           <div class="setting-left">
             <div class="setting-title" id="pinLabel">Account PIN</div>
-            <div class="setting-desc" id="pinStatusDesc">No PIN set</div>
+            <div class="setting-desc" id="accountPinStatus">No PIN set</div>
           </div>
           <div class="setting-right">
-            <button class="btn-ghost" id="pinToggleBtn">Set PIN</button>
+            <svg class="arrow-icon" width="20" height="20" viewBox="0 0 24 24" fill="none">
+              <path d="M9 18l6-6-6-6" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
           </div>
-        </div>
-
-        <div class="setting-subgroup" id="pinFormWrap" hidden>
-          <form id="pinForm" autocomplete="off" novalidate>
-            <div class="field-row">
-              <label for="pinInput">Enter 4-digit PIN</label>
-              <input id="pinInput" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="new-password" required>
-            </div>
-            <div class="field-row">
-              <label for="pinConfirm">Confirm PIN</label>
-              <input id="pinConfirm" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="new-password" required>
-            </div>
-            <div class="form-actions">
-              <button type="submit" class="btn-primary">Save PIN</button>
-              <button type="button" class="btn-ghost" id="pinCancelBtn">Cancel</button>
-            </div>
-            <p class="note" id="pinNote"></p>
-          </form>
         </div>
 
         <!-- Change password -->

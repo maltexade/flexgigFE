@@ -2075,156 +2075,280 @@ payBtn.addEventListener('click', () => {
     alert(`Successfully funded ₦${fundAmount}!`);
     console.log('[DEBUG] addMoneyBtn: Funding processed, new balance:', userBalance, 'Transaction:', transaction);
   });
-  const setupPinBtn = document.querySelector('.card.pin');
-  const pinModal = document.getElementById('pinModal');
-  const closePinModal = document.getElementById('closePinModal');
-  const pinTitle = pinModal.querySelector('.pin-header h2');
-  const pinSubtitle = pinModal.querySelector('.firewall-icon p');
-  const pinInputs = document.querySelectorAll('.pin-inputs input');
-  const keypadButtons = document.querySelectorAll('.pin-keypad button');
-  const deleteKey = document.getElementById('deleteKey');
 
-  const pinAlert = document.getElementById('pinAlert');
-  const pinAlertMsg = document.getElementById('pinAlertMsg');
+/* ===========================================================
+   PIN modal — unified keypad + keyboard input + toast system
+   =========================================================== */
+(function () {
+  // Init once DOM is ready
+  function init() {
+    // -- Elements (graceful guards) --
+    const setupPinBtn = document.querySelector('.card.pin'); // Dashboard pin card
+    const pinModal = document.getElementById('pinModal');
+    const closePinModal = document.getElementById('closePinModal');
+    const securityPinRow = document.getElementById('securityPinRow');
+    const accountPinStatus = document.getElementById('accountPinStatus');
 
-  let currentPin = "";
-  let firstPin = "";
-  let step = "create"; // "create" | "confirm"
+    if (!pinModal) {
+      console.warn('[PIN] pinModal not found — PIN flow disabled.');
+      return;
+    }
+    const pinTitleEl = pinModal.querySelector('.pin-header h2');
+    const pinSubtitleEl = pinModal.querySelector('.firewall-icon p');
+    const pinInputs = Array.from(document.querySelectorAll('.pin-inputs input'));
+    const keypadButtons = Array.from(document.querySelectorAll('.pin-keypad button'));
+    const deleteKey = document.getElementById('deleteKey');
 
-  // Reset PIN input boxes
-  function resetInputs() {
-    currentPin = "";
-    pinInputs.forEach(input => input.classList.remove("filled"));
-  }
-  // Open PIN modal for re-authentication
-  // In dashboard.js, modify openPinModalForReauth
-  async function openPinModalForReauth() {
-    try {
-      const res = await fetch('https://api.flexgig.com.ng/api/session', {
-        method: 'GET',
-        credentials: 'include',
+    // If key elements missing, warn but continue if possible
+    if (!pinTitleEl || !pinSubtitleEl || pinInputs.length === 0) {
+      console.warn('[PIN] Some modal sub-elements are missing. Check selectors.');
+    }
+
+    // -- State --
+    let currentPin = "";
+    let firstPin = "";
+    let step = "create"; // "create" | "confirm" | "reauth"
+    let processing = false; // prevents double submits
+
+    // ---------------------
+    // Toast (top-right) system (injects minimal styles & container)
+    // ---------------------
+    const toastContainerId = 'flexgig_toast_container';
+    function ensureToastStylesAndContainer() {
+      if (!document.getElementById(toastContainerId + '_style')) {
+        const style = document.createElement('style');
+        style.id = toastContainerId + '_style';
+        style.textContent = `
+          #${toastContainerId} {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            z-index: 11000;
+            pointer-events: none;
+          }
+          .flexgig-toast {
+            pointer-events: auto;
+            min-width: 240px;
+            max-width: 360px;
+            padding: 12px 16px;
+            border-radius: 10px;
+            color: #fff;
+            font-weight: 600;
+            box-shadow: 0 6px 18px rgba(0,0,0,0.15);
+            transform: translateX(120%);
+            opacity: 0;
+            transition: transform .36s cubic-bezier(.22,.9,.32,1), opacity .28s ease;
+            font-size: 14px;
+          }
+          .flexgig-toast.show { transform: translateX(0); opacity: 1; }
+          .flexgig-toast.success { background: linear-gradient(135deg,#4caf50,#43a047); }
+          .flexgig-toast.error   { background: linear-gradient(135deg,#f44336,#e53935); }
+          .flexgig-toast.info    { background: linear-gradient(135deg,#2196f3,#1e88e5); }
+          `;
+        document.head.appendChild(style);
+      }
+      let container = document.getElementById(toastContainerId);
+      if (!container) {
+        container = document.createElement('div');
+        container.id = toastContainerId;
+        document.body.appendChild(container);
+      }
+      return container;
+    }
+
+    function showToast(message, type = 'success', duration = 2800) {
+      const container = ensureToastStylesAndContainer();
+      const toast = document.createElement('div');
+      toast.className = `flexgig-toast ${type}`;
+      toast.textContent = message;
+      container.appendChild(toast);
+
+      // animate in
+      requestAnimationFrame(() => toast.classList.add('show'));
+
+      // remove after duration
+      const removeAfter = () => {
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 420);
+      };
+      setTimeout(removeAfter, duration);
+    }
+
+    // ---------------------
+    // Helpers for input UI
+    // ---------------------
+    function updatePinInputs() {
+      // fill stars for length of currentPin
+      pinInputs.forEach((inp, idx) => {
+        if (idx < currentPin.length) {
+          inp.classList.add('filled');
+          inp.value = '*';
+        } else {
+          inp.classList.remove('filled');
+          inp.value = '';
+        }
       });
-      if (!res.ok) {
-        console.error('[dashboard.js] openPinModalForReauth: Session invalid');
-        window.location.href = '/'; // Redirect if session is invalid
-        return;
-      }
-      const { user } = await res.json();
-      if (!user.pin) {
-        console.log('[dashboard.js] No PIN set, redirecting to PIN creation');
-        pinModal.classList.remove('hidden');
-        pinTitle.textContent = 'Create PIN';
-        pinSubtitle.textContent = 'Create a 4-digit PIN';
-        step = 'create';
-        resetInputs();
-      } else {
-        pinModal.classList.remove('hidden');
-        pinTitle.textContent = 'Re-enter PIN';
-        pinSubtitle.textContent = 'Enter your 4-digit PIN to continue';
-        resetInputs();
-        step = 'reauth';
-      }
-      console.log('[dashboard.js] PIN modal opened for:', user.pin ? 're-authentication' : 'PIN creation');
-    } catch (err) {
-      console.error('[dashboard.js] openPinModalForReauth error:', err);
-      window.location.href = '/';
     }
-  }
 
-
-  // Show custom alert
-  function showAlert(message, autoClose = false) {
-    pinAlertMsg.textContent = message;
-    pinAlert.classList.remove("hidden");
-    setTimeout(() => pinAlert.classList.add("show"), 10);
-    if (autoClose) {
-      setTimeout(() => {
-        pinModal.classList.add('hidden');
-        resetInputs();
-      }, 1200);
-    } else {
-      setTimeout(() => {
-        document.body.addEventListener("click", dismissAlert, { once: true });
-      }, 300);
+    function resetInputs() {
+      currentPin = "";
+      pinInputs.forEach(input => {
+        input.classList.remove("filled");
+        input.value = "";
+      });
     }
-  }
 
-
-  // Hide alert
-  function dismissAlert() {
-    pinAlert.classList.remove("show");
-    setTimeout(() => pinAlert.classList.add("hidden"), 300);
-  }
-
-  // Open modal
-  setupPinBtn.addEventListener('click', () => {
-    pinModal.classList.remove('hidden');
-    step = "create";
-    pinTitle.textContent = "Create PIN";
-    pinSubtitle.textContent = "Create a 4-digit PIN";
-    resetInputs();
-  });
-
-  // Close/back button
-  closePinModal.addEventListener('click', () => {
-    if (step === "confirm") {
-      step = "create";
-      pinTitle.textContent = "Create PIN";
-      pinSubtitle.textContent = "Create a 4-digit PIN";
-      resetInputs();
-    } else {
-      pinModal.classList.add('hidden');
+    function openModalAsCreate() {
+      pinModal.classList.remove('hidden');
+      step = 'create';
+      if (pinTitleEl) pinTitleEl.textContent = 'Create PIN';
+      if (pinSubtitleEl) pinSubtitleEl.textContent = 'Create a 4-digit PIN';
       resetInputs();
     }
-  });
 
-  // Update PIN keypad logic to handle reauth step
-  keypadButtons.forEach(btn => {
-  btn.addEventListener('click', async () => {
-    const val = btn.textContent.trim();
-    if (!val || isNaN(val)) return;
+    // ---------------------
+    // Server/Session helper for reauth open (unchanged logic)
+    // ---------------------
+    async function openPinModalForReauth() {
+      try {
+        const res = await fetch('https://api.flexgig.com.ng/api/session', {
+          method: 'GET',
+          credentials: 'include',
+        });
+        if (!res.ok) {
+          console.error('[dashboard.js] openPinModalForReauth: Session invalid');
+          window.location.href = '/';
+          return;
+        }
+        const { user } = await res.json();
+        pinModal.classList.remove('hidden');
 
-    if (currentPin.length < 4) {
-      currentPin += val;
-      pinInputs[currentPin.length - 1].classList.add('filled');
-      pinInputs[currentPin.length - 1].value = '*';
+        if (!user.pin) {
+          if (pinTitleEl) pinTitleEl.textContent = 'Create PIN';
+          if (pinSubtitleEl) pinSubtitleEl.textContent = 'Create a 4-digit PIN';
+          step = 'create';
+        } else {
+          if (pinTitleEl) pinTitleEl.textContent = 'Re-enter PIN';
+          if (pinSubtitleEl) pinSubtitleEl.textContent = 'Enter your 4-digit PIN to continue';
+          step = 'reauth';
+        }
+        resetInputs();
+        console.log('[dashboard.js] PIN modal opened for:', user.pin ? 're-authentication' : 'PIN creation');
+      } catch (err) {
+        console.error('[dashboard.js] openPinModalForReauth error:', err);
+        window.location.href = '/';
+      }
     }
 
-    if (currentPin.length === 4) {
+    // ---------------------
+    // Close/back button logic
+    // ---------------------
+    if (closePinModal) {
+      closePinModal.addEventListener('click', () => {
+        if (step === 'confirm') {
+          step = 'create';
+          if (pinTitleEl) pinTitleEl.textContent = 'Create PIN';
+          if (pinSubtitleEl) pinSubtitleEl.textContent = 'Create a 4-digit PIN';
+          resetInputs();
+        } else {
+          pinModal.classList.add('hidden');
+          resetInputs();
+        }
+        processing = false;
+      });
+    }
+
+    // ---------------------
+    // Input actions (shared)
+    // ---------------------
+    function inputDigit(digit) {
+      if (processing) return;
+      if (!/^[0-9]$/.test(digit)) return;
+      if (currentPin.length >= 4) return;
+      currentPin += digit;
+      updatePinInputs();
+      if (currentPin.length === 4) {
+        handlePinCompletion();
+      }
+    }
+
+    function handleDelete() {
+      if (processing) return;
+      if (currentPin.length === 0) return;
+      currentPin = currentPin.slice(0, -1);
+      updatePinInputs();
+    }
+
+    // ---------------------
+    // Main completion logic (prevents double submissions)
+    // ---------------------
+    async function handlePinCompletion() {
+      // Prevent re-entry while processing an async request
+      if (processing) return;
+      // small guard — ensure currentPin length = 4 when called
+      if (currentPin.length !== 4) return;
+
       if (step === 'create') {
         firstPin = currentPin;
         step = 'confirm';
-        pinTitle.textContent = 'Confirm PIN';
-        pinSubtitle.textContent = 'Confirm your 4-digit PIN';
+        if (pinTitleEl) pinTitleEl.textContent = 'Confirm PIN';
+        if (pinSubtitleEl) pinSubtitleEl.textContent = 'Confirm your 4-digit PIN';
         resetInputs();
-      } else if (step === 'confirm') {
-        if (currentPin === firstPin) {
-          try {
-            await fetch('https://api.flexgig.com.ng/api/save-pin', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ pin: currentPin }),
-              credentials: 'include',
-            });
-            localStorage.setItem('userPin', currentPin); // Mock storage
-            console.log('[dashboard.js] PIN setup successfully:', currentPin);
-            showAlert('PIN created successfully!', true);
-            pinModal.classList.add('hidden');
-            resetInputs();
-          } catch (err) {
-            console.error('[dashboard.js] PIN save error:', err);
-            showAlert('Failed to save PIN. Please try again.');
-            resetInputs();
-          }
-        } else {
-          console.error('[dashboard.js] PIN mismatch');
-          showAlert('Oops! The PINs do not match. Please try again.');
+        return;
+      }
+
+      if (step === 'confirm') {
+        if (currentPin !== firstPin) {
+          console.warn('[PIN] mismatch on confirmation');
+          showToast('PINs do not match — try again', 'error');
           step = 'create';
-          pinTitle.textContent = 'Create PIN';
-          pinSubtitle.textContent = 'Create a 4-digit PIN';
+          if (pinTitleEl) pinTitleEl.textContent = 'Create PIN';
+          if (pinSubtitleEl) pinSubtitleEl.textContent = 'Create a 4-digit PIN';
           resetInputs();
+          return;
         }
-      } else if (step === 'reauth') {
+
+        // submit new PIN
+        processing = true;
+        try {
+          const res = await fetch('https://api.flexgig.com.ng/api/save-pin', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pin: currentPin }),
+            credentials: 'include',
+          });
+
+          if (!res.ok) {
+            throw new Error('Save PIN failed');
+          }
+
+          localStorage.setItem('userPin', currentPin);
+          console.log('[dashboard.js] PIN setup successfully:', currentPin);
+
+          // Update UI and close modal once
+          const dashboardPinCard = document.getElementById('dashboardPinCard');
+          if (dashboardPinCard) dashboardPinCard.style.display = 'none';
+          if (accountPinStatus) accountPinStatus.textContent = 'PIN set';
+
+          // Show toast and hide modal (only once)
+          showToast('PIN updated successfully', 'success', 2400);
+          pinModal.classList.add('hidden');
+          resetInputs();
+        } catch (err) {
+          console.error('[dashboard.js] PIN save error:', err);
+          showToast('Failed to save PIN. Try again.', 'error', 2200);
+          resetInputs();
+        } finally {
+          processing = false;
+        }
+        return;
+      }
+
+      if (step === 'reauth') {
+        processing = true;
         try {
           const res = await fetch('https://api.flexgig.com.ng/api/verify-pin', {
             method: 'POST',
@@ -2232,9 +2356,8 @@ payBtn.addEventListener('click', () => {
             body: JSON.stringify({ pin: currentPin }),
             credentials: 'include',
           });
-          if (!res.ok) {
-            throw new Error('Invalid PIN');
-          }
+          if (!res.ok) throw new Error('Invalid PIN');
+
           const { user } = await res.json();
           localStorage.setItem('userEmail', user.email || '');
           localStorage.setItem('firstName', user.fullName?.split(' ')[0] || '');
@@ -2242,31 +2365,97 @@ payBtn.addEventListener('click', () => {
           localStorage.setItem('phoneNumber', user.phoneNumber || '');
           localStorage.setItem('address', user.address || '');
           localStorage.setItem('profilePicture', user.profilePicture || '');
-          await updateGreetingAndAvatar(user.username, user.fullName?.split(' ')[0]);
-          await loadUserProfile();
-          updateBalanceDisplay();
+
+          // Update UI from user (these functions exist in your dashboard)
+          if (typeof updateGreetingAndAvatar === 'function') {
+            await updateGreetingAndAvatar(user.username, user.fullName?.split(' ')[0]);
+          }
+          if (typeof loadUserProfile === 'function') {
+            await loadUserProfile();
+          }
+          if (typeof updateBalanceDisplay === 'function') {
+            updateBalanceDisplay();
+          }
+
           pinModal.classList.add('hidden');
           resetInputs();
           console.log('[dashboard.js] PIN re-auth: Session restored');
         } catch (err) {
           console.error('[dashboard.js] PIN re-auth error:', err);
-          showAlert('Invalid PIN or session. Redirecting to login...');
-          setTimeout(() => {
-            window.location.href = '/';
-          }, 1200);
+          showToast('Invalid PIN or session. Redirecting to login...', 'error', 1800);
+          setTimeout(() => (window.location.href = '/'), 1200);
+        } finally {
+          processing = false;
         }
       }
     }
-  });
-});
 
-  // Handle delete
-  deleteKey.addEventListener('click', () => {
-    if (currentPin.length > 0) {
-      pinInputs[currentPin.length - 1].classList.remove("filled");
-      currentPin = currentPin.slice(0, -1);
+    // ---------------------
+    // Wire keypad buttons (including delete)
+    // ---------------------
+    keypadButtons.forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const raw = (btn.dataset.value ?? btn.textContent).trim().toLowerCase();
+        if (btn.id === 'deleteKey' || raw === 'del' || raw === 'delete' || raw === '⌫') {
+          handleDelete();
+          return;
+        }
+        // digit button
+        if (/^[0-9]$/.test(raw)) {
+          inputDigit(raw);
+        }
+      });
+    });
+
+    // deleteKey (if selected separately)
+    if (deleteKey) {
+      deleteKey.addEventListener('click', handleDelete);
     }
-  });
+
+    // ---------------------
+    // Keyboard handler for desktop
+    // ---------------------
+    document.addEventListener('keydown', (e) => {
+      // Only active when modal visible
+      if (pinModal.classList.contains('hidden')) return;
+
+      if (/^[0-9]$/.test(e.key)) {
+        inputDigit(e.key);
+      } else if (e.key === 'Backspace') {
+        handleDelete();
+      } else if (e.key === 'Enter') {
+        if (currentPin.length === 4) handlePinCompletion();
+      }
+    });
+
+    // ---------------------
+    // Open modal from dashboard card or security row
+    // ---------------------
+    if (setupPinBtn) {
+      setupPinBtn.addEventListener('click', openModalAsCreate);
+    }
+    if (securityPinRow) {
+      securityPinRow.addEventListener('click', () => {
+        window.lastPinSource = 'security';
+        openModalAsCreate();
+      });
+    }
+
+    // Debug logs to help trace (remove in production)
+    console.log('[PIN] initialized — modal found, inputs:', pinInputs.length, 'keypad buttons:', keypadButtons.length);
+  } // end init()
+
+  // Run init
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+
+
+
+
 
 
 
@@ -4461,6 +4650,9 @@ async function startAuthentication(userId) {
     setTimeout(__sec_boot, 0);
   }
 })(supabaseClient);
+
+
+
 
 
 
