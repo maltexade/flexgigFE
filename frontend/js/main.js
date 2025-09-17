@@ -74,7 +74,7 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
       console.error('[ERROR] main.js: #content element not found in getSession');
       alert('Error: Page not fully loaded. Please refresh the page.');
     } else {
-      alert('Unable to reach the server. Please check your internet connection and try again.');
+      console.log('Unable to reach the server. Please check your internet connection and try again.');
     }
     return null;
   }

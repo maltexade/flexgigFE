@@ -94,7 +94,7 @@ async function getSession() {
         });
       } else {
         console.error('[ERROR] getSession: Refresh failed', await refreshRes.text());
-        window.location.href = '/';
+        //window.location.href = '/';
         return null;
       }
     }
@@ -102,7 +102,7 @@ async function getSession() {
     if (!res.ok) {
       const text = await res.text().catch(() => '');
       console.error('[ERROR] getSession: Session API returned error:', res.status, text);
-      window.location.href = '/';
+      //window.location.href = '/';
       return null;
     }
 
@@ -170,7 +170,7 @@ async function getSession() {
     return { user, authToken: newToken }; // Return for __sec_getCurrentUser
   } catch (err) {
     console.error('[ERROR] getSession: Failed to fetch session', err && err.message ? err.message : err);
-    window.location.href = '/';
+    //window.location.href = '/';
     return null;
   }
 }
@@ -3808,49 +3808,62 @@ document.querySelectorAll('.contact-box').forEach(box => {
   }
 
   /* Set biometric UI state */
-  function __sec_setBiometrics(parentOn, animate = true) {
-    if (!__sec_parentSwitch) { __sec_log.w('parent switch element missing'); return; }
-    __sec_setChecked(__sec_parentSwitch, parentOn);
-    try { localStorage.setItem(__sec_KEYS.biom, parentOn ? '1' : '0'); } catch (e) {}
+  /* Set biometric UI state (fixed defaulting & no `|| true` bug) */
+function __sec_setBiometrics(parentOn, animate = true) {
+  if (!__sec_parentSwitch) { __sec_log.w('parent switch element missing'); return; }
+  __sec_setChecked(__sec_parentSwitch, parentOn);
+  try { localStorage.setItem(__sec_KEYS.biom, parentOn ? '1' : '0'); } catch (e) {}
 
-    if (parentOn) {
-      const storedLogin = localStorage.getItem(__sec_KEYS.bioLogin) === '1';
-      const storedTx = localStorage.getItem(__sec_KEYS.bioTx) === '1';
-      if (animate) {
-        __sec_revealChildrenAnimated();
-        setTimeout(() => {
-          __sec_setChecked(__sec_bioLogin, storedLogin || true);
-          __sec_setChecked(__sec_bioTx, storedTx || true);
-        }, 60);
-      } else {
-        __sec_revealChildrenNoAnimate();
-        __sec_setChecked(__sec_bioLogin, storedLogin || true);
-        __sec_setChecked(__sec_bioTx, storedTx || true);
-      }
+  if (parentOn) {
+    // Read raw stored values so we can distinguish "missing" (null) vs set '0'/'1'
+    const rawLogin = localStorage.getItem(__sec_KEYS.bioLogin); // '1' | '0' | null
+    const rawTx = localStorage.getItem(__sec_KEYS.bioTx);
+
+    // If there's no stored preference, default children to true (first-time enabling).
+    const defaultLogin = rawLogin === null ? true : (rawLogin === '1');
+    const defaultTx = rawTx === null ? true : (rawTx === '1');
+
+    if (animate) {
+      __sec_revealChildrenAnimated();
+      setTimeout(() => {
+        __sec_setChecked(__sec_bioLogin, defaultLogin);
+        __sec_setChecked(__sec_bioTx, defaultTx);
+
+        // Persist whichever value we actually applied (defensive).
+        try {
+          localStorage.setItem(__sec_KEYS.bioLogin, __sec_isChecked(__sec_bioLogin) ? '1' : '0');
+          localStorage.setItem(__sec_KEYS.bioTx, __sec_isChecked(__sec_bioTx) ? '1' : '0');
+        } catch (e) {}
+      }, 60);
+    } else {
+      __sec_revealChildrenNoAnimate();
+      __sec_setChecked(__sec_bioLogin, defaultLogin);
+      __sec_setChecked(__sec_bioTx, defaultTx);
       try {
         localStorage.setItem(__sec_KEYS.bioLogin, __sec_isChecked(__sec_bioLogin) ? '1' : '0');
         localStorage.setItem(__sec_KEYS.bioTx, __sec_isChecked(__sec_bioTx) ? '1' : '0');
       } catch (e) {}
-      __sec_log.i('biom ON', { storedLogin, storedTx, animate });
-    } else {
-      try {
-        localStorage.setItem(__sec_KEYS.bioLogin, '0');
-        localStorage.setItem(__sec_KEYS.bioTx, '0');
-      } catch (e) {}
-      if (__sec_bioLogin) __sec_setChecked(__sec_bioLogin, false);
-      if (__sec_bioTx) __sec_setChecked(__sec_bioTx, false);
-      if (animate) __sec_hideChildrenAnimated();
-      else {
-        if (__sec_bioOptions) {
-          __sec_bioOptions.classList.remove('show');
-          __sec_bioOptions.hidden = true;
-          const rows = Array.from(__sec_bioOptions.querySelectorAll('.setting-row'));
-          rows.forEach(r => { r.classList.remove('visible'); r.style.transitionDelay = ''; });
-        }
-      }
-      __sec_log.i('biom OFF', { animate });
     }
+    __sec_log.i('biom ON', { rawLogin, rawTx, animate });
+  } else {
+    try {
+      localStorage.setItem(__sec_KEYS.bioLogin, '0');
+      localStorage.setItem(__sec_KEYS.bioTx, '0');
+    } catch (e) {}
+    if (__sec_bioLogin) __sec_setChecked(__sec_bioLogin, false);
+    if (__sec_bioTx) __sec_setChecked(__sec_bioTx, false);
+    if (animate) __sec_hideChildrenAnimated();
+    else {
+      if (__sec_bioOptions) {
+        __sec_bioOptions.classList.remove('show');
+        __sec_bioOptions.hidden = true;
+        const rows = Array.from(__sec_bioOptions.querySelectorAll('.setting-row'));
+        rows.forEach(r => { r.classList.remove('visible'); r.style.transitionDelay = ''; });
+      }
+    }
+    __sec_log.i('biom OFF', { animate });
   }
+}
 
   /* If both child switches are off, turn the parent off */
   function __sec_maybeDisableParentIfChildrenOff() {
@@ -3870,34 +3883,52 @@ document.querySelectorAll('.contact-box').forEach(box => {
 
   /* Initialize from storage */
   function __sec_initFromStorage() {
-    try {
-      const biomStored = localStorage.getItem(__sec_KEYS.biom) === '1';
-      const loginStored = localStorage.getItem(__sec_KEYS.bioLogin) === '1';
-      const txStored = localStorage.getItem(__sec_KEYS.bioTx) === '1';
-      const balanceStored = localStorage.getItem(__sec_KEYS.balance) !== '0';
+  try {
+    const rawBiom = localStorage.getItem(__sec_KEYS.biom); // '1' | '0' | null
+    const rawLogin = localStorage.getItem(__sec_KEYS.bioLogin);
+    const rawTx = localStorage.getItem(__sec_KEYS.bioTx);
+    const rawBalance = localStorage.getItem(__sec_KEYS.balance); // '1' | '0' | null
 
-      if (__sec_parentSwitch) __sec_setChecked(__sec_parentSwitch, biomStored);
+    const biomStored = rawBiom === '1';
+    // For child switches: default false if no stored value (so we don't accidentally enable them)
+    // If you'd rather default them to true when parent is enabled for first time, keep the logic in setBiometrics.
+    const loginStored = rawLogin === '1';
+    const txStored = rawTx === '1';
+    // Balance: default to visible (true) when missing; change if you want opposite.
+    const balanceStored = rawBalance === null ? true : (rawBalance === '1');
 
-      if (__sec_bioOptions) {
-        if (biomStored) {
-          __sec_revealChildrenNoAnimate();
-          if (__sec_bioLogin) __sec_setChecked(__sec_bioLogin, loginStored);
-          if (__sec_bioTx) __sec_setChecked(__sec_bioTx, txStored);
-        } else {
-          __sec_bioOptions.hidden = true;
-          __sec_bioOptions.classList.remove('show');
-          if (__sec_bioLogin) __sec_setChecked(__sec_bioLogin, false);
-          if (__sec_bioTx) __sec_setChecked(__sec_bioTx, false);
-        }
+    if (__sec_parentSwitch) __sec_setChecked(__sec_parentSwitch, biomStored);
+
+    if (__sec_bioOptions) {
+      if (biomStored) {
+        __sec_revealChildrenNoAnimate();
+        if (__sec_bioLogin) __sec_setChecked(__sec_bioLogin, loginStored);
+        if (__sec_bioTx) __sec_setChecked(__sec_bioTx, txStored);
+      } else {
+        __sec_bioOptions.hidden = true;
+        __sec_bioOptions.classList.remove('show');
+        if (__sec_bioLogin) __sec_setChecked(__sec_bioLogin, false);
+        if (__sec_bioTx) __sec_setChecked(__sec_bioTx, false);
       }
-
-      if (__sec_balanceSwitch) __sec_setChecked(__sec_balanceSwitch, balanceStored);
-
-      __sec_log.d('initFromStorage', { biomStored, loginStored, txStored, balanceStored });
-    } catch (err) {
-      __sec_log.e('initFromStorage error', err);
     }
+
+    if (__sec_balanceSwitch) __sec_setChecked(__sec_balanceSwitch, balanceStored);
+
+    __sec_log.d('initFromStorage', { rawBiom, rawLogin, rawTx, rawBalance, biomStored, loginStored, txStored, balanceStored });
+  } catch (err) {
+    __sec_log.e('initFromStorage error', err);
   }
+}
+
+window.addEventListener('beforeunload', () => {
+  try {
+    if (__sec_parentSwitch) localStorage.setItem(__sec_KEYS.biom, __sec_isChecked(__sec_parentSwitch) ? '1' : '0');
+    if (__sec_bioLogin) localStorage.setItem(__sec_KEYS.bioLogin, __sec_isChecked(__sec_bioLogin) ? '1' : '0');
+    if (__sec_bioTx) localStorage.setItem(__sec_KEYS.bioTx, __sec_isChecked(__sec_bioTx) ? '1' : '0');
+    if (__sec_balanceSwitch) localStorage.setItem(__sec_KEYS.balance, __sec_isChecked(__sec_balanceSwitch) ? '1' : '0');
+  } catch (e) { /* ignore */ }
+});
+
 
   /* Convert pin/pwd rows to chevron buttons */
   function __sec_convertRowsToChevron() {
