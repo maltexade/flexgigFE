@@ -357,6 +357,8 @@ async function loadUserProfile() {
 
 
 
+
+
 async function openPinModalForReauth() {
   try {
     const res = await fetch('https://api.flexgig.com.ng/api/session', {
@@ -2086,7 +2088,6 @@ payBtn.addEventListener('click', () => {
     const setupPinBtn = document.querySelector('.card.pin'); // Dashboard pin card
     const pinModal = document.getElementById('pinModal');
     const closePinModal = document.getElementById('closePinModal');
-    const securityPinRow = document.getElementById('securityPinRow');
     const accountPinStatus = document.getElementById('accountPinStatus');
 
     if (!pinModal) {
@@ -2111,7 +2112,7 @@ payBtn.addEventListener('click', () => {
     let processing = false; // prevents double submits
 
     // ---------------------
-    // Toast (top-right) system (injects minimal styles & container)
+    // Toast (top-right) system
     // ---------------------
     const toastContainerId = 'flexgig_toast_container';
     function ensureToastStylesAndContainer() {
@@ -2181,7 +2182,6 @@ payBtn.addEventListener('click', () => {
     // Helpers for input UI
     // ---------------------
     function updatePinInputs() {
-      // fill stars for length of currentPin
       pinInputs.forEach((inp, idx) => {
         if (idx < currentPin.length) {
           inp.classList.add('filled');
@@ -2210,7 +2210,7 @@ payBtn.addEventListener('click', () => {
     }
 
     // ---------------------
-    // Server/Session helper for reauth open (unchanged logic)
+    // Server/Session helper
     // ---------------------
     async function openPinModalForReauth() {
       try {
@@ -2244,7 +2244,7 @@ payBtn.addEventListener('click', () => {
     }
 
     // ---------------------
-    // Close/back button logic
+    // Close/back button
     // ---------------------
     if (closePinModal) {
       closePinModal.addEventListener('click', () => {
@@ -2262,7 +2262,7 @@ payBtn.addEventListener('click', () => {
     }
 
     // ---------------------
-    // Input actions (shared)
+    // Input actions
     // ---------------------
     function inputDigit(digit) {
       if (processing) return;
@@ -2283,12 +2283,10 @@ payBtn.addEventListener('click', () => {
     }
 
     // ---------------------
-    // Main completion logic (prevents double submissions)
+    // Completion logic
     // ---------------------
     async function handlePinCompletion() {
-      // Prevent re-entry while processing an async request
       if (processing) return;
-      // small guard — ensure currentPin length = 4 when called
       if (currentPin.length !== 4) return;
 
       if (step === 'create') {
@@ -2311,7 +2309,6 @@ payBtn.addEventListener('click', () => {
           return;
         }
 
-        // submit new PIN
         processing = true;
         try {
           const res = await fetch('https://api.flexgig.com.ng/api/save-pin', {
@@ -2321,19 +2318,15 @@ payBtn.addEventListener('click', () => {
             credentials: 'include',
           });
 
-          if (!res.ok) {
-            throw new Error('Save PIN failed');
-          }
+          if (!res.ok) throw new Error('Save PIN failed');
 
           localStorage.setItem('userPin', currentPin);
           console.log('[dashboard.js] PIN setup successfully:', currentPin);
 
-          // Update UI and close modal once
           const dashboardPinCard = document.getElementById('dashboardPinCard');
           if (dashboardPinCard) dashboardPinCard.style.display = 'none';
           if (accountPinStatus) accountPinStatus.textContent = 'PIN set';
 
-          // Show toast and hide modal (only once)
           showToast('PIN updated successfully', 'success', 2400);
           pinModal.classList.add('hidden');
           resetInputs();
@@ -2366,7 +2359,6 @@ payBtn.addEventListener('click', () => {
           localStorage.setItem('address', user.address || '');
           localStorage.setItem('profilePicture', user.profilePicture || '');
 
-          // Update UI from user (these functions exist in your dashboard)
           if (typeof updateGreetingAndAvatar === 'function') {
             await updateGreetingAndAvatar(user.username, user.fullName?.split(' ')[0]);
           }
@@ -2391,32 +2383,29 @@ payBtn.addEventListener('click', () => {
     }
 
     // ---------------------
-    // Wire keypad buttons (including delete)
+    // Wire keypad buttons
     // ---------------------
     keypadButtons.forEach(btn => {
-      btn.addEventListener('click', (e) => {
+      btn.addEventListener('click', () => {
         const raw = (btn.dataset.value ?? btn.textContent).trim().toLowerCase();
         if (btn.id === 'deleteKey' || raw === 'del' || raw === 'delete' || raw === '⌫') {
           handleDelete();
           return;
         }
-        // digit button
         if (/^[0-9]$/.test(raw)) {
           inputDigit(raw);
         }
       });
     });
 
-    // deleteKey (if selected separately)
     if (deleteKey) {
       deleteKey.addEventListener('click', handleDelete);
     }
 
     // ---------------------
-    // Keyboard handler for desktop
+    // Keyboard handler
     // ---------------------
     document.addEventListener('keydown', (e) => {
-      // Only active when modal visible
       if (pinModal.classList.contains('hidden')) return;
 
       if (/^[0-9]$/.test(e.key)) {
@@ -2429,19 +2418,12 @@ payBtn.addEventListener('click', () => {
     });
 
     // ---------------------
-    // Open modal from dashboard card or security row
+    // Open modal from dashboard card
     // ---------------------
     if (setupPinBtn) {
       setupPinBtn.addEventListener('click', openModalAsCreate);
     }
-    if (securityPinRow) {
-      securityPinRow.addEventListener('click', () => {
-        window.lastPinSource = 'security';
-        openModalAsCreate();
-      });
-    }
 
-    // Debug logs to help trace (remove in production)
     console.log('[PIN] initialized — modal found, inputs:', pinInputs.length, 'keypad buttons:', keypadButtons.length);
   } // end init()
 
@@ -2452,6 +2434,57 @@ payBtn.addEventListener('click', () => {
     init();
   }
 })();
+
+// Elements
+const securityPinRow = document.getElementById("securityPinRow");
+const securityPinModal = document.getElementById("securityPinModal");
+const securityPinClose = document.getElementById("securityPinCloseBtn");
+const changePinForm = document.getElementById("changePinForm");
+const resetPinBtn = document.getElementById("resetPinBtn");
+
+// --- Open modal
+if (securityPinRow) {
+  securityPinRow.addEventListener("click", () => {
+    console.log("[SECURITY PIN] Row clicked, opening modal");
+    securityPinModal.classList.add("active");
+  });
+}
+
+// --- Close modal
+if (securityPinClose) {
+  securityPinClose.addEventListener("click", () => {
+    securityPinModal.classList.remove("active");
+  });
+}
+
+// --- Handle Change PIN
+if (changePinForm) {
+  changePinForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+
+    const currentPin = document.getElementById("currentPin").value.trim();
+    const newPin = document.getElementById("newPin").value.trim();
+    const confirmPin = document.getElementById("confirmPin").value.trim();
+
+    if (newPin !== confirmPin) {
+      alert("New PINs do not match.");
+      return;
+    }
+
+    console.log("[SECURITY PIN] Change PIN submitted", { currentPin, newPin });
+    // TODO: backend call here
+    securityPinModal.classList.remove("active");
+  });
+}
+
+// --- Reset PIN
+if (resetPinBtn) {
+  resetPinBtn.addEventListener("click", () => {
+    console.log("[SECURITY PIN] Reset PIN triggered");
+    alert("Reset process started.");
+  });
+}
+
 
 
 
@@ -3770,6 +3803,9 @@ document.querySelectorAll('.contact-box').forEach(box => {
 
 
 /* ---------- Security modal behavior + WebAuthn integration ---------- */
+/* ---------- Security modal behavior + WebAuthn integration ---------- */
+/* ---------- Security modal behavior + WebAuthn integration ---------- */
+/* ---------- Security modal behavior + WebAuthn integration ---------- */
 (function (supabase) {
   /* Unique-scoped security modal module (prefix __sec_) */
   const __sec_DEBUG = true;
@@ -4398,6 +4434,15 @@ async function startAuthentication(userId) {
       } else {
         __sec_log.w('no close button (#securityCloseBtn) found');
       }
+      if (__sec_closeBtn && __sec_modal) {
+        __sec_closeBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          __sec_log.i('Security modal close button clicked');
+          __sec_modal.classList.remove('show'); // or whatever class shows it
+          __sec_modal.setAttribute('aria-hidden', 'true');
+        });
+      }
+
 
       document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape' && __sec_modal && __sec_modal.classList.contains('active')) {
@@ -4650,6 +4695,7 @@ async function startAuthentication(userId) {
     setTimeout(__sec_boot, 0);
   }
 })(supabaseClient);
+
 
 
 

@@ -1510,6 +1510,125 @@
   margin-bottom: 17px;
 }
 
+/* Modal wrapper */
+.security-pin-modal {
+  position: fixed;
+  inset: 0;
+  background: #0a0a0a;
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  z-index: 10002;
+
+  transform: translateX(-100%);
+  opacity: 0;
+  transition: transform 0.35s ease, opacity 0.25s ease;
+  pointer-events: none;
+}
+.security-pin-modal.active {
+  transform: translateX(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Header */
+.security-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  background: linear-gradient(180deg, rgba(255,255,255,0.05), transparent);
+}
+.security-modal-header h1 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+.security-pin-close {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: #fff;
+  padding: 10px;
+  cursor: pointer;
+  border-radius: 50%;
+}
+
+/* Body */
+.security-modal-body {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.pin-info {
+  font-size: 14px;
+  line-height: 1.4;
+  color: #bbb;
+  background: rgba(255,255,255,0.05);
+  padding: 12px 14px;
+  border-radius: 8px;
+}
+
+/* Form */
+.form-group label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 14px;
+}
+.form-group input {
+  width: 100%;
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.05);
+  color: #fff;
+  font-size: 16px;
+  letter-spacing: 3px;
+  text-align: center;
+}
+
+/* Forgot section */
+.forgot-section {
+  margin-top: 10px;
+  font-size: 14px;
+}
+.link-btn {
+  background: none;
+  border: none;
+  color: #4da6ff;
+  cursor: pointer;
+  font-size: 14px;
+  text-decoration: underline;
+}
+
+/* Actions */
+.form-actions {
+  margin-top: 20px;
+}
+.primary-btn {
+  width: 100%;
+  padding: 12px;
+  border: none;
+  border-radius: 8px;
+  background: #4da6ff;
+  color: #fff;
+  cursor: pointer;
+  font-weight: bold;
+  transition: background 0.25s ease;
+}
+.primary-btn:hover {
+  background: #1a84e0;
+}
+
+
+
 .pin-body p {
   font-size: 1rem;
   margin-bottom: 2rem;
@@ -2153,22 +2272,24 @@ html.dark-mode .theme-toggle .toggle-knob { transform: translateX(20px); }
 .security-modal-header h1 { margin:0; font-size:20px; font-weight:700; color:#fff; }
 .security-modal-close {
   position: absolute;
-  top: 30px;
-  left: 0;              /* stick to extreme left */
-  transform: translateY(-50%);
+  top: 4.5%;
+  left: 0;
+  transform: translateY(-50%); /* keeps it vertically centered */
   background: none;
   border: none;
   color: #fff;
-  padding: 12px;        /* slightly larger click area */
-  border-radius: 0 8px 8px 0; /* round only right side */
+  padding: 14px 16px;         /* bigger tap target for mobile */
+  border-radius: 0 8px 8px 0;
   cursor: pointer;
+  z-index: 10;                /* make sure it’s above header content */
 }
 
 @media (min-width: 768px) {
   .security-modal-close {
-    left: 0; /* extreme left on desktop too */
+    padding: 12px; /* slightly smaller on desktop */
   }
 }
+
 
 .security-modal-close:focus { outline: 2px solid rgba(255,255,255,0.12); }
 
