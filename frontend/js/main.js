@@ -127,6 +127,14 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
     console.error('[main.js] Navigo is not defined.');
     return;
   }
+  // Patch Navigo to ignore modal history states
+window.addEventListener("popstate", (e) => {
+  if (e.state && e.state.modal) {
+    console.log("[DEBUG] Navigo ignored modal popstate", e.state);
+    return; // 🚫 do not let Navigo handle this one
+  }
+});
+
 
   router = new Navigo('/', { hash: false });
   console.log('[DEBUG] main.js: Router initialized', { path: window.location.pathname });

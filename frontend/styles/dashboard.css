@@ -338,6 +338,10 @@
   align-items: center;
   padding-bottom: 12px; /* space for name */
   margin: 0;
+  user-select: none;
+  -webkit-user-select: none;
+  -ms-user-select: none;
+  -webkit-tap-highlight-color: transparent;
 }
 @media (min-width: 468px) {
   .plans-row {
@@ -491,7 +495,7 @@
     visibility: hidden;
     opacity: 0;
     transition: opacity 0.3s ease, visibility 0.3s ease;
-    z-index: 9999;
+    z-index: 999;
   }
   .modal-overlay.active {
     visibility: visible;
@@ -499,9 +503,9 @@
   }
 
   /* Modal sliding up */
-  .modal-content {
+  .plan-modal-content {
     position: relative;
-    top: -12px;
+    top: 10%;
     background-color: #121212;
     color: #fff;
     width: 100%;
@@ -517,7 +521,7 @@
     flex-direction: column;
     overflow-x: hidden;
   }
-  .modal-overlay.active .modal-content {
+  .modal-overlay.active .plan-modal-content {
     transform: translateY(0);
   }
 
@@ -1482,6 +1486,7 @@
 }
 
 .back-btn {
+  top: 4px;
   background: none;
   border: none;
   cursor: pointer;
@@ -1523,7 +1528,7 @@
   transform: translateX(-100%);
   opacity: 0;
   transition: transform 0.35s ease, opacity 0.25s ease;
-  pointer-events: none;
+  pointer-events: auto;
 }
 .security-pin-modal.active {
   transform: translateX(0);
@@ -1544,12 +1549,12 @@
 .security-modal-header h1 {
   margin: 0;
   font-size: 18px;
-  font-weight: 600;
+  font-weight: 700;
 }
 .security-pin-close {
   position: absolute;
   left: 14px;
-  top: 50%;
+  top: 56%;
   transform: translateY(-50%);
   background: none;
   border: none;
@@ -1557,10 +1562,11 @@
   padding: 10px;
   cursor: pointer;
   border-radius: 50%;
+  pointer-events: auto;
 }
 
 /* Body */
-.security-modal-body {
+.security-pin-modal-body {
   padding: 20px;
   display: flex;
   flex-direction: column;
@@ -1577,12 +1583,12 @@
 }
 
 /* Form */
-.form-group label {
+.pin-form-group label {
   display: block;
   margin-bottom: 6px;
   font-size: 14px;
 }
-.form-group input {
+.pin-form-group input {
   width: 100%;
   padding: 10px;
   border-radius: 6px;
@@ -1609,7 +1615,7 @@
 }
 
 /* Actions */
-.form-actions {
+.pin-form-actions {
   margin-top: 20px;
 }
 .primary-btn {
@@ -1734,20 +1740,31 @@
 
 
 
+/* Bottom nav */
 .bottom-nav {
   position: fixed;
   bottom: 0;
   left: 0;
   width: 100%;
-  background: #000; /* black background */
+  height: 60px; /* explicit height */
+  background: #000;
   display: flex;
   justify-content: space-around;
   align-items: center;
-  padding: 10px 0;
-  margin-top: 0;
   border-top: 1px solid #333;
   z-index: 10000;
 }
+
+/* Wrapper content padding to avoid nav overlap */
+.page-content {
+  padding-left: 0;
+  padding-right: 0;
+  padding-top: 0;
+  padding-bottom: 17px; /* nav height + optional spacing */
+  /* Optional: smooth scrolling */
+  overflow-y: auto;
+}
+
 
 .nav-item {
   flex: 1;
@@ -1805,10 +1822,18 @@
   justify-content: center;
 }
 
+
+
+
+.all-modal-title {
+  font-size: 18px !important;
+  font-weight: 700 !important;
+}
+
 .settings-back {
   position: absolute;
   left: 14px;
-  top: 12px;
+  top: 15px;
   border: none;
   background: transparent;
   color: #fff;
@@ -2075,7 +2100,7 @@ html.dark-mode .theme-toggle .toggle-knob { transform: translateX(20px); }
 .help-modal-header .help-modal-close {
   position: absolute;
   left: 1px;
-  top: 50%;
+  top: 54%;
   transform: translateY(-50%);
   background: none;
   border: none;
@@ -2272,7 +2297,7 @@ html.dark-mode .theme-toggle .toggle-knob { transform: translateX(20px); }
 .security-modal-header h1 { margin:0; font-size:20px; font-weight:700; color:#fff; }
 .security-modal-close {
   position: absolute;
-  top: 4.5%;
+  top: 4.05%;
   left: 0;
   transform: translateY(-50%); /* keeps it vertically centered */
   background: none;
@@ -2291,7 +2316,11 @@ html.dark-mode .theme-toggle .toggle-knob { transform: translateX(20px); }
 }
 
 
-.security-modal-close:focus { outline: 2px solid rgba(255,255,255,0.12); }
+#securityModal [data-close]:focus {
+  outline: none;
+  box-shadow: transparent; /* faint glow */
+}
+
 
 /* body */
 .security-modal-body {
@@ -2376,3 +2405,91 @@ html.dark-mode .theme-toggle .toggle-knob { transform: translateX(20px); }
   .security-modal-body { width:720px; margin: 0 auto; }
 }
 
+
+/* Gradient blur loading effect for text and avatar */
+.loading-blur {
+  position: relative;
+  overflow: hidden;
+  color: transparent !important; /* Hide text during loading */
+  background: transparent !important;
+  min-width: 100px; /* Ensure minimum width for text */
+  height: 1.2em; /* Match text height */
+}
+
+.loading-blur.settings-avatar {
+  min-width: 48px; /* Match avatar size */
+  min-height: 48px;
+  border-radius: 50%; /* Keep avatar circular */
+}
+
+.loading-blur::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 200%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    rgba(200, 200, 200, 0.1) 0%,
+    rgba(200, 200, 200, 0.3) 50%,
+    rgba(200, 200, 200, 0.1) 100%
+  );
+  animation: shimmer 1.5s infinite;
+  border-radius: 4px;
+}
+
+.loading-blur.settings-avatar::before {
+  border-radius: 50%; /* Match avatar shape */
+}
+
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* Ensure settings profile layout remains consistent */
+.settings-profile-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-username,
+.settings-email {
+  display: inline-block;
+  min-height: 1.2em; /* Prevent layout shift */
+}
+
+
+
+
+
+
+
+.theme-toggle[aria-pressed="true"] .toggle-knob {
+  transform: translateX(20px);
+}
+
+/* Dark mode styles */
+.dark-mode {
+  background-color: #1a1a1a;
+  color: #ffffff;
+}
+
+.dark-mode .settings-modal {
+  background-color: #2c2c2c;
+}
+
+.dark-mode .settings-content {
+  background-color: #2c2c2c;
+}
+
+.dark-mode .settings-item {
+  background-color: #3a3a3a;
+  color: #ffffff;
+}

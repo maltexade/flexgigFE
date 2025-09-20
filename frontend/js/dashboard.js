@@ -571,11 +571,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const continueBtn = document.getElementById('continueBtn');
   const phoneInput = document.getElementById('phone-input');
   const contactBtn = document.querySelector('.contact-btn');
-  const modal = document.getElementById('allPlansModal');
+  const allPlansModal = document.getElementById('allPlansModal');
   const openBtn = document.querySelector('.see-all-plans');
-  const closeBtn = modal.querySelector('.close-btn');
-  const modalContent = modal.querySelector('.modal-content');
-  const pullHandle = modal.querySelector('.pull-handle');
+  const allPlansModalContent = allPlansModal.querySelector('.plan-modal-content');
+  const pullHandle = allPlansModal.querySelector('.pull-handle');
   const slider = document.querySelector('.provider-grid .slider');
 
   // --- DEBOUNCE FUNCTION ---
@@ -666,27 +665,31 @@ function formatNigeriaNumber(phone, isInitialDigit = false, isPaste = false) {
     return !!plansRow.querySelector('.plan-box.selected');
   }
 
-  // --- STATE PERSISTENCE ---
   function saveUserState() {
     const activeProvider = providerClasses.find(cls => slider.classList.contains(cls));
     const selectedPlan = plansRow.querySelector('.plan-box.selected');
     const phoneNumber = phoneInput.value;
-    const rawNumber = normalizePhone(phoneNumber); // Normalize before saving
+    const rawNumber = normalizePhone(phoneNumber);
+
     if (!rawNumber) {
       console.warn('[WARN] saveUserState: Invalid phone number:', phoneNumber);
+      // Do not save invalid phone numbers
     }
+
     localStorage.setItem('userState', JSON.stringify({
       provider: activeProvider || '',
       planId: selectedPlan ? selectedPlan.getAttribute('data-id') : '',
-      number: rawNumber || phoneNumber, // Fallback to formatted if invalid
+      number: rawNumber || '',   // Save empty string instead of invalid
       serviceIdx: [...serviceItems].findIndex(el => el.classList.contains('active')),
     }));
-    console.log('[DEBUG] saveUserState: Saved state:', { 
-      provider: activeProvider, 
-      planId: selectedPlan?.getAttribute('data-id'), 
-      number: rawNumber || phoneNumber 
+
+    console.log('[DEBUG] saveUserState: Saved state:', {
+      provider: activeProvider,
+      planId: selectedPlan ? selectedPlan.getAttribute('data-id') : '',
+      number: rawNumber,
     });
   }
+
 
   // --- CUSTOM SMOOTH SCROLL ---
   function smoothScroll(element, target, duration) {
@@ -820,7 +823,7 @@ function formatNigeriaNumber(phone, isInitialDigit = false, isPaste = false) {
         plan.classList.remove(...providerClasses);
         if (plan.classList.contains('selected')) plan.classList.add(providerClass);
       });
-      modal.querySelectorAll('.plan-box.selected').forEach(p => p.classList.remove('selected', ...providerClasses));
+      allPlansModal.querySelectorAll('.plan-box.selected').forEach(p => p.classList.remove('selected', ...providerClasses));
 
       renderDashboardPlans(providerClass);
       renderModalPlans(providerClass);
@@ -881,97 +884,97 @@ function formatNigeriaNumber(phone, isInitialDigit = false, isPaste = false) {
   }
 
   // --- RENDER MODAL PLANS ---
-  function renderModalPlans(activeProvider) {
-    const modal = document.getElementById('allPlansModal');
-    if (!modal) return;
+function renderModalPlans(activeProvider) {
+  const allPlansModal = document.getElementById('allPlansModal');
+  if (!allPlansModal) return;
 
-    const sectionMap = [
-      { provider: 'mtn', subType: 'awoof', plans: mtnAwoofPlans, title: 'MTN AWOOF', svg: svgShapes.mtn },
-      { provider: 'mtn', subType: 'gifting', plans: mtnGiftingPlans, title: 'MTN GIFTING', svg: svgShapes.mtn },
-      { provider: 'airtel', subType: 'awoof', plans: airtelAwoofPlans, title: 'AIRTEL AWOOF', svg: svgShapes.airtel },
-      { provider: 'airtel', subType: 'cg', plans: airtelCgPlans, title: 'AIRTEL CG', svg: svgShapes.airtel },
-      { provider: 'glo', subType: 'cg', plans: gloCgPlans, title: 'GLO CG', svg: svgShapes.glo },
-      { provider: 'glo', subType: 'gifting', plans: gloGiftingPlans, title: 'GLO GIFTING', svg: svgShapes.glo },
-      { provider: 'ninemobile', subType: '', plans: ninemobilePlans, title: '9MOBILE', svg: svgShapes.ninemobile }
-    ];
+  const sectionMap = [
+    { provider: 'mtn', subType: 'awoof', plans: mtnAwoofPlans, title: 'MTN AWOOF', svg: svgShapes.mtn },
+    { provider: 'mtn', subType: 'gifting', plans: mtnGiftingPlans, title: 'MTN GIFTING', svg: svgShapes.mtn },
+    { provider: 'airtel', subType: 'awoof', plans: airtelAwoofPlans, title: 'AIRTEL AWOOF', svg: svgShapes.airtel },
+    { provider: 'airtel', subType: 'cg', plans: airtelCgPlans, title: 'AIRTEL CG', svg: svgShapes.airtel },
+    { provider: 'glo', subType: 'cg', plans: gloCgPlans, title: 'GLO CG', svg: svgShapes.glo },
+    { provider: 'glo', subType: 'gifting', plans: gloGiftingPlans, title: 'GLO GIFTING', svg: svgShapes.glo },
+    { provider: 'ninemobile', subType: '', plans: ninemobilePlans, title: '9MOBILE', svg: svgShapes.ninemobile }
+  ];
 
-    const awoofSection = modal.querySelector('.plan-section.awoof-section');
-    const giftingSection = modal.querySelector('.plan-section.gifting-section');
+  const awoofSection = allPlansModal.querySelector('.plan-section.awoof-section');
+  const giftingSection = allPlansModal.querySelector('.plan-section.gifting-section');
 
-    if (giftingSection) {
-      giftingSection.style.display = activeProvider === 'ninemobile' ? 'none' : 'block';
-      console.log(`[DEBUG] renderModalPlans: Gifting section display set to ${giftingSection.style.display} for provider ${activeProvider}`);
-    }
-    if (awoofSection) {
-      awoofSection.style.display = 'block';
-      console.log(`[DEBUG] renderModalPlans: Awoof section display set to ${awoofSection.style.display} for provider ${activeProvider}`);
-    }
-
-    const providerSections = sectionMap.filter(s => s.provider === activeProvider);
-
-    if (providerSections.length >= 1 && awoofSection) {
-      const { provider, subType, plans, title, svg } = providerSections[0];
-      awoofSection.setAttribute('data-provider', provider);
-      const grid = awoofSection.querySelector('.plans-grid');
-      if (grid) {
-        grid.innerHTML = '';
-        plans.forEach(plan => {
-          const box = document.createElement('div');
-          box.className = `plan-box ${provider}`;
-          box.setAttribute('data-id', generatePlanId(provider, subType, plan));
-          box.innerHTML = `
-            <div class="plan-amount">₦${plan.price}</div>
-            <div class="plan-data">${plan.data}</div>
-            <div class="plan-days">${plan.duration}</div>
-          `;
-          grid.appendChild(box);
-        });
-      }
-      const header = awoofSection.querySelector('.section-header');
-      if (header) {
-        const existingSvg = header.querySelector('svg');
-        if (existingSvg) existingSvg.remove();
-        header.insertAdjacentHTML('afterbegin', svg);
-        const h2 = header.querySelector('h2');
-        if (h2) h2.textContent = title;
-      }
-      console.log(`[DEBUG] renderModalPlans: Rendered ${title} section for ${provider}`);
-    }
-
-    if (providerSections.length >= 2 && giftingSection) {
-      const { provider, subType, plans, title, svg } = providerSections[1];
-      giftingSection.setAttribute('data-provider', provider);
-      const grid = giftingSection.querySelector('.plans-grid');
-      if (grid) {
-        grid.innerHTML = '';
-        plans.forEach(plan => {
-          const box = document.createElement('div');
-          box.className = `plan-box ${provider}`;
-          box.setAttribute('data-id', generatePlanId(provider, subType, plan));
-          box.innerHTML = `
-            <div class="plan-amount">₦${plan.price}</div>
-            <div class="plan-data">${plan.data}</div>
-            <div class="plan-days">${plan.duration}</div>
-          `;
-          grid.appendChild(box);
-        });
-      }
-      const header = giftingSection.querySelector('.section-header');
-      if (header) {
-        const existingSvg = header.querySelector('svg');
-        if (existingSvg) existingSvg.remove();
-        header.insertAdjacentHTML('afterbegin', svg);
-        const h2 = header.querySelector('h2');
-        if (h2) h2.textContent = title;
-      }
-      console.log(`[DEBUG] renderModalPlans: Rendered ${title} section for ${provider}`);
-    }
+  if (giftingSection) {
+    giftingSection.style.display = activeProvider === 'ninemobile' ? 'none' : 'block';
   }
+  if (awoofSection) {
+    awoofSection.style.display = 'block';
+  }
+
+  const providerSections = sectionMap.filter(s => s.provider === activeProvider);
+
+  // Render first section (awoof/cg/…)
+  if (providerSections.length >= 1 && awoofSection) {
+    const { provider, subType, plans, title, svg } = providerSections[0];
+    fillPlanSection(awoofSection, provider, subType, plans, title, svg);
+  }
+
+  // Render second section (gifting/…)
+  if (providerSections.length >= 2 && giftingSection) {
+    const { provider, subType, plans, title, svg } = providerSections[1];
+    fillPlanSection(giftingSection, provider, subType, plans, title, svg);
+  }
+
+  console.log(`[DEBUG] renderModalPlans: Populated modal sections for ${activeProvider}`);
+}
+
+// helper: fill a modal section
+function fillPlanSection(sectionEl, provider, subType, plans, title, svg) {
+  sectionEl.setAttribute('data-provider', provider);
+  const grid = sectionEl.querySelector('.plans-grid');
+  if (grid) {
+    grid.innerHTML = '';
+    plans.forEach(plan => {
+      const box = document.createElement('div');
+      box.className = `plan-box ${provider}`;
+      box.setAttribute('data-id', generatePlanId(provider, subType, plan));
+      box.innerHTML = `
+        <div class="plan-amount">₦${plan.price}</div>
+        <div class="plan-data">${plan.data}</div>
+        <div class="plan-days">${plan.duration}</div>
+      `;
+      grid.appendChild(box);
+    });
+  }
+  const header = sectionEl.querySelector('.section-header');
+  if (header) {
+    const existingSvg = header.querySelector('svg');
+    if (existingSvg) existingSvg.remove();
+    header.insertAdjacentHTML('afterbegin', svg);
+    const h2 = header.querySelector('h2');
+    if (h2) h2.textContent = title;
+  }
+}
+const seeAllBtn = document.querySelector('.see-all-plans');
+if (seeAllBtn) {
+  seeAllBtn.addEventListener('click', () => {
+    if (window.ModalManager && typeof ModalManager.openModal === 'function') {
+      ModalManager.openModal('allPlansModal');
+      console.log('[DEBUG] See All Plans: Modal opened via ModalManager');
+    } else {
+      if (allPlansModal) {
+        allPlansModal.classList.remove('hidden');
+        allPlansModal.classList.add('active');
+        allPlansModal.style.display = 'flex';
+        allPlansModal.setAttribute('aria-hidden', 'false');
+      }
+    }
+  });
+}
+
+
 
   // --- LOG PLAN IDs ---
   function logPlanIDs() {
     const dashboardPlanIDs = Array.from(plansRow.querySelectorAll('.plan-box')).map(p => p.getAttribute('data-id'));
-    const modalPlanIDs = Array.from(modal.querySelectorAll('.plan-box')).map(p => p.getAttribute('data-id'));
+    const modalPlanIDs = Array.from(allPlansModal.querySelectorAll('.plan-box')).map(p => p.getAttribute('data-id'));
     console.log('[RAW LOG] Dashboard plan IDs:', dashboardPlanIDs);
     console.log('[RAW LOG] Modal plan IDs:', modalPlanIDs);
   }
@@ -991,26 +994,26 @@ function formatNigeriaNumber(phone, isInitialDigit = false, isPaste = false) {
       console.log('[RAW LOG] No dashboard plan found for id:', id);
     }
 
-    const modalPlan = modal.querySelector(`.plan-box[data-id="${id}"]`);
+    const modalPlan = allPlansModal.querySelector(`.plan-box[data-id="${id}"]`);
     if (modalPlan) {
       modalPlan.classList.add('selected', activeProvider);
       console.log('[RAW LOG] Modal plan selected for id:', id, modalPlan.textContent.trim());
     } else {
       console.log('[RAW LOG] No modal plan found for id:', id);
-      const allModalPlans = Array.from(modal.querySelectorAll('.plan-box'));
+      const allModalPlans = Array.from(allPlansModal.querySelectorAll('.plan-box'));
       console.log('[RAW LOG] Modal plan IDs:', allModalPlans.map(p => p.getAttribute('data-id')));
     }
 
     document.querySelectorAll('.plan-box').forEach(p => {
       const amount = p.querySelector('.plan-amount');
-      if (amount && !p.closest('.modal-content')) {
+      if (amount && !p.closest('.plan-modal-content')) {
         if (p.classList.contains('selected')) {
           amount.classList.add('plan-price');
         } else {
           amount.classList.remove('plan-price');
         }
       }
-      if (amount && p.closest('.modal-content')) {
+      if (amount && p.closest('.plan-modal-content')) {
         amount.classList.remove('plan-price');
         amount.classList.add('plan-amount');
       }
@@ -1032,7 +1035,7 @@ function formatNigeriaNumber(phone, isInitialDigit = false, isPaste = false) {
   function handlePlanClick(e) {
     const plan = e.currentTarget;
     const id = plan.getAttribute('data-id');
-    const isModalClick = plan.closest('.modal-content');
+    const isModalClick = plan.closest('.plan-modal-content');
     const activeProvider = providerClasses.find(cls => slider.classList.contains(cls));
 
     const dashPlan = plansRow.querySelector(`.plan-box[data-id="${id}"]`);
@@ -1121,10 +1124,10 @@ function formatNigeriaNumber(phone, isInitialDigit = false, isPaste = false) {
     const dashSelected = plansRow.querySelector('.plan-box.selected');
     const activeProvider = providerClasses.find(cls => slider.classList.contains(cls));
 
-    modalContent.scrollTop = 0;
+    allPlansModalContent.scrollTop = 0;
     console.log('[DEBUG] openModal: Scroll position reset to top for provider:', activeProvider);
-    const awoofSection = modal.querySelector('.plan-section.awoof-section');
-    const giftingSection = modal.querySelector('.plan-section.gifting-section');
+    const awoofSection = allPlansModal.querySelector('.plan-section.awoof-section');
+    const giftingSection = allPlansModal.querySelector('.plan-section.gifting-section');
     if (giftingSection) {
       giftingSection.style.display = activeProvider === 'ninemobile' ? 'none' : 'block';
       console.log(`[DEBUG] openModal: Gifting section display set to ${giftingSection.style.display} for provider ${activeProvider}`);
@@ -1136,24 +1139,24 @@ function formatNigeriaNumber(phone, isInitialDigit = false, isPaste = false) {
 
     if (dashSelected) {
       const id = dashSelected.getAttribute('data-id');
-      modal.querySelectorAll('.plan-box.selected').forEach(p => p.classList.remove('selected'));
-      const modalPlan = modal.querySelector(`.plan-box[data-id="${id}"]`);
+      allPlansModal.querySelectorAll('.plan-box.selected').forEach(p => p.classList.remove('selected'));
+      const modalPlan = allPlansModal.querySelector(`.plan-box[data-id="${id}"]`);
       if (modalPlan) {
         modalPlan.classList.add('selected');
         console.log('[RAW LOG] Modal plan selected on openModal. Plan ID:', id, 'Text:', modalPlan.textContent.trim());
       } else {
         console.log('[RAW LOG] openModal: No matching modal plan for ID', id);
-        const allModalPlans = Array.from(modal.querySelectorAll('.plan-box'));
+        const allModalPlans = Array.from(allPlansModal.querySelectorAll('.plan-box'));
         console.log('[RAW LOG] openModal: Modal plan IDs:', allModalPlans.map(p => p.getAttribute('data-id')));
       }
     }
-    modal.classList.add('active');
-    modal.setAttribute('aria-hidden', 'false');
+    allPlansModal.classList.add('active');
+    allPlansModal.setAttribute('aria-hidden', 'false');
     document.body.classList.add('modal-open');
-    modal.focus();
+    allPlansModal.focus();
     history.pushState({ popup: true }, '', location.href);
     setTimeout(() => {
-      const modalSelected = modal.querySelector('.plan-box.selected');
+      const modalSelected = allPlansModal.querySelector('.plan-box.selected');
       if (modalSelected) {
         modalSelected.scrollIntoView({ behavior: 'smooth', block: 'center' });
         console.log('[RAW LOG] Modal auto-scrolled to selected plan:', modalSelected.textContent.trim());
@@ -1163,10 +1166,10 @@ function formatNigeriaNumber(phone, isInitialDigit = false, isPaste = false) {
 
   // --- CLOSE PLANS MODAL ---
   function closeModal() {
-    modal.classList.remove('active');
-    modal.setAttribute('aria-hidden', 'true');
+    allPlansModal.classList.remove('active');
+    allPlansModal.setAttribute('aria-hidden', 'true');
     document.body.classList.remove('modal-open');
-    modalContent.style.transform = 'translateY(0)';
+    allPlansModalContent.style.transform = 'translateY(0)';
     if (history.state && history.state.popup) history.back();
   }
 
@@ -1236,49 +1239,49 @@ function formatNigeriaNumber(phone, isInitialDigit = false, isPaste = false) {
 
   // --- OPEN CHECKOUT MODAL ---
   function openCheckoutModal() {
-    const modal = document.getElementById('checkoutModal');
-    if (!modal) {
+    const checkoutModal = document.getElementById('checkoutModal');
+    if (!checkoutModal) {
       console.error('[ERROR] openCheckoutModal: #checkoutModal not found in DOM');
       return;
     }
-    const modalContent = modal.querySelector('.modal-content');
-    if (!modalContent) {
+    const checkoutModalContent = checkoutModal.querySelector('.modal-content');
+    if (!checkoutModalContent) {
       console.error('[ERROR] openCheckoutModal: .modal-content not found');
       return;
     }
-    modal.style.display = 'none';
-    modal.classList.remove('active');
-    modalContent.style.transform = 'translateY(0)';
+    checkoutModal.style.display = 'none';
+    checkoutModal.classList.remove('active');
+    checkoutModalContent.style.transform = 'translateY(0)';
     renderCheckoutModal();
     setTimeout(() => {
-      modal.style.display = 'flex';
-      modal.classList.add('active');
-      modal.setAttribute('aria-hidden', 'false');
+      checkoutModal.style.display = 'flex';
+      checkoutModal.classList.add('active');
+      checkoutModal.setAttribute('aria-hidden', 'false');
       document.body.classList.add('modal-open');
-      modal.focus();
+      checkoutModal.focus();
       history.pushState({ popup: true }, '', location.href);
-      console.log('[DEBUG] openCheckoutModal: Modal opened, display:', modal.style.display, 'active:', modal.classList.contains('active'));
+      console.log('[DEBUG] openCheckoutModal: Modal opened, display:', checkoutModal.style.display, 'active:', checkoutModal.classList.contains('active'));
     }, 50);
   }
 
   // --- CLOSE CHECKOUT MODAL ---
   function closeCheckoutModal() {
-    const modal = document.getElementById('checkoutModal');
-    if (!modal) {
+    const checkoutModal = document.getElementById('checkoutModal');
+    if (!checkoutModal) {
       console.error('[ERROR] closeCheckoutModal: #checkoutModal not found');
       return;
     }
-    const modalContent = modal.querySelector('.modal-content');
-    modal.classList.remove('active');
-    modal.style.display = 'none';
-    modal.setAttribute('aria-hidden', 'true');
+    const checkoutModalContent = checkoutModal.querySelector('.modal-content');
+    checkoutModal.classList.remove('active');
+    checkoutModal.style.display = 'none';
+    checkoutModal.setAttribute('aria-hidden', 'true');
     document.body.classList.remove('modal-open');
-    modalContent.style.transform = 'translateY(100%)';
+    checkoutModalContent.style.transform = 'translateY(100%)';
     if (history.state && history.state.popup) {
       history.back();
       console.log('[DEBUG] closeCheckoutModal: History state popped');
     }
-    console.log('[DEBUG] closeCheckoutModal: Modal closed, display:', modal.style.display, 'active:', modal.classList.length);
+    console.log('[DEBUG] closeCheckoutModal: Modal closed, display:', checkoutModal.style.display, 'active:', checkoutModal.classList.length);
   }
 
   // --- SERVICE SELECTION ---
@@ -1552,9 +1555,8 @@ phoneInput.maxLength = 13;  // 11 digits + 2 spaces in formatted value
 
   // --- MODAL EVENT LISTENERS ---
   openBtn.addEventListener('click', openModal);
-  closeBtn.addEventListener('click', closeModal);
-  modal.addEventListener('click', e => {
-    if (e.target === modal) closeModal();
+ allPlansModal.addEventListener('click', e => {
+    if (e.target === allPlansModal) closeModal();
   });
   window.addEventListener('keydown', e => {
     if (e.key === 'Escape') closeModal();
@@ -1564,11 +1566,11 @@ phoneInput.maxLength = 13;  // 11 digits + 2 spaces in formatted value
   const pullThreshold = 120;
 
   function handleTouchStart(e) {
-    if (modalContent.scrollTop > 0) return;
+    if (allPlansModalContent.scrollTop > 0) return;
     dragging = true;
     startY = e.touches[0].clientY;
     translateY = 0;
-    modalContent.style.transition = 'none';
+    allPlansModalContent.style.transition = 'none';
   }
 
   function handleTouchMove(e) {
@@ -1578,7 +1580,7 @@ phoneInput.maxLength = 13;  // 11 digits + 2 spaces in formatted value
     if (diff > 0) {
       let resistance = diff < 60 ? 1 : diff < 120 ? 0.8 : 0.6;
       translateY = diff * resistance;
-      modalContent.style.transform = `translateY(${translateY}px)`;
+      allPlansModalContent.style.transform = `translateY(${translateY}px)`;
       e.preventDefault();
     }
   }
@@ -1586,21 +1588,21 @@ phoneInput.maxLength = 13;  // 11 digits + 2 spaces in formatted value
   function handleTouchEnd() {
     if (!dragging) return;
     dragging = false;
-    modalContent.style.transition = 'transform 0.25s cubic-bezier(0.22, 1, 0.36, 1)';
+    allPlansModalContent.style.transition = 'transform 0.25s cubic-bezier(0.22, 1, 0.36, 1)';
     if (translateY > pullThreshold) {
-      modalContent.style.transform = `translateY(100%)`;
+      allPlansModalContent.style.transform = `translateY(100%)`;
       setTimeout(closeModal, 200);
     } else {
-      modalContent.style.transform = 'translateY(0)';
+      allPlansModalContent.style.transform = 'translateY(0)';
     }
   }
 
   pullHandle?.addEventListener('touchstart', handleTouchStart);
   pullHandle?.addEventListener('touchmove', handleTouchMove, { passive: false });
   pullHandle?.addEventListener('touchend', handleTouchEnd);
-  modalContent.addEventListener('touchstart', handleTouchStart);
-  modalContent.addEventListener('touchmove', handleTouchMove, { passive: false });
-  modalContent.addEventListener('touchend', handleTouchEnd);
+  allPlansModalContent.addEventListener('touchstart', handleTouchStart);
+  allPlansModalContent.addEventListener('touchmove', handleTouchMove, { passive: false });
+  allPlansModalContent.addEventListener('touchend', handleTouchEnd);
 
   // --- TRANSACTIONS RENDERING ---
 // --- TRANSACTIONS RENDERING ---
@@ -2435,6 +2437,10 @@ payBtn.addEventListener('click', () => {
   }
 })();
 
+
+// --- SECURITY PIN MODAL ---
+// --- SECURITY PIN MODAL ---
+// --- SECURITY PIN MODAL ---
 // Elements
 const securityPinRow = document.getElementById("securityPinRow");
 const securityPinModal = document.getElementById("securityPinModal");
@@ -2442,13 +2448,6 @@ const securityPinClose = document.getElementById("securityPinCloseBtn");
 const changePinForm = document.getElementById("changePinForm");
 const resetPinBtn = document.getElementById("resetPinBtn");
 
-// --- Open modal
-if (securityPinRow) {
-  securityPinRow.addEventListener("click", () => {
-    console.log("[SECURITY PIN] Row clicked, opening modal");
-    securityPinModal.classList.add("active");
-  });
-}
 
 // --- Close modal
 if (securityPinClose) {
@@ -3586,7 +3585,7 @@ if (profilePictureInput && profilePicturePreview) {
   const settingsBtn = document.getElementById('settingsBtn');
   const settingsModal = document.getElementById('settingsModal');
   const settingsBack = document.getElementById('settingsBack');
-  const closeSettings = document.getElementById('closeSettings'); // may be absent; back button will close
+  const closeSettings = document.getElementById('closeSettings');
   const openUpdateProfile = document.getElementById('openUpdateProfile');
   const logoutBtnModal = document.getElementById('logoutBtnModal');
   const helpSupportBtn = document.getElementById('helpSupportBtn');
@@ -3603,12 +3602,17 @@ if (profilePictureInput && profilePicturePreview) {
   function showModal() {
     settingsModal.style.display = 'flex';
     document.documentElement.style.overflow = 'hidden';
+    document.body.style.overflow = 'hidden'; // Ensure body is also locked
     if (settingsBtn) settingsBtn.classList.add('active');
+    console.log('[SettingsModal] showModal: Modal opened, scroll locked');
   }
+
   function hideModal() {
     settingsModal.style.display = 'none';
-    document.documentElement.style.overflow = '';
+    document.documentElement.style.overflow = ''; // Restore scroll
+    document.body.style.overflow = ''; // Ensure body scroll is restored
     if (settingsBtn) settingsBtn.classList.remove('active');
+    console.log('[SettingsModal] hideModal: Modal closed, scroll restored');
   }
 
   // button → open
@@ -3619,75 +3623,103 @@ if (profilePictureInput && profilePicturePreview) {
   if (closeSettings) closeSettings.addEventListener('click', hideModal);
 
   // prevent closing when clicking inside modal content
-  const modalContent = modal.querySelector('.settings-content');
-  if (modalContent) {
-    modalContent.addEventListener('click', (e) => e.stopPropagation());
+  const settingsModalContent = settingsModal.querySelector('.settings-content');
+  if (settingsModalContent) {
+    settingsModalContent.addEventListener('click', (e) => e.stopPropagation());
   }
 
   // close on outside click
-  modal.addEventListener('click', (e) => {
-    if (e.target === modal) hideModal();
+  settingsModal.addEventListener('click', (e) => {
+    if (e.target === settingsModal) hideModal();
+  });
+
+  // Ensure scroll is restored if modal is hidden by external means (e.g., modalManager.js)
+  const observer = new MutationObserver((mutations) => {
+    mutations.forEach((mutation) => {
+      if (
+        mutation.attributeName === 'style' &&
+        settingsModal.style.display === 'none'
+      ) {
+        document.documentElement.style.overflow = '';
+        document.body.style.overflow = '';
+        console.log(
+          '[SettingsModal] MutationObserver: Modal hidden externally, scroll restored'
+        );
+      }
+    });
+  });
+  observer.observe(settingsModal, { attributes: true, attributeFilter: ['style'] });
+
+  // Handle browser back button or modalManager.js closing
+  window.addEventListener('popstate', () => {
+    if (settingsModal.style.display === 'flex') {
+      hideModal();
+      console.log('[SettingsModal] popstate: Modal closed due to back navigation');
+    }
   });
 
   // populate user info
   async function loadProfileToSettings() {
     try {
-        let profile;
-        // Try fetching from API
+      let profile;
+      try {
+        const resp = await fetch('https://api.flexgig.com.ng/api/profile', {
+          credentials: 'include',
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('authToken') || ''}`,
+          },
+        });
+        let rawText = await resp.text();
         try {
-            const resp = await fetch('https://api.flexgig.com.ng/api/profile', {
-                credentials: 'include',
-                headers: {
-                    'Authorization': `Bearer ${localStorage.getItem('authToken') || ''}`
-                }
-            });
-            let rawText = await resp.text();
-            try {
-                profile = rawText ? JSON.parse(rawText) : {};
-            } catch (e) {
-                console.warn('[WARN] loadProfileToSettings: Response is not valid JSON', rawText);
-            }
+          profile = rawText ? JSON.parse(rawText) : {};
         } catch (e) {
-            console.warn('[WARN] Profile fetch failed, falling back to local', e);
+          console.warn('[WARN] loadProfileToSettings: Response is not valid JSON', rawText);
         }
+      } catch (e) {
+        console.warn('[WARN] Profile fetch failed, falling back to local', e);
+      }
 
-        // Fallback to localStorage
-        if (!profile) {
-            profile = {
-                profilePicture: localStorage.getItem('profilePicture') || '',
-                username: localStorage.getItem('username') || '',
-                fullName: localStorage.getItem('fullName') || '',
-                firstName: localStorage.getItem('firstName') || '',
-                email: localStorage.getItem('userEmail') || ''
-            };
-        }
+      if (!profile) {
+        profile = {
+          profilePicture: localStorage.getItem('profilePicture') || '',
+          username: localStorage.getItem('username') || '',
+          fullName: localStorage.getItem('fullName') || '',
+          firstName: localStorage.getItem('firstName') || '',
+          email: localStorage.getItem('userEmail') || '',
+        };
+      }
 
-        // Ensure elements exist
-        const settingsAvatar = document.getElementById('settingsAvatar');
-        const settingsUsername = document.getElementById('settingsUsername');
-        const settingsEmail = document.getElementById('settingsEmail');
+      if (!settingsAvatar || !settingsUsername || !settingsEmail) {
+        console.error('[ERROR] loadProfileToSettings: Missing DOM elements');
+        return;
+      }
 
-        if (!settingsAvatar || !settingsUsername || !settingsEmail) {
-            console.error('[ERROR] loadProfileToSettings: Missing DOM elements');
-            return;
-        }
+      const avatarUrl =
+        profile.profilePicture ||
+        profile.profile_picture ||
+        profile.avatar_url ||
+        '/frontend/img/avatar-placeholder.png';
+      settingsAvatar.src = avatarUrl.startsWith('/')
+        ? `${location.protocol}//${location.host}${avatarUrl}`
+        : avatarUrl;
 
-        // Set profile picture
-        const avatarUrl = profile.profilePicture || profile.profile_picture || profile.avatar_url || '/frontend/img/avatar-placeholder.png';
-        settingsAvatar.src = avatarUrl.startsWith('/') ? `${location.protocol}//${location.host}${avatarUrl}` : avatarUrl;
+      const displayName =
+        profile.username ||
+        profile.firstName ||
+        profile.fullName ||
+        (profile.email ? profile.email.split('@')[0] : 'Loading...');
+      settingsUsername.textContent = displayName;
+      settingsEmail.textContent = profile.email || 'Loading...';
 
-        // Set username or full name
-        const displayName = profile.username || profile.firstName || profile.fullName || (profile.email ? profile.email.split('@')[0] : 'Loading...');
-        settingsUsername.textContent = displayName;
-
-        // Set email
-        settingsEmail.textContent = profile.email || 'Loading...';
-
-        console.log('[DEBUG] loadProfileToSettings: Loaded', { avatarUrl, displayName, email: profile.email });
+      console.log('[DEBUG] loadProfileToSettings: Loaded', {
+        avatarUrl,
+        displayName,
+        email: profile.email,
+      });
     } catch (err) {
-        console.error('[ERROR] Failed to load profile to settings', err);
+      console.error('[ERROR] Failed to load profile to settings', err);
     }
-}
+  }
 
   loadProfileToSettings();
 
@@ -3695,27 +3727,28 @@ if (profilePictureInput && profilePicturePreview) {
   if (openUpdateProfile) {
     openUpdateProfile.addEventListener('click', () => {
       lastModalSource = 'settings';
-      openUpdateProfileModal(); // Directly open updateProfileModal
-      // Remove the hideModal() and profileOpenBtn logic
+      openUpdateProfileModal();
+      hideModal(); // Ensure scroll is restored when opening another modal
     });
   }
 
   // Get the profile open button and update profile modal
   const profileOpenBtn = document.getElementById('profileopenbtn');
   if (profileOpenBtn) {
-    const updateProfileModal = new bootstrap.Modal(document.getElementById('updateprofile'));
+    const updateProfileModal = new bootstrap.Modal(
+      document.getElementById('updateprofile')
+    );
     profileOpenBtn.addEventListener('click', function () {
       updateProfileModal.show();
+      hideModal(); // Ensure scroll is restored
     });
   }
 
-
-
-
   // Referrals
-  if (referralsBtn) referralsBtn.addEventListener('click', () => {
-    window.location.href = '/referrals.html';
-  });
+  if (referralsBtn)
+    referralsBtn.addEventListener('click', () => {
+      window.location.href = '/referrals.html';
+    });
 
   // Logout (modal)
   if (logoutBtnModal) {
@@ -3754,12 +3787,12 @@ if (profilePictureInput && profilePicturePreview) {
 
   // when the modal opens, refresh profile
   const obs = new MutationObserver(() => {
-    if (modal.style.display === 'flex') loadProfileToSettings();
+    if (settingsModal.style.display === 'flex') loadProfileToSettings();
   });
-  obs.observe(modal, { attributes: true, attributeFilter: ['style'] });
+  obs.observe(settingsModal, { attributes: true, attributeFilter: ['style'] });
 })();
 
-// Help & Support (inside settings modal)
+// ---------- Help & Support (inside settings modal) ----------
 const helpSupportBtn = document.getElementById('helpSupportBtn');
 const helpSupportModal = document.getElementById('helpSupportModal');
 const helpCloseBtn = helpSupportModal?.querySelector('.help-modal-close');
@@ -3779,7 +3812,6 @@ if (helpSupportBtn && helpSupportModal) {
 if (helpCloseBtn) {
   helpCloseBtn.addEventListener('click', () => {
     console.log('Help & Support closed');
-
     helpSupportModal.classList.remove('active');
     document.body.classList.remove('modal-open');
 
@@ -3797,9 +3829,11 @@ helpSupportModal?.addEventListener('click', (e) => {
   }
 });
 
-document.querySelectorAll('.contact-box').forEach(box => {
-  box.addEventListener('contextmenu', e => e.preventDefault());
+// disable right-click on contact boxes
+document.querySelectorAll('.contact-box').forEach((box) => {
+  box.addEventListener('contextmenu', (e) => e.preventDefault());
 });
+
 
 
 /* ---------- Security modal behavior + WebAuthn integration ---------- */

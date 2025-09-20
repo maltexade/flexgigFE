@@ -16,11 +16,7 @@
 
 </head>
 <body>
-  <div id="loader-overlay" class="hidden">
-    <div class="loader-logo">
-      <img src="path/to/your/logo.png" alt="Loading...">
-    </div>
-  </div>
+
 
   <div id="content">
     <header>
@@ -40,6 +36,8 @@
     </header>
   </div>
 
+  <main class="page-content">
+
   <main>
     <!-- dashboard.html -->
     <div id="profileUpdateNotification" class="profile-update-notification" role="alert">
@@ -48,49 +46,51 @@
     <div id="userProfileDashboardContent" class="user-profile-dashboard-content active">
       <div class="stack">
         <!-- Setup Pin -->
-        <div data-close class="card pin" id="dashboardPinCard">
-          <div style="display:flex;gap:12px;align-items:center">
-            <div class="icon-wrap" aria-hidden>
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-                <path d="M12 2L4 5v6c0 5.25 3.84 9.74 8 11 4.16-1.26 8-5.75 8-11V5l-8-3z" fill="#FFD700" opacity="0.95"/>
-                <rect x="9" y="10" width="6" height="5" rx="1" fill="#021827"/>
-              </svg>
-            </div>
-            <div>
-              <h4>Setup Pin</h4>
-              <p>Secure your account</p>
-            </div>
+        <div class="card pin" id="dashboardPinCard">
+        <div style="display:flex;gap:12px;align-items:center">
+          <div class="icon-wrap" aria-hidden>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+              <path d="M12 2L4 5v6c0 5.25 3.84 9.74 8 11 4.16-1.26 8-5.75 8-11V5l-8-3z" fill="#FFD700" opacity="0.95"/>
+              <rect x="9" y="10" width="6" height="5" rx="1" fill="#021827"/>
+            </svg>
           </div>
-          <svg class="arrow-icon" width="20" height="20" viewBox="0 0 24 24" fill="none">
-            <path d="M9 18l6-6-6-6" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
+          <div>
+            <h4>Setup Pin</h4>
+            <p>Secure your account</p>
+          </div>
         </div>
+        <svg class="arrow-icon" width="20" height="20" viewBox="0 0 24 24" fill="none">
+          <path d="M9 18l6-6-6-6" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+
 
 
         <!-- Update Profile -->
-        <div class="card update-profile">
-          <div style="display:flex;gap:12px;align-items:center">
-            <div class="icon-wrap" aria-hidden>
-              <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24">
-                <defs>
-                  <linearGradient id="gradProfile" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" style="stop-color:#ff6a00; stop-opacity:1" />
-                    <stop offset="50%" style="stop-color:#ee0979; stop-opacity:1" />
-                    <stop offset="100%" style="stop-color:#8e2de2; stop-opacity:1" />
-                  </linearGradient>
-                </defs>
-                <path fill="url(#gradProfile)" d="M12 12c2.67 0 8 1.34 8 4v2H4v-2c0-2.66 5.33-4 8-4zm0-2a4 4 0 100-8 4 4 0 000 8z"/>
-              </svg>
-            </div>
-            <div>
-              <h4>Update Profile</h4>
-              <p>Keep your account details up to date</p>
-            </div>
-          </div>
-          <svg class="arrow-icon" width="20" height="20" viewBox="0 0 24 24" fill="none">
-            <path d="M9 18l6-6-6-6" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-        </div>
+        <!-- Update Profile -->
+<div class="card update-profile" id="dashboardUpdateProfileCard">
+  <div style="display:flex;gap:12px;align-items:center">
+    <div class="icon-wrap" aria-hidden>
+      <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24">
+        <defs>
+          <linearGradient id="gradProfile" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" style="stop-color:#ff6a00; stop-opacity:1" />
+            <stop offset="50%" style="stop-color:#ee0979; stop-opacity:1" />
+            <stop offset="100%" style="stop-color:#8e2de2; stop-opacity:1" />
+          </linearGradient>
+        </defs>
+        <path fill="url(#gradProfile)" d="M12 12c2.67 0 8 1.34 8 4v2H4v-2c0-2.66 5.33-4 8-4zm0-2a4 4 0 100-8 4 4 0 000 8z"/>
+      </svg>
+    </div>
+    <div>
+      <h4>Update Profile</h4>
+      <p>Keep your account details up to date</p>
+    </div>
+  </div>
+  <svg class="arrow-icon" width="20" height="20" viewBox="0 0 24 24" fill="none">
+    <path d="M9 18l6-6-6-6" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+</div>
 
         <!-- Balance -->
         <div class="balance">
@@ -266,7 +266,7 @@
               <span>All Plans</span>
             </div>
             <div id="allPlansModal" class="modal-overlay" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="modalTitle" tabindex="-1">
-              <div class="modal-content" role="document">
+              <div class="plan-modal-content" role="document">
                 <div class="modal-header">
                   <div class="pull-handle" aria-hidden="true"></div>
                   <button class="close-btn" data-close aria-label="Close All Plans">&times;</button>
@@ -281,11 +281,11 @@
                   <div class="plans-grid awoof-grid"></div>
                 </section>
                 <section class="plan-section gifting-section" data-provider="mtn">
-                  <div class="section-header">
+                  <div class="section-header sticky-header">
                     <svg class="yellow-circle-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                       <circle cx="12" cy="12" r="10" fill="#FFD700"/>
                     </svg>
-                    <h2>MTN GIFTING</h2>
+                    <h2 >MTN GIFTING</h2>
                   </div>
                   <div class="plans-grid gifting-grid"></div>
                 </section>
@@ -361,12 +361,19 @@
         <div class="transactions-list"></div>
       </div>
       <div id="pinModal" class="pin-modal hidden">
-        <div class="pin-header">
-          <button id="closePinModal" class="back-btn" data-close aria-label="Close">
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="white" viewBox="0 0 24 24">
-              <path d="M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z"/>
-            </svg>
-          </button>
+  <div class="pin-header">
+    <button 
+      id="closePinModal" 
+      class="back-btn" 
+      data-close 
+      aria-label="Close"
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="white" viewBox="0 0 24 24">
+        <path d="M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z"/>
+      </svg>
+    </button>
+
+
           <h2>Create PIN</h2>
         </div>
         <div class="pin-body">
@@ -409,17 +416,17 @@
     <!-- Security PIN Modal -->
     <!-- Security PIN Modal -->
     <div id="securityPinModal" class="security-pin-modal" aria-hidden="true" role="dialog" aria-labelledby="pinTitle">
-      <div class="security-modal-header">
+      <div class="security-modal-header all-modal-headers">
         <button class="security-pin-close" data-close id="securityPinCloseBtn" aria-label="Close security PIN modal">
           <!-- back-chevron -->
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+          <svg class="all-modal-chevron" width="20" height="20" viewBox="0 0 24 24" fill="none">
             <path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
         </button>
-        <h1 id="pinTitle">Account PIN</h1>
+        <h1 id="pinTitle" class="all-modal-title">Account PIN</h1>
       </div>
 
-      <div class="security-modal-body">
+      <div class="security-pin-modal-body">
         <p class="pin-info">
           Your 4-digit account PIN helps secure your transactions. 
           Keep it safe and confidential — do not share it with anyone.
@@ -427,19 +434,19 @@
 
         <form id="changePinForm">
           <!-- Current PIN -->
-          <div class="form-group">
+          <div class="pin-form-group">
             <label for="currentPin">Current PIN</label>
             <input type="password" id="currentPin" maxlength="4" required>
           </div>
 
           <!-- New PIN -->
-          <div class="form-group">
+          <div class="pin-form-group">
             <label for="newPin">New PIN</label>
             <input type="password" id="newPin" maxlength="4" required>
           </div>
 
           <!-- Confirm New PIN -->
-          <div class="form-group">
+          <div class="pin-form-group">
             <label for="confirmPin">Confirm New PIN</label>
             <input type="password" id="confirmPin" maxlength="4" required>
           </div>
@@ -451,7 +458,7 @@
           </div>
 
           <!-- Submit -->
-          <div class="form-actions">
+          <div class="pin-form-actions">
             <button type="submit" class="primary-btn">Change PIN</button>
           </div>
         </form>
@@ -463,15 +470,15 @@
     <!-- Update Profile Modal -->
      <!-- Update Profile Modal -->
 <!-- Update Profile Modal -->
-<div id="updateProfileModal" class="profilemodal-overlay modal-overlay" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="updateProfileTitle" tabindex="-1">
+<div id="updateProfileModal" class="profilemodal-overlay modal-overlay hidden" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="updateProfileTitle" tabindex="-1">
   <div class="profilemodal-content modal-content">
-    <div class="profilemodal-header modal-header">
-      <button class="back-btn" data-close aria-label="Back to dashboard">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <div class="profilemodal-header all-modal-headers">
+       <button id="closeUpdateProfileModal" class="back-btn all-modal-chevron" data-close aria-label="Back to dashboard">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
           <path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z" fill="white"/>
         </svg>
       </button>
-      <h2 id="updateProfileTitle">Update Profile</h2>
+      <h2 id="updateProfileTitle" class="all-modal-title">Update Profile</h2>
     </div>
     <form id="updateProfileForm" enctype="multipart/form-data">
       <div class="profile-picture-section">
@@ -513,40 +520,19 @@
     
   </main>
 
-  <nav class="bottom-nav">
-    <a href="#home" class="nav-item">
-      <svg viewBox="0 0 36 36" xmlns="http://www.w3.org/2000/svg" class="icon">
-        <title>house-solid</title>
-        <path d="M33,19a1,1,0,0,1-.71-.29L18,4.41,3.71,18.71a1,1,0,0,1-1.41-1.41l15-15a1,1,0,0,1,1.41,0l15,15A1,1,0,0,1,33,19Z" fill="currentColor"/>
-        <path d="M18,7.79,6,19.83V32a2,2,0,0,0,2,2h7V24h6V34h7a2,2,0,0,0,2-2V19.76Z" fill="currentColor"/>
-      </svg>
-
-      <span>Home</span>
-    </a>
-    <a href="#history" class="nav-item">
-      <svg xmlns="http://www.w3.org/2000/svg" class="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-          d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-      </svg>
-      <span>History</span>
-    </a>
-    <a href="javascript:void(0)" class="nav-item" id="settingsBtn">
-      <img src="/frontend/svg/settings.svg" alt="Settings Icon" class="icon svg-inject">
-      <span>Settings</span>
-    </a>
-  </nav>
+  
 <!-- Settings Modal (full screen) -->
 <div id="settingsModal" class="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" style="display:none;">
   <div class="settings-content">
-    <div class="settings-header">
-      <button id="settingsBack" data-close class="settings-back" aria-label="Close settings">
+    <div class="settings-header all-modal-headers">
+      <button id="settingsBack" data-close class="settings-back all-modal-chevron" aria-label="Close settings">
         <!-- back SVG -->
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
           <path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
       </button>
 
-      <h3 id="settingsTitle" class="settings-title">Settings</h3>
+      <h3 id="settingsTitle" class="settings-title all-modal-title">Settings</h3>
     </div>
 
     <div class="settings-divider"></div>
@@ -555,7 +541,7 @@
     <!-- Profile row -->
     <div class="settings-profile">
   <div class="settings-profile-main">
-    <img id="settingsAvatar" class="settings-avatar" src="/frontend/img/avatar-placeholder.png">
+    <div id="settingsAvatar" class="settings-avatar"></div>
     <div class="settings-profile-info">
       <div class="settings-username" id="settingsUsername">Loading...</div>
       <div class="settings-email" id="settingsEmail">Loading...</div>
@@ -622,7 +608,7 @@
         <div class="left">
           <svg width="25px" height="25px" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="#000000" stroke-width="0.336"><g id="SVGRepo_bgCarrier" stroke-width="0"></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g><g id="SVGRepo_iconCarrier"> <path fill-rule="evenodd" clip-rule="evenodd" d="M11.0174 2.80157C6.37072 3.29221 2.75 7.22328 2.75 12C2.75 13.1448 2.95764 14.2397 3.33685 15.25H12.8489C10.1562 14.1916 8.25 11.5684 8.25 8.5C8.25 6.18738 9.33315 4.1283 11.0174 2.80157ZM18.1508 15.25H20.6631C20.9324 14.5327 21.1151 13.7727 21.1985 12.9825C20.4085 13.9854 19.359 14.7751 18.1508 15.25ZM22.2375 15.2884C22.5704 14.2513 22.75 13.1461 22.75 12C22.75 11.2834 22.1787 10.9246 21.7237 10.8632C21.286 10.804 20.7293 10.9658 20.4253 11.469C19.4172 13.1373 17.5882 14.25 15.5 14.25C12.3244 14.25 9.75 11.6756 9.75 8.5C9.75 6.41182 10.8627 4.5828 12.531 3.57467C13.0342 3.27065 13.196 2.71398 13.1368 2.27627C13.0754 1.82126 12.7166 1.25 12 1.25C6.06294 1.25 1.25 6.06294 1.25 12C1.25 13.1461 1.4296 14.2513 1.76248 15.2884C1.46468 15.3877 1.25 15.6688 1.25 16C1.25 16.4142 1.58579 16.75 2 16.75H22C22.4142 16.75 22.75 16.4142 22.75 16C22.75 15.6688 22.5353 15.3877 22.2375 15.2884ZM4.25 19C4.25 18.5858 4.58579 18.25 5 18.25H19C19.4142 18.25 19.75 18.5858 19.75 19C19.75 19.4142 19.4142 19.75 19 19.75H5C4.58579 19.75 4.25 19.4142 4.25 19ZM7.25 22C7.25 21.5858 7.58579 21.25 8 21.25H16C16.4142 21.25 16.75 21.5858 16.75 22C16.75 22.4142 16.4142 22.75 16 22.75H8C7.58579 22.75 7.25 22.4142 7.25 22Z" fill="#ffffff"></path> <path fill-rule="evenodd" clip-rule="evenodd" d="M20.3655 2.12433C20.0384 1.29189 18.8624 1.29189 18.5353 2.12433L18.1073 3.21354L17.0227 3.6429C16.1933 3.97121 16.1933 5.14713 17.0227 5.47544L18.1073 5.90481L18.5353 6.99401C18.8624 7.82645 20.0384 7.82646 20.3655 6.99402L20.7935 5.90481L21.8781 5.47544C22.7075 5.14714 22.7075 3.97121 21.8781 3.6429L20.7935 3.21354L20.3655 2.12433ZM19.4504 2.52989L19.8651 3.58533C19.9648 3.83891 20.165 4.04027 20.4188 4.14073L21.4759 4.55917L20.4188 4.97762C20.165 5.07808 19.9648 5.27943 19.8651 5.53301L19.4504 6.58846L19.0357 5.53301C18.936 5.27943 18.7358 5.07808 18.482 4.97762L17.4249 4.55917L18.482 4.14073C18.7358 4.04027 18.936 3.83891 19.0357 3.58533L19.4504 2.52989ZM16.4981 7.94681C16.171 7.11437 14.9951 7.11437 14.668 7.94681L14.5134 8.34008L14.1222 8.49497C13.2928 8.82328 13.2928 9.9992 14.1222 10.3275L14.5134 10.4824L14.668 10.8757C14.9951 11.7081 16.171 11.7081 16.4981 10.8757L16.6527 10.4824L17.0439 10.3275C17.8733 9.9992 17.8733 8.82328 17.0439 8.49497L16.6527 8.34008L16.4981 7.94681ZM15.583 8.35237L15.7243 8.71188C15.824 8.96545 16.0242 9.16681 16.278 9.26727L16.6417 9.41124L16.278 9.55521C16.0242 9.65567 15.824 9.85703 15.7243 10.1106L15.583 10.4701L15.4418 10.1106C15.3421 9.85703 15.1419 9.65567 14.8881 9.55521L14.5244 9.41124L14.8881 9.26727C15.1419 9.16681 15.3421 8.96545 15.4418 8.71188L15.583 8.35237Z" fill="#ffffff"></path> </g></svg>
           <div class="item-texts">
-            <div class="item-title">Dark theme</div>
+            <div class="item-title">Change theme</div>
             <div class="item-sub">Switch between light and dark</div>
           </div>
         </div>
@@ -654,14 +640,14 @@
 <!-- Help & Support Modal (full screen) -->
 <div class="help-support-modal" id="helpSupportModal">
   <div class="pad4Support">
-  <div class="help-modal-header">
+  <div class="help-modal-header all-modal-headers">
     <!-- Close/back SVG (top-left) -->
-    <button class="help-modal-close" data-close aria-label="Close">
-      <svg width="25" height="25" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <button class="help-modal-close all-modal-chevron" data-close aria-label="Close">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
           <path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
     </button>
-    <h1>Help &amp; Support</h1>
+    <h1 class="all-modal-title">Help &amp; Support</h1>
   </div>
 
   <div class="help-modal-body">
@@ -731,15 +717,15 @@
 <!-- Security Modal HTML -->
 <div class="security-modal" id="securityModal" data-modal aria-hidden="true" role="dialog" aria-labelledby="securityTitle" aria-modal="true">
 
-  <button class="security-modal-close" data-close id="securityCloseBtn" aria-label="Close security modal">
+  <button class="security-modal-close all-modal-chevron" data-close id="securityCloseBtn" aria-label="Close security modal">
     <!-- left-chevron -->
-    <svg width="25" height="25" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
       <path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
     </svg>
   </button>
-    <div class="security-modal-header">
+    <div class="security-modal-header all-modal-headers">
 
-      <h1 id="securityTitle">Security</h1>
+      <h1 id="securityTitle" class="all-modal-title">Security</h1>
     </div>
 
     <div class="security-modal-body">
@@ -851,228 +837,38 @@
   </div>
 </div>
 
+</main>
+
+<nav class="bottom-nav">
+    <a href="#home" class="nav-item">
+      <svg viewBox="0 0 36 36" xmlns="http://www.w3.org/2000/svg" class="icon">
+        <title>house-solid</title>
+        <path d="M33,19a1,1,0,0,1-.71-.29L18,4.41,3.71,18.71a1,1,0,0,1-1.41-1.41l15-15a1,1,0,0,1,1.41,0l15,15A1,1,0,0,1,33,19Z" fill="currentColor"/>
+        <path d="M18,7.79,6,19.83V32a2,2,0,0,0,2,2h7V24h6V34h7a2,2,0,0,0,2-2V19.76Z" fill="currentColor"/>
+      </svg>
+
+      <span>Home</span>
+    </a>
+    <a href="#history" class="nav-item">
+      <svg xmlns="http://www.w3.org/2000/svg" class="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+          d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+      <span>History</span>
+    </a>
+    <a href="javascript:void(0)" class="nav-item" id="settingsBtn">
+      <img src="/frontend/svg/settings.svg" alt="Settings Icon" class="icon svg-inject">
+      <span>Settings</span>
+    </a>
+  </nav>
 
 
+<!-- Scripts -->
 
-
+  
 
   <script src="/frontend/js/dashboard.js"></script>
   <script src="/frontend/js/main.js"></script>
-<script>
-// Robust modal back handler with full debug logging and improved selector coverage
-// Full updated modal handler script - replace the entire inline <script> at the end of the HTML with this
-
-// Robust modal back handler with full debug logging and improved selector coverage
-document.addEventListener('DOMContentLoaded', () => {
-  const modalIds = [
-    'contactModal',
-    'allPlansModal',
-    'checkoutModal',
-    'pinModal',
-    'securityPinModal',
-    'updateProfileModal',
-    'settingsModal',
-    'helpSupportModal',
-    'securityModal'
-  ];
-
-  const openModalsStack = [];
-  const observers = new Map();
-  let lastFocusedElement = null; // For focus restoration
-
-  console.log("[Init] ModalBackHandler loaded");
-
-  if (window.history.state && window.history.state.isModal) {
-    console.warn("[History] Found stale modal state, resetting");
-    history.replaceState({ isModal: false }, '', window.location.href);
-  }
-
-  // Check if a modal is visible
-  function isModalVisible(modal) {
-    if (!modal) return false;
-    const style = window.getComputedStyle(modal);
-    const visible = style.display !== 'none' && style.visibility !== 'hidden' && !modal.classList.contains('hidden') && modal.getAttribute('aria-hidden') !== 'true';
-    console.log(`[Check] Modal ${modal.id} visible=${visible}`);
-    return visible;
-  }
-
-  // Find the close button inside a modal (expanded selectors)
-  function findCloseButton(modal) {
-    const selectors = [
-      '[data-close]', '.close-btn', '.back-btn',
-      '#closePinModal', '#settingsBack', '#modal-cancel', '#modal-save', // Added for contactModal
-      '.help-modal-close', '#securityPinCloseBtn', '#securityCloseBtn',
-      '.security-pin-close', '.security-modal-close', '.settings-back'
-    ];
-    for (let sel of selectors) {
-      const btn = modal.querySelector(sel);
-      if (btn) {
-        console.log(`[FindCloseBtn] Found "${sel}" in ${modal.id}`);
-        return btn;
-      }
-    }
-    // Fallback to any button that might close
-    const fallback = modal.querySelector('button[type="button"], [aria-label*="close"], [role="button"], button#modal-cancel, button.cancel');
-    if (fallback) {
-      console.log(`[FindCloseBtn] Found fallback button in ${modal.id}`);
-      return fallback;
-    }
-    console.warn(`[FindCloseBtn] No close button found in ${modal.id}`);
-    return null;
-  }
-
-  // Close the top modal in stack
-  function closeTopModal() {
-    if (!openModalsStack.length) {
-      console.log("[CloseTop] No modals in stack");
-      return;
-    }
-
-    const modal = openModalsStack[openModalsStack.length - 1];
-    console.log(`[CloseTop] Closing top modal: ${modal.id}`);
-    const btn = findCloseButton(modal);
-
-    if (btn) {
-      console.log(`[CloseTop] Clicking close button in ${modal.id}`);
-      btn.dispatchEvent(new Event('click', { bubbles: true }));
-    } else {
-      console.warn(`[CloseTop] No close button, hiding ${modal.id} manually`);
-      modal.style.display = 'none';
-      modal.classList.add('hidden');
-      modal.classList.remove('active');
-      modal.setAttribute('aria-hidden', 'true');
-      // Dispatch custom event for other scripts to handle cleanup
-      modal.dispatchEvent(new CustomEvent('modalClosed', { detail: { id: modal.id } }));
-      // Handle potential overlay parents
-      const overlay = modal.closest('.modal-overlay');
-      if (overlay) {
-        overlay.style.display = 'none';
-        overlay.setAttribute('aria-hidden', 'true');
-      }
-    }
-
-    openModalsStack.pop();
-    console.log(`[Stack] After close: [${openModalsStack.map(m => m.id).join(', ')}]`);
-
-    if (!openModalsStack.length) {
-      console.log("[History] Stack empty, resetting state");
-      history.replaceState({ isModal: false }, '', window.location.href);
-    }
-
-    // Restore focus
-    if (lastFocusedElement) {
-      lastFocusedElement.focus();
-      lastFocusedElement = null;
-    }
-  }
-
-  // Handle Android back button / browser popstate
-  window.addEventListener('popstate', (e) => {
-    console.log("[PopState] Event", e.state, "Stack:", openModalsStack.map(m => m.id));
-    if (openModalsStack.length && e.state && e.state.isModal) {
-      console.log("[PopState] Closing top modal due to back button");
-      closeTopModal();
-      if (e.preventDefault) e.preventDefault();
-    } else if (!openModalsStack.length) {
-      console.log("[PopState] No modals open, resetting state");
-      history.replaceState({ isModal: false }, '', window.location.href);
-    }
-  });
-
-  // Observe modals for open/close
-  modalIds.forEach(id => {
-    const modal = document.getElementById(id);
-    if (!modal) {
-      console.warn(`[Observer] Modal ${id} not found`);
-      return;
-    }
-
-    const observer = new MutationObserver(() => {
-      setTimeout(() => {
-        const visible = isModalVisible(modal);
-        const idx = openModalsStack.indexOf(modal);
-
-        if (visible && idx === -1) {
-          lastFocusedElement = document.activeElement; // Save focus
-          openModalsStack.push(modal);
-          history.pushState({ isModal: true, modalId: id }, '', window.location.href);
-          console.log(`[Observer] Modal opened: ${id}, Stack=[${openModalsStack.map(m => m.id).join(', ')}]`);
-        } else if (!visible && idx !== -1) {
-          openModalsStack.splice(idx, 1);
-          console.log(`[Observer] Modal closed: ${id}, Stack=[${openModalsStack.map(m => m.id).join(', ')}]`);
-        }
-      }, 200);
-    });
-
-    observer.observe(modal, { attributes: true, attributeFilter: ['style', 'class', 'aria-hidden'] });
-    observers.set(id, observer);
-
-    if (isModalVisible(modal)) {
-      openModalsStack.push(modal);
-      history.pushState({ isModal: true, modalId: id }, '', window.location.href);
-      console.log(`[Init] Modal ${id} already visible, added to stack`);
-    }
-  });
-
-  // Sync stack on any manual close clicks
-  document.addEventListener('click', e => {
-    const target = e.target.closest('[data-close], .close-btn, .back-btn, #closePinModal, #settingsBack, .help-modal-close, #securityPinCloseBtn, #securityCloseBtn, .security-pin-close, .security-modal-close, .settings-back, #modal-cancel');
-    if (target) {
-      const modal = target.closest(modalIds.map(id => `#${id}`).join(','));
-      console.log(`[Click] Close button clicked inside ${modal?.id || 'unknown'}`);
-      if (modal) {
-        const idx = openModalsStack.indexOf(modal);
-        if (idx !== -1) {
-          openModalsStack.splice(idx, 1);
-          console.log(`[Click] Removed ${modal.id} from stack, Stack=[${openModalsStack.map(m => m.id).join(', ')}]`);
-        }
-      }
-    }
-  });
-
-  // Trap focus inside modal
-  function trapFocus(modal) {
-    if (!modal) return;
-    const focusables = modal.querySelectorAll('a, button, textarea, input, select, [tabindex]:not([tabindex="-1"])');
-    if (!focusables.length) return;
-    const first = focusables[0], last = focusables[focusables.length - 1];
-
-    modal.addEventListener('keydown', e => {
-      if (e.key === 'Tab') {
-        if (e.shiftKey && document.activeElement === first) {
-          last.focus(); e.preventDefault();
-          console.log(`[FocusTrap] Shift+Tab in ${modal.id}, moving to last`);
-        } else if (!e.shiftKey && document.activeElement === last) {
-          first.focus(); e.preventDefault();
-          console.log(`[FocusTrap] Tab in ${modal.id}, moving to first`);
-        }
-      }
-    });
-  }
-
-  modalIds.forEach(id => {
-    const modal = document.getElementById(id);
-    if (modal) {
-      trapFocus(modal);
-      console.log(`[FocusTrap] Attached to ${id}`);
-    }
-  });
-
-  // Expose API
-  window.ModalBackHandler = {
-    closeTopModal,
-    getOpenModals: () => [...openModalsStack],
-    isAnyModalOpen: () => openModalsStack.length > 0
-  };
-
-  console.log("[Init] ModalBackHandler ready");
-});
-</script>
-
-
-
-
-
-
+  <script src="/frontend/js/modalManager.js" defer></script>
 </body>
 </html>
