@@ -2288,101 +2288,105 @@ payBtn.addEventListener('click', () => {
     // Completion logic
     // ---------------------
     async function handlePinCompletion() {
-      if (processing) return;
-      if (currentPin.length !== 4) return;
+  if (processing) return;
+  if (currentPin.length !== 4) return;
 
-      if (step === 'create') {
-        firstPin = currentPin;
-        step = 'confirm';
-        if (pinTitleEl) pinTitleEl.textContent = 'Confirm PIN';
-        if (pinSubtitleEl) pinSubtitleEl.textContent = 'Confirm your 4-digit PIN';
-        resetInputs();
-        return;
-      }
+  if (step === 'create') {
+    firstPin = currentPin;
+    step = 'confirm';
+    if (pinTitleEl) pinTitleEl.textContent = 'Confirm PIN';
+    if (pinSubtitleEl) pinSubtitleEl.textContent = 'Confirm your 4-digit PIN';
+    resetInputs();
+    return;
+  }
 
-      if (step === 'confirm') {
-        if (currentPin !== firstPin) {
-          console.warn('[PIN] mismatch on confirmation');
-          showToast('PINs do not match — try again', 'error');
-          step = 'create';
-          if (pinTitleEl) pinTitleEl.textContent = 'Create PIN';
-          if (pinSubtitleEl) pinSubtitleEl.textContent = 'Create a 4-digit PIN';
-          resetInputs();
-          return;
-        }
-
-        processing = true;
-        try {
-          const res = await fetch('https://api.flexgig.com.ng/api/save-pin', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ pin: currentPin }),
-            credentials: 'include',
-          });
-
-          if (!res.ok) throw new Error('Save PIN failed');
-
-          localStorage.setItem('userPin', currentPin);
-          console.log('[dashboard.js] PIN setup successfully:', currentPin);
-
-          const dashboardPinCard = document.getElementById('dashboardPinCard');
-          if (dashboardPinCard) dashboardPinCard.style.display = 'none';
-          if (accountPinStatus) accountPinStatus.textContent = 'PIN set';
-
-          showToast('PIN updated successfully', 'success', 2400);
-          pinModal.classList.add('hidden');
-          resetInputs();
-        } catch (err) {
-          console.error('[dashboard.js] PIN save error:', err);
-          showToast('Failed to save PIN. Try again.', 'error', 2200);
-          resetInputs();
-        } finally {
-          processing = false;
-        }
-        return;
-      }
-
-      if (step === 'reauth') {
-        processing = true;
-        try {
-          const res = await fetch('https://api.flexgig.com.ng/api/verify-pin', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ pin: currentPin }),
-            credentials: 'include',
-          });
-          if (!res.ok) throw new Error('Invalid PIN');
-
-          const { user } = await res.json();
-          localStorage.setItem('userEmail', user.email || '');
-          localStorage.setItem('firstName', user.fullName?.split(' ')[0] || '');
-          localStorage.setItem('username', user.username || '');
-          localStorage.setItem('phoneNumber', user.phoneNumber || '');
-          localStorage.setItem('address', user.address || '');
-          localStorage.setItem('profilePicture', user.profilePicture || '');
-
-          if (typeof updateGreetingAndAvatar === 'function') {
-            await updateGreetingAndAvatar(user.username, user.fullName?.split(' ')[0]);
-          }
-          if (typeof loadUserProfile === 'function') {
-            await loadUserProfile();
-          }
-          if (typeof updateBalanceDisplay === 'function') {
-            updateBalanceDisplay();
-          }
-
-          pinModal.classList.add('hidden');
-          resetInputs();
-          console.log('[dashboard.js] PIN re-auth: Session restored');
-        } catch (err) {
-          console.error('[dashboard.js] PIN re-auth error:', err);
-          showToast('Invalid PIN or session. Redirecting to login...', 'error', 1800);
-          setTimeout(() => (window.location.href = '/'), 1200);
-        } finally {
-          processing = false;
-        }
-      }
+  if (step === 'confirm') {
+    if (currentPin !== firstPin) {
+      console.warn('[PIN] mismatch on confirmation');
+      showToast('PINs do not match — try again', 'error');
+      step = 'create';
+      if (pinTitleEl) pinTitleEl.textContent = 'Create PIN';
+      if (pinSubtitleEl) pinSubtitleEl.textContent = 'Create a 4-digit PIN';
+      resetInputs();
+      return;
     }
+
+    processing = true;
+    try {
+      const res = await fetch('https://api.flexgig.com.ng/api/save-pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: currentPin }),
+        credentials: 'include',
+      });
+
+      if (!res.ok) throw new Error('Save PIN failed');
+
+      console.log('[dashboard.js] PIN setup successfully');
+      // Removed: localStorage.setItem('userPin', currentPin);
+
+      const dashboardPinCard = document.getElementById('dashboardPinCard');
+      if (dashboardPinCard) dashboardPinCard.style.display = 'none';
+      if (accountPinStatus) accountPinStatus.textContent = 'PIN set';
+
+      showToast('PIN updated successfully', 'success', 2400);
+      pinModal.classList.add('hidden');
+      resetInputs();
+    } catch (err) {
+      console.error('[dashboard.js] PIN save error:', err);
+      showToast('Failed to save PIN. Try again.', 'error', 2200);
+      resetInputs();
+    } finally {
+      processing = false;
+    }
+    return;
+  }
+
+  if (step === 'reauth') {
+    processing = true;
+    try {
+      const res = await fetch('https://api.flexgig.com.ng/api/verify-pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: currentPin }),
+        credentials: 'include',
+      });
+      if (!res.ok) throw new Error('Invalid PIN');
+
+      const { user } = await res.json();
+      // Removed: localStorage.setItem calls for userEmail, firstName, username, phoneNumber, address, profilePicture
+      // Fetch user data on-demand when needed instead of storing in localStorage
+      const userData = {
+        email: user.email || '',
+        firstName: user.fullName?.split(' ')[0] || '',
+        username: user.username || '',
+        phoneNumber: user.phoneNumber || '',
+        address: user.address || '',
+        profilePicture: user.profilePicture || '',
+      };
+
+      if (typeof updateGreetingAndAvatar === 'function') {
+        await updateGreetingAndAvatar(userData.username, userData.firstName);
+      }
+      if (typeof loadUserProfile === 'function') {
+        await loadUserProfile(userData); // Pass userData to function
+      }
+      if (typeof updateBalanceDisplay === 'function') {
+        await updateBalanceDisplay();
+      }
+
+      pinModal.classList.add('hidden');
+      resetInputs();
+      console.log('[dashboard.js] PIN re-auth: Session restored');
+    } catch (err) {
+      console.error('[dashboard.js] PIN re-auth error:', err);
+      showToast('Invalid PIN or session. Redirecting to login...', 'error', 1800);
+      setTimeout(() => (window.location.href = '/'), 1200);
+    } finally {
+      processing = false;
+    }
+  }
+}
 
     // ---------------------
     // Wire keypad buttons
@@ -2436,6 +2440,13 @@ payBtn.addEventListener('click', () => {
     init();
   }
 })();
+
+
+function __fg_pin_clearAllInputs() {
+  if (__fg_pin_inputCurrentEl) __fg_pin_inputCurrentEl.value = '';
+  if (__fg_pin_inputNewEl) __fg_pin_inputNewEl.value = '';
+  if (__fg_pin_inputConfirmEl) __fg_pin_inputConfirmEl.value = '';
+}
 
 
 
@@ -2515,29 +2526,35 @@ payBtn.addEventListener('click', () => {
 
   // Utility to get current signed-in uid
   async function __fg_pin_getCurrentUid() {
-    try {
-      if (typeof window.getSession === 'function') {
-        const s = await window.getSession();
-        __fg_pin_log.d('getSession result', s);
-        if (s && s.user && s.user.uid) return { uid: s.user.uid, session: s };
-      }
-      const stored = JSON.parse(localStorage.getItem('authTokenData') || '{}');
-      if (stored && stored.user && stored.user.uid) {
-        __fg_pin_log.d('local authTokenData used', stored.user);
-        return { uid: stored.user.uid, session: stored };
-      }
-      const altUser = JSON.parse(localStorage.getItem('user') || 'null');
-      if (altUser && altUser.uid) {
-        __fg_pin_log.d('alt local user used', altUser);
-        return { uid: altUser.uid, session: null };
-      }
-      __fg_pin_log.w('no session/uid found');
-      return null;
-    } catch (err) {
-      __fg_pin_log.e('getPinCurrentUid error', err);
+  try {
+    if (typeof window.getSession === 'function') {
+      const s = await window.getSession();
+      __fg_pin_log.d('getSession result', s);
+      if (s && s.user && s.user.uid) return { uid: s.user.uid, session: s };
+    }
+    // Removed: localStorage fallbacks for authTokenData and user
+    // Fetch UID from server-side session endpoint as a fallback
+    const res = await fetch('https://api.flexgig.com.ng/api/session', {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+    });
+    if (!res.ok) {
+      __fg_pin_log.w('session fetch failed', await res.text());
       return null;
     }
+    const { user } = await res.json();
+    if (user && user.uid) {
+      __fg_pin_log.d('session API used', user);
+      return { uid: user.uid, session: user };
+    }
+    __fg_pin_log.w('no session/uid found');
+    return null;
+  } catch (err) {
+    __fg_pin_log.e('getPinCurrentUid error', err);
+    return null;
   }
+}
 
   // Find stored PIN value in Supabase
   const __fg_pin_TRY_TABLES = ['profiles', 'users', 'accounts'];
@@ -2549,72 +2566,66 @@ payBtn.addEventListener('click', () => {
     'pin_hash',
     'pin_hash_text',
   ];
-  async function __fg_pin_findStoredPin(uid) {
-    if (!window.supabaseClient) {
-      __fg_pin_log.e('findStoredPin: supabaseClient not provided');
-      return null;
-    }
-    for (const table of __fg_pin_TRY_TABLES) {
-      for (const col of __fg_pin_TRY_COLUMNS) {
-        try {
-          __fg_pin_log.d('querying', { table, col, uid });
-          const query = window.supabaseClient
-            .from(table)
-            .select(col)
-            .eq('id', uid)
-            .limit(1)
-            .single();
-          const { data, error, status } = await query;
-          if (error) {
-            __fg_pin_log.d('query error (continue)', { table, col, status, error });
-            continue;
-          }
-          if (data && Object.prototype.hasOwnProperty.call(data, col)) {
-            const value = data[col];
-            __fg_pin_log.i('found stored pin candidate', {
-              table,
-              col,
-              valueExists: value != null,
-            });
-            return { table, column: col, value };
-          }
-        } catch (err) {
-          __fg_pin_log.d('caught query exception (continue)', { table, col, err });
-          continue;
-        }
-      }
-    }
-    __fg_pin_log.w('no stored PIN field found in common tables/columns');
+  async function __fg_pin_findStoredPin({ uid }) {
+  if (!uid) {
+    __fg_pin_log.w('No uid for findStoredPin');
     return null;
   }
 
+  try {
+    const res = await fetch('https://api.flexgig.com.ng/api/check-pin', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${localStorage.getItem('token') || ''}`, // Assumes token is stored temporarily during session
+      },
+      credentials: 'include',
+    });
+    if (!res.ok) {
+      __fg_pin_log.e('Error checking PIN existence:', await res.text());
+      return null;
+    }
+    const { hasPin } = await res.json();
+    if (hasPin) {
+      __fg_pin_log.d('PIN found in users.pin');
+      return { table: 'users', column: 'pin' }; // Standardize to users(pin)
+    }
+    __fg_pin_log.w('No stored PIN found');
+    return null;
+  } catch (err) {
+    __fg_pin_log.e('Error checking PIN:', err);
+    return null;
+  }
+}
+
   // Update stored PIN in Supabase
   async function __fg_pin_updateStoredPin(uid, table, column, newPin) {
-    try {
-      if (!window.supabaseClient) {
-        __fg_pin_log.e('updateStoredPin: supabaseClient missing');
-        return { ok: false, error: 'no_client' };
-      }
-      const payload = {};
-      payload[column] = newPin;
-      __fg_pin_log.d('updating', { table, column, uid });
-      const { data, error } = await window.supabaseClient
-        .from(table)
-        .update(payload)
-        .eq('id', uid)
-        .select()
-        .single();
-      if (error) {
-        __fg_pin_log.e('update error', error);
-        return { ok: false, error };
-      }
-      __fg_pin_log.i('update success', data);
-      return { ok: true, data };
-    } catch (err) {
-      __fg_pin_log.e('updateStoredPin exception', err);
-      return { ok: false, error: err };
-    }
+  if (table !== 'users' || column !== 'pin') {
+    __fg_pin_log.e('Invalid updateStoredPin params', { table, column });
+    return { ok: false, error: 'invalid_params' };
   }
+  try {
+    const res = await fetch('https://api.flexgig.com.ng/api/save-pin', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${localStorage.getItem('token') || ''}`,
+      },
+      body: JSON.stringify({ pin: newPin }),
+      credentials: 'include',
+    });
+    if (!res.ok) {
+      const { error } = await res.json();
+      __fg_pin_log.e('Error saving PIN:', error?.message || await res.text());
+      return { ok: false, error: error?.message || 'Failed to save PIN' };
+    }
+    __fg_pin_log.i('PIN updated successfully');
+    return { ok: true };
+  } catch (err) {
+    __fg_pin_log.e('Error updating PIN:', err);
+    return { ok: false, error: err.message };
+  }
+}
 
   // Strict PIN input restrictions + auto-jump + auto-submit
   function __fg_pin_bindStrictPinInputs() {
@@ -2770,132 +2781,136 @@ payBtn.addEventListener('click', () => {
 
   // Main change PIN handler
   if (__fg_pin_changePinForm) {
-    __fg_pin_changePinForm.addEventListener(
-      'submit',
-      async (ev) => {
+  __fg_pin_changePinForm.addEventListener(
+    'submit',
+    async (ev) => {
+      try {
+        ev.preventDefault();
+        __fg_pin_log.d('Change PIN submit handler started');
+
+        __fg_pin_clearAllFieldErrors();
+
+        const cur = String((__fg_pin_inputCurrentEl && __fg_pin_inputCurrentEl.value) || '').trim();
+        const neu = String((__fg_pin_inputNewEl && __fg_pin_inputNewEl.value) || '').trim();
+        const conf = String((__fg_pin_inputConfirmEl && __fg_pin_inputConfirmEl.value) || '').trim();
+
+        __fg_pin_log.d('submitted values', { cur, neu, conf });
+
+        if (!/^\d{4}$/.test(cur)) {
+          __fg_pin_log.w('current pin invalid format');
+          __fg_pin_showFieldError(__fg_pin_inputCurrentEl, 'Enter your current 4-digit PIN');
+          __fg_pin_notify('Enter your current 4-digit PIN', 'error');
+          return;
+        }
+        if (!/^\d{4}$/.test(neu)) {
+          __fg_pin_log.w('new pin invalid format');
+          __fg_pin_showFieldError(__fg_pin_inputNewEl, 'New PIN must be 4 digits');
+          __fg_pin_notify('New PIN must be 4 digits', 'error');
+          return;
+        }
+        if (neu === cur) {
+          __fg_pin_log.w('new equals current');
+          __fg_pin_showFieldError(__fg_pin_inputNewEl, 'New PIN must be different');
+          __fg_pin_notify('New PIN must be different from current PIN', 'error');
+          return;
+        }
+        if (neu !== conf) {
+          __fg_pin_log.w('confirm does not match new');
+          __fg_pin_showFieldError(__fg_pin_inputConfirmEl, 'Confirm PIN does not match');
+          __fg_pin_notify('New PIN and confirm PIN do not match', 'error');
+          return;
+        }
+
+        const sessionInfo = await __fg_pin_getCurrentUid();
+        if (!sessionInfo || !sessionInfo.uid) {
+          __fg_pin_log.e('no user session available to change PIN');
+          __fg_pin_notify('You must be signed in to change PIN', 'error');
+          return;
+        }
+        const uid = sessionInfo.uid;
+        __fg_pin_log.d('session uid', uid);
+
+        __fg_pin_notify('Verifying current PIN...', 'info');
+        const found = await __fg_pin_findStoredPin({ uid }); // Note: Pass object { uid }
+        if (!found) {
+          __fg_pin_log.w('no stored pin record located');
+          __fg_pin_notify(
+            'No existing PIN found. Redirecting to reset...',
+            'error'
+          );
+          setTimeout(() => {
+            window.location.href = '/reset-pin.html';
+          }, 1200);
+          return;
+        }
+
+        // Verify current PIN using /api/verify-pin
         try {
-          ev.preventDefault();
-          __fg_pin_log.d('Change PIN submit handler started');
-
-          __fg_pin_clearAllFieldErrors();
-
-          const cur = String((__fg_pin_inputCurrentEl && __fg_pin_inputCurrentEl.value) || '').trim();
-          const neu = String((__fg_pin_inputNewEl && __fg_pin_inputNewEl.value) || '').trim();
-          const conf = String((__fg_pin_inputConfirmEl && __fg_pin_inputConfirmEl.value) || '').trim();
-
-          __fg_pin_log.d('submitted values', { cur, neu, conf });
-
-          if (!/^\d{4}$/.test(cur)) {
-            __fg_pin_log.w('current pin invalid format');
-            __fg_pin_showFieldError(__fg_pin_inputCurrentEl, 'Enter your current 4-digit PIN');
-            __fg_pin_notify('Enter your current 4-digit PIN', 'error');
-            return;
-          }
-          if (!/^\d{4}$/.test(neu)) {
-            __fg_pin_log.w('new pin invalid format');
-            __fg_pin_showFieldError(__fg_pin_inputNewEl, 'New PIN must be 4 digits');
-            __fg_pin_notify('New PIN must be 4 digits', 'error');
-            return;
-          }
-          if (neu === cur) {
-            __fg_pin_log.w('new equals current');
-            __fg_pin_showFieldError(__fg_pin_inputNewEl, 'New PIN must be different');
-            __fg_pin_notify('New PIN must be different from current PIN', 'error');
-            return;
-          }
-          if (neu !== conf) {
-            __fg_pin_log.w('confirm does not match new');
-            __fg_pin_showFieldError(__fg_pin_inputConfirmEl, 'Confirm PIN does not match');
-            __fg_pin_notify('New PIN and confirm PIN do not match', 'error');
-            return;
-          }
-
-          const sessionInfo = await __fg_pin_getCurrentUid();
-          if (!sessionInfo || !sessionInfo.uid) {
-            __fg_pin_log.e('no user session available to change PIN');
-            __fg_pin_notify('You must be signed in to change PIN', 'error');
-            return;
-          }
-          const uid = sessionInfo.uid;
-          __fg_pin_log.d('session uid', uid);
-
-          __fg_pin_notify('Verifying current PIN...', 'info');
-          const found = await __fg_pin_findStoredPin(uid);
-          if (!found) {
-            __fg_pin_log.w('no stored pin record located');
-            __fg_pin_notify(
-              'Cannot verify PIN locally. Use Reset PIN or contact support.',
-              'error'
-            );
-            return;
-          }
-
-          const storedValueRaw = found.value == null ? '' : String(found.value);
-          __fg_pin_log.d('stored candidate', {
-            table: found.table,
-            column: found.column,
-            storedValueRaw,
+          const verifyRes = await fetch('https://api.flexgig.com.ng/api/verify-pin', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${localStorage.getItem('token') || ''}`,
+            },
+            body: JSON.stringify({ pin: cur }),
+            credentials: 'include',
           });
-
-          if (!/^\d{1,8}$/.test(storedValueRaw)) {
-            __fg_pin_log.w(
-              'stored PIN appears not to be plain digits (likely hashed). refusing client verification'
-            );
-            __fg_pin_notify(
-              'PIN is stored securely on server; use the Reset flow or server endpoint to change PIN.',
-              'error'
-            );
+          if (!verifyRes.ok) {
+            const { error } = await verifyRes.json();
+            __fg_pin_log.w('current PIN verification failed', error);
+            __fg_pin_showFieldError(__fg_pin_inputCurrentEl, error?.message || 'Current PIN is incorrect');
+            __fg_pin_notify(error?.message || 'Current PIN is incorrect', 'error');
+            __fg_pin_clearAllInputs();
             return;
-          }
-
-          if (storedValueRaw !== cur) {
-            __fg_pin_log.i('current PIN mismatch', { stored: storedValueRaw, provided: cur });
-            __fg_pin_showFieldError(__fg_pin_inputCurrentEl, 'Current PIN is incorrect');
-            __fg_pin_notify('Current PIN is incorrect', 'error');
-            return;
-          }
-
-          __fg_pin_notify('Updating PIN...', 'info');
-          const upd = await __fg_pin_updateStoredPin(uid, found.table, found.column, neu);
-          if (upd && upd.ok) {
-            __fg_pin_log.i('pin update succeeded');
-            __fg_pin_notify('PIN changed successfully', 'success');
-            try {
-              __fg_pin_inputConfirmEl &&
-                __fg_pin_inputConfirmEl.blur &&
-                __fg_pin_inputConfirmEl.blur();
-              __fg_pin_inputNewEl && __fg_pin_inputNewEl.blur && __fg_pin_inputNewEl.blur();
-              __fg_pin_inputCurrentEl &&
-                __fg_pin_inputCurrentEl.blur &&
-                __fg_pin_inputCurrentEl.blur();
-              __fg_pin_log.d('blurred inputs after update success');
-            } catch (b) {
-              __fg_pin_log.d('blur after update error', b);
-            }
-
-            if (__fg_pin_inputCurrentEl) __fg_pin_inputCurrentEl.value = '';
-            if (__fg_pin_inputNewEl) __fg_pin_inputNewEl.value = '';
-            if (__fg_pin_inputConfirmEl) __fg_pin_inputConfirmEl.value = '';
-            // Close modal using ModalManager
-            if (window.ModalManager && typeof window.ModalManager.closeModal === 'function') {
-              window.ModalManager.closeModal('securityPinModal');
-              __fg_pin_log.i('Closed PIN modal via ModalManager');
-            } else {
-              __fg_pin_securityPinModal?.classList.remove('active');
-              __fg_pin_securityPinModal?.setAttribute('aria-hidden', 'true');
-              __fg_pin_log.w('ModalManager not available, closed PIN modal directly');
-            }
-          } else {
-            __fg_pin_log.e('pin update failed', upd && upd.error);
-            __fg_pin_notify('Failed to update PIN. Please try again later.', 'error');
           }
         } catch (err) {
-          __fg_pin_log.e('Change PIN submit error', err);
-          __fg_pin_notify('Unexpected error while changing PIN', 'error');
+          __fg_pin_log.e('Error verifying PIN:', err);
+          __fg_pin_showFieldError(__fg_pin_inputCurrentEl, 'Failed to verify PIN. Try again.');
+          __fg_pin_notify('Failed to verify PIN. Try again.', 'error');
+          return;
         }
-      },
-      { passive: false }
-    );
+
+        __fg_pin_notify('Updating PIN...', 'info');
+        const upd = await __fg_pin_updateStoredPin(uid, found.table, found.column, neu);
+        if (upd && upd.ok) {
+          __fg_pin_log.i('pin update succeeded');
+          __fg_pin_notify('PIN changed successfully', 'success');
+          try {
+            __fg_pin_inputConfirmEl &&
+              __fg_pin_inputConfirmEl.blur &&
+              __fg_pin_inputConfirmEl.blur();
+            __fg_pin_inputNewEl && __fg_pin_inputNewEl.blur && __fg_pin_inputNewEl.blur();
+            __fg_pin_inputCurrentEl &&
+              __fg_pin_inputCurrentEl.blur &&
+              __fg_pin_inputCurrentEl.blur();
+            __fg_pin_log.d('blurred inputs after update success');
+          } catch (b) {
+            __fg_pin_log.d('blur after update error', b);
+          }
+
+          if (__fg_pin_inputCurrentEl) __fg_pin_inputCurrentEl.value = '';
+          if (__fg_pin_inputNewEl) __fg_pin_inputNewEl.value = '';
+          if (__fg_pin_inputConfirmEl) __fg_pin_inputConfirmEl.value = '';
+          // Close modal using ModalManager
+          if (window.ModalManager && typeof window.ModalManager.closeModal === 'function') {
+            window.ModalManager.closeModal('securityPinModal');
+            __fg_pin_log.i('Closed PIN modal via ModalManager');
+          } else {
+            __fg_pin_securityPinModal?.classList.remove('active');
+            __fg_pin_securityPinModal?.setAttribute('aria-hidden', 'true');
+            __fg_pin_log.w('ModalManager not available, closed PIN modal directly');
+          }
+        } else {
+          __fg_pin_log.e('pin update failed', upd && upd.error);
+          __fg_pin_notify('Failed to update PIN. Please try again later.', 'error');
+        }
+      } catch (err) {
+        __fg_pin_log.e('Change PIN submit error', err);
+        __fg_pin_notify('Unexpected error while changing PIN', 'error');
+      }
+    },
+    { passive: false }
+  );
     __fg_pin_log.i('Change PIN form handler attached (strict)');
   } else {
     __fg_pin_log.d('changePinForm not present on page yet');
@@ -3009,7 +3024,7 @@ payBtn.addEventListener('click', () => {
     const response = await fetch('https://api.flexgig.com.ng/api/check-pin', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+        'Authorization': `Bearer ${localStorage.getItem('authToken') || ''}`,
         'Content-Type': 'application/json',
       },
       credentials: 'include',
@@ -3019,7 +3034,12 @@ payBtn.addEventListener('click', () => {
       return null;
     }
     const { hasPin } = await response.json();
-    return hasPin ? { table: 'users', column: 'pin' } : null; // Return schema for compatibility
+    if (hasPin) {
+      console.log('[PinModal] PIN found in users.pin');
+      return { table: 'users', column: 'pin' };
+    }
+    console.log('[PinModal] No PIN found');
+    return null;
   } catch (err) {
     console.error('[PinModal] Error checking PIN:', err);
     return null;
@@ -3032,15 +3052,16 @@ payBtn.addEventListener('click', () => {
     const response = await fetch('https://api.flexgig.com.ng/api/save-pin', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+        'Authorization': `Bearer ${localStorage.getItem('authToken') || ''}`,
         'Content-Type': 'application/json',
       },
       credentials: 'include',
       body: JSON.stringify({ pin: newPin }),
     });
     if (!response.ok) {
-      console.error('[PinModal] PIN update failed:', await response.text());
-      return { ok: false, error: 'Failed to update PIN' };
+      const { error } = await response.json();
+      console.error('[PinModal] PIN update failed:', error?.message || await response.text());
+      return { ok: false, error: error?.message || 'Failed to update PIN' };
     }
     console.log('[PinModal] PIN updated successfully');
     return { ok: true };
@@ -3052,25 +3073,35 @@ payBtn.addEventListener('click', () => {
 
   // Re-authenticate with PIN
   async function reAuthenticateWithPin(uid, pin, callback) {
-    try {
-      const found = await findStoredPin(uid);
-      if (!found || !found.value) {
-        notify('No PIN set. Please set a PIN first.', 'error', pinVerifyAlert, pinVerifyAlertMsg);
-        return false;
-      }
-      if (found.value !== pin) {
-        notify('Incorrect PIN. Try again.', 'error', pinVerifyAlert, pinVerifyAlertMsg);
-        return false;
-      }
-      notify('PIN verified successfully', 'success', pinVerifyAlert, pinVerifyAlertMsg);
-      callback(true);
-      return true;
-    } catch (err) {
-      log.e('reAuthenticateWithPin error', err);
-      notify('Error verifying PIN. Please try again.', 'error', pinVerifyAlert, pinVerifyAlertMsg);
+  try {
+    const found = await findStoredPin(uid);
+    if (!found) {
+      notify('No PIN set. Please set a PIN first.', 'error', pinVerifyAlert, pinVerifyAlertMsg);
       return false;
     }
+    const res = await fetch('https://api.flexgig.com.ng/api/verify-pin', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('authToken') || ''}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ pin }),
+      credentials: 'include',
+    });
+    if (!res.ok) {
+      const { error } = await res.json();
+      notify(error?.message || 'Incorrect PIN. Try again.', 'error', pinVerifyAlert, pinVerifyAlertMsg);
+      return false;
+    }
+    notify('PIN verified successfully', 'success', pinVerifyAlert, pinVerifyAlertMsg);
+    callback(true);
+    return true;
+  } catch (err) {
+    log.e('reAuthenticateWithPin error', err);
+    notify('Error verifying PIN. Please try again.', 'error', pinVerifyAlert, pinVerifyAlertMsg);
+    return false;
   }
+}
 
   // Reusable PIN check function
   window.checkPinExists = async function (callback, context = null) {
@@ -3201,33 +3232,36 @@ payBtn.addEventListener('click', () => {
     if (pinForm && pinInputs.length) {
       bindPinInputs(pinInputs, pinForm, pinModal, pinAlert, pinAlertMsg);
       pinForm.addEventListener('submit', async (ev) => {
-        ev.preventDefault();
-        const pin = Array.from(pinInputs).map(input => input.value).join('');
-        if (!/^\d{4}$/.test(pin)) {
-          notify('PIN must be 4 digits', 'error');
-          return;
-        }
-        const info = await getUid();
-        if (!info || !info.uid) {
-          notify('You must be signed in to set PIN', 'error');
-          return;
-        }
-        const found = await findStoredPin(info.uid) || { table: 'profiles', column: 'pin' };
-        notify('Setting PIN...', 'info');
-        const upd = await updateStoredPin(info.uid, found.table, found.column, pin);
-        if (upd.ok) {
-          notify('PIN set successfully', 'success');
-          pinInputs.forEach(inp => inp.value = '');
-          window.ModalManager.closeModal('pinModal');
-          if (lastModalSource === 'security') {
-            window.ModalManager.openModal('securityModal');
-          } else if (lastModalSource === 'checkout') {
-            window.ModalManager.openModal('pinVerifyModal');
-          }
-        } else {
-          notify('Failed to set PIN. Try again.', 'error');
-        }
-      });
+  ev.preventDefault();
+  const pin = Array.from(pinInputs).map(input => input.value).join('');
+  if (!/^\d{4}$/.test(pin)) {
+    notify('PIN must be 4 digits', 'error');
+    pinInputs.forEach(inp => inp.value = ''); // Clear inputs on error
+    return;
+  }
+  const info = await getUid();
+  if (!info || !info.uid) {
+    notify('You must be signed in to set PIN', 'error');
+    pinInputs.forEach(inp => inp.value = ''); // Clear inputs on error
+    return;
+  }
+  const found = await findStoredPin(info.uid) || { table: 'profiles', column: 'pin' };
+  notify('Setting PIN...', 'info');
+  const upd = await updateStoredPin(info.uid, found.table, found.column, pin);
+  if (upd.ok) {
+    notify('PIN set successfully', 'success');
+    pinInputs.forEach(inp => inp.value = '');
+    window.ModalManager.closeModal('pinModal');
+    if (lastModalSource === 'security') {
+      window.ModalManager.openModal('securityModal');
+    } else if (lastModalSource === 'checkout') {
+      window.ModalManager.openModal('pinVerifyModal');
+    }
+  } else {
+    notify('Failed to set PIN. Try again.', 'error');
+    pinInputs.forEach(inp => inp.value = ''); // Clear inputs on error
+  }
+});
     }
   }
 
@@ -3236,29 +3270,33 @@ payBtn.addEventListener('click', () => {
     if (pinVerifyForm && pinVerifyInputs.length) {
       bindPinInputs(pinVerifyInputs, pinVerifyForm, pinVerifyModal, pinVerifyAlert, pinVerifyAlertMsg);
       pinVerifyForm.addEventListener('submit', async (ev) => {
-        ev.preventDefault();
-        const pin = Array.from(pinVerifyInputs).map(input => input.value).join('');
-        if (!/^\d{4}$/.test(pin)) {
-          notify('PIN must be 4 digits', 'error', pinVerifyAlert, pinVerifyAlertMsg);
-          return;
-        }
-        const info = await getUid();
-        if (!info || !info.uid) {
-          notify('You must be signed in to verify PIN', 'error', pinVerifyAlert, pinVerifyAlertMsg);
-          return;
-        }
-        await reAuthenticateWithPin(info.uid, pin, (success) => {
-          if (success) {
-            pinVerifyInputs.forEach(inp => inp.value = '');
-            window.ModalManager.closeModal('pinVerifyModal');
-            if (lastModalSource === 'checkout') {
-              // Proceed with checkout (e.g., trigger payment API)
-              notify('Payment processing...', 'info');
-              // Add your payment logic here
-            }
-          }
-        });
-      });
+  ev.preventDefault();
+  const pin = Array.from(pinVerifyInputs).map(input => input.value).join('');
+  if (!/^\d{4}$/.test(pin)) {
+    notify('PIN must be 4 digits', 'error', pinVerifyAlert, pinVerifyAlertMsg);
+    pinVerifyInputs.forEach(inp => inp.value = ''); // Clear inputs on error
+    return;
+  }
+  const info = await getUid();
+  if (!info || !info.uid) {
+    notify('You must be signed in to verify PIN', 'error', pinVerifyAlert, pinVerifyAlertMsg);
+    pinVerifyInputs.forEach(inp => inp.value = ''); // Clear inputs on error
+    return;
+  }
+  await reAuthenticateWithPin(info.uid, pin, (success) => {
+    if (success) {
+      pinVerifyInputs.forEach(inp => inp.value = '');
+      window.ModalManager.closeModal('pinVerifyModal');
+      if (lastModalSource === 'checkout') {
+        notify('Payment processing...', 'info');
+        // Add your payment logic here
+      }
+    } else {
+      notify('Incorrect PIN. Please try again.', 'error', pinVerifyAlert, pinVerifyAlertMsg);
+      pinVerifyInputs.forEach(inp => inp.value = ''); // Clear inputs on error
+    }
+  });
+});
     }
   }
 
@@ -5278,100 +5316,110 @@ function showSlideNotification(message, type = "info") {
 /* ========== Wire PIN modal controls ========== */
 function __sec_pin_wireHandlers() {
   if (__sec_CHANGE_FORM) {
-    __sec_CHANGE_FORM.addEventListener(
-      'submit',
-      async (ev) => {
-        ev.preventDefault();
-        try {
-          __sec_log.d('[PIN] submit started');
-          const cur = String((__sec_PIN_CURRENT && __sec_PIN_CURRENT.value) || '').trim();
-          const neu = String((__sec_PIN_NEW && __sec_PIN_NEW.value) || '').trim();
-          const conf = String((__sec_PIN_CONFIRM && __sec_PIN_CONFIRM.value) || '').trim();
-          __sec_log.d('[PIN] submitted values', { cur, neu, conf });
+    __sec_CHANGE_FORM.addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  try {
+    __sec_log.d('[PIN] submit started');
+    const cur = String((__sec_PIN_CURRENT && __sec_PIN_CURRENT.value) || '').trim();
+    const neu = String((__sec_PIN_NEW && __sec_PIN_NEW.value) || '').trim();
+    const conf = String((__sec_PIN_CONFIRM && __sec_PIN_CONFIRM.value) || '').trim();
+    __sec_log.d('[PIN] submitted values', { cur, neu, conf });
 
-          // === Input validation ===
-          if (!/^\d{4}$/.test(cur)) {
-            __sec_pin_notify('Enter your current 4-digit PIN', 'error');
-            __sec_log.w('[PIN] current invalid');
-            return;
-          }
-          if (!/^\d{4}$/.test(neu)) {
-            __sec_pin_notify('New PIN must be 4 digits', 'error');
-            __sec_log.w('[PIN] new invalid');
-            return;
-          }
-          if (neu === cur) {
-            __sec_pin_notify('New PIN must be different from current PIN', 'error');
-            __sec_log.w('[PIN] new equals current');
-            return;
-          }
-          if (neu !== conf) {
-            __sec_pin_notify('New PIN and confirmation do not match', 'error');
-            __sec_log.w('[PIN] confirm mismatch');
-            return;
-          }
+    // Helper to clear inputs
+    const clearInputs = () => {
+      if (__sec_PIN_CURRENT) __sec_PIN_CURRENT.value = '';
+      if (__sec_PIN_NEW) __sec_PIN_NEW.value = '';
+      if (__sec_PIN_CONFIRM) __sec_PIN_CONFIRM.value = '';
+    };
 
-          // === Get user ID ===
-          const info = await __sec_pin_getUid();
-          if (!info || !info.uid) {
-            __sec_pin_notify('You must be signed in to change PIN', 'error');
-            __sec_log.e('[PIN] no signed-in user');
-            return;
-          }
-          const uid = info.uid;
-          __sec_log.d('[PIN] uid obtained', uid);
+    // === Input validation ===
+    if (!/^\d{4}$/.test(cur)) {
+      __sec_pin_notify('Enter your current 4-digit PIN', 'error');
+      __sec_log.w('[PIN] current invalid');
+      clearInputs();
+      return;
+    }
+    if (!/^\d{4}$/.test(neu)) {
+      __sec_pin_notify('New PIN must be 4 digits', 'error');
+      __sec_log.w('[PIN] new invalid');
+      clearInputs();
+      return;
+    }
+    if (neu === cur) {
+      __sec_pin_notify('New PIN must be different from current PIN', 'error');
+      __sec_log.w('[PIN] new equals current');
+      clearInputs();
+      return;
+    }
+    if (neu !== conf) {
+      __sec_pin_notify('New PIN and confirmation do not match', 'error');
+      __sec_log.w('[PIN] confirm mismatch');
+      clearInputs();
+      return;
+    }
 
-          // === Verify current PIN with API ===
-          __sec_pin_notify('Verifying current PIN...', 'info');
-          const verifyResponse = await fetch('https://api.flexgig.com.ng/api/verify-pin', {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
-              'Content-Type': 'application/json',
-            },
-            credentials: 'include',
-            body: JSON.stringify({ pin: cur }),
-          });
+    // === Get user ID ===
+    const info = await __sec_pin_getUid();
+    if (!info || !info.uid) {
+      __sec_pin_notify('You must be signed in to change PIN', 'error');
+      __sec_log.e('[PIN] no signed-in user');
+      clearInputs();
+      return;
+    }
+    const uid = info.uid;
+    __sec_log.d('[PIN] uid obtained', uid);
 
-          if (!verifyResponse.ok) {
-            const errText = await verifyResponse.text();
-            console.error('[SecurityPin] PIN verification failed:', errText);
-            __sec_pin_notify('Current PIN is incorrect', 'error');
-            return;
-          }
-          __sec_log.i('[PIN] current PIN verified by API');
-
-          // === Update PIN ===
-          __sec_pin_notify('Updating PIN...', 'info');
-          const upd = await __sec_pin_updateStored(uid, neu);
-          if (upd && upd.ok) {
-            __sec_pin_notify('PIN changed successfully', 'success');
-            __sec_log.i('[PIN] update succeeded');
-
-            if (__sec_PIN_CURRENT) __sec_PIN_CURRENT.value = '';
-            if (__sec_PIN_NEW) __sec_PIN_NEW.value = '';
-            if (__sec_PIN_CONFIRM) __sec_PIN_CONFIRM.value = '';
-
-            // Close modal via ModalManager
-            if (window.ModalManager?.closeModal) {
-              window.ModalManager.closeModal('securityPinModal');
-              __sec_log.i('[PIN] closed securityPinModal via ModalManager');
-            } else {
-              __sec_PIN_MODAL?.classList.remove('active');
-              __sec_PIN_MODAL?.setAttribute('aria-hidden', 'true');
-              __sec_log.w('[PIN] ModalManager not found, closed directly');
-            }
-          } else {
-            __sec_log.e('[PIN] update failed', upd?.error);
-            __sec_pin_notify('Failed to update PIN. Please try again later.', 'error');
-          }
-        } catch (err) {
-          __sec_log.e('[PIN] submit error', err);
-          __sec_pin_notify('Unexpected error while changing PIN', 'error');
-        }
+    // === Verify current PIN with API ===
+    __sec_pin_notify('Verifying current PIN...', 'info');
+    const verifyResponse = await fetch('https://api.flexgig.com.ng/api/verify-pin', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
+        'Content-Type': 'application/json',
       },
-      { passive: false }
-    );
+      credentials: 'include',
+      body: JSON.stringify({ pin: cur }),
+    });
+
+    if (!verifyResponse.ok) {
+      const errText = await verifyResponse.text();
+      console.error('[SecurityPin] PIN verification failed:', errText);
+      __sec_pin_notify('Current PIN is incorrect', 'error');
+      clearInputs();
+      return;
+    }
+    __sec_log.i('[PIN] current PIN verified by API');
+
+    // === Update PIN ===
+    __sec_pin_notify('Updating PIN...', 'info');
+    const upd = await __sec_pin_updateStored(uid, neu);
+    if (upd && upd.ok) {
+      __sec_pin_notify('PIN changed successfully', 'success');
+      __sec_log.i('[PIN] update succeeded');
+
+      clearInputs();
+
+      if (window.ModalManager?.closeModal) {
+        window.ModalManager.closeModal('securityPinModal');
+        __sec_log.i('[PIN] closed securityPinModal via ModalManager');
+      } else {
+        __sec_PIN_MODAL?.classList.remove('active');
+        __sec_PIN_MODAL?.setAttribute('aria-hidden', 'true');
+        __sec_log.w('[PIN] ModalManager not found, closed directly');
+      }
+    } else {
+      __sec_log.e('[PIN] update failed', upd?.error);
+      __sec_pin_notify('Failed to update PIN. Please try again later.', 'error');
+      clearInputs();
+    }
+  } catch (err) {
+    __sec_log.e('[PIN] submit error', err);
+    __sec_pin_notify('Unexpected error while changing PIN', 'error');
+    if (__sec_PIN_CURRENT) __sec_PIN_CURRENT.value = '';
+    if (__sec_PIN_NEW) __sec_PIN_NEW.value = '';
+    if (__sec_PIN_CONFIRM) __sec_PIN_CONFIRM.value = '';
+  }
+}, { passive: false });
     __sec_log.i('[PIN] change form handler attached');
   } else {
     __sec_log.d('[PIN] change form not present yet');
