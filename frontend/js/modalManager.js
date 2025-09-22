@@ -11,7 +11,6 @@
     updateProfileModal: { element: document.getElementById('updateProfileModal'), hasPullHandle: true },
     pinModal: { element: document.getElementById('pinModal'), hasPullHandle: false },
     allPlansModal: { element: document.getElementById('allPlansModal'), hasPullHandle: true },
-    checkoutModal: { element: document.getElementById('checkoutModal'), hasPullHandle: true },
     contactModal: { element: document.getElementById('contactModal'), hasPullHandle: false },
   };
 
@@ -177,21 +176,24 @@ function openModal(modalId, skipHistory = false) {
     }
 
     if (!skipHistory) {
-      history.pushState({ modalId }, "", `#${modalId}`);
+      history.pushState({ modalId }, '', `#${modalId}`);
     }
 
-    // Focus handling (same as before)
-    let focusTarget = modal.querySelector(
-      'input, select, textarea, [tabindex]:not([tabindex="-1"])'
-    ) || modal.querySelector('button:not([data-close])');
+    // Focus handling
+    let focusTarget =
+      modal.querySelector('input, select, textarea, [tabindex]:not([tabindex="-1"])') ||
+      modal.querySelector('button:not([data-close])');
 
-    if (modalId === "securityPinModal") {
+    if (modalId === 'securityPinModal') {
       const title = modal.querySelector('#pinTitle');
       if (title) focusTarget = title;
+      // Dispatch event to bind PIN inputs
+      document.dispatchEvent(new CustomEvent('security:pin-modal-opened'));
+      console.log('[ModalManager] openModal: Dispatched security:pin-modal-opened for securityPinModal');
     }
 
     if (focusTarget) {
-      focusTarget.setAttribute('tabindex', '-1'); 
+      focusTarget.setAttribute('tabindex', '-1');
       focusTarget.focus();
     }
 

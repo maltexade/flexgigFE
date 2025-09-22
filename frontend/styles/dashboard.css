@@ -520,6 +520,7 @@
     display: flex;
     flex-direction: column;
     overflow-x: hidden;
+    padding-bottom: 80px;
   }
   .modal-overlay.active .plan-modal-content {
     transform: translateY(0);
@@ -1760,7 +1761,7 @@
   padding-left: 0;
   padding-right: 0;
   padding-top: 0;
-  padding-bottom: 17px; /* nav height + optional spacing */
+  padding-bottom: 17px !important; /* nav height + optional spacing */
   /* Optional: smooth scrolling */
   overflow-y: auto;
 }
@@ -2492,4 +2493,58 @@ html.dark-mode .theme-toggle .toggle-knob { transform: translateX(20px); }
 .dark-mode .settings-item {
   background-color: #3a3a3a;
   color: #ffffff;
+}
+
+/* Slide notification (top-right) */
+.slide-notification {
+  pointer-events: auto;
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  min-width: 260px;
+  max-width: 420px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  color: #fff;
+  font-weight: 600;
+  font-size: 14px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.18);
+  transform: translateX(120%);
+  opacity: 0;
+  transition: transform .36s cubic-bezier(.22,.9,.32,1), opacity .28s ease;
+  z-index: 12000;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+/* container to stack multiple toasts */
+#flexgig_slide_container {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  z-index: 12000;
+  pointer-events: none; /* allow clicks to pass through except on toasts */
+}
+
+/* show state */
+.slide-notification.show { transform: translateX(0); opacity: 1; }
+
+/* Types */
+.slide-notification.success { background: linear-gradient(135deg,#4caf50,#43a047); }
+.slide-notification.error   { background: linear-gradient(135deg,#f44336,#e53935); }
+.slide-notification.info    { background: linear-gradient(135deg,#2196f3,#1e88e5); }
+
+/* small text/icon tweaks */
+.slide-notification .label { flex: 1; }
+.slide-notification .close-btn {
+  background: transparent;
+  border: 0;
+  color: rgba(255,255,255,0.95);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 4px;
 }

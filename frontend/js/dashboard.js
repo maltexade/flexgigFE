@@ -2438,51 +2438,502 @@ payBtn.addEventListener('click', () => {
 })();
 
 
-// --- SECURITY PIN MODAL ---
-// --- SECURITY PIN MODAL ---
-// --- SECURITY PIN MODAL ---
-// Elements
-const securityPinRow = document.getElementById("securityPinRow");
-const securityPinModal = document.getElementById("securityPinModal");
-const securityPinClose = document.getElementById("securityPinCloseBtn");
-const changePinForm = document.getElementById("changePinForm");
-const resetPinBtn = document.getElementById("resetPinBtn");
 
 
-// --- Close modal
-if (securityPinClose) {
-  securityPinClose.addEventListener("click", () => {
-    securityPinModal.classList.remove("active");
-  });
-}
 
-// --- Handle Change PIN
-if (changePinForm) {
-  changePinForm.addEventListener("submit", (e) => {
-    e.preventDefault();
+// --- SECURITY PIN MODAL (integrated, strict, Supabase-aware, auto-jump & auto-submit) ---
+// --- SECURITY PIN MODAL (integrated, strict, Supabase-aware, auto-jump & auto-submit) ---
+// --- SECURITY PIN MODAL (integrated, strict, Supabase-aware, auto-jump & auto-submit) ---
+// --- SECURITY PIN MODAL (integrated, strict, Supabase-aware, auto-jump & auto-submit) ---
+// --- SECURITY PIN MODAL (integrated, strict, Supabase-aware, auto-jump & auto-submit) ---
+(() => {
+  // Local logger (keeps messages compact)
+  const __fg_pin_log = {
+    d: (...a) => console.debug('[PIN][debug]', ...a),
+    i: (...a) => console.info('[PIN][info]', ...a),
+    w: (...a) => console.warn('[PIN][warn]', ...a),
+    e: (...a) => console.error('[PIN][error]', ...a),
+  };
 
-    const currentPin = document.getElementById("currentPin").value.trim();
-    const newPin = document.getElementById("newPin").value.trim();
-    const confirmPin = document.getElementById("confirmPin").value.trim();
+  // Elements (IDs must exist in DOM)
+  const __fg_pin_securityPinModal = document.getElementById('securityPinModal');
+  const __fg_pin_changePinForm = document.getElementById('changePinForm');
+  const __fg_pin_resetPinBtn = document.getElementById('resetPinBtn');
+  const __fg_pin_inputCurrentEl = document.getElementById('currentPin');
+  const __fg_pin_inputNewEl = document.getElementById('newPin');
+  const __fg_pin_inputConfirmEl = document.getElementById('confirmPin');
 
-    if (newPin !== confirmPin) {
-      alert("New PINs do not match.");
+  // Timing variables
+  const __fg_pin_nextFocusDelay = 60; // ms delay before focusing next input after auto-jump
+  const __fg_pin_autoSubmitBlurDelay = 80; // ms delay after blur before auto-submitting
+
+  function __fg_pin_notify(message, type = 'info', duration = 3200) {
+    try {
+      __fg_pin_log.i('[PIN notify]', { message, type });
+      if (typeof window.showSlideNotification === 'function') {
+        window.showSlideNotification(message, type, duration);
+        return;
+      }
+    } catch (err) {
+      __fg_pin_log.e('[notifyPin] error', err);
+    }
+  }
+
+  // Inline field error helper
+  function __fg_pin_showFieldError(field, message) {
+    if (!field) return;
+    __fg_pin_hideFieldError(field);
+    const span = document.createElement('div');
+    span.className = 'pin-field-error';
+    span.setAttribute('role', 'alert');
+    span.style.color = '#ffcccc';
+    span.style.fontSize = '12px';
+    span.style.marginTop = '6px';
+    span.textContent = message;
+    field.classList.add('pin-invalid');
+    field.setAttribute('aria-invalid', 'true');
+    if (field.parentNode) field.parentNode.insertBefore(span, field.nextSibling);
+  }
+
+  function __fg_pin_hideFieldError(field) {
+    if (!field || !field.parentNode) return;
+    const next = field.nextSibling;
+    if (next && next.classList && next.classList.contains('pin-field-error')) {
+      next.remove();
+    }
+    field.classList.remove('pin-invalid');
+    field.removeAttribute('aria-invalid');
+  }
+
+  function __fg_pin_clearAllFieldErrors() {
+    [__fg_pin_inputCurrentEl, __fg_pin_inputNewEl, __fg_pin_inputConfirmEl].forEach(
+      (f) => {
+        if (f) __fg_pin_hideFieldError(f);
+      }
+    );
+  }
+
+  // Utility to get current signed-in uid
+  async function __fg_pin_getCurrentUid() {
+    try {
+      if (typeof window.getSession === 'function') {
+        const s = await window.getSession();
+        __fg_pin_log.d('getSession result', s);
+        if (s && s.user && s.user.uid) return { uid: s.user.uid, session: s };
+      }
+      const stored = JSON.parse(localStorage.getItem('authTokenData') || '{}');
+      if (stored && stored.user && stored.user.uid) {
+        __fg_pin_log.d('local authTokenData used', stored.user);
+        return { uid: stored.user.uid, session: stored };
+      }
+      const altUser = JSON.parse(localStorage.getItem('user') || 'null');
+      if (altUser && altUser.uid) {
+        __fg_pin_log.d('alt local user used', altUser);
+        return { uid: altUser.uid, session: null };
+      }
+      __fg_pin_log.w('no session/uid found');
+      return null;
+    } catch (err) {
+      __fg_pin_log.e('getPinCurrentUid error', err);
+      return null;
+    }
+  }
+
+  // Find stored PIN value in Supabase
+  const __fg_pin_TRY_TABLES = ['profiles', 'users', 'accounts'];
+  const __fg_pin_TRY_COLUMNS = [
+    'pin',
+    'account_pin',
+    'accountPin',
+    'pinCode',
+    'pin_hash',
+    'pin_hash_text',
+  ];
+  async function __fg_pin_findStoredPin(uid) {
+    if (!window.supabaseClient) {
+      __fg_pin_log.e('findStoredPin: supabaseClient not provided');
+      return null;
+    }
+    for (const table of __fg_pin_TRY_TABLES) {
+      for (const col of __fg_pin_TRY_COLUMNS) {
+        try {
+          __fg_pin_log.d('querying', { table, col, uid });
+          const query = window.supabaseClient
+            .from(table)
+            .select(col)
+            .eq('id', uid)
+            .limit(1)
+            .single();
+          const { data, error, status } = await query;
+          if (error) {
+            __fg_pin_log.d('query error (continue)', { table, col, status, error });
+            continue;
+          }
+          if (data && Object.prototype.hasOwnProperty.call(data, col)) {
+            const value = data[col];
+            __fg_pin_log.i('found stored pin candidate', {
+              table,
+              col,
+              valueExists: value != null,
+            });
+            return { table, column: col, value };
+          }
+        } catch (err) {
+          __fg_pin_log.d('caught query exception (continue)', { table, col, err });
+          continue;
+        }
+      }
+    }
+    __fg_pin_log.w('no stored PIN field found in common tables/columns');
+    return null;
+  }
+
+  // Update stored PIN in Supabase
+  async function __fg_pin_updateStoredPin(uid, table, column, newPin) {
+    try {
+      if (!window.supabaseClient) {
+        __fg_pin_log.e('updateStoredPin: supabaseClient missing');
+        return { ok: false, error: 'no_client' };
+      }
+      const payload = {};
+      payload[column] = newPin;
+      __fg_pin_log.d('updating', { table, column, uid });
+      const { data, error } = await window.supabaseClient
+        .from(table)
+        .update(payload)
+        .eq('id', uid)
+        .select()
+        .single();
+      if (error) {
+        __fg_pin_log.e('update error', error);
+        return { ok: false, error };
+      }
+      __fg_pin_log.i('update success', data);
+      return { ok: true, data };
+    } catch (err) {
+      __fg_pin_log.e('updateStoredPin exception', err);
+      return { ok: false, error: err };
+    }
+  }
+
+  // Strict PIN input restrictions + auto-jump + auto-submit
+  function __fg_pin_bindStrictPinInputs() {
+    const maxLen = 4;
+    const inputs = [
+      __fg_pin_inputCurrentEl,
+      __fg_pin_inputNewEl,
+      __fg_pin_inputConfirmEl,
+    ].filter(Boolean);
+    if (!inputs.length) {
+      __fg_pin_log.d('bindStrictPinInputs: no inputs present yet');
       return;
     }
 
-    console.log("[SECURITY PIN] Change PIN submitted", { currentPin, newPin });
-    // TODO: backend call here
-    securityPinModal.classList.remove("active");
-  });
-}
+    function __fg_pin_nextInputOf(el) {
+      if (!el) return null;
+      if (el === __fg_pin_inputCurrentEl) return __fg_pin_inputNewEl;
+      if (el === __fg_pin_inputNewEl) return __fg_pin_inputConfirmEl;
+      return null;
+    }
 
-// --- Reset PIN
-if (resetPinBtn) {
-  resetPinBtn.addEventListener("click", () => {
-    console.log("[SECURITY PIN] Reset PIN triggered");
-    alert("Reset process started.");
+    inputs.forEach((el) => {
+      if (!el) return;
+      if (el.__fg_pin_bound) return;
+      el.__fg_pin_bound = true;
+
+      el.setAttribute('inputmode', 'numeric');
+      el.setAttribute('pattern', '[0-9]*');
+      el.setAttribute('maxlength', String(maxLen));
+      el.setAttribute('autocomplete', 'off');
+
+      el.addEventListener('input', (ev) => {
+        const before = el.value || '';
+        const cleaned = before.replace(/\D/g, '').slice(0, maxLen);
+        if (before !== cleaned) {
+          __fg_pin_log.d('input sanitized', { id: el.id, before, cleaned });
+          el.value = cleaned;
+        }
+        __fg_pin_hideFieldError(el);
+
+        if (cleaned.length === maxLen) {
+          const next = __fg_pin_nextInputOf(el);
+          if (next) {
+            setTimeout(() => {
+              try {
+                next.focus();
+                next.select && next.select();
+              } catch (e) {
+                __fg_pin_log.d('next.focus failed', e);
+              }
+            }, __fg_pin_nextFocusDelay);
+          } else if (el === __fg_pin_inputConfirmEl) {
+            try {
+              __fg_pin_inputConfirmEl.blur();
+              __fg_pin_inputNewEl && __fg_pin_inputNewEl.blur && __fg_pin_inputNewEl.blur();
+              __fg_pin_inputCurrentEl &&
+                __fg_pin_inputCurrentEl.blur &&
+                __fg_pin_inputCurrentEl.blur();
+              __fg_pin_log.d('confirm filled -> blurred inputs to hide keyboard before submit');
+            } catch (berr) {
+              __fg_pin_log.d('blur error', berr);
+            }
+
+            setTimeout(() => {
+              __fg_pin_autoSubmitIfValid();
+            }, __fg_pin_autoSubmitBlurDelay);
+          }
+        }
+      });
+
+      el.addEventListener('keypress', (ev) => {
+        if (!/^[0-9]$/.test(ev.key)) {
+          __fg_pin_log.d('keypress blocked non-digit', { id: el.id, key: ev.key });
+          ev.preventDefault();
+        }
+      });
+
+      el.addEventListener('paste', (ev) => {
+        const pasted = (ev.clipboardData || window.clipboardData).getData('text') || '';
+        const digits = pasted.replace(/\D/g, '').slice(0, maxLen);
+        if (!digits.length) {
+          __fg_pin_log.d('paste blocked no digits', { id: el.id, pasted });
+          ev.preventDefault();
+          return;
+        }
+        ev.preventDefault();
+        const start = el.selectionStart ?? el.value.length;
+        const end = el.selectionEnd ?? el.value.length;
+        const newVal = (el.value.slice(0, start) + digits + el.value.slice(end))
+          .replace(/\D/g, '')
+          .slice(0, maxLen);
+        el.value = newVal;
+        const caret = Math.min(start + digits.length, maxLen);
+        el.setSelectionRange(caret, caret);
+        __fg_pin_log.d('paste accepted', { id: el.id, digits, newVal });
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+
+      __fg_pin_log.i('bound strict PIN handlers to', el.id);
+    });
+  }
+
+  // Auto-submit if valid
+  function __fg_pin_autoSubmitIfValid() {
+    if (!__fg_pin_changePinForm) return;
+    const cur = String((__fg_pin_inputCurrentEl && __fg_pin_inputCurrentEl.value) || '').trim();
+    const neu = String((__fg_pin_inputNewEl && __fg_pin_inputNewEl.value) || '').trim();
+    const conf = String((__fg_pin_inputConfirmEl && __fg_pin_inputConfirmEl.value) || '').trim();
+
+    if (!/^\d{4}$/.test(cur)) {
+      __fg_pin_showFieldError(__fg_pin_inputCurrentEl, 'Enter current 4-digit PIN');
+      __fg_pin_notify('Enter your current 4-digit PIN', 'error');
+      return;
+    }
+    if (!/^\d{4}$/.test(neu)) {
+      __fg_pin_showFieldError(__fg_pin_inputNewEl, 'New PIN must be 4 digits');
+      __fg_pin_notify('New PIN must be 4 digits', 'error');
+      return;
+    }
+    if (neu === cur) {
+      __fg_pin_showFieldError(__fg_pin_inputNewEl, 'New PIN must be different');
+      __fg_pin_notify('New PIN must be different from current PIN', 'error');
+      return;
+    }
+    if (neu !== conf) {
+      __fg_pin_showFieldError(__fg_pin_inputConfirmEl, 'Confirm PIN does not match');
+      __fg_pin_notify('New PIN and confirm PIN do not match', 'error');
+      return;
+    }
+
+    try {
+      __fg_pin_inputConfirmEl && __fg_pin_inputConfirmEl.blur && __fg_pin_inputConfirmEl.blur();
+      __fg_pin_inputNewEl && __fg_pin_inputNewEl.blur && __fg_pin_inputNewEl.blur();
+      __fg_pin_inputCurrentEl &&
+        __fg_pin_inputCurrentEl.blur &&
+        __fg_pin_inputCurrentEl.blur();
+      __fg_pin_log.d('autoSubmitIfValid: blurred inputs to hide keyboard');
+    } catch (b) {
+      __fg_pin_log.d('autoSubmit blur error', b);
+    }
+
+    setTimeout(() => {
+      try {
+        if (typeof __fg_pin_changePinForm.requestSubmit === 'function')
+          __fg_pin_changePinForm.requestSubmit();
+        else __fg_pin_changePinForm.dispatchEvent(new Event('submit', { cancelable: true }));
+        __fg_pin_log.d('autoSubmitIfValid: requestSubmit invoked');
+      } catch (err) {
+        __fg_pin_log.e('autoSubmitIfValid error', err);
+      }
+    }, __fg_pin_autoSubmitBlurDelay);
+  }
+
+  // Main change PIN handler
+  if (__fg_pin_changePinForm) {
+    __fg_pin_changePinForm.addEventListener(
+      'submit',
+      async (ev) => {
+        try {
+          ev.preventDefault();
+          __fg_pin_log.d('Change PIN submit handler started');
+
+          __fg_pin_clearAllFieldErrors();
+
+          const cur = String((__fg_pin_inputCurrentEl && __fg_pin_inputCurrentEl.value) || '').trim();
+          const neu = String((__fg_pin_inputNewEl && __fg_pin_inputNewEl.value) || '').trim();
+          const conf = String((__fg_pin_inputConfirmEl && __fg_pin_inputConfirmEl.value) || '').trim();
+
+          __fg_pin_log.d('submitted values', { cur, neu, conf });
+
+          if (!/^\d{4}$/.test(cur)) {
+            __fg_pin_log.w('current pin invalid format');
+            __fg_pin_showFieldError(__fg_pin_inputCurrentEl, 'Enter your current 4-digit PIN');
+            __fg_pin_notify('Enter your current 4-digit PIN', 'error');
+            return;
+          }
+          if (!/^\d{4}$/.test(neu)) {
+            __fg_pin_log.w('new pin invalid format');
+            __fg_pin_showFieldError(__fg_pin_inputNewEl, 'New PIN must be 4 digits');
+            __fg_pin_notify('New PIN must be 4 digits', 'error');
+            return;
+          }
+          if (neu === cur) {
+            __fg_pin_log.w('new equals current');
+            __fg_pin_showFieldError(__fg_pin_inputNewEl, 'New PIN must be different');
+            __fg_pin_notify('New PIN must be different from current PIN', 'error');
+            return;
+          }
+          if (neu !== conf) {
+            __fg_pin_log.w('confirm does not match new');
+            __fg_pin_showFieldError(__fg_pin_inputConfirmEl, 'Confirm PIN does not match');
+            __fg_pin_notify('New PIN and confirm PIN do not match', 'error');
+            return;
+          }
+
+          const sessionInfo = await __fg_pin_getCurrentUid();
+          if (!sessionInfo || !sessionInfo.uid) {
+            __fg_pin_log.e('no user session available to change PIN');
+            __fg_pin_notify('You must be signed in to change PIN', 'error');
+            return;
+          }
+          const uid = sessionInfo.uid;
+          __fg_pin_log.d('session uid', uid);
+
+          __fg_pin_notify('Verifying current PIN...', 'info');
+          const found = await __fg_pin_findStoredPin(uid);
+          if (!found) {
+            __fg_pin_log.w('no stored pin record located');
+            __fg_pin_notify(
+              'Cannot verify PIN locally. Use Reset PIN or contact support.',
+              'error'
+            );
+            return;
+          }
+
+          const storedValueRaw = found.value == null ? '' : String(found.value);
+          __fg_pin_log.d('stored candidate', {
+            table: found.table,
+            column: found.column,
+            storedValueRaw,
+          });
+
+          if (!/^\d{1,8}$/.test(storedValueRaw)) {
+            __fg_pin_log.w(
+              'stored PIN appears not to be plain digits (likely hashed). refusing client verification'
+            );
+            __fg_pin_notify(
+              'PIN is stored securely on server; use the Reset flow or server endpoint to change PIN.',
+              'error'
+            );
+            return;
+          }
+
+          if (storedValueRaw !== cur) {
+            __fg_pin_log.i('current PIN mismatch', { stored: storedValueRaw, provided: cur });
+            __fg_pin_showFieldError(__fg_pin_inputCurrentEl, 'Current PIN is incorrect');
+            __fg_pin_notify('Current PIN is incorrect', 'error');
+            return;
+          }
+
+          __fg_pin_notify('Updating PIN...', 'info');
+          const upd = await __fg_pin_updateStoredPin(uid, found.table, found.column, neu);
+          if (upd && upd.ok) {
+            __fg_pin_log.i('pin update succeeded');
+            __fg_pin_notify('PIN changed successfully', 'success');
+            try {
+              __fg_pin_inputConfirmEl &&
+                __fg_pin_inputConfirmEl.blur &&
+                __fg_pin_inputConfirmEl.blur();
+              __fg_pin_inputNewEl && __fg_pin_inputNewEl.blur && __fg_pin_inputNewEl.blur();
+              __fg_pin_inputCurrentEl &&
+                __fg_pin_inputCurrentEl.blur &&
+                __fg_pin_inputCurrentEl.blur();
+              __fg_pin_log.d('blurred inputs after update success');
+            } catch (b) {
+              __fg_pin_log.d('blur after update error', b);
+            }
+
+            if (__fg_pin_inputCurrentEl) __fg_pin_inputCurrentEl.value = '';
+            if (__fg_pin_inputNewEl) __fg_pin_inputNewEl.value = '';
+            if (__fg_pin_inputConfirmEl) __fg_pin_inputConfirmEl.value = '';
+            // Close modal using ModalManager
+            if (window.ModalManager && typeof window.ModalManager.closeModal === 'function') {
+              window.ModalManager.closeModal('securityPinModal');
+              __fg_pin_log.i('Closed PIN modal via ModalManager');
+            } else {
+              __fg_pin_securityPinModal?.classList.remove('active');
+              __fg_pin_securityPinModal?.setAttribute('aria-hidden', 'true');
+              __fg_pin_log.w('ModalManager not available, closed PIN modal directly');
+            }
+          } else {
+            __fg_pin_log.e('pin update failed', upd && upd.error);
+            __fg_pin_notify('Failed to update PIN. Please try again later.', 'error');
+          }
+        } catch (err) {
+          __fg_pin_log.e('Change PIN submit error', err);
+          __fg_pin_notify('Unexpected error while changing PIN', 'error');
+        }
+      },
+      { passive: false }
+    );
+    __fg_pin_log.i('Change PIN form handler attached (strict)');
+  } else {
+    __fg_pin_log.d('changePinForm not present on page yet');
+  }
+
+  // Reset PIN action
+  if (__fg_pin_resetPinBtn) {
+    __fg_pin_resetPinBtn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      __fg_pin_log.i('resetPinBtn clicked - redirecting to reset flow');
+      __fg_pin_notify('Redirecting to PIN reset flow', 'info');
+      window.location.href = '/reset-pin.html';
+    });
+  }
+
+  // Bind strict inputs when modal opens via custom event
+  document.addEventListener('security:pin-modal-opened', () => {
+    try {
+      __fg_pin_bindStrictPinInputs();
+      __fg_pin_log.i('Bound strict PIN inputs on security:pin-modal-opened event');
+    } catch (e) {
+      __fg_pin_log.d('bindStrictPinInputs error on modal open', e);
+    }
   });
-}
+
+  // Expose debug helpers
+  window.__fg_debugPinModule = {
+    __fg_pin_findStoredPin,
+    __fg_pin_updateStoredPin,
+    __fg_pin_bindStrictPinInputs,
+    __fg_pin_notify,
+    __fg_pin_autoSubmitIfValid,
+  };
+
+  __fg_pin_log.i('Security PIN integration loaded');
+})();
+
+
 
 
 
@@ -4189,37 +4640,359 @@ window.addEventListener('beforeunload', () => {
 });
 
 
-  /* Convert pin/pwd rows to chevron buttons */
-  function __sec_convertRowsToChevron() {
-    if (__sec_pinBtn) {
-      __sec_pinBtn.classList.add('chev-btn');
-      __sec_pinBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-      __sec_pinBtn.addEventListener('click', (ev) => {
-        ev.preventDefault();
-        __sec_log.i('pin row clicked');
-        if (typeof window.openPinModal === 'function') {
-          try { window.openPinModal(); }
-          catch (err) { __sec_log.e('openPinModal threw', err); window.dispatchEvent(new CustomEvent('security:open-pin')); }
-        } else {
-          window.dispatchEvent(new CustomEvent('security:open-pin'));
-        }
-      });
-    } else __sec_log.d('#pinToggleBtn not present');
+/* ========== Slide-in Notification ========== */
+function showSlideNotification(message, type = "info") {
+  let box = document.createElement("div");
+  box.className = "slide-notification " + type;
+  box.innerText = message;
+  document.body.appendChild(box);
 
-    if (__sec_pwdBtn) {
-      __sec_pwdBtn.classList.add('chev-btn');
-      __sec_pwdBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-      __sec_pwdBtn.addEventListener('click', (ev) => {
+  requestAnimationFrame(() => box.classList.add("show"));
+
+  setTimeout(() => {
+    box.classList.remove("show");
+    setTimeout(() => box.remove(), 500);
+  }, 3000);
+}
+
+/* =========================
+   PIN Submodule (integrated)
+   ========================= */
+
+  // Elements for PIN modal (IDs from your top-of-script)
+  const __sec_PIN_ROW        = __sec_q('#securityPinRow');
+  const __sec_PIN_MODAL      = __sec_q('#securityPinModal');
+  const __sec_PIN_CLOSE_BTN  = __sec_q('#securityPinCloseBtn');
+  const __sec_CHANGE_FORM    = __sec_q('#changePinForm');
+  const __sec_RESET_BTN      = __sec_q('#resetPinBtn');
+  const __sec_PIN_CURRENT    = __sec_q('#currentPin');
+  const __sec_PIN_NEW        = __sec_q('#newPin');
+  const __sec_PIN_CONFIRM    = __sec_q('#confirmPin');
+
+  // notify helper (prefer slide notification)
+  function __sec_pin_notify(msg, type = 'info') {
+    __sec_log.i('[PIN notify]', msg, type);
+    if (typeof showSlideNotification === 'function') {
+      showSlideNotification(msg, type);
+    } else if (typeof showToast === 'function') {
+      showToast(msg, type === 'error' ? 'error' : (type === 'success' ? 'success' : 'info'));
+    } else {
+      if (type === 'error') console.error('[PIN]', msg); else console.log('[PIN]', msg);
+    }
+  }
+
+  // small helper: get uid from session or local storage
+  async function __sec_pin_getUid() {
+    try {
+      if (typeof window.getSession === 'function') {
+        const s = await window.getSession();
+        __sec_log.d('[PIN] getSession', s);
+        if (s && s.user && s.user.uid) return { uid: s.user.uid, session: s };
+      }
+      const stored = JSON.parse(localStorage.getItem('authTokenData') || '{}');
+      if (stored && stored.user && stored.user.uid) return { uid: stored.user.uid, session: stored };
+      const altUser = JSON.parse(localStorage.getItem('user') || 'null');
+      if (altUser && altUser.uid) return { uid: altUser.uid, session: altUser };
+      __sec_log.w('[PIN] no uid found');
+      return null;
+    } catch (err) {
+      __sec_log.e('[PIN] getUid error', err);
+      return null;
+    }
+  }
+
+  // Common tables/columns to try (safe client read only when plain digits)
+  const __sec_PIN_TRY_TABLES  = ['profiles','users','accounts'];
+  const __sec_PIN_TRY_COLUMNS = ['pin','account_pin','accountPin','pinCode','pin_hash','pin_hash_text'];
+
+  async function __sec_pin_findStored(uid) {
+    if (!window.supabaseClient) {
+      __sec_log.e('[PIN] supabaseClient missing');
+      return null;
+    }
+    for (const t of __sec_PIN_TRY_TABLES) {
+      for (const c of __sec_PIN_TRY_COLUMNS) {
+        try {
+          __sec_log.d('[PIN] querying', { table: t, column: c, uid });
+          // query as single
+          const { data, error } = await window.supabaseClient.from(t).select(c).eq('id', uid).limit(1).single();
+          if (error) {
+            __sec_log.d('[PIN] query error (continue)', { table: t, column: c, error });
+            continue;
+          }
+          if (data && Object.prototype.hasOwnProperty.call(data, c)) {
+            __sec_log.i('[PIN] found candidate', { table: t, column: c, valueExists: data[c] != null });
+            return { table: t, column: c, value: data[c] };
+          }
+        } catch (err) {
+          __sec_log.d('[PIN] caught while querying (continue)', err);
+          continue;
+        }
+      }
+    }
+    __sec_log.w('[PIN] no stored PIN field found');
+    return null;
+  }
+
+  async function __sec_pin_updateStored(uid, table, column, newPin) {
+    if (!window.supabaseClient) {
+      __sec_log.e('[PIN] supabaseClient missing for update');
+      return { ok: false, error: 'no_client' };
+    }
+    try {
+      const payload = {};
+      payload[column] = newPin;
+      __sec_log.d('[PIN] updating', { table, column, uid });
+      const { data, error } = await window.supabaseClient.from(table).update(payload).eq('id', uid).select().single();
+      if (error) {
+        __sec_log.e('[PIN] update error', error);
+        return { ok: false, error };
+      }
+      __sec_log.i('[PIN] update success', data);
+      return { ok: true, data };
+    } catch (err) {
+      __sec_log.e('[PIN] update exception', err);
+      return { ok: false, error: err };
+    }
+  }
+
+  // Strict pin input binding (digit-only, length 4)
+  function __sec_pin_bindStrictInputs() {
+    try {
+      const maxLen = 4;
+      const fields = [__sec_PIN_CURRENT, __sec_PIN_NEW, __sec_PIN_CONFIRM].filter(Boolean);
+      if (!fields.length) {
+        __sec_log.d('[PIN] no input fields found when binding');
+        return;
+      }
+      fields.forEach((el) => {
+        if (!el) return;
+        if (el.__sec_pin_bound) return;
+        el.__sec_pin_bound = true;
+        el.setAttribute('inputmode','numeric');
+        el.setAttribute('pattern','[0-9]*');
+        el.setAttribute('maxlength', String(maxLen));
+        el.autocomplete = 'one-time-code';
+
+        el.addEventListener('input', () => {
+          const before = el.value || '';
+          const cleaned = before.replace(/\D/g,'').slice(0, maxLen);
+          if (before !== cleaned) {
+            __sec_log.d('[PIN] sanitized input', { id: el.id, before, cleaned });
+            el.value = cleaned;
+          }
+        });
+
+        el.addEventListener('keypress', (ev) => {
+          if (!/^[0-9]$/.test(ev.key)) {
+            __sec_log.d('[PIN] keypress blocked', { id: el.id, key: ev.key });
+            ev.preventDefault();
+          }
+        });
+
+        el.addEventListener('paste', (ev) => {
+          const pasted = (ev.clipboardData || window.clipboardData).getData('text') || '';
+          const digits = pasted.replace(/\D/g,'').slice(0, maxLen);
+          if (!digits.length) {
+            __sec_log.d('[PIN] paste blocked (no digits)', { id: el.id, pasted });
+            ev.preventDefault();
+            return;
+          }
+          ev.preventDefault();
+          const start = el.selectionStart ?? el.value.length;
+          const end = el.selectionEnd ?? el.value.length;
+          const newVal = (el.value.slice(0, start) + digits + el.value.slice(end)).replace(/\D/g,'').slice(0, maxLen);
+          el.value = newVal;
+          const caret = Math.min(start + digits.length, maxLen);
+          el.setSelectionRange(caret, caret);
+          __sec_log.d('[PIN] paste accepted', { id: el.id, digits, newVal });
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+
+        __sec_log.i('[PIN] bound strict handlers to', el.id);
+      });
+    } catch (err) {
+      __sec_log.e('[PIN] bindStrictInputs error', err);
+    }
+  }
+
+  /* ========== Wire PIN modal controls ========== */
+function __sec_pin_wireHandlers() {
+  // Remove all PIN modal open/close logic, as ModalManager handles it
+  if (__sec_CHANGE_FORM) {
+    __sec_CHANGE_FORM.addEventListener(
+      'submit',
+      async (ev) => {
         ev.preventDefault();
-        __sec_log.i('change-password row clicked');
-        if (typeof window.openChangePasswordModal === 'function') {
-          try { window.openChangePasswordModal(); }
-          catch (err) { __sec_log.e('openChangePasswordModal threw', err); window.dispatchEvent(new CustomEvent('security:open-change-password')); }
-        } else {
+        try {
+          __sec_log.d('[PIN] submit started');
+          const cur = String((__sec_PIN_CURRENT && __sec_PIN_CURRENT.value) || '').trim();
+          const neu = String((__sec_PIN_NEW && __sec_PIN_NEW.value) || '').trim();
+          const conf = String((__sec_PIN_CONFIRM && __sec_PIN_CONFIRM.value) || '').trim();
+          __sec_log.d('[PIN] submitted values', { cur, neu, conf });
+
+          if (!/^\d{4}$/.test(cur)) {
+            __sec_log.w('[PIN] current invalid');
+            __sec_pin_notify('Enter your current 4-digit PIN', 'error');
+            return;
+          }
+          if (!/^\d{4}$/.test(neu)) {
+            __sec_log.w('[PIN] new invalid');
+            __sec_pin_notify('New PIN must be 4 digits', 'error');
+            return;
+          }
+          if (neu === cur) {
+            __sec_log.w('[PIN] new equals current');
+            __sec_pin_notify('New PIN must be different from current PIN', 'error');
+            return;
+          }
+          if (neu !== conf) {
+            __sec_log.w('[PIN] confirm mismatch');
+            __sec_pin_notify('New PIN and confirm PIN do not match', 'error');
+            return;
+          }
+
+          const info = await __sec_pin_getUid();
+          if (!info || !info.uid) {
+            __sec_log.e('[PIN] no signed in user');
+            __sec_pin_notify('You must be signed in to change PIN', 'error');
+            return;
+          }
+          const uid = info.uid;
+          __sec_log.d('[PIN] uid obtained', uid);
+
+          __sec_pin_notify('Verifying current PIN...', 'info');
+          const found = await __sec_pin_findStored(uid);
+          if (!found) {
+            __sec_log.w('[PIN] cannot find stored pin candidate');
+            __sec_pin_notify(
+              'Cannot verify PIN locally. Use Reset PIN or contact support.',
+              'error'
+            );
+            return;
+          }
+
+          const storedRaw = found.value == null ? '' : String(found.value);
+          __sec_log.d('[PIN] stored candidate', {
+            table: found.table,
+            column: found.column,
+            storedRaw,
+          });
+
+          if (!/^\d{1,8}$/.test(storedRaw)) {
+            __sec_log.w(
+              '[PIN] stored value non-digit (probably hashed), refusing client compare'
+            );
+            __sec_pin_notify(
+              'PIN is stored securely on server; use the Reset flow or server endpoint to change PIN.',
+              'error'
+            );
+            return;
+          }
+
+          if (storedRaw !== cur) {
+            __sec_log.i('[PIN] current mismatch', { stored: storedRaw, provided: cur });
+            __sec_pin_notify('Current PIN is incorrect', 'error');
+            return;
+          }
+
+          __sec_pin_notify('Updating PIN...', 'info');
+          const upd = await __sec_pin_updateStored(uid, found.table, found.column, neu);
+          if (upd && upd.ok) {
+            __sec_log.i('[PIN] update succeeded');
+            __sec_pin_notify('PIN changed successfully', 'success');
+            if (__sec_PIN_CURRENT) __sec_PIN_CURRENT.value = '';
+            if (__sec_PIN_NEW) __sec_PIN_NEW.value = '';
+            if (__sec_PIN_CONFIRM) __sec_PIN_CONFIRM.value = '';
+            // Close modal using ModalManager
+            if (window.ModalManager && typeof window.ModalManager.closeModal === 'function') {
+              window.ModalManager.closeModal('securityPinModal');
+              __sec_log.i('Closed PIN modal via ModalManager');
+            } else {
+              __sec_PIN_MODAL?.classList.remove('active');
+              __sec_PIN_MODAL?.setAttribute('aria-hidden', 'true');
+              __sec_log.w('ModalManager not available, closed PIN modal directly');
+            }
+          } else {
+            __sec_log.e('[PIN] update failed', upd && upd.error);
+            __sec_pin_notify('Failed to update PIN. Please try again later.', 'error');
+          }
+        } catch (err) {
+          __sec_log.e('[PIN] submit error', err);
+          __sec_pin_notify('Unexpected error while changing PIN', 'error');
+        }
+      },
+      { passive: false }
+    );
+    __sec_log.i('[PIN] change form handler attached');
+  } else {
+    __sec_log.d('[PIN] change form not present yet');
+  }
+
+  if (__sec_RESET_BTN) {
+    __sec_RESET_BTN.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      __sec_log.i('[PIN] reset requested - redirecting to reset flow');
+      __sec_pin_notify('Redirecting to PIN reset flow', 'info');
+      window.location.href = '/reset-pin.html';
+    });
+  }
+}
+
+  /* ========== Convert rows to chevron buttons ========== */
+function __sec_convertRowsToChevron() {
+  if (__sec_pwdBtn) {
+    __sec_pwdBtn.classList.add('chev-btn');
+    __sec_pwdBtn.innerHTML =
+      '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    __sec_pwdBtn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      __sec_log.i('change-password row clicked');
+      if (typeof window.openChangePasswordModal === 'function') {
+        try {
+          window.openChangePasswordModal();
+        } catch (err) {
+          __sec_log.e('openChangePasswordModal threw', err);
           window.dispatchEvent(new CustomEvent('security:open-change-password'));
         }
-      });
-    } else __sec_log.d('#changePwdBtn not present');
+      } else {
+        window.dispatchEvent(new CustomEvent('security:open-change-password'));
+      }
+    });
+  } else __sec_log.d('#changePwdBtn not present');
+}
+
+  /* ========== Init / Boot ========== */
+  async function __sec_boot() {
+    try {
+      __sec_log.d('Booting security module');
+      // Ensure session is available before wiring things that rely on it
+      if (typeof window.getSession === 'function') {
+        try { await window.getSession(); } catch (e) { __sec_log.d('getSession during boot failed', e); }
+      }
+
+      // Wire UI pieces
+      __sec_convertRowsToChevron();
+      __sec_initFromStorage();
+      __sec_wireEvents();
+
+      // PIN submodule bindings
+      __sec_pin_bindStrictInputs();
+      __sec_pin_wireHandlers();
+
+      __sec_log.i('security module booted (with WebAuthn & PIN integration)');
+    } catch (err) {
+      __sec_log.e('boot error', err);
+    }
+  }
+
+  /* Initialize: reuse existing boot wiring */
+  if (document.readyState === 'loading') {
+    __sec_log.d('DOM not ready, waiting for DOMContentLoaded');
+    document.addEventListener('DOMContentLoaded', __sec_boot);
+  } else {
+    __sec_log.d('DOM ready, booting immediately');
+    setTimeout(__sec_boot, 0);
   }
 
   /* ---- WebAuthn register/authenticate flows ---- */
@@ -4255,8 +5028,6 @@ function uuidToArrayBuffer(uuid) {
   return buffer.buffer;
 }
 
-
-/* ---- Registration flow ---- */
 /* ---- Registration flow ---- */
 async function startRegistration(userId, username, displayName) {
   try {
@@ -4320,8 +5091,6 @@ async function startRegistration(userId, username, displayName) {
   }
 }
 
-
-/* ---- Authentication flow ---- */
 /* ---- Authentication flow ---- */
 async function startAuthentication(userId) {
   try {
@@ -4374,361 +5143,337 @@ async function startAuthentication(userId) {
   }
 }
 
-
-
-  /* ---- WebAuthn helper calls to server (list/revoke) ---- */
-  async function __sec_listAuthenticators(userId) {
-    try {
-      __sec_log.d('listAuthenticators: starting', { userId });
-      const currentUser = await __sec_getCurrentUser();
-      if (!currentUser || !currentUser.authToken) {
-        __sec_log.w('No auth token for listing authenticators');
-        return null;
-      }
-      const token = currentUser.authToken;
-
-      const r = await fetch(
-        `${window.__SEC_API_BASE}/webauthn/authenticators/${encodeURIComponent(userId)}`,
-        {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          credentials: 'include',
-        }
-      );
-
-      if (!r.ok) {
-        __sec_log.w('listAuthenticators failed', r.status);
-        return null;
-      }
-
-      const j = await r.json();
-      __sec_log.d('listAuthenticators success', j);
-      return j;
-    } catch (err) {
-      __sec_log.e('listAuthenticators error', err);
+/* ---- WebAuthn helper calls to server (list/revoke) ---- */
+async function __sec_listAuthenticators(userId) {
+  try {
+    __sec_log.d('listAuthenticators: starting', { userId });
+    const currentUser = await __sec_getCurrentUser();
+    if (!currentUser || !currentUser.authToken) {
+      __sec_log.w('No auth token for listing authenticators');
       return null;
     }
+    const token = currentUser.authToken;
+
+    const r = await fetch(
+      `${window.__SEC_API_BASE}/webauthn/authenticators/${encodeURIComponent(userId)}`,
+      {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+      }
+    );
+
+    if (!r.ok) {
+      __sec_log.w('listAuthenticators failed', r.status);
+      return null;
+    }
+
+    const j = await r.json();
+    __sec_log.d('listAuthenticators success', j);
+    return j;
+  } catch (err) {
+    __sec_log.e('listAuthenticators error', err);
+    return null;
   }
+}
 
-  async function __sec_revokeAuthenticator(userId, credentialID) {
-    try {
-      __sec_log.d('revokeAuthenticator: starting', { userId, credentialID });
-      const currentUser = await __sec_getCurrentUser();
-      if (!currentUser || !currentUser.authToken) {
-        __sec_log.w('No auth token for revoking authenticator');
-        return false;
-      }
-      const token = currentUser.authToken;
-
-      const r = await fetch(
-        `${window.__SEC_API_BASE}/webauthn/authenticators/${encodeURIComponent(userId)}/revoke`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          credentials: 'include',
-          body: JSON.stringify({ credentialID }),
-        }
-      );
-
-      if (!r.ok) {
-        __sec_log.w('revokeAuthenticator failed', credentialID, r.status);
-        return false;
-      }
-
-      __sec_log.i('revokeAuthenticator success', credentialID);
-      return true;
-    } catch (err) {
-      __sec_log.e('revokeAuthenticator error', err);
+async function __sec_revokeAuthenticator(userId, credentialID) {
+  try {
+    __sec_log.d('revokeAuthenticator: starting', { userId, credentialID });
+    const currentUser = await __sec_getCurrentUser();
+    if (!currentUser || !currentUser.authToken) {
+      __sec_log.w('No auth token for revoking authenticator');
       return false;
     }
+    const token = currentUser.authToken;
+
+    const r = await fetch(
+      `${window.__SEC_API_BASE}/webauthn/authenticators/${encodeURIComponent(userId)}/revoke`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({ credentialID }),
+      }
+    );
+
+    if (!r.ok) {
+      __sec_log.w('revokeAuthenticator failed', credentialID, r.status);
+      return false;
+    }
+
+    __sec_log.i('revokeAuthenticator success', credentialID);
+    return true;
+  } catch (err) {
+    __sec_log.e('revokeAuthenticator error', err);
+    return false;
   }
+}
 
-  /* Wire events (with WebAuthn integration) */
-  function __sec_wireEvents() {
-    try {
-      if (__sec_launcherBtn) {
-        __sec_launcherBtn.addEventListener('click', (ev) => {
-          ev.preventDefault();
-          __sec_openModal();
-        });
-        __sec_log.d('launcher wired (#securityBtn)');
-      } else {
-        __sec_log.w('no launcher (#securityBtn) found; use controller.open() to open');
+/* Wire events (with WebAuthn integration) */
+function __sec_wireEvents() {
+  try {
+    if (__sec_launcherBtn) {
+      __sec_launcherBtn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        __sec_openModal();
+      });
+      __sec_log.d('launcher wired (#securityBtn)');
+    } else {
+      __sec_log.w('no launcher (#securityBtn) found; use controller.open() to open');
+    }
+
+    if (__sec_closeBtn) {
+      __sec_closeBtn.addEventListener('click', __sec_closeModal);
+      __sec_log.d('close button wired (#securityCloseBtn)');
+    } else {
+      __sec_log.w('no close button (#securityCloseBtn) found');
+    }
+    if (__sec_closeBtn && __sec_modal) {
+      __sec_closeBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        __sec_log.i('Security modal close button clicked');
+        __sec_modal.classList.remove('show'); // or whatever class shows it
+        __sec_modal.setAttribute('aria-hidden', 'true');
+      });
+    }
+
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && __sec_modal && __sec_modal.classList.contains('active')) {
+        __sec_closeModal();
       }
+    });
 
-      if (__sec_closeBtn) {
-        __sec_closeBtn.addEventListener('click', __sec_closeModal);
-        __sec_log.d('close button wired (#securityCloseBtn)');
-      } else {
-        __sec_log.w('no close button (#securityCloseBtn) found');
-      }
-      if (__sec_closeBtn && __sec_modal) {
-        __sec_closeBtn.addEventListener('click', (e) => {
-          e.preventDefault();
-          __sec_log.i('Security modal close button clicked');
-          __sec_modal.classList.remove('show'); // or whatever class shows it
-          __sec_modal.setAttribute('aria-hidden', 'true');
-        });
-      }
+    if (__sec_parentSwitch) {
+      const __sec_parentHandler = async () => {
+        __sec_log.d('__sec_parentHandler: Starting');
+        __sec_setBusy(__sec_parentSwitch, true);
+        const uiOn = __sec_toggleSwitch(__sec_parentSwitch);
+        __sec_log.d('__sec_parentHandler: Toggle state', { uiOn });
 
+        const currentUser = await __sec_getCurrentUser();
+        __sec_log.d('__sec_parentHandler: Retrieved currentUser', currentUser);
 
-      document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && __sec_modal && __sec_modal.classList.contains('active')) {
-          __sec_closeModal();
+        if (!currentUser) {
+          __sec_log.e('__sec_parentHandler: No current user object returned');
+          __sec_setChecked(__sec_parentSwitch, false);
+          __sec_setBusy(__sec_parentSwitch, false);
+          alert('You must be signed in to enable biometrics. Please try logging in again.');
+          window.location.href = '/frontend/html/login.html';
+          return;
+        }
+
+        const { user, authToken } = currentUser;
+        __sec_log.d('__sec_parentHandler: Extracted user and authToken', { user, authToken });
+
+        if (!user || !user.uid) {
+          __sec_log.e('__sec_parentHandler: Invalid user or missing uid', { user });
+          __sec_setChecked(__sec_parentSwitch, false);
+          __sec_setBusy(__sec_parentSwitch, false);
+          alert('You must be signed in to enable biometrics. Please try logging in again.');
+          window.location.href = '/frontend/html/login.html';
+          return;
+        }
+
+        const uid = user.uid;
+        __sec_log.d('__sec_parentHandler: Proceeding with uid', uid);
+
+        if (uiOn) {
+          __sec_log.i('Parent toggle ON requested — checking existing authenticators for user', uid);
+          const auths = await __sec_listAuthenticators(uid);
+          __sec_log.d('__sec_parentHandler: Authenticators', auths);
+          if (Array.isArray(auths) && auths.length > 0) {
+            __sec_log.i('Existing authenticators found — showing children without registering new one');
+            __sec_setBiometrics(true, true);
+            __sec_setBusy(__sec_parentSwitch, false);
+            return;
+          }
+
+          try {
+            __sec_log.i('No authenticators found — starting registration flow');
+            await startRegistration(uid, user.email || user.username || uid, user.fullName || user.email || uid);
+            __sec_setBiometrics(true, true);
+            __sec_log.i('Registration successful');
+          } catch (err) {
+            __sec_log.e('Registration failed', err);
+            __sec_setChecked(__sec_parentSwitch, false);
+            __sec_setBiometrics(false, false);
+            alert('Biometric registration failed: ' + (err.message || 'unknown error'));
+          } finally {
+            __sec_setBusy(__sec_parentSwitch, false);
+          }
+        } else {
+          try {
+            __sec_log.i('Parent toggle OFF requested — revoking authenticators for user', uid);
+            const auths = await __sec_listAuthenticators(uid);
+            __sec_log.d('__sec_parentHandler: Authenticators to revoke', auths);
+            if (Array.isArray(auths) && auths.length > 0) {
+              for (const a of auths) {
+                const credential_id = a.credential_id || a.credentialID || a.credentialId;
+                if (!credential_id) continue;
+                const ok = await __sec_revokeAuthenticator(uid, credential_id);
+                __sec_log.d('revoke result', credential_id, ok);
+              }
+            } else {
+              __sec_log.d('No authenticators to revoke for user', uid);
+            }
+            __sec_setBiometrics(false, true);
+          } catch (err) {
+            __sec_log.e('Error revoking authenticators', err);
+            __sec_setBiometrics(false, true);
+            alert('Warning: failed to revoke authenticator(s) on server. Check console.');
+          } finally {
+            __sec_setBusy(__sec_parentSwitch, false);
+          }
+        }
+      };
+
+      __sec_parentSwitch.addEventListener('click', (e) => { e.preventDefault(); __sec_parentHandler(); });
+      __sec_parentSwitch.addEventListener('keydown', (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); __sec_parentHandler(); } });
+    } else {
+      __sec_log.w('no parent switch (#biometricsSwitch) found');
+    }
+
+    if (__sec_bioLogin) {
+      __sec_bioLogin.addEventListener('click', async () => {
+        if (!__sec_parentSwitch || !__sec_isChecked(__sec_parentSwitch)) {
+          __sec_log.d('bioLogin click ignored; parent OFF');
+          return;
+        }
+        __sec_setBusy(__sec_bioLogin, true);
+        const newState = __sec_toggleSwitch(__sec_bioLogin);
+        try {
+          const currentUser = await __sec_getCurrentUser();
+          if (!currentUser || !currentUser.user || !currentUser.user.uid) throw new Error('Not signed in');
+          const user = currentUser.user;
+
+          if (newState) {
+            __sec_log.i('bioLogin enabling: performing authentication test');
+            await startAuthentication(user.uid);
+            localStorage.setItem(__sec_KEYS.bioLogin, '1');
+            __sec_log.i('bioLogin enabled and verified');
+          } else {
+            localStorage.setItem(__sec_KEYS.bioLogin, '0');
+            __sec_maybeDisableParentIfChildrenOff();
+          }
+        } catch (err) {
+          __sec_log.e('bioLogin error or verification failed', err);
+          __sec_setChecked(__sec_bioLogin, false);
+          try { localStorage.setItem(__sec_KEYS.bioLogin, '0'); } catch (e) {}
+          alert('Biometric verification failed: ' + (err.message || 'unknown'));
+        } finally {
+          __sec_setBusy(__sec_bioLogin, false);
         }
       });
 
-      if (__sec_parentSwitch) {
-        const __sec_parentHandler = async () => {
-          __sec_log.d('__sec_parentHandler: Starting');
-          __sec_setBusy(__sec_parentSwitch, true);
-          const uiOn = __sec_toggleSwitch(__sec_parentSwitch);
-          __sec_log.d('__sec_parentHandler: Toggle state', { uiOn });
+      __sec_bioLogin.addEventListener('keydown', (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); __sec_bioLogin.click(); } });
+    } else {
+      __sec_log.w('no bioLogin switch (#bioLoginSwitch) found');
+    }
 
+    if (__sec_bioTx) {
+      __sec_bioTx.addEventListener('click', async () => {
+        if (!__sec_parentSwitch || !__sec_isChecked(__sec_parentSwitch)) {
+          __sec_log.d('bioTx click ignored; parent OFF');
+          return;
+        }
+        __sec_setBusy(__sec_bioTx, true);
+        const newState = __sec_toggleSwitch(__sec_bioTx);
+        try {
           const currentUser = await __sec_getCurrentUser();
-          __sec_log.d('__sec_parentHandler: Retrieved currentUser', currentUser);
+          if (!currentUser || !currentUser.user || !currentUser.user.uid) throw new Error('Not signed in');
+          const user = currentUser.user;
 
-          if (!currentUser) {
-            __sec_log.e('__sec_parentHandler: No current user object returned');
-            __sec_setChecked(__sec_parentSwitch, false);
-            __sec_setBusy(__sec_parentSwitch, false);
-            alert('You must be signed in to enable biometrics. Please try logging in again.');
-            window.location.href = '/frontend/html/login.html';
-            return;
-          }
-
-          const { user, authToken } = currentUser;
-          __sec_log.d('__sec_parentHandler: Extracted user and authToken', { user, authToken });
-
-          if (!user || !user.uid) {
-            __sec_log.e('__sec_parentHandler: Invalid user or missing uid', { user });
-            __sec_setChecked(__sec_parentSwitch, false);
-            __sec_setBusy(__sec_parentSwitch, false);
-            alert('You must be signed in to enable biometrics. Please try logging in again.');
-            window.location.href = '/frontend/html/login.html';
-            return;
-          }
-
-          const uid = user.uid;
-          __sec_log.d('__sec_parentHandler: Proceeding with uid', uid);
-
-          if (uiOn) {
-            __sec_log.i('Parent toggle ON requested — checking existing authenticators for user', uid);
-            const auths = await __sec_listAuthenticators(uid);
-            __sec_log.d('__sec_parentHandler: Authenticators', auths);
-            if (Array.isArray(auths) && auths.length > 0) {
-              __sec_log.i('Existing authenticators found — showing children without registering new one');
-              __sec_setBiometrics(true, true);
-              __sec_setBusy(__sec_parentSwitch, false);
-              return;
-            }
-
-            try {
-              __sec_log.i('No authenticators found — starting registration flow');
-              await startRegistration(uid, user.email || user.username || uid, user.fullName || user.email || uid);
-              __sec_setBiometrics(true, true);
-              __sec_log.i('Registration successful');
-            } catch (err) {
-              __sec_log.e('Registration failed', err);
-              __sec_setChecked(__sec_parentSwitch, false);
-              __sec_setBiometrics(false, false);
-              alert('Biometric registration failed: ' + (err.message || 'unknown error'));
-            } finally {
-              __sec_setBusy(__sec_parentSwitch, false);
-            }
+          if (newState) {
+            __sec_log.i('bioTx enabling: performing authentication test');
+            await startAuthentication(user.uid);
+            localStorage.setItem(__sec_KEYS.bioTx, '1');
+            __sec_log.i('bioTx enabled and verified');
           } else {
-            try {
-              __sec_log.i('Parent toggle OFF requested — revoking authenticators for user', uid);
-              const auths = await __sec_listAuthenticators(uid);
-              __sec_log.d('__sec_parentHandler: Authenticators to revoke', auths);
-              if (Array.isArray(auths) && auths.length > 0) {
-                for (const a of auths) {
-                  const credential_id = a.credential_id || a.credentialID || a.credentialId;
-                  if (!credential_id) continue;
-                  const ok = await __sec_revokeAuthenticator(uid, credential_id);
-                  __sec_log.d('revoke result', credential_id, ok);
-                }
-              } else {
-                __sec_log.d('No authenticators to revoke for user', uid);
-              }
-              __sec_setBiometrics(false, true);
-            } catch (err) {
-              __sec_log.e('Error revoking authenticators', err);
-              __sec_setBiometrics(false, true);
-              alert('Warning: failed to revoke authenticator(s) on server. Check console.');
-            } finally {
-              __sec_setBusy(__sec_parentSwitch, false);
-            }
+            localStorage.setItem(__sec_KEYS.bioTx, '0');
+            __sec_maybeDisableParentIfChildrenOff();
           }
-        };
+        } catch (err) {
+          __sec_log.e('bioTx error or verification failed', err);
+          __sec_setChecked(__sec_bioTx, false);
+          try { localStorage.setItem(__sec_KEYS.bioTx, '0'); } catch (e) {}
+          alert('Biometric verification failed: ' + (err.message || 'unknown'));
+        } finally {
+          __sec_setBusy(__sec_bioTx, false);
+        }
+      });
 
-        __sec_parentSwitch.addEventListener('click', (e) => { e.preventDefault(); __sec_parentHandler(); });
-        __sec_parentSwitch.addEventListener('keydown', (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); __sec_parentHandler(); } });
-      } else {
-        __sec_log.w('no parent switch (#biometricsSwitch) found');
-      }
-
-      if (__sec_bioLogin) {
-        __sec_bioLogin.addEventListener('click', async () => {
-          if (!__sec_parentSwitch || !__sec_isChecked(__sec_parentSwitch)) {
-            __sec_log.d('bioLogin click ignored; parent OFF');
-            return;
-          }
-          __sec_setBusy(__sec_bioLogin, true);
-          const newState = __sec_toggleSwitch(__sec_bioLogin);
-          try {
-            const currentUser = await __sec_getCurrentUser();
-            if (!currentUser || !currentUser.user || !currentUser.user.uid) throw new Error('Not signed in');
-            const user = currentUser.user;
-
-            if (newState) {
-              __sec_log.i('bioLogin enabling: performing authentication test');
-              await startAuthentication(user.uid);
-              localStorage.setItem(__sec_KEYS.bioLogin, '1');
-              __sec_log.i('bioLogin enabled and verified');
-            } else {
-              localStorage.setItem(__sec_KEYS.bioLogin, '0');
-              __sec_maybeDisableParentIfChildrenOff();
-            }
-          } catch (err) {
-            __sec_log.e('bioLogin error or verification failed', err);
-            __sec_setChecked(__sec_bioLogin, false);
-            try { localStorage.setItem(__sec_KEYS.bioLogin, '0'); } catch (e) {}
-            alert('Biometric verification failed: ' + (err.message || 'unknown'));
-          } finally {
-            __sec_setBusy(__sec_bioLogin, false);
-          }
-        });
-
-        __sec_bioLogin.addEventListener('keydown', (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); __sec_bioLogin.click(); } });
-      } else {
-        __sec_log.w('no bioLogin switch (#bioLoginSwitch) found');
-      }
-
-      if (__sec_bioTx) {
-        __sec_bioTx.addEventListener('click', async () => {
-          if (!__sec_parentSwitch || !__sec_isChecked(__sec_parentSwitch)) {
-            __sec_log.d('bioTx click ignored; parent OFF');
-            return;
-          }
-          __sec_setBusy(__sec_bioTx, true);
-          const newState = __sec_toggleSwitch(__sec_bioTx);
-          try {
-            const currentUser = await __sec_getCurrentUser();
-            if (!currentUser || !currentUser.user || !currentUser.user.uid) throw new Error('Not signed in');
-            const user = currentUser.user;
-
-            if (newState) {
-              __sec_log.i('bioTx enabling: performing authentication test');
-              await startAuthentication(user.uid);
-              localStorage.setItem(__sec_KEYS.bioTx, '1');
-              __sec_log.i('bioTx enabled and verified');
-            } else {
-              localStorage.setItem(__sec_KEYS.bioTx, '0');
-              __sec_maybeDisableParentIfChildrenOff();
-            }
-          } catch (err) {
-            __sec_log.e('bioTx error or verification failed', err);
-            __sec_setChecked(__sec_bioTx, false);
-            try { localStorage.setItem(__sec_KEYS.bioTx, '0'); } catch (e) {}
-            alert('Biometric verification failed: ' + (err.message || 'unknown'));
-          } finally {
-            __sec_setBusy(__sec_bioTx, false);
-          }
-        });
-
-        __sec_bioTx.addEventListener('keydown', (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); __sec_bioTx.click(); } });
-      } else {
-        __sec_log.w('no bioTx switch (#bioTxSwitch) found');
-      }
-
-      if (__sec_balanceSwitch) {
-        const __sec_balanceHandler = () => {
-          const on = __sec_toggleSwitch(__sec_balanceSwitch);
-          try { localStorage.setItem(__sec_KEYS.balance, on ? '1' : '0'); } catch (e) {}
-          window.dispatchEvent(new CustomEvent('security:balance-visibility-changed', { detail: { visible: on } }));
-          __sec_log.i('balanceSwitch ->', on);
-        };
-        __sec_balanceSwitch.addEventListener('click', __sec_balanceHandler);
-        __sec_balanceSwitch.addEventListener('keydown', (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); __sec_balanceHandler(); } });
-      } else {
-        __sec_log.w('no balance switch (#balanceSwitch) found');
-      }
-
-      __sec_log.i('events wired (with WebAuthn integration)');
-    } catch (err) {
-      __sec_log.e('wireEvents error', err);
+      __sec_bioTx.addEventListener('keydown', (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); __sec_bioTx.click(); } });
+    } else {
+      __sec_log.w('no bioTx switch (#bioTxSwitch) found');
     }
-  }
 
-  /* Open/close modal with focus handling */
-  let __sec_lastActiveElement = null;
-  function __sec_openModal() {
-    if (!__sec_modal) {
-      __sec_log.e('openModal: #securityModal not found');
-      return;
+    if (__sec_balanceSwitch) {
+      const __sec_balanceHandler = () => {
+        const on = __sec_toggleSwitch(__sec_balanceSwitch);
+        try { localStorage.setItem(__sec_KEYS.balance, on ? '1' : '0'); } catch (e) {}
+        window.dispatchEvent(new CustomEvent('security:balance-visibility-changed', { detail: { visible: on } }));
+        __sec_log.i('balanceSwitch ->', on);
+      };
+      __sec_balanceSwitch.addEventListener('click', __sec_balanceHandler);
+      __sec_balanceSwitch.addEventListener('keydown', (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); __sec_balanceHandler(); } });
+    } else {
+      __sec_log.w('no balance switch (#balanceSwitch) found');
     }
-    __sec_lastActiveElement = document.activeElement;
-    __sec_modal.classList.add('active');
-    __sec_modal.setAttribute('aria-hidden', 'false');
-    try { __sec_modal.scrollTop = 0; } catch (e) {}
-    if (__sec_parentSwitch && typeof __sec_parentSwitch.focus === 'function') {
-      __sec_parentSwitch.focus();
-    }
-    __sec_log.i('modal opened');
-  }
 
-  function __sec_closeModal() {
-    if (!__sec_modal) return;
-    __sec_modal.classList.remove('active');
-    __sec_modal.setAttribute('aria-hidden', 'true');
-    if (__sec_lastActiveElement && typeof __sec_lastActiveElement.focus === 'function') {
-      __sec_lastActiveElement.focus();
-    }
-    __sec_log.i('modal closed');
+    __sec_log.i('events wired (with WebAuthn integration)');
+  } catch (err) {
+    __sec_log.e('wireEvents error', err);
   }
+}
 
-  /* Expose safe controller */
-  window.__secModalController = {
-    open: __sec_openModal,
-    close: __sec_closeModal,
-    getState: () => ({
-      biom: localStorage.getItem(__sec_KEYS.biom),
-      bioLogin: localStorage.getItem(__sec_KEYS.bioLogin),
-      bioTx: localStorage.getItem(__sec_KEYS.bioTx),
-      balance: localStorage.getItem(__sec_KEYS.balance)
-    })
-  };
-
-  /* Boot */
-  async function __sec_boot() {
-    try {
-      __sec_log.d('Booting security module');
-      await window.getSession(); // Ensure session is stored before proceeding
-      __sec_convertRowsToChevron();
-      __sec_initFromStorage();
-      __sec_wireEvents();
-      __sec_log.i('security module booted (with WebAuthn)');
-    } catch (err) {
-      __sec_log.e('boot error', err);
-    }
+/* Open/close modal with focus handling */
+let __sec_lastActiveElement = null;
+function __sec_openModal() {
+  if (!__sec_modal) {
+    __sec_log.e('openModal: #securityModal not found');
+    return;
   }
-
-  /* Initialize */
-  if (document.readyState === 'loading') {
-    __sec_log.d('DOM not ready, waiting for DOMContentLoaded');
-    document.addEventListener('DOMContentLoaded', __sec_boot);
-  } else {
-    __sec_log.d('DOM ready, booting immediately');
-    setTimeout(__sec_boot, 0);
+  __sec_lastActiveElement = document.activeElement;
+  __sec_modal.classList.add('active');
+  __sec_modal.setAttribute('aria-hidden', 'false');
+  try { __sec_modal.scrollTop = 0; } catch (e) {}
+  if (__sec_parentSwitch && typeof __sec_parentSwitch.focus === 'function') {
+    __sec_parentSwitch.focus();
   }
+  __sec_log.i('modal opened');
+}
+
+function __sec_closeModal() {
+  if (!__sec_modal) return;
+  __sec_modal.classList.remove('active');
+  __sec_modal.setAttribute('aria-hidden', 'true');
+  if (__sec_lastActiveElement && typeof __sec_lastActiveElement.focus === 'function') {
+    __sec_lastActiveElement.focus();
+  }
+  __sec_log.i('modal closed');
+}
+
+/* Expose safe controller */
+window.__secModalController = {
+  open: __sec_openModal,
+  close: __sec_closeModal,
+  getState: () => ({
+    biom: localStorage.getItem(__sec_KEYS.biom),
+    bioLogin: localStorage.getItem(__sec_KEYS.bioLogin),
+    bioTx: localStorage.getItem(__sec_KEYS.bioTx),
+    balance: localStorage.getItem(__sec_KEYS.balance)
+  })
+};
 })(supabaseClient);
+
 
 
 
