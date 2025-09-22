@@ -837,6 +837,72 @@
   </div>
 </div>
 
+<!-- Inactivity Popup Modal -->
+<div id="inactivityModal" class="inactivityModal hidden" aria-hidden="true" role="dialog" aria-labelledby="inactivityTitle">
+  <div class="inactivityModal">
+    <div class="inactivityModal-header">
+      <h2 id="inactivityTitle">Are you still there?</h2>
+    </div>
+    <div class="inactivityModal-body">
+      <p>Please confirm your presence to continue.</p>
+      <button id="inactivityConfirmBtn" class="primary-btn">Yes</button>
+    </div>
+  </div>
+</div>
+
+<!-- PIN Verification Modal -->
+<div id="pinVerifyModal" class="pin-modal hidden" aria-hidden="true" role="dialog" aria-labelledby="pinVerifyTitle">
+  <div class="pin-header">
+    <button id="closePinVerifyModal" class="back-btn" data-close aria-label="Close">
+      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="white" viewBox="0 0 24 24">
+        <path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/>
+      </svg>
+    </button>
+    <h2 id="pinVerifyTitle">Enter PIN</h2>
+  </div>
+  <div class="pin-body">
+    <div class="firewall-icon">
+      <svg class="fwall" width="25" height="25" viewBox="0 0 24 24" fill="none">
+        <path d="M12 2L4 5v6c0 5.25 3.84 9.74 8 11 4.16-1.26 8-5.75 8-11V5l-8-3z" fill="#FFD700" opacity="0.95"/>
+        <rect x="9" y="10" width="6" height="5" rx="1" fill="#021827"/>
+      </svg>
+      <p>Enter your 4-digit PIN</p>
+    </div>
+    <form id="pinVerifyForm">
+      <div class="pin-inputs">
+        <input type="password" maxlength="1" readonly data-fg-pin="1"/>
+        <input type="password" maxlength="1" readonly data-fg-pin="2"/>
+        <input type="password" maxlength="1" readonly data-fg-pin="3"/>
+        <input type="password" maxlength="1" readonly data-fg-pin="4"/>
+      </div>
+      <div class="pin-keypad">
+        <button type="button" data-key="1">1</button>
+        <button type="button" data-key="2">2</button>
+        <button type="button" data-key="3">3</button>
+        <button type="button" data-key="4">4</button>
+        <button type="button" data-key="5">5</button>
+        <button type="button" data-key="6">6</button>
+        <button type="button" data-key="7">7</button>
+        <button type="button" data-key="8">8</button>
+        <button type="button" data-key="9">9</button>
+        <div></div>
+        <button type="button" data-key="0">0</button>
+        <button type="button" id="deleteVerifyKey" aria-label="Delete">
+          <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path d="M8 6H19C19.5523 6 20 6.44772 20 7V17C20 17.5523 19.5523 18 19 18H8L2 12L8 6Z" fill="white"/>
+            <line x1="10" y1="9" x2="16" y2="15" stroke="black" stroke-width="2" stroke-linecap="round"/>
+            <line x1="16" y1="9" x2="10" y2="15" stroke="black" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </div>
+      <button type="submit" hidden>Submit</button>
+    </form>
+  </div>
+  <div id="pinVerifyAlert" class="pin-alert hidden">
+    <p id="pinVerifyAlertMsg"></p>
+  </div>
+</div>
+
 </main>
 
 <nav class="bottom-nav">
