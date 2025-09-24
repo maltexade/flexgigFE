@@ -2865,7 +2865,6 @@ function __fg_pin_clearAllInputs() {
           }
         } catch (err) {
           __fg_pin_log.e('Error verifying PIN:', err);
-          __fg_pin_showFieldError(__fg_pin_inputCurrentEl, 'Failed to verify PIN. Try again.');
           __fg_pin_notify('Failed to verify PIN. Try again.', 'error');
           return;
         }
@@ -3621,6 +3620,18 @@ if (updateProfileForm) {
         throw new Error(serverMsg);
       }
 
+      // NEW: Update UI immediately with new profile data
+      const updatedProfile = parsedData.profile || {}; // Assuming the response includes newly updated profile data
+      updateGreetingAndAvatar(updatedProfile.username, updatedProfile.fullName.split(' ')[0]);
+      localStorage.setItem('profilePicture', updatedProfile.profilePicture || ''); // Cache new picture if provided
+
+      // Notify user of success
+      const profileNotification = document.getElementById('profileUpdateNotification');
+      if (profileNotification) {
+        profileNotification.classList.add('active');
+        setTimeout(() => profileNotification.classList.remove('active'), 3000);
+      }
+
       const data = parsedData || {};
 
       // Pick up server-returned profile picture (handle multiple shapes)
@@ -3745,6 +3756,7 @@ function formatNigeriaNumberProfile(input, isInitialDigit = false, isPaste = fal
 }
 
 // Debounce function
+// Debounce (kept simple)
 function debounce(func, wait) {
   let timeout;
   return function (...args) {
