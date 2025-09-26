@@ -2461,7 +2461,7 @@ html.dark-mode .theme-toggle .toggle-knob { transform: translateX(20px); }
 }
 
 .settings-username,
-.settings-email, .greet {
+.settings-email {
   display: inline-block;
   min-height: 1.2em; /* Prevent layout shift */
 }
