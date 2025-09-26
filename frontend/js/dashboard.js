@@ -3545,6 +3545,36 @@ parsedData.message)) || rawText || `HTTP ${response.status}`;
         throw new Error(serverMsg);
       }
 
+      // Immediate localStorage and DOM update with submitted values for quick feedback
+      localStorage.setItem('fullName', fullNameVal);
+      localStorage.setItem('username', usernameVal);
+      localStorage.setItem('phoneNumber', phoneRaw);
+      localStorage.setItem('address', addressVal);
+      localStorage.setItem('firstName', fullNameVal.split(' ')[0] || 'User');
+
+      // If a new picture file was uploaded, temporarily set a local data URI for instant display
+      let tempProfilePicture = localStorage.getItem('profilePicture') || '';
+      if (profilePictureInput && profilePictureInput.files[0]) {
+        tempProfilePicture = URL.createObjectURL(profilePictureInput.files[0]);
+        localStorage.setItem('profilePicture', tempProfilePicture); // Temporary; server fetch will overwrite
+      }
+
+      // Update DOM immediately
+      const firstnameEl = document.getElementById('firstname');
+      const avatarEl = document.getElementById('avatar');
+      if (firstnameEl && avatarEl) {
+        const displayName = usernameVal || (fullNameVal.split(' ')[0] || 'User');
+        firstnameEl.textContent = displayName.charAt(0).toUpperCase() + displayName.slice(1);
+
+        const isValidTempPicture = tempProfilePicture && /^(data:image\/|https?:\/\/|\/|blob:)/i.test(tempProfilePicture); // Allow blob: for local URL
+        if (isValidTempPicture) {
+          avatarEl.innerHTML = `<img src="${tempProfilePicture}" alt="Profile Picture" class="avatar-img" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`;
+        } else {
+          avatarEl.innerHTML = '';
+          avatarEl.textContent = displayName.charAt(0).toUpperCase();
+        }
+      }
+
       // Show success notification
       const notification = document.getElementById('notification') || document.getElementById('profileUpdateNotification');
       if (notification) {
@@ -3555,8 +3585,8 @@ parsedData.message)) || rawText || `HTTP ${response.status}`;
 
       closeUpdateProfileModal();
 
-      // Auto-reload the page to reflect changes
-      window.location.reload();
+      // Fetch fresh server data and apply (will overwrite temp values if needed)
+      await loadUserProfile(true);
 
     } catch (err) {
       console.error('[ERROR] updateProfileForm:', err);
