@@ -3726,49 +3726,65 @@ function debounce(func, wait) {
   };
 }
 
-async function checkUsernameAvailability(username) {
-  if (!username || !/^[a-zA-Z0-9_]{3,20}$/.test(username)) {
+// keep a module-level AbortController reference to cancel previous checks
+let __usernameAvailabilityController = null;
+
+/**
+ * checkUsernameAvailability(username, { signal })
+ * returns boolean
+ */
+async function checkUsernameAvailability(username, signal = undefined) {
+  // Only accept validated username strings of 3..15 chars and allowed chars
+  if (!username || !/^[a-zA-Z0-9_]{3,15}$/.test(username)) {
     isUsernameAvailable = false;
     return false;
   }
 
+  // Cancel previous inflight request
+  try { if (__usernameAvailabilityController) __usernameAvailabilityController.abort(); } catch (e) { /* ignore */ }
+  __usernameAvailabilityController = new AbortController();
+  const controller = __usernameAvailabilityController;
+  const fetchSignal = signal || controller.signal;
+
   try {
-    const response = await fetch('https://api.flexgig.com.ng/api/profile/check-username', {
+    const resp = await fetch('https://api.flexgig.com.ng/api/profile/check-username', {
       method: 'POST',
+      credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${localStorage.getItem('authToken') || ''}`
       },
       body: JSON.stringify({ username }),
-      credentials: 'include',
+      signal: fetchSignal
     });
 
-    let rawText = '';
-    let parsedData = null;
-    try {
-      rawText = await response.text();
-      parsedData = rawText ? JSON.parse(rawText) : null;
-    } catch (e) {
-      console.warn('[WARN] checkUsernameAvailability: Response is not valid JSON');
+    const text = await resp.text().catch(() => '');
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch (e) { /* ignore */ }
+
+    if (!resp.ok) {
+      console.warn('[WARN] checkUsernameAvailability: non-OK', resp.status, text);
+      isUsernameAvailable = false;
+      return false;
     }
 
-    if (!response.ok) {
-      console.error('[ERROR] checkUsernameAvailability: Failed response', response.status, parsedData || rawText);
-      const serverMsg = (parsedData && (parsedData.error || parsedData.message)) || rawText || `HTTP ${response.status}`;
-      throw new Error(serverMsg);
-    }
-
-    const data = parsedData || {};
-    isUsernameAvailable = !!data.available;
-    console.log('[DEBUG] checkUsernameAvailability:', { username, available: isUsernameAvailable });
-    return isUsernameAvailable;
-
+    const available = !!(data && data.available);
+    isUsernameAvailable = available;
+    return available;
   } catch (err) {
-    console.error('[ERROR] checkUsernameAvailability:', err.message || err);
+    if (err && err.name === 'AbortError') {
+      // aborted — that's fine
+      return false;
+    }
+    console.error('[ERROR] checkUsernameAvailability:', err && err.message ? err.message : err);
     isUsernameAvailable = false;
     return false;
+  } finally {
+    // if this controller is the current one, clear it (so next call creates a new controller)
+    if (controller === __usernameAvailabilityController) __usernameAvailabilityController = null;
   }
 }
+
 
 const fieldTouched = {
   fullName: false,
@@ -3848,47 +3864,134 @@ function validateField(field) {
   // ... continue with your existing switch (fullName, username, phoneNumber, address, profilePicture) ...
 
   switch (field) {
-    case 'fullName':
-      if (value.trim().length < 2 || !/^[a-zA-Z\s]{2,}$/.test(value)) {
-        errorElement.textContent = 'Full name must be at least 2 characters and contain only letters';
-        errorElement.classList.add('active');
-        inputElement.classList.add('invalid');
-        isValid = false;
-      } else {
-        errorElement.textContent = '';
-        errorElement.classList.remove('active');
-        inputElement.classList.remove('invalid');
-      }
+    // inside validateField(field) -> switch(field) { ... }
+case 'fullName': {
+  // value trimmed for validation (we don't mutate the input here)
+  const trimmed = (inputElement.value || '').trim();
+  let error = '';
+
+  // If empty -> no error (hide errors while empty)
+  if (!trimmed) {
+    errorElement.textContent = '';
+    errorElement.classList.remove('active');
+    inputElement.classList.remove('invalid');
+    break;
+  }
+
+  // Immediate: invalid characters show right away
+  if (!/^[a-zA-Z\s'-]+$/.test(trimmed)) {
+    error = 'Full name must contain only letters';
+  }
+  // Length: show only after blur/submit or if input is not active
+  else if (
+    trimmed.length > 0 &&
+    trimmed.length < 2 &&
+    (fieldTouched.fullName || document.activeElement !== inputElement)
+  ) {
+    error = 'Full name must be at least 2 characters';
+  }
+
+  if (error) {
+    errorElement.textContent = error;
+    errorElement.classList.add('active');
+    inputElement.classList.add('invalid');
+    isValid = false;
+  } else {
+    errorElement.textContent = '';
+    errorElement.classList.remove('active');
+    inputElement.classList.remove('invalid');
+  }
+  break;
+}
+
+
+
+
+    case 'username': {
+  const raw = (inputElement.value || '');
+  const value = raw.trim(); // validation uses trimmed form
+  let err = '';
+
+  // If empty -> no error (errors appear on blur/submit or if invalid immediate)
+  if (!value) {
+    errorElement.textContent = '';
+    errorElement.classList.remove('active', 'error', 'available');
+    inputElement.classList.remove('invalid');
+    isValid = true;
+    break;
+  }
+
+  // server lock (if present)
+  const lastUpdate = localStorage.getItem('lastUsernameUpdate');
+  const currentUsername = localStorage.getItem('username') || '';
+  if (value !== currentUsername && lastUpdate) {
+    const daysSinceUpdate = (Date.now() - new Date(lastUpdate).getTime()) / (1000 * 60 * 60 * 24);
+    if (daysSinceUpdate < 90) {
+      err = `You can update your username again in ${Math.ceil(90 - daysSinceUpdate)} days`;
+      errorElement.textContent = err;
+      errorElement.classList.add('active', 'error');
+      inputElement.classList.add('invalid');
+      isValid = false;
       break;
-    case 'username':
-      const lastUpdate = localStorage.getItem('lastUsernameUpdate');
-      const currentUsername = localStorage.getItem('username') || '';
-      if (value !== currentUsername && lastUpdate) {
-        const daysSinceUpdate = (Date.now() - new Date(lastUpdate).getTime()) / (1000 * 60 * 60 * 24);
-        if (daysSinceUpdate < 90) {
-          errorElement.textContent = `You can update your username again in ${Math.ceil(90 - daysSinceUpdate)} days`;
-          errorElement.classList.add('active');
-          inputElement.classList.add('invalid');
-          isValid = false;
-          break;
-        }
-      }
-      if (value.trim().length < 3 || !/^[a-zA-Z0-9_]{3,20}$/.test(value)) {
-        errorElement.textContent = 'Username must be 3-20 characters and contain only letters, numbers, or underscores';
-        errorElement.classList.add('active');
-        inputElement.classList.add('invalid');
-        isValid = false;
-      } else if (!isUsernameAvailable) {
-        errorElement.textContent = 'Username is already taken or invalid';
-        errorElement.classList.add('active');
-        inputElement.classList.add('invalid');
-        isValid = false;
-      } else {
-        errorElement.textContent = '';
-        errorElement.classList.remove('active');
-        inputElement.classList.remove('invalid');
-      }
-      break;
+    }
+  }
+
+  // Immediate client-side checks:
+  if (/^\d/.test(value)) {
+    err = 'Username cannot start with a number';
+  } else if (/^_/.test(value)) {
+    err = 'Username cannot start with underscore';
+  } else if (!/^[a-zA-Z0-9_]+$/.test(value)) {
+    err = 'Username can only contain letters, numbers, or underscores';
+  } else if (value.length > 15) {
+    err = 'Username cannot exceed 15 characters';
+  } else if (value.length < 3 && (fieldTouched.username || document.activeElement !== inputElement)) {
+    // Minimum length only shown on blur/submit (or if already marked touched)
+    err = 'Username must be at least 3 characters';
+  }
+
+  if (err) {
+    errorElement.textContent = err;
+    errorElement.classList.add('active', 'error');
+    inputElement.classList.add('invalid');
+    isValid = false;
+    break;
+  }
+
+  // Passed client-side syntactic checks — now consider availability state
+  // If we already have an availability result (isUsernameAvailable) we reflect it here,
+  // otherwise we just clear errors (the debounced availability check will set isUsernameAvailable).
+  if (value === currentUsername) {
+    // unchanged username -> treat as available
+    errorElement.textContent = '';
+    errorElement.classList.remove('active', 'error', 'available');
+    inputElement.classList.remove('invalid');
+    isValid = true;
+  } else {
+    if (isUsernameAvailable === true) {
+      errorElement.textContent = `${value} is available`;
+      errorElement.classList.add('active', 'available');
+      errorElement.classList.remove('error');
+      inputElement.classList.remove('invalid');
+      isValid = true;
+    } else if (isUsernameAvailable === false) {
+      // known not available
+      errorElement.textContent = `${value} is already taken`;
+      errorElement.classList.add('active', 'error');
+      inputElement.classList.add('invalid');
+      isValid = false;
+    } else {
+      // unknown availability (inflight or not checked yet) -> clear availability UI
+      errorElement.textContent = '';
+      errorElement.classList.remove('active', 'error', 'available', 'checking');
+      inputElement.classList.remove('invalid');
+      // do not flip isValid here — keep as true for the syntactic checks (so form enabling depends on full validation later)
+      isValid = true;
+    }
+  }
+  break;
+}
+
     case 'phoneNumber':
       const cleaned = value.replace(/\s/g, '');
       if (cleaned && !isNigeriaMobileProfile(cleaned)) {
@@ -3987,70 +4090,255 @@ function attachProfileListeners() {
   detachProfileListeners();
 
   // --- fullName ---
-  if (fullNameInput && !fullNameInput.disabled) {
-    const fullNameHandler = (e) => {
-      fieldTouched.fullName = true;
-      const value = (fullNameInput.value || '').trim();
-      let error = '';
+  // --- fullName (attachProfileListeners) ---
+// --- fullName (attachProfileListeners) ---
+if (fullNameInput && !fullNameInput.disabled) {
+  // Input handler — show only character-related errors while typing
 
-      if (value.length > 0) {
-        if (!/^[a-zA-Z\s'-]+$/.test(value)) {
-          error = 'Full name can only contain letters, spaces, hyphens, or apostrophes';
-        } else if (value.length < 2) {
-          error = 'Full name must be at least 2 characters';
-        } else if (value.length > 50) {
-          error = 'Full name cannot exceed 50 characters';
-        }
-      }
+  try {
+    const prev = fullNameInput.__profileHandlers || {};
+    if (prev.input) fullNameInput.removeEventListener('input', prev.input);
+    if (prev.blur) fullNameInput.removeEventListener('blur', prev.blur);
+  } catch (e) { /* ignore */ }
+  
+  const fullNameInputHandler = () => {
+    // Strip leading spaces while preserving caret
+    const before = fullNameInput.value || '';
+    if (/^\s+/.test(before)) {
+      const caret = fullNameInput.selectionStart || 0;
+      const newVal = before.replace(/^\s+/, '');
+      fullNameInput.value = newVal;
+      const shift = before.length - newVal.length;
+      const newCaret = Math.max(0, caret - shift);
+      fullNameInput.setSelectionRange(newCaret, newCaret);
+    }
 
-      if (error) {
-        fullNameError && fullNameError.classList.add('active') && (fullNameError.textContent = error);
-        fullNameInput.classList.add('invalid');
-      } else {
-        fullNameError && (fullNameError.textContent = ''), fullNameError && fullNameError.classList.remove('active');
-        fullNameInput.classList.remove('invalid');
+    const trimmed = (fullNameInput.value || '').trim();
+
+    // If empty -> clear errors and class (no validation while empty)
+    if (!trimmed) {
+      if (fullNameError) {
+        fullNameError.textContent = '';
+        fullNameError.classList.remove('active');
       }
-      validateProfileForm(true);
-    };
-    fullNameInput.addEventListener('input', fullNameHandler);
-    fullNameInput.__profileHandlers = { ...(fullNameInput.__profileHandlers || {}), input: fullNameHandler };
-  }
+      fullNameInput.classList.remove('invalid');
+      // Do not set fieldTouched here (we want blur/submit to mark it)
+      validateProfileForm(false);
+      return;
+    }
+
+    // Live character rule
+    if (!/^[a-zA-Z\s'-]+$/.test(trimmed)) {
+      if (fullNameError) {
+        fullNameError.textContent = 'Full name must contain only letters';
+        fullNameError.classList.add('active');
+      }
+      fullNameInput.classList.add('invalid');
+    } else {
+      // Clear live char error; length error will be checked on blur/submit
+      if (fullNameError && !fieldTouched.fullName) {
+        fullNameError.textContent = '';
+        fullNameError.classList.remove('active');
+      }
+      fullNameInput.classList.remove('invalid');
+    }
+
+    validateProfileForm(false);
+  };
+
+  // Blur handler — mark touched and run full validation (including length)
+  const fullNameBlurHandler = () => {
+    // On blur we mark touched and run the full validation (including length)
+    fieldTouched.fullName = true;
+    // Also trim the input value (so we store clean data)
+    fullNameInput.value = (fullNameInput.value || '').trim();
+    validateField('fullName');
+    validateProfileForm(true);
+  };
+
+  fullNameInput.addEventListener('input', fullNameInputHandler);
+  fullNameInput.addEventListener('blur', fullNameBlurHandler);
+
+  fullNameInput.__profileHandlers = {
+    ...(fullNameInput.__profileHandlers || {}),
+    input: fullNameInputHandler,
+    blur: fullNameBlurHandler
+  };
+}
+
+
 
   // --- username (debounced availability check) ---
-  if (usernameInput && !usernameInput.disabled) {
-    const usernameHandler = debounce(async (e) => {
-      fieldTouched.username = true;
-      const val = (usernameInput.value || '').trim();
-      validateField('username');
+  // --- username (attachProfileListeners) ---
+if (usernameInput && !usernameInput.disabled) {
+  // defensive cleanup
+  try {
+    const prev = usernameInput.__profileHandlers || {};
+    if (prev.input) usernameInput.removeEventListener('input', prev.input);
+    if (prev.blur) usernameInput.removeEventListener('blur', prev.blur);
+    if (prev.focus) usernameInput.removeEventListener('focus', prev.focus);
+  } catch (e) { /* ignore */ }
 
-      // only check if looks like a valid username and different from stored username
-      const currentUsername = localStorage.getItem('username') || '';
-      if (val && val !== currentUsername) {
-        try {
-          await checkUsernameAvailability(val);
-          if (!isUsernameAvailable) {
-            if (usernameError) {
-              usernameError.textContent = 'Username is already taken';
-              usernameError.classList.add('active');
-              usernameInput.classList.add('invalid');
-            }
-          } else {
-            if (usernameError) {
-              usernameError.textContent = '';
-              usernameError.classList.remove('active');
-              usernameInput.classList.remove('invalid');
-            }
-          }
-        } catch (err) {
-          console.warn('username availability check error', err);
-        }
+  // show a small help/note on focus if you have a usernameNote element
+  let __usernameNoteTimer = null;
+  const showUsernameNote = () => {
+    const note = document.getElementById('usernameNote');
+    if (!note) return;
+    note.classList.add('active');
+    clearTimeout(__usernameNoteTimer);
+    __usernameNoteTimer = setTimeout(() => note.classList.remove('active'), 2500);
+  };
+
+  // Ensure max length attribute
+  try { usernameInput.maxLength = 15; } catch (e) {}
+
+  // Debounced availability + validation handler
+  const usernameInputHandler = debounce(async () => {
+    // strip leading spaces
+    const before = usernameInput.value || '';
+    if (/^\s+/.test(before)) {
+      const caret = usernameInput.selectionStart || 0;
+      const newVal = before.replace(/^\s+/, '');
+      usernameInput.value = newVal;
+      const shift = before.length - newVal.length;
+      const newCaret = Math.max(0, caret - shift);
+      usernameInput.setSelectionRange(newCaret, newCaret);
+    }
+
+    const raw = usernameInput.value || '';
+    const val = raw.trim();
+    const errEl = usernameError;
+    const currentUsername = localStorage.getItem('username') || '';
+
+    // Reset classes
+    if (errEl) errEl.classList.remove('error', 'checking', 'available');
+
+    // empty -> clear UI
+    if (!val) {
+      if (errEl) { errEl.textContent = ''; errEl.classList.remove('active'); }
+      usernameInput.classList.remove('invalid');
+      isUsernameAvailable = false;
+      validateProfileForm(false);
+      return;
+    }
+
+    // immediate client-side checks (same rules as validateField)
+    if (/^\d/.test(val)) {
+      if (errEl) { errEl.textContent = 'Username cannot start with a number'; errEl.classList.add('active', 'error'); }
+      usernameInput.classList.add('invalid');
+      isUsernameAvailable = false;
+      validateProfileForm(false);
+      return;
+    }
+    if (/^_/.test(val)) {
+      if (errEl) { errEl.textContent = 'Username cannot start with underscore'; errEl.classList.add('active', 'error'); }
+      usernameInput.classList.add('invalid');
+      isUsernameAvailable = false;
+      validateProfileForm(false);
+      return;
+    }
+    if (!/^[a-zA-Z0-9_]+$/.test(val)) {
+      if (errEl) { errEl.textContent = 'Username can only contain letters, numbers, or underscores'; errEl.classList.add('active', 'error'); }
+      usernameInput.classList.add('invalid');
+      isUsernameAvailable = false;
+      validateProfileForm(false);
+      return;
+    }
+    if (val.length > 15) {
+      if (errEl) { errEl.textContent = 'Username cannot exceed 15 characters'; errEl.classList.add('active', 'error'); }
+      usernameInput.classList.add('invalid');
+      isUsernameAvailable = false;
+      validateProfileForm(false);
+      return;
+    }
+
+    // min-length message: only show on blur/submit; if still focused, hide it
+    if (val.length < 3 && !(document.activeElement !== usernameInput || fieldTouched.username)) {
+      if (errEl) { errEl.textContent = ''; errEl.classList.remove('active', 'error'); }
+      usernameInput.classList.remove('invalid');
+      isUsernameAvailable = false;
+      validateProfileForm(false);
+      return;
+    }
+
+    // If username equals current username => treat as available (no remote check)
+    if (val === currentUsername) {
+      isUsernameAvailable = true;
+      if (errEl) { errEl.textContent = ''; errEl.classList.remove('active', 'error', 'checking', 'available'); }
+      usernameInput.classList.remove('invalid');
+      validateProfileForm(false);
+      return;
+    }
+
+    // Passed client-side → do availability check
+    if (errEl) { errEl.textContent = 'Checking availability...'; errEl.classList.add('checking', 'active'); }
+    usernameInput.classList.remove('invalid');
+
+    const ok = await checkUsernameAvailability(val);
+
+    if (ok) {
+      isUsernameAvailable = true;
+      if (errEl) {
+        errEl.textContent = `${val} is available`;
+        errEl.classList.remove('error', 'checking');
+        errEl.classList.add('available', 'active');
+      }
+      usernameInput.classList.remove('invalid');
+    } else {
+      isUsernameAvailable = false;
+      if (errEl) {
+        errEl.textContent = `${val} is already taken`;
+        errEl.classList.remove('checking', 'available');
+        errEl.classList.add('error', 'active');
+      }
+      usernameInput.classList.add('invalid');
+    }
+
+    validateProfileForm(false);
+  }, 300);
+
+  // attach handlers
+  usernameInput.addEventListener('input', usernameInputHandler);
+
+  // on focus show short note
+  usernameInput.addEventListener('focus', () => {
+    showUsernameNote();
+  });
+
+  // on blur mark touched so min-length will show after leaving
+  usernameInput.addEventListener('blur', () => {
+    fieldTouched.username = true;
+    // Immediately run handler once (no debounce) to surface any blur-time errors/availability
+    // Call the underlying async logic directly (not the debounced wrapper)
+    // Create a tiny helper to call the internals immediately:
+    (async () => {
+      // Cancel any pending debounce by calling the handler function directly
+      // Username logic is inside usernameInputHandler (debounced wrapper) - we need a direct run.
+      // We'll reuse checkUsernameAvailability logic: strip leading spaces, trim and run same steps quickly.
+      // For simplicity call usernameInputHandler() but we need the non-debounced body:
+      // Easiest: call usernameInputHandler() and immediately flush by awaiting a short delay
+      // (debounce wrapper will schedule; to avoid race we can also call checkUsernameAvailability directly)
+      // We'll call usernameInputHandler() and also run validateField to show min-length error now:
+      validateField('username');
+      // If value passes basic client checks and length >=3 then run availability check
+      const raw = usernameInput.value || '';
+      const val = raw.trim();
+      if (val && /^[a-zA-Z0-9_]{3,15}$/.test(val) && val !== (localStorage.getItem('username') || '')) {
+        // run availability (no signal)
+        await checkUsernameAvailability(val);
+        // reflect availability immediately
+        validateField('username');
       }
       validateProfileForm(true);
-    }, 300);
+    })();
+  });
 
-    usernameInput.addEventListener('input', usernameHandler);
-    usernameInput.__profileHandlers = { ...(usernameInput.__profileHandlers || {}), input: usernameHandler };
-  }
+  usernameInput.__profileHandlers = {
+    ...(usernameInput.__profileHandlers || {}),
+    input: usernameInputHandler
+  };
+}
+
 
   // --- phone number: paste + input handlers (same logic you had inline) ---
   if (phoneNumberInput && !phoneNumberInput.disabled) {
@@ -4150,11 +4438,13 @@ function attachProfileListeners() {
 
 
 
-function openUpdateProfileModal(profile) {
+function openUpdateProfileModal(profile = {}) {
   if (!updateProfileModal || !updateProfileForm) {
     console.error('[ERROR] openUpdateProfileModal: Modal or form not found');
     return;
   }
+
+  // show modal
   updateProfileModal.style.display = 'block';
   setTimeout(() => {
     updateProfileModal.classList.add('active');
@@ -4162,430 +4452,69 @@ function openUpdateProfileModal(profile) {
     document.body.classList.add('modal-open');
   }, 10);
 
-  // Set form fields
-  const fullName = profile?.fullName || localStorage.getItem('fullName') || localStorage.getItem('userEmail')?.split('@')[0] || '';
+  // --- Populate form fields (prefer provided profile, then localStorage as fallback) ---
+  const fullName = profile?.fullName || localStorage.getItem('fullName') || (localStorage.getItem('userEmail') || '').split('@')[0] || '';
   const username = profile?.username || localStorage.getItem('username') || '';
   const phoneNumber = profile?.phoneNumber || localStorage.getItem('phoneNumber') || '';
   const email = profile?.email || localStorage.getItem('userEmail') || '';
+  const address = profile?.address || localStorage.getItem('address') || '';
+
   if (fullNameInput) fullNameInput.value = fullName;
   if (usernameInput) usernameInput.value = username;
   if (phoneNumberInput) phoneNumberInput.value = phoneNumber ? formatNigeriaNumberProfile(phoneNumber).value : '';
   if (emailInput) emailInput.value = email;
-  if (addressInput) addressInput.value = profile?.address || localStorage.getItem('address') || '';
+  if (addressInput) addressInput.value = address;
 
-  // Disable fields based on server rules
+  // --- Field enable/disable rules (server-driven) ---
   if (fullNameInput) fullNameInput.disabled = localStorage.getItem('fullNameEdited') === 'true';
   if (phoneNumberInput) phoneNumberInput.disabled = !!phoneNumber;
   if (emailInput) emailInput.disabled = true;
   if (addressInput) addressInput.disabled = !!(profile?.address || localStorage.getItem('address')?.trim());
-  if (profilePictureInput) profilePictureInput.disabled = false; // Always editable
+  if (profilePictureInput) profilePictureInput.disabled = false; // always editable
 
-  // Set avatar
-  const profilePicture = localStorage.getItem('profilePicture');
-  const isValidProfilePicture = profilePicture && (profilePicture.startsWith('data:image/') || profilePicture.startsWith('https://'));
-  const displayName = username || fullName.split(' ')[0] || 'User';
+  // --- Avatar / preview ---
+  const profilePicture = localStorage.getItem('profilePicture') || '';
+  const isValidProfilePicture = !!profilePicture && /^(data:image\/|https?:\/\/|\/|blob:)/i.test(profilePicture);
+  const displayName = username || (fullName.split(' ')[0] || 'User');
+
   if (profilePicturePreview) {
     if (isValidProfilePicture) {
-      profilePicturePreview.innerHTML = `<img src="${profilePicture}" alt="Profile Picture" class="avatar-img" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`;
+      profilePicturePreview.innerHTML = `<img src="${profilePicture}" alt="Profile Picture" class="avatar-img" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`;
     } else {
       profilePicturePreview.innerHTML = '';
       profilePicturePreview.textContent = displayName.charAt(0).toUpperCase();
     }
   }
 
-  // Reset error messages, touched states, and invalid classes
-  [fullNameError, usernameError, phoneNumberError, addressError, profilePictureError].forEach(error => {
-    if (error) {
-      error.textContent = '';
-      error.classList.remove('active');
+  // --- Reset error UI, invalid classes and touched flags ---
+  [fullNameError, usernameError, phoneNumberError, addressError, profilePictureError].forEach(errEl => {
+    if (errEl) {
+      errEl.textContent = '';
+      errEl.classList.remove('active', 'error', 'checking', 'available');
     }
   });
-  [fullNameInput, usernameInput, phoneNumberInput, addressInput].forEach(input => {
-    if (input) input.classList.remove('invalid');
-  });
-  Object.keys(fieldTouched).forEach(key => fieldTouched[key] = false);
 
-  // remove previously attached handlers (reliable)
+  [fullNameInput, usernameInput, phoneNumberInput, addressInput].forEach(inp => {
+    if (inp) inp.classList.remove('invalid');
+  });
+
+  Object.keys(fieldTouched).forEach(k => fieldTouched[k] = false);
+
+  // --- Ensure no duplicate listeners: detach previous, then attach fresh handlers ---
   detachProfileListeners();
+  attachProfileListeners(); // attachProfileListeners should add input/blur/paste handlers for fullName/username/phone/address/profilePicture
 
-  // attach modal-specific handlers (single source of truth)
-  attachProfileListeners();
+  // NOTE: Do NOT add inline input listeners for validation here.
+  // The attachProfileListeners() function is the single source of truth and
+  // is responsible for adding the input + blur handlers that follow the
+  // "live rules vs blur-on-length" pattern (so length errors only show on blur/submit).
 
-
-  // Add input listeners for live validation
-  // Add input listeners for live validation
-if (fullNameInput) {
-  const fullNameAlreadySet = localStorage.getItem('fullNameEdited') === 'true';
-  if (fullNameAlreadySet) {
-    fullNameInput.disabled = true;
-    // No error message
-  } else {
-    fullNameInput.disabled = false;
-    fullNameInput.addEventListener('input', () => {
-      fieldTouched.fullName = true;
-      const value = fullNameInput.value.trim();
-      let error = '';
-
-      // Only validate if user typed something
-      if (value.length > 0) {
-        // First, check for invalid characters
-        if (!/^[a-zA-Z\s'-]+$/.test(value)) {
-          error = 'Full name can only contain letters, spaces, hyphens, or apostrophes';
-        }
-        // Then check length
-        else if (value.length < 2) {
-          error = 'Full name must be at least 2 characters';
-        } else if (value.length > 50) {
-          error = 'Full name cannot exceed 50 characters';
-        }
-      }
-
-      // Update error display
-      if (error) {
-        fullNameError.textContent = error;
-        fullNameError.classList.add('active');
-        fullNameInput.classList.add('invalid');
-      } else {
-        fullNameError.textContent = '';
-        fullNameError.classList.remove('active');
-        fullNameInput.classList.remove('invalid');
-      }
-
-      validateProfileForm(true);
-    });
-  }
-}
-
-
-
-  if (usernameInput) {
-    const lastUpdate = localStorage.getItem('lastUsernameUpdate');
-    const currentUsername = localStorage.getItem('username') || '';
-    let usernameLocked = false;
-    if (lastUpdate && currentUsername) {
-      const daysSinceUpdate = (Date.now() - new Date(lastUpdate).getTime()) / (1000 * 60 * 60 * 24);
-      if (daysSinceUpdate < 90) {
-        usernameLocked = true;
-        usernameInput.disabled = true;
-        if (usernameError) {
-          usernameError.textContent = `You can update your username again in ${Math.ceil(90 - daysSinceUpdate)} days`;
-          usernameError.classList.add('active');
-        }
-      }
-    }
-
-    if (!usernameLocked) {
-      usernameInput.disabled = false;
-      usernameInput.addEventListener('input', debounce(async () => {
-        fieldTouched.username = true;
-        const value = usernameInput.value.trim();
-        const errorEl = usernameError;
-
-        // Reset classes
-        if (errorEl) errorEl.classList.remove('error', 'checking', 'available');
-
-        if (!value) {
-          if (errorEl) errorEl.textContent = '';
-          validateProfileForm(true);
-          return;
-        }
-
-        if (/^\d/.test(value)) {
-          if (errorEl) {
-            errorEl.textContent = 'Username cannot start with a number';
-            errorEl.classList.add('error', 'active'); // red
-          }
-          usernameInput.classList.add('invalid');
-          isUsernameAvailable = false;
-          validateProfileForm(true);
-          return;
-        }
-
-        // --- Validation checks ---
-        if (value.length < 3) {
-          if (errorEl) {
-            errorEl.textContent = 'Username must have at least 3 characters';
-            errorEl.classList.add('error', 'active'); // red
-          }
-          usernameInput.classList.add('invalid');
-          isUsernameAvailable = false;
-          validateProfileForm(true);
-          return;
-        }
-
-        if (value.length > 20) {
-          if (errorEl) {
-            errorEl.textContent = 'Username cannot exceed 20 characters';
-            errorEl.classList.add('error', 'active'); // red
-          }
-          usernameInput.classList.add('invalid');
-          isUsernameAvailable = false;
-          validateProfileForm(true);
-          return;
-        }
-
-        if (!/^[a-zA-Z0-9_]+$/.test(value)) {
-          if (errorEl) {
-            errorEl.textContent = 'Username can only contain letters, numbers, or underscores';
-            errorEl.classList.add('error', 'active'); // red
-          }
-          usernameInput.classList.add('invalid');
-          isUsernameAvailable = false;
-          validateProfileForm(true);
-          return;
-        }
-
-        // Passed all validations → check availability
-        if (errorEl) {
-          errorEl.textContent = 'Checking availability...';
-          errorEl.classList.add('checking', 'active'); // white
-        }
-        usernameInput.classList.remove('invalid');
-
-        // --- Supabase availability check ---
-        const isAvailable = await checkUsernameAvailability(value);
-
-        if (isAvailable) {
-          if (errorEl) {
-            errorEl.textContent = `${value} is available`;
-            errorEl.classList.add('available', 'active'); // green
-          }
-          usernameInput.classList.remove('invalid');
-        } else {
-          if (errorEl) {
-            errorEl.textContent = 'Username is already taken';
-            errorEl.classList.add('error', 'active'); // red
-          }
-          usernameInput.classList.add('invalid');
-        }
-
-        validateProfileForm(true);
-      }, 300));
-    }
-  }
-
-
-  if (addressInput) {
-  const addressAlreadySet = !!(profile?.address || localStorage.getItem('address')?.trim());
-  if (addressAlreadySet) {
-    addressInput.disabled = true;
-    // No error message
-  } else {
-    addressInput.disabled = false;
-    if (!addressInput.dataset.listenerAttached) {
-      const addressHandler = () => {
-        fieldTouched.address = true;
-        validateField('address');
-        validateProfileForm(true);
-      };
-      addressInput.addEventListener('input', addressHandler);
-      addressInput.addEventListener('paste', (e) => {
-        setTimeout(addressHandler, 0);
-      });
-      addressInput.dataset.listenerAttached = '1';
-    }
-  }
-}
-
-
-
-  if (profilePictureInput) {
-    profilePictureInput.addEventListener('change', () => {
-      fieldTouched.profilePicture = true;
-      validateField('profilePicture');
-      validateProfileForm(true);
-    });
-  }
-
-  // Nigerian phone number validation and formatting for profile modal
-  if (phoneNumberInput && !phoneNumberInput.disabled) {
-    phoneNumberInput.addEventListener('keypress', (e) => {
-      if (e.key === '+') {
-        e.preventDefault();
-        console.log('[DEBUG] phoneNumberInput keypress: Blocked + key');
-      }
-    });
-
-    phoneNumberInput.addEventListener('beforeinput', (e) => {
-      const rawInput = phoneNumberInput.value.replace(/\s/g, '');
-
-      // Case: First digit typed is 7/8/9 → auto prepend 0
-      if (rawInput.length === 0 && e.data && /^[789]$/.test(e.data)) {
-        e.preventDefault(); // stop default typing
-        phoneNumberInput.value = '0' + e.data;
-
-        // Place cursor at the very end (after 7/8/9)
-        requestAnimationFrame(() => {
-          phoneNumberInput.setSelectionRange(phoneNumberInput.value.length, phoneNumberInput.value.length);
-        });
-        return;
-      }
-
-      // Block non-digits
-      if (e.data && !/^\d$/.test(e.data)) {
-        e.preventDefault();
-      }
-    });
-
-
-    phoneNumberInput.addEventListener('keydown', (e) => {
-      const allowedKeys = [
-        'Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab', 'Enter',
-        '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'
-      ];
-      if ((e.ctrlKey || e.metaKey) && ['a', 'c', 'v'].includes(e.key.toLowerCase())) {
-        return;
-      }
-      if (!allowedKeys.includes(e.key)) {
-        e.preventDefault();
-        console.log('[DEBUG] phoneNumberInput keydown: Blocked non-allowed key:', e.key);
-      }
-    });
-
-    phoneNumberInput.addEventListener('paste', (e) => {
-      e.preventDefault();
-      const pastedData = (e.clipboardData || window.clipboardData).getData('text').trim();
-      console.log('[DEBUG] phoneNumberInput paste: Raw pasted data:', pastedData);
-
-      const normalized = normalizePhoneProfile(pastedData);
-      if (!normalized) {
-        phoneNumberInput.classList.add('invalid');
-        if (phoneNumberError) {
-          phoneNumberError.textContent = 'Please paste a valid Nigerian phone number';
-          phoneNumberError.classList.add('active');
-        }
-        console.log('[DEBUG] phoneNumberInput paste: Blocked invalid number:', pastedData);
-        return;
-      }
-
-      const { value: formatted, cursorOffset } = formatNigeriaNumberProfile(normalized, false, true);
-      if (!formatted) {
-        phoneNumberInput.classList.add('invalid');
-        if (phoneNumberError) {
-          phoneNumberError.textContent = 'Invalid phone number format';
-          phoneNumberError.classList.add('active');
-        }
-        console.log('[DEBUG] phoneNumberInput paste: Invalid formatted number:', normalized);
-        return;
-      }
-
-      phoneNumberInput.value = formatted;
-      console.log('[DEBUG] phoneNumberInput paste: Accepted and formatted:', formatted);
-
-      const newCursorPosition = formatted.length;
-      phoneNumberInput.setSelectionRange(newCursorPosition, newCursorPosition);
-
-      const prefix = normalized.slice(0, 4);
-      const validPrefixes = Object.values(providerPrefixes).flat();
-      phoneNumberInput.classList.toggle('invalid', normalized.length >= 4 && !validPrefixes.includes(prefix));
-      if (phoneNumberError) {
-        phoneNumberError.textContent = normalized.length >= 4 && !validPrefixes.includes(prefix)
-          ? 'Invalid phone number prefix'
-          : '';
-        phoneNumberError.classList.toggle('active', normalized.length >= 4 && !validPrefixes.includes(prefix));
-      }
-
-      fieldTouched.phoneNumber = true;
-      validateField('phoneNumber');
-      validateProfileForm(true);
-
-      if (normalized.length === 11 && isNigeriaMobileProfile(normalized)) {
-        phoneNumberInput.blur();
-        console.log('[RAW LOG] phoneNumberInput paste: Keyboard closed, valid Nigeria number:', normalized);
-      }
-    });
-
-    phoneNumberInput.addEventListener('input', debounce((e) => {
-      const cursorPosition = phoneNumberInput.selectionStart;
-      const rawInput = phoneNumberInput.value.replace(/\s/g, '');
-      const isInitialDigit = rawInput.length === 1 && /^[789]$/.test(rawInput);
-      const isDelete = e.inputType === 'deleteContentBackward' || e.inputType === 'deleteContentForward';
-
-      if (!rawInput && isDelete) {
-        phoneNumberInput.classList.remove('invalid');
-        if (phoneNumberError) {
-          phoneNumberError.textContent = '';
-          phoneNumberError.classList.remove('active');
-        }
-        validateProfileForm(true);
-        console.log('[DEBUG] phoneNumberInput input: Input cleared, no validation');
-        return;
-      }
-
-      const normalized = normalizePhoneProfile(rawInput);
-      if (!normalized && rawInput) {
-        phoneNumberInput.value = rawInput;
-        phoneNumberInput.classList.add('invalid');
-        if (phoneNumberError) {
-          phoneNumberError.textContent = 'Invalid phone number';
-          phoneNumberError.classList.add('active');
-        }
-        console.log('[DEBUG] phoneNumberInput input: Invalid number, keeping raw input:', rawInput);
-        validateProfileForm(true);
-        return;
-      }
-
-      let finalNormalized = normalized;
-      if (normalized.length > 11) {
-        finalNormalized = normalized.slice(0, 11);
-        console.log('[DEBUG] phoneNumberInput input: Truncated to 11 digits:', finalNormalized);
-      }
-
-      const { value: formatted, cursorOffset } = formatNigeriaNumberProfile(finalNormalized, isInitialDigit, false);
-      phoneNumberInput.value = formatted;
-
-      let newCursorPosition = cursorPosition;
-      if (isInitialDigit) {
-        newCursorPosition = 2;
-      } else if (finalNormalized.length >= 4 && finalNormalized.length <= 7) {
-        if (cursorPosition > 4) newCursorPosition += 1;
-      } else if (finalNormalized.length > 7) {
-        if (cursorPosition > 4) newCursorPosition += 1;
-        if (cursorPosition > 7) newCursorPosition += 1;
-      }
-      newCursorPosition = Math.min(newCursorPosition, formatted.length);
-      phoneNumberInput.setSelectionRange(newCursorPosition, newCursorPosition);
-
-      const prefix = finalNormalized.slice(0, 4);
-      const validPrefixes = Object.values(providerPrefixes).flat();
-
-      let errorMessage = '';
-
-      if (finalNormalized.length >= 4) {
-        if (!validPrefixes.includes(prefix)) {
-          // If exactly 4 digits → prefix error
-          if (finalNormalized.length === 4) {
-            errorMessage = 'Invalid phone number prefix';
-          } else {
-            // More than 4 digits → general error
-            errorMessage = 'Invalid phone number';
-          }
-        }
-      }
-
-      phoneNumberInput.classList.toggle('invalid', !!errorMessage);
-
-      if (phoneNumberError) {
-        phoneNumberError.textContent = errorMessage;
-        phoneNumberError.classList.toggle('active', !!errorMessage);
-      }
-
-
-      fieldTouched.phoneNumber = true;
-      validateField('phoneNumber');
-      validateProfileForm(true);
-
-      if (finalNormalized.length === 11 && isNigeriaMobileProfile(finalNormalized)) {
-        phoneNumberInput.blur();
-        console.log('[RAW LOG] phoneNumberInput input: Keyboard closed, valid Nigeria number:', finalNormalized);
-      }
-    }, 50));
-    if (phoneNumberInput) phoneNumberInput.maxLength = 13; // 11 digits + 2 spaces
-  }
-
+  // Re-run initial validation to set the save button state correctly
   validateProfileForm(false);
+
   console.log('[DEBUG] openUpdateProfileModal: Modal opened', { fullName, username, phoneNumber, email });
 }
+
 
 function closeUpdateProfileModal() {
     if (!updateProfileModal) return;
