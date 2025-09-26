@@ -25,9 +25,9 @@ async function getSession() {
   window.__lastSessionLoadId = loadId;
 
   function isValidImageSource(src) {
-    if (!src) return false;
-    return /^(data:image\/|https?:\/\/|\/)/i.test(src);
-  }
+  if (!src) return false;
+  return /^(data:image\/|https?:\/\/|\/)/i.test(src);
+}
 
   function applySessionToDOM(userObj, derivedFirstName) {
     if (window.__lastSessionLoadId !== loadId) {
@@ -4705,66 +4705,85 @@ if (profilePictureInput && profilePicturePreview) {
 
   // populate user info
   async function loadProfileToSettings() {
-    try {
-      let profile;
-      try {
-        const resp = await fetch('https://api.flexgig.com.ng/api/profile', {
-          credentials: 'include',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('authToken') || ''}`,
-          },
-        });
-        let rawText = await resp.text();
-        try {
-          profile = rawText ? JSON.parse(rawText) : {};
-        } catch (e) {
-          console.warn('[WARN] loadProfileToSettings: Response is not valid JSON', rawText);
-        }
-      } catch (e) {
-        console.warn('[WARN] Profile fetch failed, falling back to local', e);
-      }
+  const settingsAvatar = document.getElementById('settingsAvatar');
+  const settingsUsername = document.getElementById('settingsUsername');
+  const settingsEmail = document.getElementById('settingsEmail');
 
-      if (!profile) {
-        profile = {
-          profilePicture: localStorage.getItem('profilePicture') || '',
-          username: localStorage.getItem('username') || '',
-          fullName: localStorage.getItem('fullName') || '',
-          firstName: localStorage.getItem('firstName') || '',
-          email: localStorage.getItem('userEmail') || '',
-        };
-      }
-
-      if (!settingsAvatar || !settingsUsername || !settingsEmail) {
-        console.error('[ERROR] loadProfileToSettings: Missing DOM elements');
-        return;
-      }
-
-      const avatarUrl =
-        profile.profilePicture ||
-        profile.profile_picture ||
-        profile.avatar_url ||
-        '/frontend/img/avatar-placeholder.png';
-      settingsAvatar.src = avatarUrl.startsWith('/')
-        ? `${location.protocol}//${location.host}${avatarUrl}`
-        : avatarUrl;
-
-      const displayName =
-        profile.username ||
-        profile.firstName ||
-        profile.fullName ||
-        (profile.email ? profile.email.split('@')[0] : 'Loading...');
-      settingsUsername.textContent = displayName;
-      settingsEmail.textContent = profile.email || 'Loading...';
-
-      console.log('[DEBUG] loadProfileToSettings: Loaded', {
-        avatarUrl,
-        displayName,
-        email: profile.email,
-      });
-    } catch (err) {
-      console.error('[ERROR] Failed to load profile to settings', err);
-    }
+  if (!settingsAvatar || !settingsUsername || !settingsEmail) {
+    console.error('[ERROR] loadProfileToSettings: Missing DOM elements');
+    return;
   }
+
+  // Set skeleton loaders immediately for UX
+  settingsUsername.innerHTML = '<div class="skeleton-text"></div>';
+  settingsEmail.innerHTML = '<div class="skeleton-text"></div>';
+  settingsAvatar.innerHTML = '<div class="skeleton-avatar"></div>';
+
+  try {
+    let profile;
+    try {
+      const resp = await fetch(`https://api.flexgig.com.ng/api/profile?_${Date.now()}`, {
+        credentials: 'include',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('authToken') || ''}`,
+        },
+      });
+      let rawText = await resp.text();
+      try {
+        profile = rawText ? JSON.parse(rawText) : {};
+      } catch (e) {
+        console.warn('[WARN] loadProfileToSettings: Response is not valid JSON', rawText);
+      }
+    } catch (e) {
+      console.warn('[WARN] Profile fetch failed, falling back to local', e);
+    }
+
+    if (!profile) {
+      profile = {
+        profilePicture: localStorage.getItem('profilePicture') || '',
+        username: localStorage.getItem('username') || '',
+        fullName: localStorage.getItem('fullName') || '',
+        firstName: localStorage.getItem('firstName') || '',
+        email: localStorage.getItem('userEmail') || '',
+      };
+    }
+
+    // Update avatar
+    const avatarUrl = profile.profilePicture || '';
+    if (isValidImageSource(avatarUrl)) {
+      settingsAvatar.innerHTML = `<img src="${avatarUrl}" alt="Profile" class="avatar-img" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`;
+    } else {
+      settingsAvatar.innerHTML = '';
+      settingsAvatar.textContent = (profile.username?.charAt(0) || profile.firstName?.charAt(0) || 'U').toUpperCase();
+    }
+
+    // Update username and email (clear skeletons)
+    const displayName = profile.username || profile.firstName || 'User';
+    settingsUsername.innerHTML = ''; // Clear skeleton
+    settingsUsername.textContent = displayName;
+
+    settingsEmail.innerHTML = ''; // Clear skeleton
+    settingsEmail.textContent = profile.email || 'Not set';
+
+    console.log('[DEBUG] loadProfileToSettings: Loaded', {
+      avatarUrl,
+      displayName,
+      email: profile.email,
+    });
+  } catch (err) {
+    console.error('[ERROR] Failed to load profile to settings', err);
+
+    // Fallback on error (clear skeletons)
+    settingsAvatar.innerHTML = '';
+    settingsAvatar.textContent = 'U';
+
+    settingsUsername.innerHTML = '';
+    settingsUsername.textContent = 'User';
+
+    settingsEmail.innerHTML = '';
+    settingsEmail.textContent = 'Not set';
+  }
+}
 
   loadProfileToSettings();
 
