@@ -4771,8 +4771,46 @@ if (profilePictureInput && profilePicturePreview) {
     }
   });
 
-  // populate user info
-  async function loadProfileToSettings() {
+  // helper to update avatar without flicker
+function updateAvatar(el, newUrl, fallbackLetter) {
+  if (!isValidImageSource(newUrl)) {
+    el.innerHTML = fallbackLetter;
+    el.classList.add('fade-in');
+    return;
+  }
+
+  // If same image already exists → don’t reload
+  const currentImg = el.querySelector('img');
+  if (currentImg && currentImg.src === newUrl) {
+    return; // ✅ stays stable
+  }
+
+  // Preload new image before swapping
+  const img = new Image();
+  img.src = newUrl.startsWith('/')
+    ? `${location.protocol}//${location.host}${newUrl}`
+    : newUrl;
+  img.alt = "Profile";
+  img.className = "avatar-img";
+  img.style.cssText =
+    "width:100%;height:100%;border-radius:50%;object-fit:cover;opacity:0;transition:opacity .3s ease;";
+
+  img.onload = () => {
+    el.innerHTML = "";
+    el.appendChild(img);
+    requestAnimationFrame(() => {
+      img.style.opacity = "1"; // fade-in after insert
+    });
+  };
+
+  img.onerror = () => {
+    el.innerHTML = fallbackLetter;
+    el.classList.add("fade-in");
+  };
+}
+
+// populate user info
+async function loadProfileToSettings() {
   const settingsAvatar = document.getElementById('settingsAvatar');
   const settingsUsername = document.getElementById('settingsUsername');
   const settingsEmail = document.getElementById('settingsEmail');
@@ -4798,21 +4836,13 @@ if (profilePictureInput && profilePicturePreview) {
     // Instant display from local
     const avatarUrl =
       localProfile.profilePicture || '/frontend/img/avatar-placeholder.png';
+    const fallbackLetter = (
+      localProfile.username?.charAt(0) ||
+      localProfile.firstName?.charAt(0) ||
+      'U'
+    ).toUpperCase();
 
-    if (isValidImageSource(avatarUrl)) {
-      settingsAvatar.innerHTML = `<img src="${
-        avatarUrl.startsWith('/')
-          ? `${location.protocol}//${location.host}${avatarUrl}`
-          : avatarUrl
-      }" alt="Profile" class="avatar-img fade-in" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`;
-    } else {
-      settingsAvatar.textContent = (
-        localProfile.username?.charAt(0) ||
-        localProfile.firstName?.charAt(0) ||
-        'U'
-      ).toUpperCase();
-      settingsAvatar.classList.add('fade-in');
-    }
+    updateAvatar(settingsAvatar, avatarUrl, fallbackLetter);
 
     const displayName =
       localProfile.username ||
@@ -4834,7 +4864,8 @@ if (profilePictureInput && profilePicturePreview) {
     // No local data → shimmer blur
     settingsUsername.innerHTML = '<div class="loading-blur"></div>';
     settingsEmail.innerHTML = '<div class="loading-blur"></div>';
-    settingsAvatar.innerHTML = '<div class="loading-blur settings-avatar"></div>';
+    settingsAvatar.innerHTML =
+      '<div class="loading-blur settings-avatar"></div>';
   }
 
   try {
@@ -4883,10 +4914,16 @@ if (profilePictureInput && profilePicturePreview) {
     ) {
       localStorage.setItem('profilePicture', mergedProfile.profilePicture);
     }
-    if (mergedProfile.username && mergedProfile.username !== localProfile.username) {
+    if (
+      mergedProfile.username &&
+      mergedProfile.username !== localProfile.username
+    ) {
       localStorage.setItem('username', mergedProfile.username);
     }
-    if (mergedProfile.fullName && mergedProfile.fullName !== localProfile.fullName) {
+    if (
+      mergedProfile.fullName &&
+      mergedProfile.fullName !== localProfile.fullName
+    ) {
       localStorage.setItem('fullName', mergedProfile.fullName);
       localStorage.setItem(
         'firstName',
@@ -4897,29 +4934,23 @@ if (profilePictureInput && profilePicturePreview) {
       localStorage.setItem('userEmail', mergedProfile.email);
     }
 
-    // Clear shimmer and fade in real content
+    // Clear shimmer
     settingsUsername.innerHTML = '';
     settingsEmail.innerHTML = '';
     settingsAvatar.innerHTML = '';
 
+    // Avatar update (stable + fade-in)
     const newAvatarUrl =
       mergedProfile.profilePicture || '/frontend/img/avatar-placeholder.png';
+    const fallbackLetter = (
+      mergedProfile.username?.charAt(0) ||
+      mergedProfile.firstName?.charAt(0) ||
+      'U'
+    ).toUpperCase();
 
-    if (isValidImageSource(newAvatarUrl)) {
-      settingsAvatar.innerHTML = `<img src="${
-        newAvatarUrl.startsWith('/')
-          ? `${location.protocol}//${location.host}${newAvatarUrl}`
-          : newAvatarUrl
-      }" alt="Profile" class="avatar-img fade-in" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`;
-    } else {
-      settingsAvatar.textContent = (
-        mergedProfile.username?.charAt(0) ||
-        mergedProfile.firstName?.charAt(0) ||
-        'U'
-      ).toUpperCase();
-      settingsAvatar.classList.add('fade-in');
-    }
+    updateAvatar(settingsAvatar, newAvatarUrl, fallbackLetter);
 
+    // Username + email
     const newDisplayName =
       mergedProfile.username ||
       mergedProfile.firstName ||
@@ -4961,8 +4992,8 @@ if (profilePictureInput && profilePicturePreview) {
   }
 }
 
+loadProfileToSettings();
 
-  loadProfileToSettings();
 
   // Edit profile action
   if (openUpdateProfile) {
