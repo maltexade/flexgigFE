@@ -320,3 +320,35 @@
   opacity: 1;
 }
 
+
+
+/* Username availability UI */
+#usernameError,
+.username-status {
+  display: block;
+  margin-top: 6px;
+  font-size: 0.875rem;
+  line-height: 1.2;
+  transition: color .12s ease, opacity .12s ease;
+  opacity: 0;
+}
+
+/* show when active */
+#usernameError.active,
+.username-status.active { opacity: 1; }
+
+/* checking — white text */
+#usernameError.checking,
+.username-status.checking { color: #ffffff; }
+
+/* available — green text */
+#usernameError.available,
+.username-status.available { color: #16a34a; }
+
+/* error — red text */
+#usernameError.error,
+.username-status.error { color: #dc2626; }
+
+/* input states (optional) */
+#username.valid { border-color: #16a34a; box-shadow: 0 0 0 3px rgba(22,163,74,0.08); }
+#username.invalid { border-color: #dc2626; box-shadow: 0 0 0 3px rgba(220,38,38,0.06); }
