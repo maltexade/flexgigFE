@@ -25,42 +25,67 @@ async function getSession() {
   window.__lastSessionLoadId = loadId;
 
   function isValidImageSource(src) {
-  if (!src) return false;
-  return /^(data:image\/|https?:\/\/|\/)/i.test(src);
-}
+    if (!src) return false;
+    return /^(data:image\/|https?:\/\/|\/)/i.test(src);
+  }
 
   function applySessionToDOM(userObj, derivedFirstName) {
     if (window.__lastSessionLoadId !== loadId) {
       console.log('[DEBUG] getSession: stale loadId, abort DOM apply');
       return;
     }
+
     const greetEl = document.getElementById('greet');
     const firstnameEl = document.getElementById('firstname');
     const avatarEl = document.getElementById('avatar');
+
     if (!(greetEl && firstnameEl && avatarEl)) {
       console.warn('[WARN] getSession: DOM elements not found when applying session');
       return;
     }
+
+    // Fade out shimmer loaders smoothly
+    [greetEl, firstnameEl, avatarEl].forEach(el => {
+      if (el.firstChild && el.firstChild.classList?.contains('loading-blur')) {
+        el.firstChild.classList.add('fade-out');
+        setTimeout(() => (el.innerHTML = ''), 200); // remove after fade-out
+      }
+    });
+
+    // Greeting text
     const hour = new Date().getHours();
-    greetEl.textContent = hour < 12 ? 'Good Morning' : hour < 18 ? 'Good Afternoon' : 'Good Evening';
-    const displayName = (userObj.username || derivedFirstName || 'User');
-    firstnameEl.textContent = displayName.charAt(0).toUpperCase() + displayName.slice(1);
+    greetEl.textContent =
+      hour < 12 ? 'Good Morning' : hour < 18 ? 'Good Afternoon' : 'Good Evening';
+    greetEl.classList.add('fade-in');
+
+    // Display name
+    const displayName = userObj.username || derivedFirstName || 'User';
+    firstnameEl.textContent =
+      displayName.charAt(0).toUpperCase() + displayName.slice(1);
+    firstnameEl.classList.add('fade-in');
+
+    // Avatar
     const profilePicture = userObj.profilePicture || '';
     if (isValidImageSource(profilePicture)) {
-      avatarEl.innerHTML = `<img src="${profilePicture}" alt="Profile Picture" class="avatar-img" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`;
+      avatarEl.innerHTML = `<img src="${profilePicture}" 
+        alt="Profile Picture" 
+        class="avatar-img fade-in" 
+        style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`;
       avatarEl.removeAttribute('aria-label');
     } else {
-      avatarEl.innerHTML = '';
       avatarEl.textContent = displayName.charAt(0).toUpperCase();
+      avatarEl.classList.add('fade-in');
       avatarEl.setAttribute('aria-label', displayName);
     }
   }
 
   async function waitForDomReady(retries = 8, delay = 100) {
     for (let i = 0; i < retries; i++) {
-      if (document.getElementById('greet') &&
-          document.getElementById('firstname') &&
-          document.getElementById('avatar')) {
+      if (
+        document.getElementById('greet') &&
+        document.getElementById('firstname') &&
+        document.getElementById('avatar')
+      ) {
         return true;
       }
       await new Promise(r => setTimeout(r, delay));
@@ -69,15 +94,30 @@ async function getSession() {
   }
 
   try {
-    console.log('[DEBUG] getSession: Initiating fetch, credentials: include, time:', new Date().toISOString());
+    // Show shimmer placeholders while loading
+    const greetEl = document.getElementById('greet');
+    const firstnameEl = document.getElementById('firstname');
+    const avatarEl = document.getElementById('avatar');
+
+    if (greetEl && firstnameEl && avatarEl) {
+      greetEl.innerHTML = '<div class="loading-blur"></div>';
+      firstnameEl.innerHTML = '<div class="loading-blur"></div>';
+      avatarEl.innerHTML = '<div class="loading-blur avatar-loader"></div>';
+    }
+
+    console.log('[DEBUG] getSession: Initiating fetch', new Date().toISOString());
     let token = localStorage.getItem('authToken') || '';
     let res = await fetch('https://api.flexgig.com.ng/api/session', {
       method: 'GET',
       credentials: 'include',
-      headers: { 'Accept': 'application/json', 'Authorization': `Bearer ${token}` }
+      headers: {
+        'Accept': 'application/json',
+        'Authorization': `Bearer ${token}`
+      }
     });
 
     console.log('[DEBUG] getSession: Response status', res.status);
+
     if (res.status === 401 && token) {
       console.log('[DEBUG] getSession: Token expired, attempting refresh');
       const refreshRes = await fetch('https://api.flexgig.com.ng/auth/refresh', {
@@ -96,7 +136,6 @@ async function getSession() {
         });
       } else {
         console.error('[ERROR] getSession: Refresh failed', await refreshRes.text());
-        //window.location.href = '/';
         return null;
       }
     }
@@ -104,7 +143,6 @@ async function getSession() {
     if (!res.ok) {
       const text = await res.text().catch(() => '');
       console.error('[ERROR] getSession: Session API returned error:', res.status, text);
-      //window.location.href = '/';
       return null;
     }
 
@@ -113,8 +151,13 @@ async function getSession() {
 
     let firstName = user.fullName?.split(' ')[0] || '';
     if (!firstName && user.email) {
-      firstName = user.email.split('@')[0].replace(/[^a-zA-Z0-9]/g, '').replace(/(\d+)/, '');
-      firstName = (firstName && firstName.charAt(0).toUpperCase() + firstName.slice(1)) || 'User';
+      firstName = user.email
+        .split('@')[0]
+        .replace(/[^a-zA-Z0-9]/g, '')
+        .replace(/(\d+)/, '');
+      firstName =
+        (firstName && firstName.charAt(0).toUpperCase() + firstName.slice(1)) ||
+        'User';
     }
 
     try {
@@ -123,12 +166,18 @@ async function getSession() {
       localStorage.setItem('username', user.username || '');
       localStorage.setItem('phoneNumber', user.phoneNumber || '');
       localStorage.setItem('address', user.address || '');
-      localStorage.setItem('fullName', user.fullName || (user.email ? user.email.split('@')[0] : ''));
+      localStorage.setItem(
+        'fullName',
+        user.fullName || (user.email ? user.email.split('@')[0] : '')
+      );
       localStorage.setItem('fullNameEdited', user.fullNameEdited ? 'true' : 'false');
       localStorage.setItem('lastUsernameUpdate', user.lastUsernameUpdate || '');
       localStorage.setItem('profilePicture', user.profilePicture || '');
       localStorage.setItem('authToken', newToken);
-      localStorage.setItem('authTokenData', JSON.stringify({ user, authToken: newToken }));
+      localStorage.setItem(
+        'authTokenData',
+        JSON.stringify({ user, authToken: newToken })
+      );
       console.log('[DEBUG] getSession: Stored authToken and authTokenData');
     } catch (err) {
       console.warn('[WARN] getSession: Failed to write some localStorage keys', err);
@@ -136,7 +185,7 @@ async function getSession() {
 
     const domReady = await waitForDomReady();
     if (!domReady) {
-      console.warn('[WARN] getSession: DOM elements not ready after waiting, will attempt to apply if they exist');
+      console.warn('[WARN] getSession: DOM elements not ready after waiting');
     }
 
     applySessionToDOM(user, firstName);
@@ -148,20 +197,39 @@ async function getSession() {
           console.log('[DEBUG] getSession: loadUserProfile result is stale, ignoring');
           return null;
         }
-        const profileData = profileResult && typeof profileResult === 'object' ? profileResult : {
-          profilePicture: localStorage.getItem('profilePicture') || user.profilePicture || ''
-        };
+        const profileData =
+          profileResult && typeof profileResult === 'object'
+            ? profileResult
+            : {
+                profilePicture:
+                  localStorage.getItem('profilePicture') || user.profilePicture || ''
+              };
         const finalProfilePicture = isValidImageSource(profileData.profilePicture)
           ? profileData.profilePicture
-          : (isValidImageSource(user.profilePicture) ? user.profilePicture : '');
-        if (finalProfilePicture && finalProfilePicture !== (localStorage.getItem('profilePicture') || '')) {
-          try { localStorage.setItem('profilePicture', finalProfilePicture); } catch (err) { /* ignore */ }
+          : isValidImageSource(user.profilePicture)
+          ? user.profilePicture
+          : '';
+        if (
+          finalProfilePicture &&
+          finalProfilePicture !== (localStorage.getItem('profilePicture') || '')
+        ) {
+          try {
+            localStorage.setItem('profilePicture', finalProfilePicture);
+          } catch (err) {
+            /* ignore */
+          }
           applySessionToDOM({ ...user, profilePicture: finalProfilePicture }, firstName);
         } else {
-          applySessionToDOM({ ...user, profilePicture: finalProfilePicture || user.profilePicture }, firstName);
+          applySessionToDOM(
+            { ...user, profilePicture: finalProfilePicture || user.profilePicture },
+            firstName
+          );
         }
       } catch (err) {
-        console.warn('[WARN] getSession: loadUserProfile failed, relying on session data', err && err.message);
+        console.warn(
+          '[WARN] getSession: loadUserProfile failed, relying on session data',
+          err && err.message
+        );
         applySessionToDOM(user, firstName);
       }
     } else {
@@ -169,16 +237,16 @@ async function getSession() {
     }
 
     console.log('[DEBUG] getSession: Completed (loadId=' + loadId + ')');
-    return { user, authToken: newToken }; // Return for __sec_getCurrentUser
+    return { user, authToken: newToken };
   } catch (err) {
-    console.error('[ERROR] getSession: Failed to fetch session', err && err.message ? err.message : err);
-    //window.location.href = '/';
+    console.error('[ERROR] getSession: Failed to fetch session', err);
     return null;
   }
 }
 
-// Make getSession globally accessible
+// Make globally accessible
 window.getSession = getSession;
+
 
 
 // --- Safe wrapper with retries ---
@@ -4714,76 +4782,185 @@ if (profilePictureInput && profilePicturePreview) {
     return;
   }
 
-  // Set skeleton loaders immediately for UX
-  settingsUsername.innerHTML = '<div class="skeleton-text"></div>';
-  settingsEmail.innerHTML = '<div class="skeleton-text"></div>';
-  settingsAvatar.innerHTML = '<div class="skeleton-avatar"></div>';
+  // Load from localStorage first (instant display)
+  const localProfile = {
+    profilePicture: localStorage.getItem('profilePicture') || '',
+    username: localStorage.getItem('username') || '',
+    fullName: localStorage.getItem('fullName') || '',
+    firstName: localStorage.getItem('firstName') || '',
+    email: localStorage.getItem('userEmail') || '',
+  };
 
-  try {
-    let profile;
-    try {
-      const resp = await fetch(`https://api.flexgig.com.ng/api/profile?_${Date.now()}`, {
-        credentials: 'include',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('authToken') || ''}`,
-        },
-      });
-      let rawText = await resp.text();
-      try {
-        profile = rawText ? JSON.parse(rawText) : {};
-      } catch (e) {
-        console.warn('[WARN] loadProfileToSettings: Response is not valid JSON', rawText);
-      }
-    } catch (e) {
-      console.warn('[WARN] Profile fetch failed, falling back to local', e);
-    }
+  const hasLocalData =
+    localProfile.username || localProfile.firstName || localProfile.email;
 
-    if (!profile) {
-      profile = {
-        profilePicture: localStorage.getItem('profilePicture') || '',
-        username: localStorage.getItem('username') || '',
-        fullName: localStorage.getItem('fullName') || '',
-        firstName: localStorage.getItem('firstName') || '',
-        email: localStorage.getItem('userEmail') || '',
-      };
-    }
+  if (hasLocalData) {
+    // Instant display from local
+    const avatarUrl =
+      localProfile.profilePicture || '/frontend/img/avatar-placeholder.png';
 
-    // Update avatar
-    const avatarUrl = profile.profilePicture || '';
     if (isValidImageSource(avatarUrl)) {
-      settingsAvatar.innerHTML = `<img src="${avatarUrl}" alt="Profile" class="avatar-img" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`;
+      settingsAvatar.innerHTML = `<img src="${
+        avatarUrl.startsWith('/')
+          ? `${location.protocol}//${location.host}${avatarUrl}`
+          : avatarUrl
+      }" alt="Profile" class="avatar-img fade-in" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`;
     } else {
-      settingsAvatar.innerHTML = '';
-      settingsAvatar.textContent = (profile.username?.charAt(0) || profile.firstName?.charAt(0) || 'U').toUpperCase();
+      settingsAvatar.textContent = (
+        localProfile.username?.charAt(0) ||
+        localProfile.firstName?.charAt(0) ||
+        'U'
+      ).toUpperCase();
+      settingsAvatar.classList.add('fade-in');
     }
 
-    // Update username and email (clear skeletons)
-    const displayName = profile.username || profile.firstName || 'User';
-    settingsUsername.innerHTML = ''; // Clear skeleton
+    const displayName =
+      localProfile.username ||
+      localProfile.firstName ||
+      (localProfile.email ? localProfile.email.split('@')[0] : 'User');
+
     settingsUsername.textContent = displayName;
+    settingsUsername.classList.add('fade-in');
 
-    settingsEmail.innerHTML = ''; // Clear skeleton
-    settingsEmail.textContent = profile.email || 'Not set';
+    settingsEmail.textContent = localProfile.email || 'Not set';
+    settingsEmail.classList.add('fade-in');
 
-    console.log('[DEBUG] loadProfileToSettings: Loaded', {
+    console.log('[DEBUG] loadProfileToSettings: Loaded from local instantly', {
       avatarUrl,
       displayName,
-      email: profile.email,
+      email: localProfile.email,
+    });
+  } else {
+    // No local data → shimmer blur
+    settingsUsername.innerHTML = '<div class="loading-blur"></div>';
+    settingsEmail.innerHTML = '<div class="loading-blur"></div>';
+    settingsAvatar.innerHTML = '<div class="loading-blur settings-avatar"></div>';
+  }
+
+  try {
+    // Fetch fresh data
+    const resp = await fetch(
+      `https://api.flexgig.com.ng/api/profile?_${Date.now()}`,
+      {
+        credentials: 'include',
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('authToken') || ''}`,
+        },
+      }
+    );
+
+    let rawText = await resp.text();
+    let serverProfile = {};
+
+    try {
+      serverProfile = rawText ? JSON.parse(rawText) : {};
+    } catch (e) {
+      console.warn(
+        '[WARN] loadProfileToSettings: Response is not valid JSON',
+        rawText
+      );
+    }
+
+    // Merge with local fallback
+    const mergedProfile = {
+      profilePicture:
+        serverProfile.profilePicture ||
+        serverProfile.profile_picture ||
+        serverProfile.avatar_url ||
+        localProfile.profilePicture ||
+        '',
+      username: serverProfile.username || localProfile.username || '',
+      fullName: serverProfile.fullName || localProfile.fullName || '',
+      firstName:
+        serverProfile.fullName?.split(' ')[0] || localProfile.firstName || '',
+      email: serverProfile.email || localProfile.email || '',
+    };
+
+    // Save back to localStorage
+    if (
+      mergedProfile.profilePicture &&
+      mergedProfile.profilePicture !== localProfile.profilePicture
+    ) {
+      localStorage.setItem('profilePicture', mergedProfile.profilePicture);
+    }
+    if (mergedProfile.username && mergedProfile.username !== localProfile.username) {
+      localStorage.setItem('username', mergedProfile.username);
+    }
+    if (mergedProfile.fullName && mergedProfile.fullName !== localProfile.fullName) {
+      localStorage.setItem('fullName', mergedProfile.fullName);
+      localStorage.setItem(
+        'firstName',
+        mergedProfile.fullName.split(' ')[0] || ''
+      );
+    }
+    if (mergedProfile.email && mergedProfile.email !== localProfile.email) {
+      localStorage.setItem('userEmail', mergedProfile.email);
+    }
+
+    // Clear shimmer and fade in real content
+    settingsUsername.innerHTML = '';
+    settingsEmail.innerHTML = '';
+    settingsAvatar.innerHTML = '';
+
+    const newAvatarUrl =
+      mergedProfile.profilePicture || '/frontend/img/avatar-placeholder.png';
+
+    if (isValidImageSource(newAvatarUrl)) {
+      settingsAvatar.innerHTML = `<img src="${
+        newAvatarUrl.startsWith('/')
+          ? `${location.protocol}//${location.host}${newAvatarUrl}`
+          : newAvatarUrl
+      }" alt="Profile" class="avatar-img fade-in" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`;
+    } else {
+      settingsAvatar.textContent = (
+        mergedProfile.username?.charAt(0) ||
+        mergedProfile.firstName?.charAt(0) ||
+        'U'
+      ).toUpperCase();
+      settingsAvatar.classList.add('fade-in');
+    }
+
+    const newDisplayName =
+      mergedProfile.username ||
+      mergedProfile.firstName ||
+      (mergedProfile.email ? mergedProfile.email.split('@')[0] : 'User');
+
+    settingsUsername.textContent = newDisplayName;
+    settingsUsername.classList.add('fade-in');
+
+    const newEmail = mergedProfile.email || 'Not set';
+    settingsEmail.textContent = newEmail;
+    settingsEmail.classList.add('fade-in');
+
+    console.log('[DEBUG] loadProfileToSettings: Updated from server', {
+      avatarUrl: newAvatarUrl,
+      displayName: newDisplayName,
+      email: newEmail,
     });
   } catch (err) {
     console.error('[ERROR] Failed to load profile to settings', err);
 
-    // Fallback on error (clear skeletons)
-    settingsAvatar.innerHTML = '';
-    settingsAvatar.textContent = 'U';
-
+    // Fallback: clear shimmer, show local/fallback
     settingsUsername.innerHTML = '';
-    settingsUsername.textContent = 'User';
-
     settingsEmail.innerHTML = '';
-    settingsEmail.textContent = 'Not set';
+    settingsAvatar.innerHTML = '';
+
+    settingsUsername.textContent =
+      localProfile.username || localProfile.firstName || 'User';
+    settingsUsername.classList.add('fade-in');
+
+    settingsEmail.textContent = localProfile.email || 'Not set';
+    settingsEmail.classList.add('fade-in');
+
+    settingsAvatar.textContent = (
+      localProfile.username?.charAt(0) ||
+      localProfile.firstName?.charAt(0) ||
+      'U'
+    ).toUpperCase();
+    settingsAvatar.classList.add('fade-in');
   }
 }
+
 
   loadProfileToSettings();
 
