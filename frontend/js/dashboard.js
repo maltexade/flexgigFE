@@ -1,3 +1,5 @@
+import { mtnAwoofPlans, mtnGiftingPlans, airtelAwoofPlans, airtelCgPlans, gloCgPlans, gloGiftingPlans, ninemobilePlans } from './dataPlans.js';
+
 window.__SEC_API_BASE = 'https://api.flexgig.com.ng'
 
 // Your project URL and anon key (get them from Supabase dashboard → Project Settings → API)
@@ -326,7 +328,6 @@ async function loadUserProfile() {
     if (updateProfileModal.classList.contains('active')) {
       openUpdateProfileModal(data);
     }
-
   } catch (err) {
     console.error('[ERROR] loadUserProfile: Failed to fetch profile', err.message);
 
@@ -394,103 +395,6 @@ async function openPinModalForReauth() {
 
 
 
-// --- DATA PLANS DEFINITION ---
-const mtnAwoofPlans = [
-  { price: 50, data: '50MB', duration: '1 DAY' },
-  { price: 100, data: '250MB', duration: '1 DAY' },
-  { price: 200, data: '500MB', duration: '3 DAYS' },
-  { price: 300, data: '1GB', duration: '7 DAYS' },
-  { price: 400, data: '1.5GB', duration: '7 DAYS' },
-  { price: 500, data: '2GB', duration: '14 DAYS' },
-  { price: 800, data: '3GB', duration: '14 DAYS' },
-  { price: 1000, data: '4.5GB', duration: '30 DAYS' },
-  { price: 1200, data: '6GB', duration: '30 DAYS' },
-  { price: 1500, data: '8GB', duration: '30 DAYS' }
-];
-const mtnGiftingPlans = [
-  { price: 2000, data: '11GB', duration: '30 DAYS' },
-  { price: 2500, data: '15GB', duration: '30 DAYS' },
-  { price: 3000, data: '20GB', duration: '30 DAYS' },
-  { price: 3500, data: '25GB', duration: '30 DAYS' },
-  { price: 5000, data: '40GB', duration: '30 DAYS' },
-  { price: 10000, data: '75GB', duration: '90 DAYS' },
-  { price: 15000, data: '120GB', duration: '90 DAYS' },
-  { price: 20000, data: '200GB', duration: '120 DAYS' },
-  { price: 30000, data: '400GB', duration: '180 DAYS' },
-  { price: 50000, data: '1TB', duration: '365 DAYS' }
-];
-const airtelAwoofPlans = [
-  { price: 100, data: '200MB', duration: '1 DAY' },
-  { price: 200, data: '500MB', duration: '2 DAYS' },
-  { price: 300, data: '750MB', duration: '3 DAYS' },
-  { price: 500, data: '1.5GB', duration: '7 DAYS' },
-  { price: 1000, data: '3GB', duration: '14 DAYS' },
-  { price: 1500, data: '6GB', duration: '30 DAYS' },
-  { price: 2000, data: '9GB', duration: '30 DAYS' },
-  { price: 2500, data: '12GB', duration: '30 DAYS' },
-  { price: 3000, data: '15GB', duration: '30 DAYS' },
-  { price: 3500, data: '20GB', duration: '30 DAYS' }
-];
-const airtelCgPlans = [
-  { price: 4000, data: '24GB', duration: '30 DAYS' },
-  { price: 5000, data: '40GB', duration: '30 DAYS' },
-  { price: 8000, data: '75GB', duration: '60 DAYS' },
-  { price: 10000, data: '120GB', duration: '90 DAYS' },
-  { price: 15000, data: '200GB', duration: '90 DAYS' },
-  { price: 20000, data: '280GB', duration: '120 DAYS' },
-  { price: 25000, data: '400GB', duration: '180 DAYS' },
-  { price: 30000, data: '500GB', duration: '180 DAYS' },
-  { price: 40000, data: '1TB', duration: '365 DAYS' },
-  { price: 50000, data: '2TB', duration: '365 DAYS' }
-];
-const gloCgPlans = [
-  { price: 50, data: '50MB', duration: '1 DAY' },
-  { price: 100, data: '150MB', duration: '1 DAY' },
-  { price: 200, data: '500MB', duration: '2 DAYS' },
-  { price: 300, data: '1GB', duration: '5 DAYS' },
-  { price: 500, data: '2GB', duration: '7 DAYS' },
-  { price: 800, data: '3GB', duration: '14 DAYS' },
-  { price: 1000, data: '4GB', duration: '15 DAYS' },
-  { price: 1500, data: '7GB', duration: '30 DAYS' },
-  { price: 2000, data: '10GB', duration: '30 DAYS' },
-  { price: 2500, data: '12GB', duration: '30 DAYS' }
-];
-const gloGiftingPlans = [
-  { price: 3000, data: '18GB', duration: '30 DAYS' },
-  { price: 4000, data: '24GB', duration: '30 DAYS' },
-  { price: 5000, data: '32GB', duration: '30 DAYS' },
-  { price: 8000, data: '55GB', duration: '60 DAYS' },
-  { price: 10000, data: '75GB', duration: '90 DAYS' },
-  { price: 15000, data: '150GB', duration: '90 DAYS' },
-  { price: 20000, data: '250GB', duration: '120 DAYS' },
-  { price: 30000, data: '500GB', duration: '180 DAYS' },
-  { price: 40000, data: '800GB', duration: '365 DAYS' },
-  { price: 50000, data: '1.5TB', duration: '365 DAYS' }
-];
-const ninemobilePlans = [
-  { price: 100, data: '100MB', duration: '1 DAY' },
-  { price: 200, data: '300MB', duration: '2 DAYS' },
-  { price: 300, data: '500MB', duration: '3 DAYS' },
-  { price: 500, data: '1GB', duration: '7 DAYS' },
-  { price: 800, data: '2GB', duration: '14 DAYS' },
-  { price: 1000, data: '3GB', duration: '14 DAYS' },
-  { price: 1200, data: '4GB', duration: '30 DAYS' },
-  { price: 1500, data: '5GB', duration: '30 DAYS' },
-  { price: 2000, data: '7GB', duration: '30 DAYS' },
-  { price: 2500, data: '10GB', duration: '30 DAYS' },
-  { price: 3000, data: '12GB', duration: '30 DAYS' },
-  { price: 3500, data: '15GB', duration: '30 DAYS' },
-  { price: 4000, data: '20GB', duration: '30 DAYS' },
-  { price: 5000, data: '30GB', duration: '30 DAYS' },
-  { price: 8000, data: '50GB', duration: '60 DAYS' },
-  { price: 10000, data: '80GB', duration: '90 DAYS' },
-  { price: 15000, data: '150GB', duration: '90 DAYS' },
-  { price: 20000, data: '250GB', duration: '120 DAYS' },
-  { price: 30000, data: '400GB', duration: '180 DAYS' },
-  { price: 50000, data: '1TB', duration: '365 DAYS' }
-];
-
-
 let userEmail = localStorage.getItem('userEmail') || '';
 let firstName = localStorage.getItem('firstName') || '';
 
@@ -511,39 +415,41 @@ deleteKey.addEventListener('click', () => {
 
 // Update DOM with greeting and avatar
 // Updates the dashboard greeting and avatar based on user data
-function updateGreetingAndAvatar(username, firstName) {
+// Helper: robust image source check (re-usable)
+function isValidImageSource(src) {
+  if (!src) return false;
+  return /^(data:image\/|https?:\/\/|\/)/i.test(src);
+}
+
+function updateGreetingAndAvatar(username, firstName, imageUrl) {
   const avatarEl = document.getElementById('avatar');
   const firstnameEl = document.getElementById('firstname');
   const greetEl = document.getElementById('greet');
-  console.log('[DEBUG] updateGreetingAndAvatar: Checking DOM elements, time:', new Date().toISOString(), {
-    avatarEl: !!avatarEl,
-    firstnameEl: !!firstnameEl,
-    greetEl: !!greetEl
-  });
 
-  if (!avatarEl || !firstnameEl || !greetEl) {
-    console.error('[ERROR] updateGreetingAndAvatar: Missing DOM elements');
-    return;
-  }
+  if (!avatarEl || !firstnameEl || !greetEl) return;
 
   const hour = new Date().getHours();
-  const greeting = hour < 12 ? 'Good Morning' : hour < 18 ? 'Good Afternoon' : 'Good Evening';
-  greetEl.textContent = greeting;
+  greetEl.textContent = hour < 12 ? 'Good Morning' : hour < 18 ? 'Good Afternoon' : 'Good Evening';
 
-  const profilePicture = localStorage.getItem('profilePicture') || '';
-  const isValidProfilePicture = profilePicture && profilePicture.startsWith('data:image/');
-  const displayName = username || firstName || 'User';
+  const profilePicture = (imageUrl !== undefined ? imageUrl : localStorage.getItem('profilePicture')) || '';
+  const displayName = (username || firstName || 'User').toString();
+  const displayNameCapitalized = displayName.charAt(0).toUpperCase() + displayName.slice(1);
 
-  if (isValidProfilePicture) {
-    avatarEl.innerHTML = `<img src="${profilePicture}" alt="Profile Picture" class="avatar-img" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`;
+  // If image URL is valid show <img>, otherwise show initial
+  if (isValidImageSource(profilePicture)) {
+    // Append cache-bust token so browser reloads the image when needed.
+    const cacheSrc = profilePicture.includes('?') ? `${profilePicture}&v=${Date.now()}` : `${profilePicture}?v=${Date.now()}`;
+    avatarEl.innerHTML = `<img src="${cacheSrc}" alt="Profile Picture" class="avatar-img" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`;
+    avatarEl.removeAttribute('aria-label');
   } else {
     avatarEl.innerHTML = '';
     avatarEl.textContent = displayName.charAt(0).toUpperCase();
+    avatarEl.setAttribute('aria-label', displayNameCapitalized);
   }
-  firstnameEl.textContent = displayName.charAt(0).toUpperCase() + displayName.slice(1);
 
-  console.log('[DEBUG] updateGreetingAndAvatar:', { greeting, username, firstName, displayName, profilePicture });
+  firstnameEl.textContent = displayNameCapitalized;
 }
+
 
 let recentTransactions = JSON.parse(localStorage.getItem('recentTransactions')) || [];
 
@@ -3529,9 +3435,11 @@ function ensureFileInFormData(formData, inputEl, fieldName = 'profilePicture') {
 }
 
 // --- SINGLE consolidated submit handler for updateProfileForm ---
+// --- SINGLE consolidated submit handler for updateProfileForm ---
 if (updateProfileForm) {
   // Remove previous listener if any (defensive)
-  updateProfileForm.removeEventListener && updateProfileForm.removeEventListener('submit', updateProfileForm.__submitHandler);
+  updateProfileForm.removeEventListener &&
+    updateProfileForm.removeEventListener('submit', updateProfileForm.__submitHandler);
 
   updateProfileForm.__submitHandler = async function (e) {
     e.preventDefault();
@@ -3542,18 +3450,18 @@ if (updateProfileForm) {
     }
 
     // Mark fields touched & validate
-    Object.keys(fieldTouched).forEach(key => {
-    const inputMap = {
-      fullName: fullNameInput,
-      username: usernameInput,
-      phoneNumber: phoneNumberInput,
-      address: addressInput,
-      profilePicture: profilePictureInput
-    };
-    const el = inputMap[key];
-    // Only mark as touched if element exists and is not disabled.
-    fieldTouched[key] = !!(el && !el.disabled);
-  });
+    Object.keys(fieldTouched).forEach((key) => {
+      const inputMap = {
+        fullName: fullNameInput,
+        username: usernameInput,
+        phoneNumber: phoneNumberInput,
+        address: addressInput,
+        profilePicture: profilePictureInput,
+      };
+      const el = inputMap[key];
+      // Only mark as touched if element exists and is not disabled.
+      fieldTouched[key] = !!(el && !el.disabled);
+    });
 
     validateProfileForm(true);
     if (saveProfileBtn.disabled) {
@@ -3569,14 +3477,26 @@ if (updateProfileForm) {
       formData.set('email', localStorage.getItem('userEmail') || '');
 
       // Full name & username: prefer input value, otherwise fall back to localStorage
-      const fullNameVal = (fullNameInput && fullNameInput.value.trim()) || localStorage.getItem('fullName') || '';
-      const usernameVal = (usernameInput && usernameInput.value.trim()) || localStorage.getItem('username') || '';
-      const addressVal = (addressInput && addressInput.value.trim()) || localStorage.getItem('address') || '';
+      const fullNameVal =
+        (fullNameInput && fullNameInput.value.trim()) ||
+        localStorage.getItem('fullName') ||
+        '';
+      const usernameVal =
+        (usernameInput && usernameInput.value.trim()) ||
+        localStorage.getItem('username') ||
+        '';
+      const addressVal =
+        (addressInput && addressInput.value.trim()) ||
+        localStorage.getItem('address') ||
+        '';
 
       // Phone: prefer input value then localStorage; remove formatting spaces
       let phoneRaw = '';
-      if (phoneNumberInput && phoneNumberInput.value) phoneRaw = phoneNumberInput.value.replace(/\s/g, '');
-      else phoneRaw = (localStorage.getItem('phoneNumber') || '').replace(/\s/g, '');
+      if (phoneNumberInput && phoneNumberInput.value) {
+        phoneRaw = phoneNumberInput.value.replace(/\s/g, '');
+      } else {
+        phoneRaw = (localStorage.getItem('phoneNumber') || '').replace(/\s/g, '');
+      }
 
       formData.set('fullName', fullNameVal);
       formData.set('username', usernameVal);
@@ -3589,7 +3509,8 @@ if (updateProfileForm) {
       // Debug: print entries (no binary)
       const debugObj = {};
       for (const [k, v] of formData.entries()) {
-        debugObj[k] = v instanceof File ? `File: ${v.name} (${v.type}, ${v.size})` : v;
+        debugObj[k] =
+          v instanceof File ? `File: ${v.name} (${v.type}, ${v.size})` : v;
       }
       console.log('[DEBUG] updateProfileForm: sending', debugObj);
 
@@ -3597,13 +3518,12 @@ if (updateProfileForm) {
       const response = await fetch('https://api.flexgig.com.ng/api/profile/update', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('authToken') || ''}`
+          Authorization: `Bearer ${localStorage.getItem('authToken') || ''}`,
         },
         body: formData,
-        credentials: 'include'
+        credentials: 'include',
       });
 
-      // Parse response (JSON preferred, fallback to text)
       // Parse response safely
       let rawText = '';
       let parsedData = null;
@@ -3615,14 +3535,24 @@ if (updateProfileForm) {
       }
 
       if (!response.ok) {
-        console.error('[ERROR] updateProfileForm: Failed response', response.status, parsedData || rawText);
-        const serverMsg = (parsedData && (parsedData.error || parsedData.message)) || rawText || `HTTP ${response.status}`;
+        console.error(
+          '[ERROR] updateProfileForm: Failed response',
+          response.status,
+          parsedData || rawText
+        );
+        const serverMsg =
+          (parsedData && (parsedData.error || parsedData.message)) ||
+          rawText ||
+          `HTTP ${response.status}`;
         throw new Error(serverMsg);
       }
 
       // NEW: Update UI immediately with new profile data
       const updatedProfile = parsedData.profile || {}; // Assuming the response includes newly updated profile data
-      updateGreetingAndAvatar(updatedProfile.username, updatedProfile.fullName.split(' ')[0]);
+      updateGreetingAndAvatar(
+        updatedProfile.username,
+        updatedProfile.fullName.split(' ')[0]
+      );
       localStorage.setItem('profilePicture', updatedProfile.profilePicture || ''); // Cache new picture if provided
 
       // Notify user of success
@@ -3638,7 +3568,8 @@ if (updateProfileForm) {
       let returnedProfilePicture = '';
       if (data) {
         if (data.profile && (data.profile.profilePicture || data.profile.picture_url)) {
-          returnedProfilePicture = data.profile.profilePicture || data.profile.picture_url || '';
+          returnedProfilePicture =
+            data.profile.profilePicture || data.profile.picture_url || '';
         } else if (data.profilePicture) {
           returnedProfilePicture = data.profilePicture;
         } else if (data.data && data.data.profilePicture) {
@@ -3647,8 +3578,10 @@ if (updateProfileForm) {
       }
 
       // Update localStorage from form values and server response
-      const newUsername = (formData.get('username') || localStorage.getItem('username') || '').trim();
-      const newFullName = (formData.get('fullName') || localStorage.getItem('fullName') || '').trim();
+      const newUsername =
+        (formData.get('username') || localStorage.getItem('username') || '').trim();
+      const newFullName =
+        (formData.get('fullName') || localStorage.getItem('fullName') || '').trim();
       const newAddress = (formData.get('address') || '').trim();
       const newPhone = phoneRaw || localStorage.getItem('phoneNumber') || '';
 
@@ -3660,12 +3593,14 @@ if (updateProfileForm) {
 
       if (returnedProfilePicture) {
         let canonical = returnedProfilePicture;
-        if (canonical.startsWith('/')) canonical = `${location.protocol}//${location.host}${canonical}`;
+        if (canonical.startsWith('/')) {
+          canonical = `${location.protocol}//${location.host}${canonical}`;
+        }
         localStorage.setItem('profilePicture', canonical);
       }
 
       // Immediate UI update
-      updateGreetingAndAvatar(newUsername, (newFullName.split(' ')[0] || ''));
+      updateGreetingAndAvatar(newUsername, newFullName.split(' ')[0] || '');
 
       // Notification
       const notification = document.getElementById('profileUpdateNotification');
@@ -3684,14 +3619,27 @@ if (updateProfileForm) {
         } catch (err) {
           // fallback manual fetch bypassing cache
           try {
-            const r = await fetch('/api/profile?ts=' + Date.now(), { method: 'GET', credentials: 'include', headers: { 'Accept': 'application/json', 'Cache-Control': 'no-cache' }});
+            const r = await fetch('/api/profile?ts=' + Date.now(), {
+              method: 'GET',
+              credentials: 'include',
+              headers: {
+                Accept: 'application/json',
+                'Cache-Control': 'no-cache',
+              },
+            });
             if (r.ok) {
               const d = await r.json();
-              const pic = (d.profile && (d.profile.profilePicture || d.profile.picture_url)) || d.profilePicture || '';
+              const pic =
+                (d.profile &&
+                  (d.profile.profilePicture || d.profile.picture_url)) ||
+                d.profilePicture ||
+                '';
               if (pic) {
-                const canonical = pic.startsWith('/') ? `${location.protocol}//${location.host}${pic}` : pic;
+                const canonical = pic.startsWith('/')
+                  ? `${location.protocol}//${location.host}${pic}`
+                  : pic;
                 localStorage.setItem('profilePicture', canonical);
-                updateGreetingAndAvatar(newUsername, (newFullName.split(' ')[0] || ''));
+                updateGreetingAndAvatar(newUsername, newFullName.split(' ')[0] || '');
               }
             }
           } catch (e) {
@@ -3699,7 +3647,6 @@ if (updateProfileForm) {
           }
         }
       }
-
     } catch (err) {
       console.error('[ERROR] updateProfileForm:', err);
       if (err.message && err.message.toLowerCase().includes('username')) {
@@ -3711,7 +3658,9 @@ if (updateProfileForm) {
       } else {
         const generalError = document.createElement('div');
         generalError.className = 'error-message active';
-        generalError.textContent = `Failed to update profile: ${err.message || err}`;
+        generalError.textContent = `Failed to update profile: ${
+          err.message || err
+        }`;
         updateProfileForm.prepend(generalError);
         setTimeout(() => generalError.remove(), 4000);
       }
@@ -3720,6 +3669,7 @@ if (updateProfileForm) {
 
   updateProfileForm.addEventListener('submit', updateProfileForm.__submitHandler);
 }
+
 
 // Profile-specific phone number functions
 function isNigeriaMobileProfile(phone) {
@@ -3997,6 +3947,198 @@ function validateField(field) {
   return isValid;
 }
 
+// --- Helpers: attach / detach profile modal listeners ---
+function detachProfileListeners() {
+  const inputs = [fullNameInput, usernameInput, phoneNumberInput, addressInput /* profilePictureInput not included because you have a global change handler */];
+  inputs.forEach((el) => {
+    if (!el) return;
+    const handlers = el.__profileHandlers || {};
+    Object.entries(handlers).forEach(([type, fn]) => {
+      try {
+        if (typeof fn === 'function') el.removeEventListener(type, fn);
+      } catch (err) {
+        console.warn('detachProfileListeners: removeEventListener failed', el, type, err);
+      }
+    });
+    el.__profileHandlers = {}; // reset
+  });
+
+  // If you ever attach a submit handler specifically for the modal and stored it,
+  // remove it the same way. (Your form submit handler is already stored as updateProfileForm.__submitHandler elsewhere.)
+  if (updateProfileForm && updateProfileForm.__submitHandlerAttached) {
+    updateProfileForm.removeEventListener('submit', updateProfileForm.__submitHandler);
+    updateProfileForm.__submitHandlerAttached = false;
+  }
+}
+
+function attachProfileListeners() {
+  // Defensive: ensure duplicates are removed before re-attaching.
+  detachProfileListeners();
+
+  // --- fullName ---
+  if (fullNameInput && !fullNameInput.disabled) {
+    const fullNameHandler = (e) => {
+      fieldTouched.fullName = true;
+      const value = (fullNameInput.value || '').trim();
+      let error = '';
+
+      if (value.length > 0) {
+        if (!/^[a-zA-Z\s'-]+$/.test(value)) {
+          error = 'Full name can only contain letters, spaces, hyphens, or apostrophes';
+        } else if (value.length < 2) {
+          error = 'Full name must be at least 2 characters';
+        } else if (value.length > 50) {
+          error = 'Full name cannot exceed 50 characters';
+        }
+      }
+
+      if (error) {
+        fullNameError && fullNameError.classList.add('active') && (fullNameError.textContent = error);
+        fullNameInput.classList.add('invalid');
+      } else {
+        fullNameError && (fullNameError.textContent = ''), fullNameError && fullNameError.classList.remove('active');
+        fullNameInput.classList.remove('invalid');
+      }
+      validateProfileForm(true);
+    };
+    fullNameInput.addEventListener('input', fullNameHandler);
+    fullNameInput.__profileHandlers = { ...(fullNameInput.__profileHandlers || {}), input: fullNameHandler };
+  }
+
+  // --- username (debounced availability check) ---
+  if (usernameInput && !usernameInput.disabled) {
+    const usernameHandler = debounce(async (e) => {
+      fieldTouched.username = true;
+      const val = (usernameInput.value || '').trim();
+      validateField('username');
+
+      // only check if looks like a valid username and different from stored username
+      const currentUsername = localStorage.getItem('username') || '';
+      if (val && val !== currentUsername) {
+        try {
+          await checkUsernameAvailability(val);
+          if (!isUsernameAvailable) {
+            if (usernameError) {
+              usernameError.textContent = 'Username is already taken';
+              usernameError.classList.add('active');
+              usernameInput.classList.add('invalid');
+            }
+          } else {
+            if (usernameError) {
+              usernameError.textContent = '';
+              usernameError.classList.remove('active');
+              usernameInput.classList.remove('invalid');
+            }
+          }
+        } catch (err) {
+          console.warn('username availability check error', err);
+        }
+      }
+      validateProfileForm(true);
+    }, 300);
+
+    usernameInput.addEventListener('input', usernameHandler);
+    usernameInput.__profileHandlers = { ...(usernameInput.__profileHandlers || {}), input: usernameHandler };
+  }
+
+  // --- phone number: paste + input handlers (same logic you had inline) ---
+  if (phoneNumberInput && !phoneNumberInput.disabled) {
+    const pasteHandler = (ev) => {
+      const pasted = (ev.clipboardData || window.clipboardData).getData('text') || '';
+      const digits = pasted.replace(/\D/g, '').slice(0, 11); // 11 raw digits
+      if (!digits.length) {
+        ev.preventDefault();
+        return;
+      }
+      ev.preventDefault();
+      const start = phoneNumberInput.selectionStart ?? phoneNumberInput.value.length;
+      const end = phoneNumberInput.selectionEnd ?? phoneNumberInput.value.length;
+      const newRaw = (phoneNumberInput.value.slice(0, start) + digits + phoneNumberInput.value.slice(end)).replace(/\D/g, '').slice(0, 11);
+      const { value: formatted } = formatNigeriaNumberProfile(newRaw, true, true);
+      phoneNumberInput.value = formatted;
+      phoneNumberInput.setSelectionRange(formatted.length, formatted.length);
+      fieldTouched.phoneNumber = true;
+      validateField('phoneNumber');
+      validateProfileForm(true);
+    };
+
+    const phoneInputHandler = debounce((e) => {
+      const cursorPosition = phoneNumberInput.selectionStart;
+      const rawInput = (phoneNumberInput.value || '').replace(/\s/g, '');
+      const isInitialDigit = rawInput.length === 1 && /^[789]$/.test(rawInput);
+      const isDelete = e && (e.inputType === 'deleteContentBackward' || e.inputType === 'deleteContentForward');
+
+      if (!rawInput && isDelete) {
+        phoneNumberInput.classList.remove('invalid');
+        if (phoneNumberError) { phoneNumberError.textContent = ''; phoneNumberError.classList.remove('active'); }
+        validateProfileForm(true);
+        return;
+      }
+
+      const normalized = normalizePhoneProfile(rawInput);
+      if (!normalized && rawInput) {
+        phoneNumberInput.value = rawInput;
+        phoneNumberInput.classList.add('invalid');
+        if (phoneNumberError) {
+          phoneNumberError.textContent = 'Invalid phone number';
+          phoneNumberError.classList.add('active');
+        }
+        validateProfileForm(true);
+        return;
+      }
+
+      let finalNormalized = normalized || '';
+      if (finalNormalized.length > 11) finalNormalized = finalNormalized.slice(0, 11);
+
+      const { value: formatted } = formatNigeriaNumberProfile(finalNormalized, isInitialDigit, false);
+      phoneNumberInput.value = formatted;
+
+      const prefix = finalNormalized.slice(0, 4);
+      const validPrefixes = Object.values(providerPrefixes).flat();
+      const prefixError = finalNormalized.length >= 4 && !validPrefixes.includes(prefix);
+      phoneNumberInput.classList.toggle('invalid', !!prefixError);
+
+      if (phoneNumberError) {
+        phoneNumberError.textContent = prefixError ? (finalNormalized.length === 4 ? 'Invalid phone number prefix' : 'Invalid phone number') : '';
+        phoneNumberError.classList.toggle('active', !!prefixError);
+      }
+
+      fieldTouched.phoneNumber = true;
+      validateField('phoneNumber');
+      validateProfileForm(true);
+
+      if (finalNormalized.length === 11 && isNigeriaMobileProfile(finalNormalized)) {
+        phoneNumberInput.blur();
+      }
+    }, 50);
+
+    phoneNumberInput.addEventListener('paste', pasteHandler);
+    phoneNumberInput.addEventListener('input', phoneInputHandler);
+    phoneNumberInput.__profileHandlers = { ...(phoneNumberInput.__profileHandlers || {}), paste: pasteHandler, input: phoneInputHandler };
+
+    // keep maxLength for formatted value (11 digits + 2 spaces)
+    phoneNumberInput.maxLength = 13;
+  }
+
+  // --- address (simple debounce validation) ---
+  if (addressInput && !addressInput.disabled) {
+    const addressHandler = debounce(() => {
+      fieldTouched.address = true;
+      validateField('address');
+      validateProfileForm(true);
+    }, 150);
+    addressInput.addEventListener('input', addressHandler);
+    addressInput.__profileHandlers = { ...(addressInput.__profileHandlers || {}), input: addressHandler };
+  }
+
+  // Note: There's a global profilePicture change handler already wired outside the modal.
+  // See your global handler at the bottom of the file — if you move that into this attach function,
+  // remove the global one to avoid duplication. (Global handler location: see file). :contentReference[oaicite:1]{index=1}
+}
+
+
+
+
 function openUpdateProfileModal(profile) {
   if (!updateProfileModal || !updateProfileForm) {
     console.error('[ERROR] openUpdateProfileModal: Modal or form not found');
@@ -4052,18 +4194,12 @@ function openUpdateProfileModal(profile) {
   });
   Object.keys(fieldTouched).forEach(key => fieldTouched[key] = false);
 
-  // Remove existing input listeners to prevent duplicates
-  const inputs = [fullNameInput, usernameInput, phoneNumberInput, addressInput, profilePictureInput];
-  inputs.forEach(input => {
-    if (input) {
-      input.removeEventListener('input', () => {});
-      input.removeEventListener('change', () => {});
-      input.removeEventListener('keypress', () => {});
-      input.removeEventListener('beforeinput', () => {});
-      input.removeEventListener('keydown', () => {});
-      input.removeEventListener('paste', () => {});
-    }
-  });
+  // remove previously attached handlers (reliable)
+  detachProfileListeners();
+
+  // attach modal-specific handlers (single source of truth)
+  attachProfileListeners();
+
 
   // Add input listeners for live validation
   // Add input listeners for live validation
@@ -4442,6 +4578,7 @@ if (fullNameInput) {
 
 function closeUpdateProfileModal() {
     if (!updateProfileModal) return;
+    detachProfileListeners();
     updateProfileModal.classList.remove('active');
     updateProfileModal.setAttribute('aria-hidden', 'true');
     document.body.classList.remove('modal-open');
