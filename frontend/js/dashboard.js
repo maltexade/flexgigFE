@@ -4170,6 +4170,7 @@ if (fullNameInput && !fullNameInput.disabled) {
 
   // --- username (debounced availability check) ---
   // --- username (attachProfileListeners) ---
+// --- username (attachProfileListeners) ---
 if (usernameInput && !usernameInput.disabled) {
   // defensive cleanup
   try {
@@ -4179,22 +4180,92 @@ if (usernameInput && !usernameInput.disabled) {
     if (prev.focus) usernameInput.removeEventListener('focus', prev.focus);
   } catch (e) { /* ignore */ }
 
-  // show a small help/note on focus if you have a usernameNote element
-  let __usernameNoteTimer = null;
-  const showUsernameNote = () => {
-    const note = document.getElementById('usernameNote');
-    if (!note) return;
-    note.classList.add('active');
-    clearTimeout(__usernameNoteTimer);
-    __usernameNoteTimer = setTimeout(() => note.classList.remove('active'), 2500);
-  };
-
   // Ensure max length attribute
   try { usernameInput.maxLength = 15; } catch (e) {}
 
-  // Debounced availability + validation handler
-  const usernameInputHandler = debounce(async () => {
-    // strip leading spaces
+  const errEl = usernameError;
+  let pendingSeq = 0;               // incremental sequence id for checks
+  let pendingController = null;     // AbortController for inflight check
+
+  // Small helper: set "Checking..." UI immediately
+  function showCheckingUI() {
+    if (!errEl) return;
+    errEl.textContent = 'Checking availability...';
+    errEl.classList.remove('error', 'available');
+    errEl.classList.add('checking', 'active');
+    usernameInput.classList.remove('invalid', 'valid');
+    // mark availability unknown while checking
+    isUsernameAvailable = null;
+  }
+
+  // Cancel any inflight availability request
+  function cancelPendingCheck() {
+    try {
+      if (pendingController) pendingController.abort();
+    } catch (e) { /* ignore */ }
+    pendingController = null;
+    pendingSeq++;
+  }
+
+  // Debounced function that actually executes backend availability check (only when appropriate)
+  const runAvailabilityCheck = debounce(async () => {
+    const valueNow = (usernameInput.value || '').trim();
+
+    // No value or too short → don't hit backend (min-length handled on blur)
+    if (!valueNow || valueNow.length < 3) {
+      // keep "checking" UI while typing, but don't request backend
+      return;
+    }
+
+    // Create controller & sequence for this request
+    cancelPendingCheck(); // increments pendingSeq and aborts prior
+    const mySeq = ++pendingSeq;
+    pendingController = new AbortController();
+    const signal = pendingController.signal;
+
+    // Run the availability check (the checkUsernameAvailability helper accepts a signal param)
+    let ok = false;
+    try {
+      ok = await checkUsernameAvailability(valueNow, signal);
+    } catch (e) {
+      // network/abort errors are fine — treat as unavailable for now
+      ok = false;
+    }
+
+    // If user changed the input since we fired, ignore this result
+    const stillSame = ((usernameInput.value || '').trim() === valueNow) && (mySeq === pendingSeq);
+    if (!stillSame) {
+      // stale result — ignore
+      return;
+    }
+
+    // Apply result to UI
+    if (ok) {
+      isUsernameAvailable = true;
+      if (errEl) {
+        errEl.textContent = `${valueNow} is available`;
+        errEl.classList.remove('error', 'checking');
+        errEl.classList.add('available', 'active');
+      }
+      usernameInput.classList.remove('invalid');
+      usernameInput.classList.add('valid');
+    } else {
+      isUsernameAvailable = false;
+      if (errEl) {
+        errEl.textContent = `${valueNow} is already taken`;
+        errEl.classList.remove('checking', 'available');
+        errEl.classList.add('error', 'active');
+      }
+      usernameInput.classList.remove('valid');
+      usernameInput.classList.add('invalid');
+    }
+
+    validateProfileForm(false);
+  }, 300); // debounce delay
+
+  // Input handler (fires immediately on every keystroke)
+  const usernameImmediateHandler = (e) => {
+    // strip leading spaces while preserving caret
     const before = usernameInput.value || '';
     if (/^\s+/.test(before)) {
       const caret = usernameInput.selectionStart || 0;
@@ -4207,23 +4278,21 @@ if (usernameInput && !usernameInput.disabled) {
 
     const raw = usernameInput.value || '';
     const val = raw.trim();
-    const errEl = usernameError;
-    const currentUsername = localStorage.getItem('username') || '';
-
-    // Reset classes
     if (errEl) errEl.classList.remove('error', 'checking', 'available');
 
-    // empty -> clear UI
+    // empty -> clear UI and cancel checks
     if (!val) {
+      cancelPendingCheck();
       if (errEl) { errEl.textContent = ''; errEl.classList.remove('active'); }
-      usernameInput.classList.remove('invalid');
-      isUsernameAvailable = false;
+      usernameInput.classList.remove('invalid', 'valid');
+      isUsernameAvailable = null;
       validateProfileForm(false);
       return;
     }
 
-    // immediate client-side checks (same rules as validateField)
+    // immediate syntactic rules (show these errors instantly)
     if (/^\d/.test(val)) {
+      cancelPendingCheck();
       if (errEl) { errEl.textContent = 'Username cannot start with a number'; errEl.classList.add('active', 'error'); }
       usernameInput.classList.add('invalid');
       isUsernameAvailable = false;
@@ -4231,13 +4300,15 @@ if (usernameInput && !usernameInput.disabled) {
       return;
     }
     if (/^_/.test(val)) {
+      cancelPendingCheck();
       if (errEl) { errEl.textContent = 'Username cannot start with underscore'; errEl.classList.add('active', 'error'); }
       usernameInput.classList.add('invalid');
       isUsernameAvailable = false;
       validateProfileForm(false);
       return;
     }
-    if (!/^[a-zA-Z0-9_]+$/.test(val)) {
+    if (!/^[a-zA-Z0-9_]*$/.test(val)) {
+      cancelPendingCheck();
       if (errEl) { errEl.textContent = 'Username can only contain letters, numbers, or underscores'; errEl.classList.add('active', 'error'); }
       usernameInput.classList.add('invalid');
       isUsernameAvailable = false;
@@ -4245,6 +4316,7 @@ if (usernameInput && !usernameInput.disabled) {
       return;
     }
     if (val.length > 15) {
+      cancelPendingCheck();
       if (errEl) { errEl.textContent = 'Username cannot exceed 15 characters'; errEl.classList.add('active', 'error'); }
       usernameInput.classList.add('invalid');
       isUsernameAvailable = false;
@@ -4252,92 +4324,60 @@ if (usernameInput && !usernameInput.disabled) {
       return;
     }
 
-    // min-length message: only show on blur/submit; if still focused, hide it
-    if (val.length < 3 && !(document.activeElement !== usernameInput || fieldTouched.username)) {
-      if (errEl) { errEl.textContent = ''; errEl.classList.remove('active', 'error'); }
-      usernameInput.classList.remove('invalid');
-      isUsernameAvailable = false;
-      validateProfileForm(false);
-      return;
-    }
+    // Passed immediate syntactic checks:
+    // Show "Checking availability..." while the user types (prevent flicker)
+    showCheckingUI();
 
-    // If username equals current username => treat as available (no remote check)
-    if (val === currentUsername) {
-      isUsernameAvailable = true;
-      if (errEl) { errEl.textContent = ''; errEl.classList.remove('active', 'error', 'checking', 'available'); }
-      usernameInput.classList.remove('invalid');
-      validateProfileForm(false);
-      return;
-    }
+    // Kick off debounced backend availability check (will only call backend when length >=3)
+    runAvailabilityCheck();
+  };
 
-    // Passed client-side → do availability check
-    if (errEl) { errEl.textContent = 'Checking availability...'; errEl.classList.add('checking', 'active'); }
-    usernameInput.classList.remove('invalid');
+  usernameInput.addEventListener('input', usernameImmediateHandler);
 
-    const ok = await checkUsernameAvailability(val);
-
-    if (ok) {
-      isUsernameAvailable = true;
-      if (errEl) {
-        errEl.textContent = `${val} is available`;
-        errEl.classList.remove('error', 'checking');
-        errEl.classList.add('available', 'active');
-      }
-      usernameInput.classList.remove('invalid');
-    } else {
-      isUsernameAvailable = false;
-      if (errEl) {
-        errEl.textContent = `${val} is already taken`;
-        errEl.classList.remove('checking', 'available');
-        errEl.classList.add('error', 'active');
-      }
-      usernameInput.classList.add('invalid');
-    }
-
-    validateProfileForm(false);
-  }, 300);
-
-  // attach handlers
-  usernameInput.addEventListener('input', usernameInputHandler);
-
-  // on focus show short note
+  // focus: show small helper note (optional)
   usernameInput.addEventListener('focus', () => {
-    showUsernameNote();
+    const note = document.getElementById('usernameNote');
+    if (note) {
+      note.classList.add('active');
+      setTimeout(() => note.classList.remove('active'), 2500);
+    }
   });
 
-  // on blur mark touched so min-length will show after leaving
-  usernameInput.addEventListener('blur', () => {
+  // blur: mark touched and run final validation + immediate availability check (if needed)
+  usernameInput.addEventListener('blur', async () => {
     fieldTouched.username = true;
-    // Immediately run handler once (no debounce) to surface any blur-time errors/availability
-    // Call the underlying async logic directly (not the debounced wrapper)
-    // Create a tiny helper to call the internals immediately:
-    (async () => {
-      // Cancel any pending debounce by calling the handler function directly
-      // Username logic is inside usernameInputHandler (debounced wrapper) - we need a direct run.
-      // We'll reuse checkUsernameAvailability logic: strip leading spaces, trim and run same steps quickly.
-      // For simplicity call usernameInputHandler() but we need the non-debounced body:
-      // Easiest: call usernameInputHandler() and immediately flush by awaiting a short delay
-      // (debounce wrapper will schedule; to avoid race we can also call checkUsernameAvailability directly)
-      // We'll call usernameInputHandler() and also run validateField to show min-length error now:
-      validateField('username');
-      // If value passes basic client checks and length >=3 then run availability check
-      const raw = usernameInput.value || '';
-      const val = raw.trim();
-      if (val && /^[a-zA-Z0-9_]{3,15}$/.test(val) && val !== (localStorage.getItem('username') || '')) {
-        // run availability (no signal)
-        await checkUsernameAvailability(val);
-        // reflect availability immediately
-        validateField('username');
+    // run validateField to surface min-length error immediately on blur
+    validateField('username');
+
+    const val = (usernameInput.value || '').trim();
+    if (val && /^[a-zA-Z0-9_]{3,15}$/.test(val) && val !== (localStorage.getItem('username') || '')) {
+      // If we already have a pending check, wait for it — otherwise run one now
+      cancelPendingCheck(); // ensure previous abort, we'll create a new one
+      const mySeq = ++pendingSeq;
+      pendingController = new AbortController();
+      const ok = await checkUsernameAvailability(val, pendingController.signal).catch(() => false);
+      // ensure still same input
+      if ((usernameInput.value || '').trim() !== val || mySeq !== pendingSeq) return;
+      if (ok) {
+        isUsernameAvailable = true;
+        if (errEl) { errEl.textContent = `${val} is available`; errEl.classList.remove('error','checking'); errEl.classList.add('available','active'); }
+        usernameInput.classList.remove('invalid'); usernameInput.classList.add('valid');
+      } else {
+        isUsernameAvailable = false;
+        if (errEl) { errEl.textContent = `${val} is already taken`; errEl.classList.remove('checking','available'); errEl.classList.add('error','active'); }
+        usernameInput.classList.remove('valid'); usernameInput.classList.add('invalid');
       }
-      validateProfileForm(true);
-    })();
+    }
+
+    validateProfileForm(true);
   });
 
   usernameInput.__profileHandlers = {
     ...(usernameInput.__profileHandlers || {}),
-    input: usernameInputHandler
+    input: usernameImmediateHandler
   };
 }
+
 
 
   // --- phone number: paste + input handlers (same logic you had inline) ---
