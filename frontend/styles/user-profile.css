@@ -352,3 +352,15 @@
 /* input states (optional) */
 #username.valid { border-color: #16a34a; box-shadow: 0 0 0 3px rgba(22,163,74,0.08); }
 #username.invalid { border-color: #dc2626; box-shadow: 0 0 0 3px rgba(220,38,38,0.06); }
+
+.error-message {
+  display: none;
+  color: red;
+  font-size: 0.8em;
+}
+.error-message.active {
+  display: block;
+}
+input.invalid {
+  border-color: red;
+}

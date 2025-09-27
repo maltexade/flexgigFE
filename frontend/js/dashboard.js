@@ -3683,38 +3683,141 @@ updateProfileForm.__submitHandler);
 }
 
 // Profile-specific phone number functions
-function isNigeriaMobileProfile(phone) {
-  const cleaned = phone.replace(/\s/g, '');
-  return /^0[789][01]\d{8}$/.test(cleaned) && Object.values(providerPrefixes).flat().includes(cleaned.slice(0, 4));
+function isValidPrefixPartial(cleaned) {
+  if (!cleaned) return true;
+  const allPrefixes = Object.values(providerPrefixes || {}).flat();
+  if (!allPrefixes.length) return true;
+
+  const first3 = cleaned.slice(0, 3);
+  const first4 = cleaned.slice(0, 4);
+
+  if (cleaned.length >= 4) {
+    return allPrefixes.includes(first4);
+  }
+  if (cleaned.length === 3) {
+    return allPrefixes.some(p => p.slice(0, 3) === first3);
+  }
+  return true;
 }
 
+// Stronger final mobile check: requires 11 digits, starts 0[7|8|9], and 4-digit prefix exist
+function isNigeriaMobileProfile(phone) {
+  const cleaned = (phone || '').replace(/\s/g, '');
+  if (!/^\d{11}$/.test(cleaned)) return false;
+  if (!/^0[789]/.test(cleaned)) return false;
+  const prefix4 = cleaned.slice(0, 4);
+  const allPrefixes = Object.values(providerPrefixes || {}).flat();
+  return allPrefixes.includes(prefix4);
+}
+
+// Normalizes various inputs to local 0-prefixed form where appropriate
 function normalizePhoneProfile(input) {
   if (!input) return '';
   const digits = input.replace(/\D/g, '');
-  if (/^234[789]/.test(digits)) return '0' + digits.slice(3);
-  if (/^\+234[789]/.test(digits)) return '0' + digits.slice(4);
+  if (/^234[789]/.test(digits)) return '0' + digits.slice(3, 14);
   if (/^[789]/.test(digits)) return '0' + digits;
   return digits;
 }
 
+// Formatting: "0XXX XXXX XXXX" (with spaces)
 function formatNigeriaNumberProfile(input, isInitialDigit = false, isPaste = false) {
   const normalized = normalizePhoneProfile(input);
   if (!normalized) return { value: '', cursorOffset: 0 };
   let formatted = normalized;
-  if (isInitialDigit && !normalized.startsWith('0')) {
-    formatted = '0' + normalized;
-  }
-  if (formatted.length > 11) {
-    formatted = formatted.slice(0, 11);
-  }
-  if (formatted.length > 3) {
-    formatted = formatted.slice(0, 4) + ' ' + formatted.slice(4);
-  }
-  if (formatted.length > 8) {
-    formatted = formatted.slice(0, 8) + ' ' + formatted.slice(8);
-  }
-  return { value: formatted, cursorOffset: isPaste ? formatted.length : 0 };
+  if (isInitialDigit && !normalized.startsWith('0')) formatted = '0' + normalized;
+  if (formatted.length > 11) formatted = formatted.slice(0, 11);
+
+  const parts = formatted.replace(/\s/g, '');
+  if (parts.length <= 4) return { value: parts, cursorOffset: isPaste ? parts.length : 0 };
+  if (parts.length <= 8) return { value: parts.slice(0, 4) + ' ' + parts.slice(4), cursorOffset: isPaste ? parts.length + 1 : 0 };
+  return { value: parts.slice(0, 4) + ' ' + parts.slice(4, 8) + ' ' + parts.slice(8), cursorOffset: isPaste ? parts.length + 2 : 0 };
 }
+
+// Validate phone number field but only show length/prefix errors if touched or blurred
+function validatePhoneNumberField(inputElement, errorElement) {
+  const raw = (inputElement.value || '').replace(/\s/g, '');
+  let error = '';
+
+  // show final (length/prefix) errors only when touched or on blur (not while actively typing)
+  const showFinalErrors = !!fieldTouched.phoneNumber || document.activeElement !== inputElement;
+
+  // quick non-digit guard
+  if (raw && !/^\d*$/.test(raw)) {
+    error = 'Phone number must contain only digits';
+  } else {
+    // If the input starts with the country code "234"
+    const startsWith234 = raw.startsWith('234');
+
+    // If the user only typed "234" (country code alone), treat it as allowed while typing
+    if (startsWith234 && raw.length === 3) {
+      // Clear UI and return valid (do not mark touched)
+      if (errorElement) { errorElement.textContent = ''; errorElement.classList.remove('active'); }
+      if (inputElement) inputElement.classList.remove('invalid');
+      return true;
+    }
+
+    // Build normalized value for checks:
+    // - If startsWith234 and has more chars, normalize to local "0..." form
+    // - Otherwise, use raw as-is (local form or partial)
+    let normalizedForChecks = raw;
+    if (startsWith234 && raw.length > 3) {
+      normalizedForChecks = '0' + raw.slice(3); // e.g. 234803... -> 0803...
+    }
+
+    const normLen = normalizedForChecks.length;
+    const rawLen = raw.length;
+
+    // 1) Specific immediate single-digit starts (exact messages)
+    if (rawLen === 1 && /^[1456]$/.test(raw)) {
+      error = `Phone number cannot start with ${raw}`;
+    } else if (startsWith234 && rawLen >= 4 && /^[1456]$/.test(normalizedForChecks[1])) {
+      // normalizedForChecks[1] is the local first digit (normalized begins with '0')
+      error = `Phone number cannot start with ${normalizedForChecks[1]}`;
+    } else {
+      // For normal local input (not country-code), check "0[1456]" pattern as soon as second char exists
+      if (!startsWith234) {
+        if (normLen >= 2 && /^0[1456]/.test(normalizedForChecks)) {
+          error = `Phone number cannot start with ${normalizedForChecks[1]}`;
+        }
+      }
+    }
+
+    // 2) Prefix validity using normalizedForChecks (but only when we have enough digits)
+    if (!error) {
+      // Only run partial/full prefix checks if we have at least 3 normalized digits (or 4 to be strict)
+      if (normLen >= 3 && !isValidPrefixPartial(normalizedForChecks)) {
+        if (showFinalErrors || normLen >= 4) {
+          error = 'Invalid Nigerian phone number prefix';
+        }
+      }
+    }
+
+    // 3) Length error: only show after touched or blur
+    if (!error && showFinalErrors) {
+      if (normLen > 0 && normLen < 11) {
+        error = 'Phone number must be 11 digits';
+      }
+    }
+
+    // 4) Full-length final validity check
+    if (!error && normLen === 11 && !isNigeriaMobileProfile(normalizedForChecks)) {
+      error = 'Invalid Nigerian phone number';
+    }
+  }
+
+  // Render UI
+  if (errorElement) {
+    errorElement.textContent = error;
+    errorElement.classList.toggle('active', !!error);
+  }
+  if (inputElement) {
+    inputElement.classList.toggle('invalid', !!error);
+  }
+  return !error;
+}
+
+
+
 
 // Debounce function
 // Debounce (kept simple)
@@ -3992,49 +4095,71 @@ case 'fullName': {
   break;
 }
 
-    case 'phoneNumber':
-      const cleaned = value.replace(/\s/g, '');
-      if (cleaned && !isNigeriaMobileProfile(cleaned)) {
-        errorElement.textContent = 'Please enter a valid Nigerian phone number';
-        errorElement.classList.add('active');
-        inputElement.classList.add('invalid');
-        isValid = false;
-      } else {
-        errorElement.textContent = '';
-        errorElement.classList.remove('active');
-        inputElement.classList.remove('invalid');
-      }
-      break;
-    case 'address': {
-      const trimmed = value.trim();
+    case 'phoneNumber': {
+  const cleaned = value.replace(/\s/g, '');
+  let error = '';
 
-      // Empty address is allowed (until user types something or on submit you want to enforce)
-      if (!trimmed) {
-        errorElement.textContent = '';
-        errorElement.classList.remove('active');
-        inputElement.classList.remove('invalid');
-        break;
-      }
-
-      // If non-empty, run validation rules
-      if (trimmed.length < 5) {
-        errorElement.textContent = 'Address must be at least 5 characters long';
-        errorElement.classList.add('active');
-        inputElement.classList.add('invalid');
-        isValid = false;
-      } else if (!/^[a-zA-Z0-9\s,.\-#]+$/.test(trimmed)) {
-        // note: allow comma, dot, dash, hash
-        errorElement.textContent = 'Address contains invalid characters';
-        errorElement.classList.add('active');
-        inputElement.classList.add('invalid');
-        isValid = false;
-      } else {
-        errorElement.textContent = '';
-        errorElement.classList.remove('active');
-        inputElement.classList.remove('invalid');
-      }
-      break;
+  if (cleaned && (fieldTouched.phoneNumber || document.activeElement !== inputElement)) {
+    if (!/^\d*$/.test(cleaned)) {
+      error = 'Phone number must contain only digits';
+    } else if (/^0[1456]/.test(cleaned)) {
+      error = 'Nigerian phone numbers cannot start with 1, 4, 5, or 6';
+    } else if (cleaned.length >= 4 && !Object.values(providerPrefixes).flat().includes(cleaned.slice(0, 4))) {
+      error = 'Invalid Nigerian phone number prefix';
+    } else if (cleaned.length > 0 && cleaned.length < 11) {
+      error = 'Phone number must be 11 digits';
+    } else if (cleaned.length === 11 && !isNigeriaMobileProfile(cleaned)) {
+      error = 'Invalid Nigerian phone number';
     }
+  }
+
+  errorElement.textContent = error;
+  errorElement.classList.toggle('active', !!error);
+  inputElement.classList.toggle('invalid', !!error);
+  isValid = !error;
+  break;
+}
+    case 'address': {
+  const raw = inputElement.value || '';
+  const trimmed = raw.trim();
+  const showFinalErrors = !!fieldTouched.address || document.activeElement !== inputElement;
+
+  // Allowed chars: letters, numbers, spaces, comma, dot, dash, hash
+  const allowedRe = /^[a-zA-Z0-9\s,.\-#]*$/;
+
+  let error = '';
+
+  // 1) Reject space as first character
+  if (raw.startsWith(' ')) {
+    error = 'Address cannot start with a space';
+  }
+  // 2) Invalid characters (specific list)
+  else if (raw && !allowedRe.test(raw)) {
+    const invalid = raw.split('').filter(ch => !/[a-zA-Z0-9\s,.\-#]/.test(ch));
+    const uniq = [...new Set(invalid)];
+    error = `Address contains invalid character${uniq.length > 1 ? 's' : ''}: ${uniq.join('')}`;
+  }
+  // 3) Length check (after blur/submit only)
+  else if (showFinalErrors && trimmed && trimmed.length < 5) {
+    error = 'Address must be at least 5 characters long';
+  }
+
+  // Render result
+  if (error) {
+    errorElement.textContent = error;
+    errorElement.classList.add('active');
+    inputElement.classList.add('invalid');
+    isValid = false;
+  } else {
+    errorElement.textContent = '';
+    errorElement.classList.remove('active');
+    inputElement.classList.remove('invalid');
+    isValid = true;
+  }
+  break;
+}
+
+
     case 'profilePicture':
       // DP is optional: only validate if a file was selected
       if (inputElement.files && inputElement.files.length > 0) {
@@ -4171,8 +4296,9 @@ if (fullNameInput && !fullNameInput.disabled) {
   // --- username (debounced availability check) ---
   // --- username (attachProfileListeners) ---
 // --- username (attachProfileListeners) ---
+// --- username (attachProfileListeners) ---
 if (usernameInput && !usernameInput.disabled) {
-  // defensive cleanup
+  // Defensive cleanup of any previous handlers
   try {
     const prev = usernameInput.__profileHandlers || {};
     if (prev.input) usernameInput.removeEventListener('input', prev.input);
@@ -4180,66 +4306,59 @@ if (usernameInput && !usernameInput.disabled) {
     if (prev.focus) usernameInput.removeEventListener('focus', prev.focus);
   } catch (e) { /* ignore */ }
 
-  // Ensure max length attribute
+  // Ensure max length attribute (prevents most over-length typing)
   try { usernameInput.maxLength = 15; } catch (e) {}
 
   const errEl = usernameError;
-  let pendingSeq = 0;               // incremental sequence id for checks
-  let pendingController = null;     // AbortController for inflight check
+  let pendingSeq = 0; // incremental sequence to ignore stale responses
 
-  // Small helper: set "Checking..." UI immediately
+  // Helper to cancel pending checks (by bumping sequence)
+  function cancelPendingCheck() {
+    pendingSeq++;
+  }
+
+  // Helper to show "Checking..." UI immediately
   function showCheckingUI() {
     if (!errEl) return;
     errEl.textContent = 'Checking availability...';
     errEl.classList.remove('error', 'available');
     errEl.classList.add('checking', 'active');
     usernameInput.classList.remove('invalid', 'valid');
-    // mark availability unknown while checking
     isUsernameAvailable = null;
   }
 
-  // Cancel any inflight availability request
-  function cancelPendingCheck() {
-    try {
-      if (pendingController) pendingController.abort();
-    } catch (e) { /* ignore */ }
-    pendingController = null;
-    pendingSeq++;
-  }
-
-  // Debounced function that actually executes backend availability check (only when appropriate)
+  // Debounced availability check — will ignore stale responses using sequence id
   const runAvailabilityCheck = debounce(async () => {
+    const mySeq = ++pendingSeq; // this run's id
     const valueNow = (usernameInput.value || '').trim();
 
-    // No value or too short → don't hit backend (min-length handled on blur)
-    if (!valueNow || valueNow.length < 3) {
-      // keep "checking" UI while typing, but don't request backend
+    // Safety: if empty or too short, don't call backend
+    if (!valueNow || valueNow.length < 3) return;
+
+    // If somehow length > 15 (paste scenario), treat as immediate error and don't call backend
+    if (valueNow.length > 15) {
+      cancelPendingCheck();
+      if (errEl) {
+        errEl.textContent = 'Username cannot exceed 15 characters';
+        errEl.classList.remove('checking', 'available');
+        errEl.classList.add('error', 'active');
+      }
+      usernameInput.classList.add('invalid');
+      isUsernameAvailable = false;
       return;
     }
 
-    // Create controller & sequence for this request
-    cancelPendingCheck(); // increments pendingSeq and aborts prior
-    const mySeq = ++pendingSeq;
-    pendingController = new AbortController();
-    const signal = pendingController.signal;
-
-    // Run the availability check (the checkUsernameAvailability helper accepts a signal param)
+    // Call your existing helper to check availability
     let ok = false;
     try {
-      ok = await checkUsernameAvailability(valueNow, signal);
+      ok = await checkUsernameAvailability(valueNow);
     } catch (e) {
-      // network/abort errors are fine — treat as unavailable for now
       ok = false;
     }
 
-    // If user changed the input since we fired, ignore this result
-    const stillSame = ((usernameInput.value || '').trim() === valueNow) && (mySeq === pendingSeq);
-    if (!stillSame) {
-      // stale result — ignore
-      return;
-    }
+    // If input changed (or another check started), ignore this result
+    if (mySeq !== pendingSeq) return;
 
-    // Apply result to UI
     if (ok) {
       isUsernameAvailable = true;
       if (errEl) {
@@ -4261,9 +4380,9 @@ if (usernameInput && !usernameInput.disabled) {
     }
 
     validateProfileForm(false);
-  }, 300); // debounce delay
+  }, 300); // tweak debounce delay as desired
 
-  // Input handler (fires immediately on every keystroke)
+  // Immediate input handler: runs on each keystroke (no debounce)
   const usernameImmediateHandler = (e) => {
     // strip leading spaces while preserving caret
     const before = usernameInput.value || '';
@@ -4278,6 +4397,8 @@ if (usernameInput && !usernameInput.disabled) {
 
     const raw = usernameInput.value || '';
     const val = raw.trim();
+
+    // Reset status classes (we will re-add below as needed)
     if (errEl) errEl.classList.remove('error', 'checking', 'available');
 
     // empty -> clear UI and cancel checks
@@ -4290,7 +4411,21 @@ if (usernameInput && !usernameInput.disabled) {
       return;
     }
 
-    // immediate syntactic rules (show these errors instantly)
+    // PRIORITY: length > 15 should win immediately (cancel backend)
+    if (val.length > 15) {
+      cancelPendingCheck();
+      if (errEl) {
+        errEl.textContent = 'Username cannot exceed 15 characters';
+        errEl.classList.remove('checking', 'available');
+        errEl.classList.add('error', 'active');
+      }
+      usernameInput.classList.add('invalid');
+      isUsernameAvailable = false;
+      validateProfileForm(false);
+      return;
+    }
+
+    // Immediate syntactic rules (these also cancel backend checks)
     if (/^\d/.test(val)) {
       cancelPendingCheck();
       if (errEl) { errEl.textContent = 'Username cannot start with a number'; errEl.classList.add('active', 'error'); }
@@ -4315,26 +4450,28 @@ if (usernameInput && !usernameInput.disabled) {
       validateProfileForm(false);
       return;
     }
-    if (val.length > 15) {
+
+    // Min-length: only show on blur/submit. While typing, we don't show "too short" messages.
+    if (val.length < 3 && !(fieldTouched.username || document.activeElement !== usernameInput)) {
+      // hide min-length message while still focused & not touched
+      if (errEl) { errEl.textContent = ''; errEl.classList.remove('active', 'error'); }
+      usernameInput.classList.remove('invalid');
+      isUsernameAvailable = null;
       cancelPendingCheck();
-      if (errEl) { errEl.textContent = 'Username cannot exceed 15 characters'; errEl.classList.add('active', 'error'); }
-      usernameInput.classList.add('invalid');
-      isUsernameAvailable = false;
       validateProfileForm(false);
       return;
     }
 
-    // Passed immediate syntactic checks:
-    // Show "Checking availability..." while the user types (prevent flicker)
+    // Passed client-side syntactic checks and within length:
+    // Show "Checking availability..." immediately and schedule backend check (debounced).
     showCheckingUI();
-
-    // Kick off debounced backend availability check (will only call backend when length >=3)
     runAvailabilityCheck();
   };
 
+  // Attach handlers
   usernameInput.addEventListener('input', usernameImmediateHandler);
 
-  // focus: show small helper note (optional)
+  // focus: show helper note (optional)
   usernameInput.addEventListener('focus', () => {
     const note = document.getElementById('usernameNote');
     if (note) {
@@ -4343,21 +4480,24 @@ if (usernameInput && !usernameInput.disabled) {
     }
   });
 
-  // blur: mark touched and run final validation + immediate availability check (if needed)
+  // blur: mark touched and run final validation + availability check (if value >= 3)
   usernameInput.addEventListener('blur', async () => {
     fieldTouched.username = true;
-    // run validateField to surface min-length error immediately on blur
-    validateField('username');
+    validateField('username'); // will show min-length error if needed
 
     const val = (usernameInput.value || '').trim();
-    if (val && /^[a-zA-Z0-9_]{3,15}$/.test(val) && val !== (localStorage.getItem('username') || '')) {
-      // If we already have a pending check, wait for it — otherwise run one now
-      cancelPendingCheck(); // ensure previous abort, we'll create a new one
+    const currentUsername = localStorage.getItem('username') || '';
+
+    if (val && /^[a-zA-Z0-9_]{3,15}$/.test(val) && val !== currentUsername) {
+      // run a final immediate availability check (no debounce)
       const mySeq = ++pendingSeq;
-      pendingController = new AbortController();
-      const ok = await checkUsernameAvailability(val, pendingController.signal).catch(() => false);
-      // ensure still same input
-      if ((usernameInput.value || '').trim() !== val || mySeq !== pendingSeq) return;
+      let ok = false;
+      try {
+        ok = await checkUsernameAvailability(val);
+      } catch (e) {
+        ok = false;
+      }
+      if (mySeq !== pendingSeq) return; // stale
       if (ok) {
         isUsernameAvailable = true;
         if (errEl) { errEl.textContent = `${val} is available`; errEl.classList.remove('error','checking'); errEl.classList.add('available','active'); }
@@ -4380,95 +4520,193 @@ if (usernameInput && !usernameInput.disabled) {
 
 
 
+
   // --- phone number: paste + input handlers (same logic you had inline) ---
-  if (phoneNumberInput && !phoneNumberInput.disabled) {
-    const pasteHandler = (ev) => {
-      const pasted = (ev.clipboardData || window.clipboardData).getData('text') || '';
-      const digits = pasted.replace(/\D/g, '').slice(0, 11); // 11 raw digits
-      if (!digits.length) {
-        ev.preventDefault();
-        return;
-      }
-      ev.preventDefault();
-      const start = phoneNumberInput.selectionStart ?? phoneNumberInput.value.length;
-      const end = phoneNumberInput.selectionEnd ?? phoneNumberInput.value.length;
-      const newRaw = (phoneNumberInput.value.slice(0, start) + digits + phoneNumberInput.value.slice(end)).replace(/\D/g, '').slice(0, 11);
-      const { value: formatted } = formatNigeriaNumberProfile(newRaw, true, true);
-      phoneNumberInput.value = formatted;
-      phoneNumberInput.setSelectionRange(formatted.length, formatted.length);
-      fieldTouched.phoneNumber = true;
-      validateField('phoneNumber');
-      validateProfileForm(true);
-    };
+  // --- phone number: paste + input handlers ---
+// --- phone number: paste + input handlers ---
+if (phoneNumberInput && !phoneNumberInput.disabled) {
+  // paste handler: normalize, set value, mark touched (pastes are likely final), validate and optionally blur
+  const phonePasteHandler = (ev) => {
+    ev.preventDefault();
+    const pasted = (ev.clipboardData || window.clipboardData).getData('text') || '';
+    const digits = pasted.replace(/\D/g, '').slice(0, 14);
+    if (!digits) return;
 
-    const phoneInputHandler = debounce((e) => {
-      const cursorPosition = phoneNumberInput.selectionStart;
-      const rawInput = (phoneNumberInput.value || '').replace(/\s/g, '');
-      const isInitialDigit = rawInput.length === 1 && /^[789]$/.test(rawInput);
-      const isDelete = e && (e.inputType === 'deleteContentBackward' || e.inputType === 'deleteContentForward');
+    const normalized = normalizePhoneProfile(digits).slice(0, 11);
+    const formatted = formatNigeriaNumberProfile(normalized, false, true).value;
+    phoneNumberInput.value = formatted;
+    phoneNumberInput.setSelectionRange(formatted.length, formatted.length);
 
-      if (!rawInput && isDelete) {
-        phoneNumberInput.classList.remove('invalid');
-        if (phoneNumberError) { phoneNumberError.textContent = ''; phoneNumberError.classList.remove('active'); }
-        validateProfileForm(true);
-        return;
-      }
+    fieldTouched.phoneNumber = true;
+    validatePhoneNumberField(phoneNumberInput, phoneNumberError);
+    validateProfileForm(false);
 
-      const normalized = normalizePhoneProfile(rawInput);
-      if (!normalized && rawInput) {
-        phoneNumberInput.value = rawInput;
-        phoneNumberInput.classList.add('invalid');
-        if (phoneNumberError) {
-          phoneNumberError.textContent = 'Invalid phone number';
-          phoneNumberError.classList.add('active');
-        }
-        validateProfileForm(true);
-        return;
-      }
+    if (normalized.length === 11 && isNigeriaMobileProfile(normalized)) {
+      phoneNumberInput.blur();
+    }
+  };
 
-      let finalNormalized = normalized || '';
-      if (finalNormalized.length > 11) finalNormalized = finalNormalized.slice(0, 11);
+  // input handler (debounced) — does NOT set touched; doesn't show length error while typing
+  const phoneInputHandler = debounce((e) => {
+    const rawNoSpaces = (phoneNumberInput.value || '').replace(/\s/g, '');
+    const isDelete = e && (e.inputType === 'deleteContentBackward' || e.inputType === 'deleteContentForward');
 
-      const { value: formatted } = formatNigeriaNumberProfile(finalNormalized, isInitialDigit, false);
-      phoneNumberInput.value = formatted;
+    // If completely empty, clear UI and return
+    if (!rawNoSpaces) {
+      phoneNumberInput.classList.remove('invalid');
+      if (phoneNumberError) { phoneNumberError.textContent = ''; phoneNumberError.classList.remove('active'); }
+      validateProfileForm(false);
+      return;
+    }
 
-      const prefix = finalNormalized.slice(0, 4);
-      const validPrefixes = Object.values(providerPrefixes).flat();
-      const prefixError = finalNormalized.length >= 4 && !validPrefixes.includes(prefix);
-      phoneNumberInput.classList.toggle('invalid', !!prefixError);
-
+    // Immediate, specific single-digit start errors for 1/4/5/6
+    if (/^[1456]$/.test(rawNoSpaces)) {
+      phoneNumberInput.classList.add('invalid');
       if (phoneNumberError) {
-        phoneNumberError.textContent = prefixError ? (finalNormalized.length === 4 ? 'Invalid phone number prefix' : 'Invalid phone number') : '';
-        phoneNumberError.classList.toggle('active', !!prefixError);
+        phoneNumberError.textContent = `Phone number cannot start with ${rawNoSpaces}`;
+        phoneNumberError.classList.add('active');
       }
+      validateProfileForm(false);
+      return;
+    }
 
+    // Normalize and cap to 11 digits for display
+    const normalized = normalizePhoneProfile(rawNoSpaces) || rawNoSpaces;
+    const finalNormalized = normalized.slice(0, 11);
+    const formatted = formatNigeriaNumberProfile(finalNormalized, /^[789]$/.test(rawNoSpaces), false).value;
+
+    // Preserve caret reasonably: set to end (simpler & robust for most edits)
+    phoneNumberInput.value = formatted;
+    phoneNumberInput.setSelectionRange(formatted.length, formatted.length);
+
+    // If there's a clear prefix mismatch at 3+ or 4 digits, show prefix error (but avoid length error here)
+    if (finalNormalized.length >= 3 && !isValidPrefixPartial(finalNormalized)) {
+      phoneNumberInput.classList.add('invalid');
+      if (phoneNumberError) {
+        phoneNumberError.textContent = 'Invalid Nigerian phone number prefix';
+        phoneNumberError.classList.add('active');
+      }
+      validateProfileForm(false);
+      return;
+    }
+
+    // Clear errors while user is typing (no forced length error)
+    phoneNumberInput.classList.remove('invalid');
+    if (phoneNumberError) { phoneNumberError.textContent = ''; phoneNumberError.classList.remove('active'); }
+
+    // If user finished typing 11 digits, run final validation and mark touched
+    if (finalNormalized.length === 11) {
       fieldTouched.phoneNumber = true;
-      validateField('phoneNumber');
-      validateProfileForm(true);
-
-      if (finalNormalized.length === 11 && isNigeriaMobileProfile(finalNormalized)) {
+      validatePhoneNumberField(phoneNumberInput, phoneNumberError);
+      validateProfileForm(false);
+      if (isNigeriaMobileProfile(finalNormalized)) {
         phoneNumberInput.blur();
       }
-    }, 50);
+    } else {
+      // Not final yet — don't mark touched; keep quiet about length
+      validateProfileForm(false);
+    }
+  }, 60);
 
-    phoneNumberInput.addEventListener('paste', pasteHandler);
-    phoneNumberInput.addEventListener('input', phoneInputHandler);
-    phoneNumberInput.__profileHandlers = { ...(phoneNumberInput.__profileHandlers || {}), paste: pasteHandler, input: phoneInputHandler };
+  // restrict non-digits (but allow leading + for paste handling)
+  const phoneBeforeInput = (e) => {
+    if (e.data && !/^\d$/.test(e.data)) {
+      if (!(e.data === '+' && phoneNumberInput.selectionStart === 0)) {
+        e.preventDefault();
+      }
+    }
+    if (e.data === '+' && phoneNumberInput.value.length === 0) {
+      e.preventDefault();
+      phoneNumberInput.value = '0';
+      phoneNumberInput.setSelectionRange(1, 1);
+    }
+  };
 
-    // keep maxLength for formatted value (11 digits + 2 spaces)
-    phoneNumberInput.maxLength = 13;
-  }
+  const phoneKeydown = (e) => {
+    const allowed = [
+      'Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab', 'Enter'
+    ];
+    if ((e.ctrlKey || e.metaKey) && ['a', 'c', 'v'].includes(e.key.toLowerCase())) return;
+    // numeric keys are allowed naturally; block other non-control keys
+    if (!allowed.includes(e.key) && !/^\d$/.test(e.key)) e.preventDefault();
+  };
+
+  // wire handlers
+  phoneNumberInput.addEventListener('beforeinput', phoneBeforeInput);
+  phoneNumberInput.addEventListener('keydown', phoneKeydown);
+  phoneNumberInput.addEventListener('paste', phonePasteHandler);
+  phoneNumberInput.addEventListener('input', phoneInputHandler);
+  phoneNumberInput.addEventListener('blur', () => {
+    fieldTouched.phoneNumber = true;
+    validatePhoneNumberField(phoneNumberInput, phoneNumberError);
+    validateProfileForm(true);
+  });
+
+  // for detachProfileListeners mapping
+  phoneNumberInput.__profileHandlers = {
+    beforeinput: phoneBeforeInput,
+    keydown: phoneKeydown,
+    paste: phonePasteHandler,
+    input: phoneInputHandler,
+    blur: null
+  };
+
+  phoneNumberInput.maxLength = 13; // allow for spaces in formatting
+}
 
   // --- address (simple debounce validation) ---
-  if (addressInput && !addressInput.disabled) {
-    const addressHandler = debounce(() => {
-      fieldTouched.address = true;
-      validateField('address');
-      validateProfileForm(true);
-    }, 150);
-    addressInput.addEventListener('input', addressHandler);
-    addressInput.__profileHandlers = { ...(addressInput.__profileHandlers || {}), input: addressHandler };
-  }
+  // --- address (live character check; length only on blur/submit) ---
+// --- address (live char + no leading space; length only on blur/submit) ---
+if (addressInput && !addressInput.disabled) {
+  const liveHandler = () => {
+    const v = addressInput.value || '';
+    const allowedRe = /^[a-zA-Z0-9\s,.\-#]*$/;
+    let error = '';
+
+    if (v.startsWith(' ')) {
+      error = 'Address cannot start with a space';
+    } else if (!allowedRe.test(v)) {
+      const invalid = v.split('').filter(ch => !/[a-zA-Z0-9\s,.\-#]/.test(ch));
+      const uniq = [...new Set(invalid)];
+      error = `Address contains invalid character${uniq.length > 1 ? 's' : ''}: ${uniq.join('')}`;
+    }
+
+    if (error) {
+      if (addressError) {
+        addressError.textContent = error;
+        addressError.classList.add('active');
+      }
+      addressInput.classList.add('invalid');
+    } else {
+      if (addressError && !fieldTouched.address) {
+        addressError.textContent = '';
+        addressError.classList.remove('active');
+      }
+      addressInput.classList.remove('invalid');
+    }
+
+    validateProfileForm(false); // do not force length errors here
+  };
+
+  const blurHandler = () => {
+    fieldTouched.address = true;
+    addressInput.value = (addressInput.value || '').trim();
+    validateField('address');
+    validateProfileForm(true);
+  };
+
+  const debouncedHandler = debounce(liveHandler, 120);
+  addressInput.addEventListener('input', debouncedHandler);
+  addressInput.addEventListener('blur', blurHandler);
+
+  addressInput.__profileHandlers = {
+    ...(addressInput.__profileHandlers || {}),
+    input: debouncedHandler,
+    blur: blurHandler
+  };
+}
+
+
 
   // Note: There's a global profilePicture change handler already wired outside the modal.
   // See your global handler at the bottom of the file — if you move that into this attach function,
