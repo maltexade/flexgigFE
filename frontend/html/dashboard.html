@@ -900,10 +900,10 @@
 </div>
 
 <!-- Reauth PIN/Biometric Modal -->
-<div id="reauthModal" class="modal hidden">
-  <div class="modal-content pin-modal" style="max-width: 320px; padding: 24px; text-align: center;">
+<div id="reauthModal" class="reauthmodal hidden">
+  <div class="reauthmodal-content reauthpin-modal" style="max-width: 320px; padding: 24px; text-align: center;">
     <!-- Close button optional, but hidden for security -->
-    <button id="closeReauthModal" class="close-btn hidden">×</button>
+    <button id="closeReauthModal" class="reauthclose-btn hidden">×</button>
     
     <!-- Shared: User Avatar -->
     <div class="avatar-container" style="margin-bottom: 12px;">
@@ -949,7 +949,7 @@
       <p style="margin-bottom: 16px;">Enter your 4-digit PIN to continue</p>
       
       <!-- PIN Inputs -->
-      <div class="pin-inputs" style="display: flex; justify-content: center; gap: 8px; margin-bottom: 16px;">
+      <div class="reauthpin-inputs" style="display: flex; justify-content: center; gap: 8px; margin-bottom: 16px;">
         <input type="password" maxlength="1" data-fg-pin="0" pattern="[0-9]" inputmode="numeric">
         <input type="password" maxlength="1" data-fg-pin="1" pattern="[0-9]" inputmode="numeric">
         <input type="password" maxlength="1" data-fg-pin="2" pattern="[0-9]" inputmode="numeric">
@@ -957,12 +957,12 @@
       </div>
       
       <!-- Alert for errors -->
-      <div id="reauthAlert" class="alert hidden">
+      <div id="reauthAlert" class="reauthalert hidden">
         <p id="reauthAlertMsg"></p>
       </div>
       
       <!-- Keypad -->
-      <div class="pin-keypad" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; max-width: 240px; margin: 0 auto 16px;">
+      <div class="reauthpin-keypad" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; max-width: 240px; margin: 0 auto 16px;">
         <button data-key="1">1</button>
         <button data-key="2">2</button>
         <button data-key="3">3</button>
@@ -988,8 +988,8 @@
 
 
 <!-- Inactivity Prompt Modal -->
-<div id="inactivityPrompt" class="modal hidden" style="background: rgba(0,0,0,0.5);">
-  <div class="modal-content" style="max-width: 280px; padding: 16px; border-radius: 12px; background: #1e1e1e;">
+<div id="inactivityPrompt" class="Inactivitymodal hidden" style="background: rgba(0,0,0,0.5);">
+  <div class="Inactivitymodal-content" style="max-width: 280px; padding: 16px; border-radius: 12px; background: #1e1e1e;">
     <h3 style="margin: 0 0 12px; font-size: 18px; color: #fff;">Are you there?</h3>
     <button id="yesActiveBtn" style="background: #00bfa5; color: #fff; padding: 8px 16px; border-radius: 20px; border: none; font-weight: bold;">Yes</button>
   </div>

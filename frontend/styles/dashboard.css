@@ -2657,7 +2657,10 @@ html.dark-mode .theme-toggle .toggle-knob { transform: translateX(20px); }
 
 
 /* Reauth Modal Base */
-.modal {
+/* Reauth Modal Base */
+/* Reauth Modal Base */
+/* Reauth Modal Base */
+.reauthmodal {
   position: fixed;
   top: 0;
   left: 0;
@@ -2671,11 +2674,11 @@ html.dark-mode .theme-toggle .toggle-knob { transform: translateX(20px); }
   transition: opacity 0.3s ease;
 }
 
-.modal.hidden {
+.reauthmodal.hidden {
   display: none;
 }
 
-.modal-content {
+.reauthmodal-content {
   background: #1e1e1e; /* Dark gray */
   border-radius: 16px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
@@ -2687,7 +2690,7 @@ html.dark-mode .theme-toggle .toggle-knob { transform: translateX(20px); }
 }
 
 /* Close Button (optional, hidden by default) */
-.close-btn {
+.reauthclose-btn {
   position: absolute;
   top: 8px;
   right: 8px;
@@ -2698,7 +2701,7 @@ html.dark-mode .theme-toggle .toggle-knob { transform: translateX(20px); }
   cursor: pointer;
 }
 
-.close-btn:hover {
+.reauthclose-btn:hover {
   color: #fff;
 }
 
@@ -2708,13 +2711,13 @@ html.dark-mode .theme-toggle .toggle-knob { transform: translateX(20px); }
 }
 
 /* Texts */
-h2 {
+.reauthmodal-content h2 {
   font-size: 20px;
   margin: 0;
   color: #fff;
 }
 
-p {
+.reauthmodal-content p {
   font-size: 14px;
   color: #aaa;
   margin: 4px 0;
@@ -2747,8 +2750,8 @@ p {
   outline: 2px solid #00bfa5;
 }
 
-/* PIN View Specific */
-.pin-inputs input {
+/* PIN View Specific
+.reauthpin-inputs input {
   width: 40px;
   height: 40px;
   text-align: center;
@@ -2828,7 +2831,7 @@ a:hover {
     width: 56px;
     height: 56px;
   }
-}
+} */
 
 /* Accessibility */
 [aria-label] {
