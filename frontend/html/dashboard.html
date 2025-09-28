@@ -12,10 +12,11 @@
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/@simplewebauthn/browser/dist/simplewebauthn-browser.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Cinzel+Decorative:wght@400;700;900&family=MuseoModerno:ital,wght@0,100..900;1,100..900&display=swap" rel="stylesheet">
 
 
 </head>
-<body>
+<body class="modal-opened">
 
 
   <div id="content">
@@ -833,7 +834,7 @@
   </div>
 </div>
 
-<!-- PIN Verification Modal -->
+<!-- PIN Verification Modal
 <div id="pinVerifyModal" class="pin-modal hidden" aria-hidden="true" role="dialog" aria-labelledby="pinVerifyTitle">
   <div class="pin-header">
     <button id="closePinVerifyModal" class="back-btn" data-close aria-label="Close">
@@ -884,10 +885,10 @@
   <div id="pinVerifyAlert" class="pin-alert hidden">
     <p id="pinVerifyAlertMsg"></p>
   </div>
-</div>
+</div> -->
 
 <!-- Reauth PIN/Biometric Modal -->
-<div id="reauthModal" class="reauthmodal hidden">
+<div id="reauthModal" class="reauthmodal ">
   <div class="reauthmodal-content reauthpin-modal" style="max-width: 320px; padding: 24px; text-align: center;">
     <!-- Close button optional, but hidden for security -->
     <button id="closeReauthModal" class="reauthclose-btn hidden">×</button>
@@ -898,15 +899,15 @@
     </div>
     
     <!-- Shared: User Name -->
-    <p id="reauthName" style="font-weight: bold; margin-bottom: 8px;">Loading...</p>
-    
+    <p id="reauthName" style="font-weight: bold; margin-bottom: 8px; background-color: #3f3f3f; padding: 5px 15px; border-radius: 50px; display: inline-block; color: #fff;"></p>
+
     <!-- Biometric View (default if enabled) -->
     <div id="biometricView" class="view" style="display: none;">
       <!-- Switch to PIN link (top-left) -->
       <a id="switchToPin" href="#" style="position: absolute; top: 16px; left: 16px; font-size: 14px; color: #007bff; text-decoration: underline;">Verify using PIN</a>
       
       <!-- Welcome Text -->
-      <h2 style="margin-bottom: 4px;">Welcome Back</h2>
+      <h2 style="font-family: 'MuseoModerno', cursive; font-size: 1.6rem; font-weight: 800;">Welcome Back</h2>
       
       <!-- Prompt Text -->
       <p style="margin-bottom: 24px;">Click to verify with Fingerprint/Face ID</p>
@@ -919,29 +920,39 @@
       
       <!-- Bottom Links -->
       <div style="display: flex; justify-content: space-between; font-size: 14px; margin-top: 24px;">
-        <a id="logoutLinkBio" href="#" style="color: #f00; text-decoration: underline;">Logout</a>
-        <a id="forgetPinLinkBio" href="#" style="color: #007bff; text-decoration: underline;">Forget PIN?</a>
+        <a id="logoutLinkPin" href="#" style="color: #ffffff; text-decoration: none;"><svg width="17px" height="17px" viewBox="-2.4 -2.4 28.80 28.80" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="white"><g id="SVGRepo_bgCarrier" stroke-width="0"></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round" stroke="white" stroke-width="0.384"> <path opacity="1" d="M12.1207 12.78C12.0507 12.77 11.9607 12.77 11.8807 12.78C10.1207 12.72 8.7207 11.28 8.7207 9.50998C8.7207 7.69998 10.1807 6.22998 12.0007 6.22998C13.8107 6.22998 15.2807 7.69998 15.2807 9.50998C15.2707 11.28 13.8807 12.72 12.1207 12.78Z" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path> <path opacity="1" d="M18.7398 19.3801C16.9598 21.0101 14.5998 22.0001 11.9998 22.0001C9.39977 22.0001 7.03977 21.0101 5.25977 19.3801C5.35977 18.4401 5.95977 17.5201 7.02977 16.8001C9.76977 14.9801 14.2498 14.9801 16.9698 16.8001C18.0398 17.5201 18.6398 18.4401 18.7398 19.3801Z" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path> <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path> </g><g id="SVGRepo_iconCarrier"> <path opacity="0.4" d="M12.1207 12.78C12.0507 12.77 11.9607 12.77 11.8807 12.78C10.1207 12.72 8.7207 11.28 8.7207 9.50998C8.7207 7.69998 10.1807 6.22998 12.0007 6.22998C13.8107 6.22998 15.2807 7.69998 15.2807 9.50998C15.2707 11.28 13.8807 12.72 12.1207 12.78Z" stroke="white" stroke-width="0.00024000000000000003" stroke-linecap="round" stroke-linejoin="round"></path> <path opacity="1" d="M18.7398 19.3801C16.9598 21.0101 14.5998 22.0001 11.9998 22.0001C9.39977 22.0001 7.03977 21.0101 5.25977 19.3801C5.35977 18.4401 5.95977 17.5201 7.02977 16.8001C9.76977 14.9801 14.2498 14.9801 16.9698 16.8001C18.0398 17.5201 18.6398 18.4401 18.7398 19.3801Z" stroke="white" stroke-width="0.00024000000000000003" stroke-linecap="round" stroke-linejoin="round"></path> <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" stroke="white" stroke-width="0.00024000000000000003" stroke-linecap="round" stroke-linejoin="round"></path> </g></svg> Logout</a>
+        <a id="forgetPinLinkPin" href="#" style="color: #ffffff; text-decoration: none;"><svg fill="#ffffff" width="12px" height="12px" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg" stroke="#ffffff"><g id="SVGRepo_bgCarrier" stroke-width="0"></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g><g id="SVGRepo_iconCarrier"><path d="M14.09 2.233C12.95 1.411 11.518 1 9.794 1c-1.311 0-2.418.289-3.317.868C5.05 2.774 4.292 4.313 4.2 6.483h3.307c0-.633.185-1.24.553-1.828.369-.586.995-.879 1.878-.879.898 0 1.517.238 1.854.713.339.477.508 1.004.508 1.582 0 .504-.252.965-.557 1.383a2.88 2.88 0 0 1-.661.674s-1.793 1.15-2.58 2.074c-.456.535-.497 1.338-.538 2.488-.002.082.029.252.315.252h2.571c.256 0 .309-.189.312-.274.018-.418.064-.633.141-.875.144-.457.538-.855.979-1.199l.91-.627c.822-.641 1.477-1.166 1.767-1.578.494-.676.842-1.51.842-2.5-.001-1.615-.571-2.832-1.711-3.656zM9.741 14.924c-1.139-.035-2.079.754-2.115 1.99-.035 1.234.858 2.051 1.998 2.084 1.189.035 2.104-.727 2.141-1.963.034-1.236-.834-2.076-2.024-2.111z"></path></g></svg> Forgot PIN?</a>
       </div>
     </div>
     
     <!-- PIN View (fallback or switched) -->
-    <div id="pinView" class="view" style="display: none;">
+    <div id="pinView" class="pin-view">
       <!-- Switch to Biometric link (if enabled, top-left) -->
       <a id="switchToBiometric" href="#" style="position: absolute; top: 16px; left: 16px; font-size: 14px; color: #007bff; text-decoration: underline; display: none;">Use Biometric</a>
       
       <!-- Welcome Text -->
-      <h2 style="margin-bottom: 4px;">Welcome Back</h2>
+      <h2 style="font-family: 'MuseoModerno', cursive; font-size: 1.6rem; font-weight: 800;">Welcome Back</h2>
+
+
+
       
       <!-- Enter Pin Subtitle -->
-      <p style="margin-bottom: 16px;">Enter your 4-digit PIN to continue</p>
+       <div class="enterpin" style="display: flex; align-items: center; justify-content: center; margin-bottom: 1px; gap: 3px;">
+        <svg class="fwall" width="20" height="20" viewBox="0 0 24 24" fill="none">
+        <path d="M12 2L4 5v6c0 5.25 3.84 9.74 8 11 4.16-1.26 8-5.75 8-11V5l-8-3z" fill="#FFD700" opacity="0.95"/>
+        <rect x="9" y="10" width="6" height="5" rx="1" fill="#021827"/>
+      </svg>
+        <p style="margin-bottom: 16px;">Enter your 4-digit PIN</p>
+      </div>
+      
       
       <!-- PIN Inputs -->
-      <div class="reauthpin-inputs" style="display: flex; justify-content: center; gap: 8px; margin-bottom: 16px;">
-        <input type="password" maxlength="1" data-fg-pin="0" pattern="[0-9]" inputmode="numeric">
-        <input type="password" maxlength="1" data-fg-pin="1" pattern="[0-9]" inputmode="numeric">
-        <input type="password" maxlength="1" data-fg-pin="2" pattern="[0-9]" inputmode="numeric">
-        <input type="password" maxlength="1" data-fg-pin="3" pattern="[0-9]" inputmode="numeric">
-      </div>
+      <div class="reauthpin-inputs">
+            <input type="password" maxlength="1" readonly />
+            <input type="password" maxlength="1" readonly />
+            <input type="password" maxlength="1" readonly />
+            <input type="password" maxlength="1" readonly />
+          </div>
       
       <!-- Alert for errors -->
       <div id="reauthAlert" class="reauthalert hidden">
@@ -949,24 +960,23 @@
       </div>
       
       <!-- Keypad -->
-      <div class="reauthpin-keypad" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; max-width: 240px; margin: 0 auto 16px;">
-        <button data-key="1">1</button>
-        <button data-key="2">2</button>
-        <button data-key="3">3</button>
-        <button data-key="4">4</button>
-        <button data-key="5">5</button>
-        <button data-key="6">6</button>
-        <button data-key="7">7</button>
-        <button data-key="8">8</button>
-        <button data-key="9">9</button>
-        <button data-key="0" style="grid-column: 2;">0</button>
-        <button id="deleteReauthKey" style="grid-column: 3;">⌫</button>
+      <div class="reauthpin-keypad">
+            <button>1</button><button>2</button><button>3</button>
+            <button>4</button><button>5</button><button>6</button>
+            <button>7</button><button>8</button><button>9</button>
+            <div></div><button>0</button>
+
+
+        
+        <button id="deleteReauthKey" aria-label="Delete">
+              <svg width="35px" height="35px" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><g id="SVGRepo_bgCarrier" stroke-width="0"></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g><g id="SVGRepo_iconCarrier"> <path d="M16 9L10 15M10.0002 9L16.0002 15M8 18L2 12L8 6C8 6 10 5.5 13.5 5.5C19.1685 5.5 20.5 5.5 20.5 12C20.5 18.5 19.2925 18.5 13.5 18.5C10 18.5 8 18 8 18Z" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path> </g></svg>
+            </button>
       </div>
       
       <!-- Bottom Links -->
-      <div style="display: flex; justify-content: space-between; font-size: 14px;">
-        <a id="logoutLinkPin" href="#" style="color: #f00; text-decoration: underline;">Logout</a>
-        <a id="forgetPinLinkPin" href="#" style="color: #007bff; text-decoration: underline;">Forget PIN?</a>
+      <div class="reauth-bottom-links">
+        <a id="logoutLinkPin" href="#" style="color: #ffffff; text-decoration: none;"><svg width="17px" height="17px" viewBox="-2.4 -2.4 28.80 28.80" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="white"><g id="SVGRepo_bgCarrier" stroke-width="0"></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round" stroke="white" stroke-width="0.384"> <path opacity="1" d="M12.1207 12.78C12.0507 12.77 11.9607 12.77 11.8807 12.78C10.1207 12.72 8.7207 11.28 8.7207 9.50998C8.7207 7.69998 10.1807 6.22998 12.0007 6.22998C13.8107 6.22998 15.2807 7.69998 15.2807 9.50998C15.2707 11.28 13.8807 12.72 12.1207 12.78Z" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path> <path opacity="1" d="M18.7398 19.3801C16.9598 21.0101 14.5998 22.0001 11.9998 22.0001C9.39977 22.0001 7.03977 21.0101 5.25977 19.3801C5.35977 18.4401 5.95977 17.5201 7.02977 16.8001C9.76977 14.9801 14.2498 14.9801 16.9698 16.8001C18.0398 17.5201 18.6398 18.4401 18.7398 19.3801Z" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path> <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path> </g><g id="SVGRepo_iconCarrier"> <path opacity="0.4" d="M12.1207 12.78C12.0507 12.77 11.9607 12.77 11.8807 12.78C10.1207 12.72 8.7207 11.28 8.7207 9.50998C8.7207 7.69998 10.1807 6.22998 12.0007 6.22998C13.8107 6.22998 15.2807 7.69998 15.2807 9.50998C15.2707 11.28 13.8807 12.72 12.1207 12.78Z" stroke="white" stroke-width="0.00024000000000000003" stroke-linecap="round" stroke-linejoin="round"></path> <path opacity="1" d="M18.7398 19.3801C16.9598 21.0101 14.5998 22.0001 11.9998 22.0001C9.39977 22.0001 7.03977 21.0101 5.25977 19.3801C5.35977 18.4401 5.95977 17.5201 7.02977 16.8001C9.76977 14.9801 14.2498 14.9801 16.9698 16.8001C18.0398 17.5201 18.6398 18.4401 18.7398 19.3801Z" stroke="white" stroke-width="0.00024000000000000003" stroke-linecap="round" stroke-linejoin="round"></path> <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" stroke="white" stroke-width="0.00024000000000000003" stroke-linecap="round" stroke-linejoin="round"></path> </g></svg> Logout</a>
+        <a id="forgetPinLinkPin" href="#" style="color: #ffffff; text-decoration: none;"><svg fill="#ffffff" width="12px" height="12px" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg" stroke="#ffffff"><g id="SVGRepo_bgCarrier" stroke-width="0"></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g><g id="SVGRepo_iconCarrier"><path d="M14.09 2.233C12.95 1.411 11.518 1 9.794 1c-1.311 0-2.418.289-3.317.868C5.05 2.774 4.292 4.313 4.2 6.483h3.307c0-.633.185-1.24.553-1.828.369-.586.995-.879 1.878-.879.898 0 1.517.238 1.854.713.339.477.508 1.004.508 1.582 0 .504-.252.965-.557 1.383a2.88 2.88 0 0 1-.661.674s-1.793 1.15-2.58 2.074c-.456.535-.497 1.338-.538 2.488-.002.082.029.252.315.252h2.571c.256 0 .309-.189.312-.274.018-.418.064-.633.141-.875.144-.457.538-.855.979-1.199l.91-.627c.822-.641 1.477-1.166 1.767-1.578.494-.676.842-1.51.842-2.5-.001-1.615-.571-2.832-1.711-3.656zM9.741 14.924c-1.139-.035-2.079.754-2.115 1.99-.035 1.234.858 2.051 1.998 2.084 1.189.035 2.104-.727 2.141-1.963.034-1.236-.834-2.076-2.024-2.111z"></path></g></svg> Forgot PIN?</a>
       </div>
     </div>
   </div>

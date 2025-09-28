@@ -6515,24 +6515,55 @@ window.__secModalController = {
 
 
 /* -----------------------------
-   Reauth + Inactivity (clean version)
+   Reauth + Inactivity (perfected version)
    - NO logs (console or on-screen)
-   - resilient shouldReauth fallback
-   - debounced mobile events
-   - defensive safeCall usage
-   ----------------------------- */
-
+   - Resilient shouldReauth fallback
+   - Debounced mobile events
+   - Defensive safeCall usage
+   - Biometrics registration/disable added
+   - ARIA/accessibility boosts
+   - Prod IDLE_TIME (10 min)
+   - Backend-aligned fetches (userId body)
+----------------------------- */
 (function () {
-  // safe wrappers
-  function safeQuery(id) { try { return document.getElementById(id); } catch (e) { return null; } }
-  function isValidImageSource(src) { return !!src && /^(data:image\/|https?:\/\/|\/|blob:)/i.test(src); }
-  function safeCall(fn, ...args) { try { if (typeof fn === 'function') return fn(...args); } catch (e) {} return undefined; }
+  // Safe wrappers
+  function safeQuery(id) {
+    try {
+      return document.getElementById(id);
+    } catch (e) {
+      return null;
+    }
+  }
 
-  // Cached DOM refs — will be (re)cached when needed
-  let reauthModal, biometricView, pinView, reauthAvatar, reauthName, reauthAlert, reauthAlertMsg,
-      deleteReauthKey, verifyBiometricBtn, switchToPin, switchToBiometric,
-      logoutLinkBio, logoutLinkPin, forgetPinLinkBio, forgetPinLinkPin,
-      promptModal, yesBtn;
+  function isValidImageSource(src) {
+    return !!src && /^(data:image\/|https?:\/\/|\/|blob:)/i.test(src);
+  }
+
+  function safeCall(fn, ...args) {
+    try {
+      if (typeof fn === 'function') return fn(...args);
+    } catch (e) {}
+    return undefined;
+  }
+
+  // Cached DOM refs — (re)cached when needed
+  let reauthModal,
+      biometricView,
+      pinView,
+      reauthAvatar,
+      reauthName,
+      reauthAlert,
+      reauthAlertMsg,
+      deleteReauthKey,
+      verifyBiometricBtn,
+      switchToPin,
+      switchToBiometric,
+      logoutLinkBio,
+      logoutLinkPin,
+      forgetPinLinkBio,
+      forgetPinLinkPin,
+      promptModal,
+      yesBtn;
 
   function cacheDomRefs() {
     reauthModal = safeQuery('reauthModal');
@@ -6550,25 +6581,31 @@ window.__secModalController = {
     logoutLinkPin = safeQuery('logoutLinkPin');
     forgetPinLinkBio = safeQuery('forgetPinLinkBio');
     forgetPinLinkPin = safeQuery('forgetPinLinkPin');
-
     promptModal = safeQuery('inactivityPrompt');
     yesBtn = safeQuery('yesActiveBtn');
   }
 
   function getReauthInputs() {
-    try { return (pinView && pinView.querySelectorAll) ? Array.from(pinView.querySelectorAll('input[data-fg-pin]')) : []; }
-    catch (e) { return []; }
+    try {
+      return (pinView && pinView.querySelectorAll) ? Array.from(pinView.querySelectorAll('input[data-fg-pin]')) : [];
+    } catch (e) {
+      return [];
+    }
   }
 
   /* -----------------------
      initReauthModal (prepares modal, binds events)
-     - uses safeCall() to call app's helpers if available
+     - Uses safeCall() to call app's helpers if available
      ----------------------- */
   async function initReauthModal({ show = false } = {}) {
     cacheDomRefs();
 
     let reauthNeeded = false;
-    try { reauthNeeded = !!(await shouldReauth()); } catch (e) { reauthNeeded = false; }
+    try {
+      reauthNeeded = !!(await shouldReauth());
+    } catch (e) {
+      reauthNeeded = false;
+    }
     if (!reauthNeeded) return;
 
     // Populate user info (safe)
@@ -6589,7 +6626,7 @@ window.__secModalController = {
       }
     } catch (e) {}
 
-    // Check biometrics flag (local) and prepare views (do NOT unhide modal here unless show===true)
+    // Check biometrics flag (local) and prepare views
     try {
       const isBiometricsEnabled = localStorage.getItem('biometricsEnabled') === 'true';
       if (biometricView) biometricView.style.display = (isBiometricsEnabled && 'PublicKeyCredential' in window) ? 'block' : 'none';
@@ -6598,7 +6635,7 @@ window.__secModalController = {
       if (switchToPin) switchToPin.style.display = '';
     } catch (e) {}
 
-    // Bind PIN inputs (call your bindPinInputs safely)
+    // Bind PIN inputs
     try {
       const inputs = getReauthInputs();
       if (typeof bindPinInputs === 'function') safeCall(bindPinInputs, inputs, pinView, reauthModal, reauthAlert, reauthAlertMsg);
@@ -6625,7 +6662,9 @@ window.__secModalController = {
 
           await safeCall(reAuthenticateWithPin, uidInfo.uid, pin, (success) => {
             if (success) {
-              try { if (reauthModal) reauthModal.classList.add('hidden'); } catch (e) {}
+              try {
+                if (reauthModal) reauthModal.classList.add('hidden');
+              } catch (e) {}
               resetReauthInputs();
               safeCall(getSession);
               onSuccessfulReauth();
@@ -6638,7 +6677,7 @@ window.__secModalController = {
       }
     } catch (e) {}
 
-    // Delete key binding
+    // Delete key
     try {
       if (deleteReauthKey && !deleteReauthKey.__bound) {
         deleteReauthKey.addEventListener('click', () => {
@@ -6654,45 +6693,63 @@ window.__secModalController = {
       }
     } catch (e) {}
 
-    // Biometric verify button
+    // Biometric verify - support multiple creds
     try {
       if (verifyBiometricBtn && !verifyBiometricBtn.__bound) {
         verifyBiometricBtn.addEventListener('click', async () => {
           try {
-            const challengeRes = await fetch('https://api.flexgig.com.ng/api/get-challenge', {
-              headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` }
-            });
-            if (!challengeRes.ok) throw new Error('Challenge failed');
-            const { challenge, rpId } = await challengeRes.json();
+            const session = await safeCall(getSession) || {};
+            const uid = session.user ? session.user.uid : null;
+            if (!uid) throw new Error('No UID');
 
-            const credentialIdB64 = localStorage.getItem('credentialId') || '';
-            const allowCreds = credentialIdB64 ? [{ type: 'public-key', id: Uint8Array.from(atob(credentialIdB64), c => c.charCodeAt(0)) }] : [];
+            const optsRes = await fetch('https://api.flexgig.com.ng/webauthn/auth/options', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+              },
+              body: JSON.stringify({ userId: uid })
+            });
+            if (!optsRes.ok) throw new Error('Options failed');
+            const { challenge, rpID, allowCredentials } = await optsRes.json(); // allowCredentials from backend
 
             const publicKey = {
               challenge: Uint8Array.from(atob(challenge), c => c.charCodeAt(0)),
-              rpId,
-              allowCredentials: allowCreds,
+              rpId: rpID, // Backend provides
+              allowCredentials: allowCredentials.map(cred => ({
+                ...cred,
+                id: Uint8Array.from(atob(cred.id), c => c.charCodeAt(0))
+              })),
               userVerification: 'required'
             };
 
             const assertion = await navigator.credentials.get({ publicKey });
-            const verifyRes = await fetch('https://api.flexgig.com.ng/api/verify-assertion', {
+            const verifyRes = await fetch('https://api.flexgig.com.ng/webauthn/auth/verify', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('authToken')}` },
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+              },
               body: JSON.stringify({
-                id: assertion.id,
-                rawId: btoa(String.fromCharCode(...new Uint8Array(assertion.rawId))),
-                response: {
-                  authenticatorData: btoa(String.fromCharCode(...new Uint8Array(assertion.response.authenticatorData))),
-                  clientDataJSON: btoa(String.fromCharCode(...new Uint8Array(assertion.response.clientDataJSON))),
-                  signature: btoa(String.fromCharCode(...new Uint8Array(assertion.response.signature))),
-                  userHandle: assertion.response.userHandle ? btoa(String.fromCharCode(...new Uint8Array(assertion.response.userHandle))) : null
+                userId: uid,
+                credential: {
+                  id: assertion.id,
+                  rawId: btoa(String.fromCharCode(...new Uint8Array(assertion.rawId))),
+                  type: assertion.type,
+                  response: {
+                    authenticatorData: btoa(String.fromCharCode(...new Uint8Array(assertion.response.authenticatorData))),
+                    clientDataJSON: btoa(String.fromCharCode(...new Uint8Array(assertion.response.clientDataJSON))),
+                    signature: btoa(String.fromCharCode(...new Uint8Array(assertion.response.signature))),
+                    userHandle: assertion.response.userHandle ? btoa(String.fromCharCode(...new Uint8Array(assertion.response.userHandle))) : null
+                  }
                 }
               })
             });
 
             if (verifyRes.ok) {
-              try { if (reauthModal) reauthModal.classList.add('hidden'); } catch (e) {}
+              try {
+                if (reauthModal) reauthModal.classList.add('hidden');
+              } catch (e) {}
               safeCall(getSession);
               onSuccessfulReauth();
             } else {
@@ -6700,88 +6757,232 @@ window.__secModalController = {
             }
           } catch (err) {
             safeCall(notify, 'Biometric not available - use PIN', 'error');
-            try { if (switchToPin) switchToPin.click(); } catch (e) {}
+            try {
+              if (switchToPin) switchToPin.click();
+            } catch (e) {}
           }
         });
         verifyBiometricBtn.__bound = true;
       }
     } catch (e) {}
 
-    // Switch view links
+    // Switch views
     try {
       if (switchToPin && !switchToPin.__bound) {
-        switchToPin.addEventListener('click', (ev) => { ev.preventDefault(); switchViews(false); });
+        switchToPin.addEventListener('click', (ev) => {
+          ev.preventDefault();
+          switchViews(false);
+        });
         switchToPin.__bound = true;
       }
       if (switchToBiometric && !switchToBiometric.__bound) {
-        switchToBiometric.addEventListener('click', (ev) => { ev.preventDefault(); switchViews(true); });
+        switchToBiometric.addEventListener('click', (ev) => {
+          ev.preventDefault();
+          switchViews(true);
+        });
         switchToBiometric.__bound = true;
       }
     } catch (e) {}
 
-    // Logout & forget PIN links
+    // Logout & forget
     try {
       [logoutLinkBio, logoutLinkPin].forEach(link => {
         if (link && !link.__bound) {
-          link.addEventListener('click', (ev) => { ev.preventDefault(); localStorage.clear(); window.location.href = '/'; });
+          link.addEventListener('click', (ev) => {
+            ev.preventDefault();
+            localStorage.clear();
+            window.location.href = '/';
+          });
           link.__bound = true;
         }
       });
       [forgetPinLinkBio, forgetPinLinkPin].forEach(link => {
         if (link && !link.__bound) {
-          link.addEventListener('click', (ev) => { ev.preventDefault(); window.location.href = '/reset-pin.html'; });
+          link.addEventListener('click', (ev) => {
+            ev.preventDefault();
+            window.location.href = '/reset-pin.html';
+          });
           link.__bound = true;
         }
       });
     } catch (e) {}
 
-    // Ensure modal/prompt are hidden unless caller explicitly asked to show
+    // Modal visibility + ARIA/focus trap
     try {
       if (!show) {
         if (reauthModal) reauthModal.classList.add('hidden');
         if (promptModal) promptModal.classList.add('hidden');
       } else {
-        if (reauthModal) reauthModal.classList.remove('hidden');
-        const isBio = localStorage.getItem('biometricsEnabled') === 'true' && ('PublicKeyCredential' in window);
-        if (isBio && biometricView) { biometricView.style.display = 'block'; if (pinView) pinView.style.display = 'none'; }
-        else { if (biometricView) biometricView.style.display = 'none'; if (pinView) pinView.style.display = 'block'; }
+        if (reauthModal) {
+          reauthModal.classList.remove('hidden');
+          reauthModal.setAttribute('aria-modal', 'true');
+          reauthModal.setAttribute('role', 'dialog');
+          const isBio = localStorage.getItem('biometricsEnabled') === 'true' && ('PublicKeyCredential' in window);
+          if (isBio && biometricView) {
+            biometricView.style.display = 'block';
+            if (pinView) pinView.style.display = 'none';
+            verifyBiometricBtn.focus();
+          } else {
+            if (biometricView) biometricView.style.display = 'none';
+            if (pinView) pinView.style.display = 'block';
+            getReauthInputs()[0].focus();
+          }
+          trapFocus(reauthModal); // Add focus trap
+        }
       }
     } catch (e) {}
   } // end initReauthModal
 
   /* -----------------------
-     small helpers for UI / PINs
+     Focus Trap for Modals (new!)
+     - Prevents tab out of modal
+     ----------------------- */
+  function trapFocus(modal) {
+    if (!modal) return;
+    const focusable = modal.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+
+    modal.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Tab') {
+        if (ev.shiftKey) {
+          if (document.activeElement === first) {
+            ev.preventDefault();
+            last.focus();
+          }
+        } else {
+          if (document.activeElement === last) {
+            ev.preventDefault();
+            first.focus();
+          }
+        }
+      }
+    });
+  }
+
+  /* -----------------------
+     Biometrics Registration
+     - Call from settings: __reauth.registerBiometrics()
+     ----------------------- */
+  async function registerBiometrics() {
+    try {
+      const session = await safeCall(getSession);
+      if (!session || !session.user) throw new Error('No session');
+      const { uid, username, fullName } = session.user;
+
+      const optsRes = await fetch('https://api.flexgig.com.ng/webauthn/register/options', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        },
+        body: JSON.stringify({ userId: uid, username, displayName: fullName || username || 'User' })
+      });
+      if (!optsRes.ok) throw new Error('Options failed');
+      const opts = await optsRes.json();
+
+      const cred = await navigator.credentials.create({ publicKey: opts });
+      const verifyRes = await fetch('https://api.flexgig.com.ng/webauthn/register/verify', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        },
+        body: JSON.stringify({
+          userId: uid,
+          credential: {
+            id: cred.id,
+            rawId: btoa(String.fromCharCode(...new Uint8Array(cred.rawId))),
+            type: cred.type,
+            response: {
+              clientDataJSON: btoa(String.fromCharCode(...new Uint8Array(cred.response.clientDataJSON))),
+              attestationObject: btoa(String.fromCharCode(...new Uint8Array(cred.response.attestationObject)))
+            }
+          }
+        })
+      });
+      if (!verifyRes.ok) throw new Error('Verify failed');
+
+      localStorage.setItem('credentialId', cred.id); // For single; for multiple, use array
+      localStorage.setItem('biometricsEnabled', 'true');
+      safeCall(notify, 'Biometrics enabled!', 'success');
+      await initReauthModal(); // Refresh
+    } catch (err) {
+      safeCall(notify, 'Biometrics setup failed - try again', 'error');
+    }
+  }
+
+  /* -----------------------
+     Disable Biometrics (new!)
+     - Call from settings: __reauth.disableBiometrics()
+     - Revokes server-side, clears local
+     ----------------------- */
+  async function disableBiometrics() {
+    try {
+      const session = await safeCall(getSession);
+      if (!session || !session.user) throw new Error('No session');
+      const uid = session.user.uid;
+
+      const credentialId = localStorage.getItem('credentialId');
+      if (!credentialId) throw new Error('No credential');
+
+      const revokeRes = await fetch(`https://api.flexgig.com.ng/webauthn/authenticators/${uid}/revoke`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        },
+        body: JSON.stringify({ credentialID: credentialId })
+      });
+      if (!revokeRes.ok) throw new Error('Revoke failed');
+
+      localStorage.removeItem('credentialId');
+      localStorage.removeItem('biometricsEnabled');
+      safeCall(notify, 'Biometrics disabled', 'success');
+      await initReauthModal(); // Refresh to PIN view
+    } catch (err) {
+      safeCall(notify, 'Disable failed - try again', 'error');
+    }
+  }
+
+  /* -----------------------
+     Small helpers
      ----------------------- */
   function switchViews(toBiometric = false) {
     try {
       if (toBiometric) {
         if (biometricView) biometricView.style.display = 'block';
         if (pinView) pinView.style.display = 'none';
+        verifyBiometricBtn.focus();
       } else {
         if (biometricView) biometricView.style.display = 'none';
         if (pinView) pinView.style.display = 'block';
+        getReauthInputs()[0].focus();
       }
     } catch (e) {}
     resetReauthInputs();
   }
 
   function resetReauthInputs() {
-    try { getReauthInputs().forEach(inp => inp.value = ''); } catch (e) {}
+    try {
+      getReauthInputs().forEach(inp => inp.value = '');
+    } catch (e) {}
   }
 
   /* -----------------------
      Inactivity logic
      ----------------------- */
   let idleTimeout = null;
-  const IDLE_TIME = 10 * 1000; // for testing; set to desired production value
+  const IDLE_TIME = 10 * 60 * 1000; // 10 min prod
   const PROMPT_TIMEOUT = 5000;
   const PROMPT_AUTO_CLOSE = true;
   let lastActive = Date.now();
-  try { localStorage.setItem('lastActive', String(lastActive)); } catch (e) {}
+  try {
+    localStorage.setItem('lastActive', String(lastActive));
+  } catch (e) {}
 
   let lastResetCall = 0;
-  const RESET_DEBOUNCE_MS = 250;
-
+  const RESET_DEBOUNCE_MS = 150; // Tighter for mobile
   let __inactivitySetupDone = false;
 
   async function shouldReauth() {
@@ -6813,7 +7014,12 @@ window.__secModalController = {
       document.addEventListener(evt, resetIdleTimer, { passive: true });
     });
 
+    let lastVisibilityChange = 0;
     document.addEventListener('visibilitychange', () => {
+      const now = Date.now();
+      if (now - lastVisibilityChange < RESET_DEBOUNCE_MS) return;
+      lastVisibilityChange = now;
+
       if (document.visibilityState === 'visible') {
         const last = Number(localStorage.getItem('lastActive') || 0);
         if (Date.now() - last > IDLE_TIME) {
@@ -6822,7 +7028,9 @@ window.__secModalController = {
           resetIdleTimer();
         }
       } else {
-        try { localStorage.setItem('lastHiddenAt', String(Date.now())); } catch (e) {}
+        try {
+          localStorage.setItem('lastHiddenAt', String(Date.now()));
+        } catch (e) {}
       }
     });
 
@@ -6830,19 +7038,22 @@ window.__secModalController = {
   }
 
   function resetIdleTimer() {
+    const now = Date.now();
+    if (now - lastResetCall < RESET_DEBOUNCE_MS) return;
+    lastResetCall = now;
+
+    if (idleTimeout) {
+      clearTimeout(idleTimeout);
+      idleTimeout = null;
+    }
+    lastActive = now;
     try {
-      const now = Date.now();
-      if (now - lastResetCall < RESET_DEBOUNCE_MS) return;
-      lastResetCall = now;
-
-      if (idleTimeout) { clearTimeout(idleTimeout); idleTimeout = null; }
-      lastActive = now;
-      try { localStorage.setItem('lastActive', String(lastActive)); } catch (e) {}
-
-      idleTimeout = setTimeout(() => {
-        showInactivityPrompt().catch(() => {});
-      }, IDLE_TIME);
+      localStorage.setItem('lastActive', String(lastActive));
     } catch (e) {}
+
+    idleTimeout = setTimeout(() => {
+      showInactivityPrompt().catch(() => {});
+    }, IDLE_TIME);
   }
 
   async function showReauthModal() {
@@ -6850,16 +7061,11 @@ window.__secModalController = {
     if (!reauthModal) return;
 
     try {
-      if (typeof window.initReauthModal === 'function') {
-        await window.initReauthModal({ show: true });
-        return;
-      }
-    } catch (e) {}
-
-    try {
       await initReauthModal({ show: true });
     } catch (e) {
-      try { reauthModal.classList.remove('hidden'); } catch (err) {}
+      try {
+        reauthModal.classList.remove('hidden');
+      } catch (err) {}
     }
   }
 
@@ -6873,34 +7079,52 @@ window.__secModalController = {
     if (!promptModal.classList.contains('hidden')) return;
 
     promptModal.classList.remove('hidden');
+    promptModal.setAttribute('aria-modal', 'true');
+    promptModal.setAttribute('role', 'dialog');
+    yesBtn.focus();
+    trapFocus(promptModal); // Focus trap
 
     let promptTimeout = null;
     const yesHandler = () => {
       try {
         promptModal.classList.add('hidden');
         if (promptTimeout) clearTimeout(promptTimeout);
-        try { yesBtn.removeEventListener('click', yesHandler); } catch (e) {}
+        try {
+          yesBtn.removeEventListener('click', yesHandler);
+        } catch (e) {}
         resetIdleTimer();
       } catch (e) {}
     };
 
-    try { yesBtn.addEventListener('click', yesHandler, { once: true }); } catch (e) {}
+    try {
+      yesBtn.addEventListener('click', yesHandler, { once: true });
+    } catch (e) {}
+
+    // Escape key closes prompt (UX)
+    const escHandler = (ev) => {
+      if (ev.key === 'Escape') yesHandler();
+    };
+    document.addEventListener('keydown', escHandler, { once: true });
 
     if (PROMPT_AUTO_CLOSE) {
       promptTimeout = setTimeout(async () => {
         if (!promptModal.classList.contains('hidden')) {
           promptModal.classList.add('hidden');
-          try { yesBtn.removeEventListener('click', yesHandler); } catch (e) {}
+          try {
+            yesBtn.removeEventListener('click', yesHandler);
+          } catch (e) {}
+          document.removeEventListener('keydown', escHandler);
           await showReauthModal();
         }
       }, PROMPT_TIMEOUT);
-    } else {
-      try { yesBtn.focus(); } catch (e) {}
     }
   }
 
   async function forceInactivityCheck() {
-    if (idleTimeout) { clearTimeout(idleTimeout); idleTimeout = null; }
+    if (idleTimeout) {
+      clearTimeout(idleTimeout);
+      idleTimeout = null;
+    }
     await showInactivityPrompt();
   }
 
@@ -6917,26 +7141,47 @@ window.__secModalController = {
      Boot sequence
      ----------------------- */
   (async function initFlow() {
-    try { await initReauthModal({ show: false }); } catch (e) {}
-    try { await setupInactivity(); } catch (e) {}
+    try {
+      await initReauthModal({ show: false });
+    } catch (e) {}
+    try {
+      await setupInactivity();
+    } catch (e) {}
   })();
 
-  // Expose functions to global scope
+  // Expose to global scope
   window.__reauth = {
     initReauthModal,
     setupInactivity,
     forceInactivityCheck,
     onSuccessfulReauth,
-    showReauthModal
+    showReauthModal,
+    registerBiometrics,
+    disableBiometrics // New!
   };
 
-  // Attach to window if not present (avoid clobbering existing globals)
-  try { if (!window.initReauthModal) window.initReauthModal = initReauthModal; } catch (e) {}
-  try { if (!window.setupInactivity) window.setupInactivity = setupInactivity; } catch (e) {}
-  try { if (!window.forceInactivityCheck) window.forceInactivityCheck = forceInactivityCheck; } catch (e) {}
-  try { if (!window.showReauthModal) window.showReauthModal = showReauthModal; } catch (e) {}
-  try { if (!window.onSuccessfulReauth) window.onSuccessfulReauth = onSuccessfulReauth; } catch (e) {}
-
+  // Attach to window if not present
+  try {
+    if (!window.initReauthModal) window.initReauthModal = initReauthModal;
+  } catch (e) {}
+  try {
+    if (!window.setupInactivity) window.setupInactivity = setupInactivity;
+  } catch (e) {}
+  try {
+    if (!window.forceInactivityCheck) window.forceInactivityCheck = forceInactivityCheck;
+  } catch (e) {}
+  try {
+    if (!window.showReauthModal) window.showReauthModal = showReauthModal;
+  } catch (e) {}
+  try {
+    if (!window.onSuccessfulReauth) window.onSuccessfulReauth = onSuccessfulReauth;
+  } catch (e) {}
+  try {
+    if (!window.registerBiometrics) window.registerBiometrics = registerBiometrics;
+  } catch (e) {}
+  try {
+    if (!window.disableBiometrics) window.disableBiometrics = disableBiometrics;
+  } catch (e) {}
 })();
 
 
