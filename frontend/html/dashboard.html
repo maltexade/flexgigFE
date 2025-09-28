@@ -396,11 +396,7 @@
             <button>7</button><button>8</button><button>9</button>
             <div></div><button>0</button>
             <button id="deleteKey" aria-label="Delete">
-              <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path d="M8 6H19C19.5523 6 20 6.44772 20 7V17C20 17.5523 19.5523 18 19 18H8L2 12L8 6Z" fill="white"/>
-                <line x1="10" y1="9" x2="16" y2="15" stroke="black" stroke-width="2" stroke-linecap="round"/>
-                <line x1="16" y1="9" x2="10" y2="15" stroke="black" stroke-width="2" stroke-linecap="round"/>
-              </svg>
+              <svg width="35px" height="35px" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><g id="SVGRepo_bgCarrier" stroke-width="0"></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g><g id="SVGRepo_iconCarrier"> <path d="M16 9L10 15M10.0002 9L16.0002 15M8 18L2 12L8 6C8 6 10 5.5 13.5 5.5C19.1685 5.5 20.5 5.5 20.5 12C20.5 18.5 19.2925 18.5 13.5 18.5C10 18.5 8 18 8 18Z" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path> </g></svg>
             </button>
           </div>
         </div>
@@ -902,6 +898,103 @@
     <p id="pinVerifyAlertMsg"></p>
   </div>
 </div>
+
+<!-- Reauth PIN/Biometric Modal -->
+<div id="reauthModal" class="modal hidden">
+  <div class="modal-content pin-modal" style="max-width: 320px; padding: 24px; text-align: center;">
+    <!-- Close button optional, but hidden for security -->
+    <button id="closeReauthModal" class="close-btn hidden">×</button>
+    
+    <!-- Shared: User Avatar -->
+    <div class="avatar-container" style="margin-bottom: 12px;">
+      <img id="reauthAvatar" src="" alt="Profile Picture" style="width: 80px; height: 80px; border-radius: 50%; object-fit: cover; border: 2px solid #ccc;">
+    </div>
+    
+    <!-- Shared: User Name -->
+    <p id="reauthName" style="font-weight: bold; margin-bottom: 8px;">Loading...</p>
+    
+    <!-- Biometric View (default if enabled) -->
+    <div id="biometricView" class="view" style="display: none;">
+      <!-- Switch to PIN link (top-left) -->
+      <a id="switchToPin" href="#" style="position: absolute; top: 16px; left: 16px; font-size: 14px; color: #007bff; text-decoration: underline;">Verify using PIN</a>
+      
+      <!-- Welcome Text -->
+      <h2 style="margin-bottom: 4px;">Welcome Back</h2>
+      
+      <!-- Prompt Text -->
+      <p style="margin-bottom: 24px;">Click to verify with Fingerprint/Face ID</p>
+      
+      <!-- Fingerprint Icon -->
+      <div style="font-size: 64px; color: #00bfa5; margin-bottom: 16px;">&#x1F50F;</div> <!-- Unicode fingerprint -->
+      
+      <!-- Verify Button -->
+      <button id="verifyBiometricBtn" style="background: #00bfa5; color: white; padding: 12px 24px; border-radius: 24px; border: none; font-weight: bold; width: 100%;">Verify Biometric</button>
+      
+      <!-- Bottom Links -->
+      <div style="display: flex; justify-content: space-between; font-size: 14px; margin-top: 24px;">
+        <a id="logoutLinkBio" href="#" style="color: #f00; text-decoration: underline;">Logout</a>
+        <a id="forgetPinLinkBio" href="#" style="color: #007bff; text-decoration: underline;">Forget PIN?</a>
+      </div>
+    </div>
+    
+    <!-- PIN View (fallback or switched) -->
+    <div id="pinView" class="view" style="display: none;">
+      <!-- Switch to Biometric link (if enabled, top-left) -->
+      <a id="switchToBiometric" href="#" style="position: absolute; top: 16px; left: 16px; font-size: 14px; color: #007bff; text-decoration: underline; display: none;">Use Biometric</a>
+      
+      <!-- Welcome Text -->
+      <h2 style="margin-bottom: 4px;">Welcome Back</h2>
+      
+      <!-- Enter Pin Subtitle -->
+      <p style="margin-bottom: 16px;">Enter your 4-digit PIN to continue</p>
+      
+      <!-- PIN Inputs -->
+      <div class="pin-inputs" style="display: flex; justify-content: center; gap: 8px; margin-bottom: 16px;">
+        <input type="password" maxlength="1" data-fg-pin="0" pattern="[0-9]" inputmode="numeric">
+        <input type="password" maxlength="1" data-fg-pin="1" pattern="[0-9]" inputmode="numeric">
+        <input type="password" maxlength="1" data-fg-pin="2" pattern="[0-9]" inputmode="numeric">
+        <input type="password" maxlength="1" data-fg-pin="3" pattern="[0-9]" inputmode="numeric">
+      </div>
+      
+      <!-- Alert for errors -->
+      <div id="reauthAlert" class="alert hidden">
+        <p id="reauthAlertMsg"></p>
+      </div>
+      
+      <!-- Keypad -->
+      <div class="pin-keypad" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; max-width: 240px; margin: 0 auto 16px;">
+        <button data-key="1">1</button>
+        <button data-key="2">2</button>
+        <button data-key="3">3</button>
+        <button data-key="4">4</button>
+        <button data-key="5">5</button>
+        <button data-key="6">6</button>
+        <button data-key="7">7</button>
+        <button data-key="8">8</button>
+        <button data-key="9">9</button>
+        <button data-key="0" style="grid-column: 2;">0</button>
+        <button id="deleteReauthKey" style="grid-column: 3;">⌫</button>
+      </div>
+      
+      <!-- Bottom Links -->
+      <div style="display: flex; justify-content: space-between; font-size: 14px;">
+        <a id="logoutLinkPin" href="#" style="color: #f00; text-decoration: underline;">Logout</a>
+        <a id="forgetPinLinkPin" href="#" style="color: #007bff; text-decoration: underline;">Forget PIN?</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+
+<!-- Inactivity Prompt Modal -->
+<div id="inactivityPrompt" class="modal hidden" style="background: rgba(0,0,0,0.5);">
+  <div class="modal-content" style="max-width: 280px; padding: 16px; border-radius: 12px; background: #1e1e1e;">
+    <h3 style="margin: 0 0 12px; font-size: 18px; color: #fff;">Are you there?</h3>
+    <button id="yesActiveBtn" style="background: #00bfa5; color: #fff; padding: 8px 16px; border-radius: 20px; border: none; font-weight: bold;">Yes</button>
+  </div>
+</div>
+
 
 </main>
 

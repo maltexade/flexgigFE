@@ -304,6 +304,20 @@ function observeForElements() {
   }
 }
 
+// After getSession succeeds
+async function onDashboardLoad() {
+  await initReauthModal();
+  setupInactivity();
+
+  // Check if long inactive (e.g., tab away >10 min)
+  const last = parseInt(localStorage.getItem('lastActive')) || 0;
+  if (Date.now() - last > IDLE_TIME && await shouldReauth()) {
+    showInactivityPrompt(); // Or direct to reauthModal if preferred
+  }
+}
+
+// Call in load: onDashboardLoad();
+
 // Remove fetchUserData and consolidate into getSession
 async function loadUserProfile(noCache = false) {
   try {
@@ -6497,6 +6511,267 @@ window.__secModalController = {
 };
 })(supabaseClient);
 
+
+
+// Reauth Modal Elements (updated)
+const reauthModal = document.getElementById('reauthModal');
+const biometricView = document.getElementById('biometricView');
+const pinView = document.getElementById('pinView');
+const reauthAvatar = document.getElementById('reauthAvatar');
+const reauthName = document.getElementById('reauthName');
+const reauthInputs = pinView?.querySelectorAll('input[data-fg-pin]');
+const reauthAlert = document.getElementById('reauthAlert');
+const reauthAlertMsg = document.getElementById('reauthAlertMsg');
+const deleteReauthKey = document.getElementById('deleteReauthKey');
+const verifyBiometricBtn = document.getElementById('verifyBiometricBtn');
+const switchToPin = document.getElementById('switchToPin');
+const switchToBiometric = document.getElementById('switchToBiometric');
+const logoutLinks = [document.getElementById('logoutLinkBio'), document.getElementById('logoutLinkPin')];
+const forgetPinLinks = [document.getElementById('forgetPinLinkBio'), document.getElementById('forgetPinLinkPin')];
+
+// Init Reauth Modal (call after getSession in dashboard init)
+// Updated initReauthModal (replace previous)
+async function initReauthModal() {
+  if (!await shouldReauth()) {
+    console.log('[Reauth] No PIN/bio set — skipping init');
+    return;
+  }
+
+  // Populate user info
+  const session = await getSession();
+  if (session?.user) {
+    const displayName = session.user.username || session.user.fullName?.split(' ')[0] || 'User';
+    reauthName.textContent = displayName.charAt(0).toUpperCase() + displayName.slice(1);
+    const profilePicture = session.user.profilePicture || localStorage.getItem('profilePicture') || '';
+    if (isValidImageSource(profilePicture)) {
+      reauthAvatar.src = `${profilePicture}?v=${Date.now()}`;
+    } else {
+      reauthAvatar.style.display = 'none';
+    }
+  }
+
+  // Check if biometrics enabled (add to user profile fetch if needed)
+  const isBiometricsEnabled = localStorage.getItem('biometricsEnabled') === 'true'; // Or session.user.biometricsEnabled
+
+  // Show appropriate view
+  if (isBiometricsEnabled && 'PublicKeyCredential' in window) { // Check WebAuthn support
+    biometricView.style.display = 'block';
+    pinView.style.display = 'none';
+    switchToBiometric.style.display = 'block'; // Show in PIN view if switch back
+  } else {
+    biometricView.style.display = 'none';
+    pinView.style.display = 'block';
+  }
+
+  // Bind PIN inputs (your existing function)
+  bindPinInputs(reauthInputs, pinView, reauthModal, reauthAlert, reauthAlertMsg);
+
+  // PIN submit (as before)
+  pinView.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const pin = Array.from(reauthInputs).map(inp => inp.value).join('');
+    if (!/^\d{4}$/.test(pin)) return notify('Invalid PIN', 'error', reauthAlert, reauthAlertMsg);
+    const uidInfo = await getUid();
+    if (!uidInfo?.uid) {
+      notify('Session error', 'error', reauthAlert, reauthAlertMsg);
+      return setTimeout(() => window.location.href = '/', 1500);
+    }
+    await reAuthenticateWithPin(uidInfo.uid, pin, (success) => {
+      if (success) {
+        reauthModal.classList.add('hidden');
+        resetReauthInputs();
+        getSession(); // Refresh
+      } else {
+        resetReauthInputs();
+      }
+    });
+  });
+
+  // Delete key for PIN
+  if (deleteReauthKey) {
+    deleteReauthKey.addEventListener('click', () => {
+      const lastFilled = Array.from(reauthInputs).reverse().find(inp => inp.value);
+      if (lastFilled) {
+        lastFilled.value = '';
+        lastFilled.previousElementSibling?.focus() || lastFilled.focus();
+      }
+    });
+  }
+
+  // Biometric verify button
+  if (verifyBiometricBtn) {
+    verifyBiometricBtn.addEventListener('click', async () => {
+      try {
+        const challengeRes = await fetch('https://api.flexgig.com.ng/api/get-challenge', {
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` }
+        });
+        if (!challengeRes.ok) throw new Error('Challenge failed');
+        const { challenge, rpId, userId } = await challengeRes.json(); // Assume server returns base64 challenge, etc.
+
+        const publicKey = {
+          challenge: Uint8Array.from(atob(challenge), c => c.charCodeAt(0)),
+          rpId,
+          allowCredentials: [{ type: 'public-key', id: Uint8Array.from(atob(localStorage.getItem('credentialId')), c => c.charCodeAt(0)) }], // Stored after registration
+          userVerification: 'required'
+        };
+
+        const assertion = await navigator.credentials.get({ publicKey });
+        const verifyRes = await fetch('https://api.flexgig.com.ng/api/verify-assertion', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('authToken')}` },
+          body: JSON.stringify({
+            id: assertion.id,
+            rawId: btoa(String.fromCharCode(...new Uint8Array(assertion.rawId))),
+            response: {
+              authenticatorData: btoa(String.fromCharCode(...new Uint8Array(assertion.response.authenticatorData))),
+              clientDataJSON: btoa(String.fromCharCode(...new Uint8Array(assertion.response.clientDataJSON))),
+              signature: btoa(String.fromCharCode(...new Uint8Array(assertion.response.signature))),
+              userHandle: assertion.response.userHandle ? btoa(String.fromCharCode(...new Uint8Array(assertion.response.userHandle))) : null
+            }
+          })
+        });
+
+        if (verifyRes.ok) {
+          reauthModal.classList.add('hidden');
+          getSession();
+          console.log('[Reauth] Biometric verified');
+        } else {
+          notify('Biometric verification failed', 'error', reauthAlert, reauthAlertMsg); // Show alert in biometric view if needed
+        }
+      } catch (err) {
+        console.error('[Reauth] Biometric error:', err);
+        notify('Biometric not available - use PIN', 'error');
+        switchViews(); // Auto-switch to PIN on fail
+      }
+    });
+  }
+
+  // Switch links
+  if (switchToPin) {
+    switchToPin.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      switchViews();
+    });
+  }
+  if (switchToBiometric) {
+    switchToBiometric.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      switchViews(true); // true = back to biometric
+    });
+  }
+
+  // Logout links
+  logoutLinks.forEach(link => {
+    if (link) link.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      localStorage.clear();
+      window.location.href = '/';
+    });
+  });
+
+  // Forget PIN links (to reset page)
+  forgetPinLinks.forEach(link => {
+    if (link) link.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      window.location.href = '/reset-pin.html';
+    });
+  });
+
+  console.log('[Reauth] Initialized with biometrics');
+}
+
+// Helper: Switch views
+function switchViews(toBiometric = false) {
+  if (toBiometric) {
+    biometricView.style.display = 'block';
+    pinView.style.display = 'none';
+  } else {
+    biometricView.style.display = 'none';
+    pinView.style.display = 'block';
+  }
+  resetReauthInputs(); // Clear PIN if switching
+}
+
+// Reset PIN inputs
+function resetReauthInputs() {
+  reauthInputs.forEach(inp => inp.value = '');
+}
+
+// Call in main init
+initReauthModal();
+
+
+
+// Globals for inactivity
+let idleTimeout = null;
+const IDLE_TIME = 10 * 60 * 1000; // 10 min idle
+const PROMPT_TIMEOUT = 5000; // 5 sec for "Yes"
+let lastActive = Date.now();
+localStorage.setItem('lastActive', lastActive); // Init timestamp
+
+// Check if reauth eligible (PIN or bio set)
+async function shouldReauth() {
+  const session = await getSession();
+  const hasPin = session?.user?.hasPin || false; // Assume backend sets this; alt: await fetch('/api/has-pin')
+  const hasBio = localStorage.getItem('biometricsEnabled') === 'true' && 'PublicKeyCredential' in window;
+  return hasPin || hasBio;
+}
+
+
+// Inactivity Detection
+async function setupInactivity() {
+  if (!(await shouldReauth())) return; // Skip if no PIN/bio
+
+  // Reset timer on activity
+  ['mousemove', 'keydown', 'touchstart'].forEach(event => {
+    document.addEventListener(event, resetIdleTimer, { passive: true });
+  });
+
+  resetIdleTimer(); // Start
+}
+
+function resetIdleTimer() {
+  clearTimeout(idleTimeout);
+  lastActive = Date.now();
+  localStorage.setItem('lastActive', lastActive);
+  idleTimeout = setTimeout(showInactivityPrompt, IDLE_TIME);
+}
+
+async function showInactivityPrompt() {
+  if (!await shouldReauth()) return;
+
+  const promptModal = document.getElementById('inactivityPrompt');
+  const yesBtn = document.getElementById('yesActiveBtn');
+
+  if (!promptModal || !yesBtn) return console.warn('[Inactivity] Prompt elements missing');
+
+  promptModal.classList.remove('hidden');
+
+  // Yes click: reset
+  const yesHandler = () => {
+    promptModal.classList.add('hidden');
+    resetIdleTimer();
+  };
+  yesBtn.addEventListener('click', yesHandler, { once: true });
+
+  // Auto-timeout to reauth
+  setTimeout(async () => {
+    promptModal.classList.add('hidden');
+    yesBtn.removeEventListener('click', yesHandler);
+    if (await shouldReauth()) {
+      reauthModal.classList.remove('hidden');
+      // Ensure bio view if enabled
+      const isBioEnabled = localStorage.getItem('biometricsEnabled') === 'true';
+      if (isBioEnabled) {
+        biometricView.style.display = 'block';
+        pinView.style.display = 'none';
+      } else {
+        biometricView.style.display = 'none';
+        pinView.style.display = 'block';
+      }
+    }
+  }, PROMPT_TIMEOUT);
+}
 
 
 
