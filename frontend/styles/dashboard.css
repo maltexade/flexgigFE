@@ -2665,6 +2665,7 @@ html.dark-mode .theme-toggle .toggle-knob { transform: translateX(20px); }
 }
 
 
+
 /* Modal backdrop + base */
 .reauthmodal,
 .Inactivitymodal {
@@ -2673,12 +2674,36 @@ html.dark-mode .theme-toggle .toggle-knob { transform: translateX(20px); }
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1100;
+  z-index: 100000;
   padding: 20px;
   background: linear-gradient(180deg, rgba(2,6,23,0.6), rgba(2,6,23,0.75));
   backdrop-filter: blur(6px) saturate(120%);
   -webkit-backdrop-filter: blur(6px) saturate(120%);
+  overscroll-behavior: contain; /* block pull-to-refresh on mobile */
 }
+
+.reauthmodal-content {
+  width: 100% !important;
+  max-width: 480px !important; /* desktop limit */
+  max-height: 100% !important; /* prevent overflow */
+  overflow-y: auto !important; /* scroll inside card if content is taller than screen */
+  border-radius: 0 !important; /* square edges for full-screen mobile */
+}
+
+@media (max-width: 600px) {
+  .reauthmodal-content,
+  .reauthmodal {
+    width: 100% !important;
+    height: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
+    border-radius: 0 !important;
+    padding: 24px 20px !important;
+  }
+}
+
+
+
 
 /* Modal content card */
 .reauthmodal-content,
@@ -2882,3 +2907,10 @@ a[style*="color: #f00"] { color: var(--danger); }
 }
 
 /* End of reauth CSS */
+
+body.modal-open {
+  overflow: hidden !important;
+  height: 100vh;   /* prevent rubber-band scrolling on iOS */
+  position: fixed; /* freeze background */
+  width: 100%;     /* prevent width shrink */
+}
