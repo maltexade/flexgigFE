@@ -6704,7 +6704,7 @@ initReauthModal();
 
 // Globals for inactivity
 let idleTimeout = null;
-const IDLE_TIME = 10 * 60 * 1000; // 10 min idle
+const IDLE_TIME = 2 * 60 * 1000; // 10 min idle
 const PROMPT_TIMEOUT = 5000; // 5 sec for "Yes"
 let lastActive = Date.now();
 localStorage.setItem('lastActive', lastActive); // Init timestamp
