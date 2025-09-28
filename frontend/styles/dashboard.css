@@ -1465,6 +1465,11 @@
   flex-direction: column !important;
   z-index: 10002 !important;
 }
+body:has(.reauthmodal:not(.hidden)),
+body:has(.pin-modal:not(.hidden)) {
+  overflow: hidden;
+  height: 100%;
+}
 
 .pin-modal.hidden, .reauthpin-modal.hidden {
   display: none !important;
