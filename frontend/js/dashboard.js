@@ -6513,70 +6513,200 @@ window.__secModalController = {
 
 
 
-// -----------------------------
-// Reauth + Inactivity (copy/paste module)
-// -----------------------------
 
-// Small safe helpers (do-not-fail wrappers)
-function safeQuery(id) { try { return document.getElementById(id); } catch (e) { return null; } }
-function isValidImageSource(src) { return !!src && /^(data:image\/|https?:\/\/|\/|blob:)/i.test(src); }
-function safeCall(fn, ...args) { try { if (typeof fn === 'function') return fn(...args); } catch (e) { console.warn('[safeCall] error', e); } return undefined; }
+/* -----------------------------
+   Reauth + Inactivity (full drop-in)
+   - on-screen logger
+   - resilient shouldReauth fallback
+   - debounce mobile events
+   - defensive safeCall usage
+   ----------------------------- */
 
-// We'll initialize after DOM ready to ensure elements are present
-document.addEventListener('DOMContentLoaded', () => {
+/* ---------- On-screen logger (always visible, avoids reliance on DevTools) ---------- */
+(function createOnScreenLogger() {
+  if (document.getElementById('inactivityLogPanel')) return;
+  const panel = document.createElement('div');
+  panel.id = 'inactivityLogPanel';
+  Object.assign(panel.style, {
+    position: 'fixed',
+    top: '8px',
+    right: '8px',
+    width: '320px',
+    maxHeight: '46vh',
+    overflow: 'auto',
+    zIndex: 2147483647,
+    background: 'rgba(0,0,0,0.8)',
+    color: '#fff',
+    fontSize: '12px',
+    lineHeight: '1.25',
+    padding: '8px',
+    borderRadius: '6px',
+    boxShadow: '0 6px 18px rgba(0,0,0,0.35)',
+    fontFamily: 'Menlo,monospace,monospace'
+  });
 
-  // -----------------------
-  // cached DOM references
-  // -----------------------
-  const reauthModal = safeQuery('reauthModal');
-  const biometricView = safeQuery('biometricView');
-  const pinView = safeQuery('pinView');
-  const reauthAvatar = safeQuery('reauthAvatar');
-  const reauthName = safeQuery('reauthName');
-  const reauthAlert = safeQuery('reauthAlert');
-  const reauthAlertMsg = safeQuery('reauthAlertMsg');
-  const deleteReauthKey = safeQuery('deleteReauthKey');
-  const verifyBiometricBtn = safeQuery('verifyBiometricBtn');
-  const switchToPin = safeQuery('switchToPin');
-  const switchToBiometric = safeQuery('switchToBiometric');
-  const logoutLinkBio = safeQuery('logoutLinkBio');
-  const logoutLinkPin = safeQuery('logoutLinkPin');
-  const forgetPinLinkBio = safeQuery('forgetPinLinkBio');
-  const forgetPinLinkPin = safeQuery('forgetPinLinkPin');
+  const header = document.createElement('div');
+  header.style.display = 'flex';
+  header.style.justifyContent = 'space-between';
+  header.style.alignItems = 'center';
+  header.style.marginBottom = '6px';
+  header.innerHTML = `<strong style="font-size:12px">Inactivity Logs</strong>`;
 
-  // Note: reauthInputs are the PIN boxes inside pinView; query at runtime
-  function getReauthInputs() {
-    return (pinView && pinView.querySelectorAll) ? Array.from(pinView.querySelectorAll('input[data-fg-pin]')) : [];
+  const controlsWrap = document.createElement('div');
+  controlsWrap.style.display = 'flex';
+  controlsWrap.style.gap = '6px';
+
+  const clearBtn = document.createElement('button');
+  clearBtn.textContent = 'Clear';
+  clearBtn.title = 'Clear logs';
+  Object.assign(clearBtn.style, { fontSize: '11px', cursor: 'pointer' });
+  clearBtn.onclick = () => { body.innerHTML = ''; };
+
+  const testBtn = document.createElement('button');
+  testBtn.textContent = 'Test';
+  testBtn.title = 'Force inactivity prompt';
+  Object.assign(testBtn.style, { fontSize: '11px', cursor: 'pointer' });
+  testBtn.onclick = () => {
+    try {
+      if (window.__reauth && typeof window.__reauth.forceInactivityCheck === 'function') {
+        window.__reauth.forceInactivityCheck();
+        window.__inactivityLogPanel.append(`[TEST] Called window.__reauth.forceInactivityCheck()`);
+      } else {
+        window.__inactivityLogPanel.append(`[TEST] window.__reauth.forceInactivityCheck() not available yet`);
+      }
+    } catch (e) {
+      window.__inactivityLogPanel.append(`[TEST] error calling forceInactivityCheck: ${String(e)}`);
+      console.error(e);
+    }
+  };
+
+  controlsWrap.appendChild(testBtn);
+  controlsWrap.appendChild(clearBtn);
+  header.appendChild(controlsWrap);
+
+  const body = document.createElement('div');
+  body.id = 'inactivityLogBody';
+  body.style.maxHeight = '40vh';
+  body.style.overflow = 'auto';
+  panel.appendChild(header);
+  panel.appendChild(body);
+
+  // Append once DOM is ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => document.body.appendChild(panel), { once: true });
+  } else {
+    document.body.appendChild(panel);
   }
 
-  // Inactivity prompt elements
-  const promptModal = safeQuery('inactivityPrompt');
-  const yesBtn = safeQuery('yesActiveBtn');
+  // small helper to append text safely from other parts of code
+  window.__inactivityLogPanel = {
+    append: (s) => {
+      try {
+        const el = document.getElementById('inactivityLogBody');
+        if (!el) return;
+        const line = document.createElement('div');
+        line.style.marginBottom = '4px';
+        line.style.wordBreak = 'break-word';
+        line.innerHTML = `<span style="color:#ccc">${new Date().toLocaleTimeString()}</span> - ${escapeHtml(String(s))}`;
+        el.appendChild(line);
+        // keep scroll at bottom
+        el.scrollTop = el.scrollHeight;
+      } catch (e) { /* ignore */ }
+    },
+    clear: () => { try { const el = document.getElementById('inactivityLogBody'); if (el) el.innerHTML = ''; } catch (e) {} }
+  };
 
-  // Defensive: ensure modals are hidden on init
-  if (reauthModal) reauthModal.classList.add('hidden');
-  if (promptModal) promptModal.classList.add('hidden');
+  function escapeHtml(s) {
+    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
 
-  // -----------------------
-  // Publicly-used app helpers
-  // (these should exist in your app; we call them with safeCall)
-  // -----------------------
-  // - getSession() -> Promise resolving to session object
-  // - getUid() -> Promise resolving to { uid: ... }
-  // - bindPinInputs(inputs, pinView, reauthModal, reauthAlert, reauthAlertMsg)
-  // - reAuthenticateWithPin(uid, pin, callback(success))
-  // - notify(message, type, alertEl?, alertMsgEl?)
-  // If not present, we'll warn but still keep flow safe.
+  // Console shortcuts that also write to panel
+  window.__inactivityLog = {
+    info: (msg, meta) => { try { console.log('[Inactivity]', msg, meta || ''); window.__inactivityLogPanel.append(String(msg) + (meta ? ' ' + JSON.stringify(meta) : '')); } catch (e) {} },
+    error: (msg, err) => { try { console.error('[Inactivity ERROR]', msg, err || ''); window.__inactivityLogPanel.append(`<span style="color:#ff8080">${escapeHtml(msg)} ${escapeHtml(err && (err.message || err))}</span>`); } catch (e) {} }
+  };
 
-  // -----------------------
-  // initReauthModal
-  // - PREPARES the modal and bindings
-  // - DOES NOT show it unless { show: true } passed
-  // -----------------------
+})(); // end on-screen logger
+
+/* -----------------------------
+   Main module (reauth + inactivity)
+   - Uses safeCall for optional app helpers
+   ----------------------------- */
+
+(function () {
+  window.__inactivityLog.info('Module loaded');
+
+  // catch global errors to the panel
+  window.addEventListener('error', (ev) => {
+    window.__inactivityLog.error('[window.onerror] ' + (ev && ev.message), ev.error || ev);
+  });
+  window.addEventListener('unhandledrejection', (ev) => {
+    window.__inactivityLog.error('[unhandledrejection] ' + (ev && ev.reason && ev.reason.message ? ev.reason.message : ''), ev.reason || ev);
+  });
+
+  // safe wrappers
+  function safeQuery(id) { try { return document.getElementById(id); } catch (e) { window.__inactivityLog.error('[safeQuery] error', e); return null; } }
+  function isValidImageSource(src) { return !!src && /^(data:image\/|https?:\/\/|\/|blob:)/i.test(src); }
+  function safeCall(fn, ...args) { try { if (typeof fn === 'function') return fn(...args); else { window.__inactivityLog.info('[safeCall] function not defined'); } } catch (e) { window.__inactivityLog.error('[safeCall] error', e); } return undefined; }
+
+  // Cached DOM refs — will be (re)cached when needed
+  let reauthModal, biometricView, pinView, reauthAvatar, reauthName, reauthAlert, reauthAlertMsg,
+      deleteReauthKey, verifyBiometricBtn, switchToPin, switchToBiometric,
+      logoutLinkBio, logoutLinkPin, forgetPinLinkBio, forgetPinLinkPin,
+      promptModal, yesBtn;
+
+  function cacheDomRefs() {
+    reauthModal = safeQuery('reauthModal');
+    biometricView = safeQuery('biometricView');
+    pinView = safeQuery('pinView');
+    reauthAvatar = safeQuery('reauthAvatar');
+    reauthName = safeQuery('reauthName');
+    reauthAlert = safeQuery('reauthAlert');
+    reauthAlertMsg = safeQuery('reauthAlertMsg');
+    deleteReauthKey = safeQuery('deleteReauthKey');
+    verifyBiometricBtn = safeQuery('verifyBiometricBtn');
+    switchToPin = safeQuery('switchToPin');
+    switchToBiometric = safeQuery('switchToBiometric');
+    logoutLinkBio = safeQuery('logoutLinkBio');
+    logoutLinkPin = safeQuery('logoutLinkPin');
+    forgetPinLinkBio = safeQuery('forgetPinLinkBio');
+    forgetPinLinkPin = safeQuery('forgetPinLinkPin');
+
+    promptModal = safeQuery('inactivityPrompt');
+    yesBtn = safeQuery('yesActiveBtn');
+
+    window.__inactivityLog.info('Cached DOM refs', {
+      reauthModal: !!reauthModal,
+      biometricView: !!biometricView,
+      pinView: !!pinView,
+      promptModal: !!promptModal,
+      yesBtn: !!yesBtn
+    });
+  }
+
+  function getReauthInputs() {
+    try { return (pinView && pinView.querySelectorAll) ? Array.from(pinView.querySelectorAll('input[data-fg-pin]')) : []; }
+    catch (e) { window.__inactivityLog.error('[getReauthInputs] error', e); return []; }
+  }
+
+  /* -----------------------
+     initReauthModal (prepares modal, binds events)
+     - uses safeCall() to call app's helpers if available
+     ----------------------- */
   async function initReauthModal({ show = false } = {}) {
-    // Skip if not configured on the server/local
-    if (!(await shouldReauth())) {
-      console.log('[Reauth] shouldReauth=false – skipping init');
+    cacheDomRefs();
+    window.__inactivityLog.info('initReauthModal start (show=' + !!show + ')');
+
+    // Quickly guard if nothing to do
+    let reauthNeeded = false;
+    try {
+      reauthNeeded = !!(await shouldReauth());
+    } catch (e) {
+      window.__inactivityLog.error('[initReauthModal] shouldReauth error', e);
+      reauthNeeded = false;
+    }
+    if (!reauthNeeded) {
+      window.__inactivityLog.info('initReauthModal: shouldReauth=false, skipping modal setup');
       return;
     }
 
@@ -6586,7 +6716,6 @@ document.addEventListener('DOMContentLoaded', () => {
       if (session && session.user) {
         const displayName = session.user.username || (session.user.fullName || '').split(' ')[0] || 'User';
         if (reauthName) reauthName.textContent = displayName.charAt(0).toUpperCase() + displayName.slice(1);
-
         const profilePicture = session.user.profilePicture || localStorage.getItem('profilePicture') || '';
         if (reauthAvatar) {
           if (isValidImageSource(profilePicture)) {
@@ -6596,14 +6725,16 @@ document.addEventListener('DOMContentLoaded', () => {
             reauthAvatar.style.display = 'none';
           }
         }
+      } else {
+        window.__inactivityLog.info('initReauthModal: no session available to populate user info');
       }
     } catch (e) {
-      console.warn('[Reauth] populate user info failed', e);
+      window.__inactivityLog.error('[initReauthModal] populate user info failed', e);
     }
 
     // Check biometrics flag (local) and prepare views (do NOT unhide modal here unless show===true)
-    const isBiometricsEnabled = localStorage.getItem('biometricsEnabled') === 'true';
     try {
+      const isBiometricsEnabled = localStorage.getItem('biometricsEnabled') === 'true';
       if (biometricView) biometricView.style.display = (isBiometricsEnabled && 'PublicKeyCredential' in window) ? 'block' : 'none';
       if (pinView) pinView.style.display = (biometricView && biometricView.style.display === 'block') ? 'none' : 'block';
       if (switchToBiometric) switchToBiometric.style.display = (isBiometricsEnabled && 'PublicKeyCredential' in window) ? '' : 'none';
@@ -6614,11 +6745,13 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const inputs = getReauthInputs();
       if (typeof bindPinInputs === 'function') {
-        // call once (bindPinInputs should itself guard re-binding if necessary, but we call it safely)
         safeCall(bindPinInputs, inputs, pinView, reauthModal, reauthAlert, reauthAlertMsg);
+        window.__inactivityLog.info('bindPinInputs invoked');
+      } else {
+        window.__inactivityLog.info('bindPinInputs not defined (skipped)');
       }
     } catch (e) {
-      console.warn('[Reauth] bindPinInputs error', e);
+      window.__inactivityLog.error('[initReauthModal] bindPinInputs error', e);
     }
 
     // PIN form submit - attach once
@@ -6640,12 +6773,12 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
           }
 
-          // Call your re-auth function; make sure to call onSuccessfulReauth() if success
+          // Use app's reAuthenticateWithPin if available
           await safeCall(reAuthenticateWithPin, uidInfo.uid, pin, (success) => {
             if (success) {
-              if (reauthModal) reauthModal.classList.add('hidden');
+              try { if (reauthModal) reauthModal.classList.add('hidden'); } catch (e) {}
               resetReauthInputs();
-              safeCall(getSession); // refresh session
+              safeCall(getSession); // refresh session if provided
               onSuccessfulReauth();
             } else {
               resetReauthInputs();
@@ -6653,12 +6786,13 @@ document.addEventListener('DOMContentLoaded', () => {
           });
         });
         pinView.__reauthSubmitBound = true;
+        window.__inactivityLog.info('PIN submit handler bound');
       }
     } catch (e) {
-      console.warn('[Reauth] pin submit bind failed', e);
+      window.__inactivityLog.error('[initReauthModal] pin submit bind failed', e);
     }
 
-    // Delete key binding (single attach)
+    // Delete key binding
     try {
       if (deleteReauthKey && !deleteReauthKey.__bound) {
         deleteReauthKey.addEventListener('click', () => {
@@ -6672,21 +6806,21 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         deleteReauthKey.__bound = true;
       }
-    } catch (e) { console.warn('[Reauth] delete key bind failed', e); }
+    } catch (e) { window.__inactivityLog.error('[initReauthModal] delete key bind failed', e); }
 
-    // Biometric verify button (single attach)
+    // Biometric verify button
     try {
       if (verifyBiometricBtn && !verifyBiometricBtn.__bound) {
         verifyBiometricBtn.addEventListener('click', async () => {
           try {
-            // fetch challenge
+            // Expect your API endpoints / flow: safeCall(getChallenge) or use built-in fetch if you want.
+            // We'll attempt to fetch a challenge but wrap in try/catch to avoid hard failures
             const challengeRes = await fetch('https://api.flexgig.com.ng/api/get-challenge', {
               headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` }
             });
             if (!challengeRes.ok) throw new Error('Challenge failed');
             const { challenge, rpId } = await challengeRes.json();
 
-            // build publicKey for navigator.credentials.get
             const credentialIdB64 = localStorage.getItem('credentialId') || '';
             const allowCreds = credentialIdB64 ? [{ type: 'public-key', id: Uint8Array.from(atob(credentialIdB64), c => c.charCodeAt(0)) }] : [];
 
@@ -6698,7 +6832,7 @@ document.addEventListener('DOMContentLoaded', () => {
             };
 
             const assertion = await navigator.credentials.get({ publicKey });
-            // send to server
+            // send to server (this is app-specific)
             const verifyRes = await fetch('https://api.flexgig.com.ng/api/verify-assertion', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('authToken')}` },
@@ -6715,23 +6849,24 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             if (verifyRes.ok) {
-              if (reauthModal) reauthModal.classList.add('hidden');
+              try { if (reauthModal) reauthModal.classList.add('hidden'); } catch (e) {}
               safeCall(getSession);
               onSuccessfulReauth();
             } else {
               safeCall(notify, 'Biometric verification failed', 'error', reauthAlert, reauthAlertMsg);
             }
           } catch (err) {
-            console.error('[Reauth] Biometric error:', err);
+            window.__inactivityLog.error('[Reauth] Biometric error:', err);
             safeCall(notify, 'Biometric not available - use PIN', 'error');
-            switchViews(); // fallback to PIN
+            // fallback to PIN view
+            try { if (switchToPin) switchToPin.click(); } catch (e) {}
           }
         });
         verifyBiometricBtn.__bound = true;
       }
-    } catch (e) { console.warn('[Reauth] verifyBiometric bind failed', e); }
+    } catch (e) { window.__inactivityLog.error('[initReauthModal] verifyBiometric bind failed', e); }
 
-    // Switch view links (safe attach)
+    // Switch view links
     try {
       if (switchToPin && !switchToPin.__bound) {
         switchToPin.addEventListener('click', (ev) => { ev.preventDefault(); switchViews(false); });
@@ -6741,7 +6876,7 @@ document.addEventListener('DOMContentLoaded', () => {
         switchToBiometric.addEventListener('click', (ev) => { ev.preventDefault(); switchViews(true); });
         switchToBiometric.__bound = true;
       }
-    } catch (e) { console.warn('[Reauth] switch links bind failed', e); }
+    } catch (e) { window.__inactivityLog.error('[initReauthModal] switch links bind failed', e); }
 
     // Logout & forget PIN links
     try {
@@ -6757,7 +6892,7 @@ document.addEventListener('DOMContentLoaded', () => {
           link.__bound = true;
         }
       });
-    } catch (e) { console.warn('[Reauth] logout/forget binds failed', e); }
+    } catch (e) { window.__inactivityLog.error('[initReauthModal] logout/forget binds failed', e); }
 
     // Ensure modal/prompt are hidden unless caller explicitly asked to show
     try {
@@ -6765,22 +6900,21 @@ document.addEventListener('DOMContentLoaded', () => {
         if (reauthModal) reauthModal.classList.add('hidden');
         if (promptModal) promptModal.classList.add('hidden');
       } else {
-        // show modal explicitly
         if (reauthModal) reauthModal.classList.remove('hidden');
         const isBio = localStorage.getItem('biometricsEnabled') === 'true' && ('PublicKeyCredential' in window);
         if (isBio && biometricView) { biometricView.style.display = 'block'; if (pinView) pinView.style.display = 'none'; }
         else { if (biometricView) biometricView.style.display = 'none'; if (pinView) pinView.style.display = 'block'; }
       }
     } catch (e) {
-      console.warn('[Reauth] setting hidden/show state failed', e);
+      window.__inactivityLog.error('[initReauthModal] setting hidden/show state failed', e);
     }
 
-    console.log('[Reauth] init complete (show=' + !!show + ')');
+    window.__inactivityLog.info('initReauthModal complete (show=' + !!show + ')');
   } // end initReauthModal
 
-  // -----------------------
-  // small helpers for UI / PINs
-  // -----------------------
+  /* -----------------------
+     small helpers for UI / PINs
+     ----------------------- */
   function switchViews(toBiometric = false) {
     try {
       if (toBiometric) {
@@ -6795,120 +6929,179 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function resetReauthInputs() {
-    try {
-      getReauthInputs().forEach(inp => inp.value = '');
-    } catch (e) { /* ignore */ }
+    try { getReauthInputs().forEach(inp => inp.value = ''); } catch (e) {}
   }
 
-  // -----------------------
-  // Inactivity logic
-  // -----------------------
+  /* -----------------------
+     Inactivity logic
+     - debounced resets to avoid mobile event floods
+     ----------------------- */
   let idleTimeout = null;
-  const IDLE_TIME = 10*1000; // set to 10 minutes in production; change to 10*1000 for testing
+  const IDLE_TIME = 10 * 1000; // 10s for testing; set to 10 * 60 * 1000 (10min) in production
   const PROMPT_TIMEOUT = 5000; // 5s
-  const PROMPT_AUTO_CLOSE = true; // set to false if you want prompt to stay until user clicks
+  const PROMPT_AUTO_CLOSE = true;
   let lastActive = Date.now();
   try { localStorage.setItem('lastActive', String(lastActive)); } catch (e) {}
 
-  // guard so we only attach listeners once
+  // debounce control
+  let lastResetCall = 0;
+  const RESET_DEBOUNCE_MS = 250; // ignore resets that happen under 250ms
+
   let __inactivitySetupDone = false;
 
+  // resilient shouldReauth - fallbacks to localStorage flags if getSession fails
   async function shouldReauth() {
     try {
       const session = await safeCall(getSession);
+      window.__inactivityLog.info('shouldReauth() - getSession returned', !!session);
       const hasPin = !!(session && session.user && session.user.hasPin);
       const hasBio = localStorage.getItem('biometricsEnabled') === 'true' && ('PublicKeyCredential' in window);
+
+      if (!session) {
+        const fallbackHasPin = localStorage.getItem('hasPin') === 'true';
+        window.__inactivityLog.info('shouldReauth fallback -> fallbackHasPin=' + fallbackHasPin, { hasBio });
+        return fallbackHasPin || hasBio;
+      }
+
       return hasPin || hasBio;
     } catch (err) {
-      console.warn('[Inactivity] shouldReauth failed', err);
-      return false;
+      window.__inactivityLog.error('[Inactivity] shouldReauth failed', err);
+      const hasBio = localStorage.getItem('biometricsEnabled') === 'true' && ('PublicKeyCredential' in window);
+      const fallbackHasPin = localStorage.getItem('hasPin') === 'true';
+      return hasBio || fallbackHasPin;
     }
   }
 
   async function setupInactivity() {
-    if (__inactivitySetupDone) return;
+    if (__inactivitySetupDone) {
+      window.__inactivityLog.info('setupInactivity already done, skipping.');
+      return;
+    }
     __inactivitySetupDone = true;
+    window.__inactivityLog.info('setupInactivity starting…');
 
     if (!(await shouldReauth())) {
-      console.log('[Inactivity] shouldReauth=false -> inactivity checks disabled');
+      window.__inactivityLog.info('shouldReauth=false -> inactivity checks disabled (no PIN/bio)');
       return;
     }
 
-    // attach activity events once
-    const events = ['mousemove', 'keydown', 'touchstart', 'click'];
-    events.forEach(evt => document.addEventListener(evt, resetIdleTimer, { passive: true }));
+    // attach activity events - avoid touchmove which fires continuously
+    const events = ['mousemove', 'keydown', 'touchstart', 'touchend', 'click', 'scroll'];
+    events.forEach(evt => {
+      document.addEventListener(evt, resetIdleTimer, { passive: true });
+      window.__inactivityLog.info('Attached activity listener for', evt);
+    });
 
-    // ensure both modals are hidden initially
-    if (reauthModal) reauthModal.classList.add('hidden');
-    if (promptModal) promptModal.classList.add('hidden');
+    // also listen to visibilitychange - mobile background/foreground
+    document.addEventListener('visibilitychange', () => {
+      window.__inactivityLog.info('visibilitychange ->', document.visibilityState);
+      if (document.visibilityState === 'visible') {
+        // if returning and lastActive was too old, force prompt
+        const last = Number(localStorage.getItem('lastActive') || 0);
+        if (Date.now() - last > IDLE_TIME) {
+          window.__inactivityLog.info('User returned after idle threshold -> forcing inactivity check');
+          showInactivityPrompt().catch(e => window.__inactivityLog.error('showInactivityPrompt error', e));
+        } else {
+          resetIdleTimer();
+        }
+      } else {
+        // Optional: when becoming hidden, record time
+        try { localStorage.setItem('lastHiddenAt', String(Date.now())); } catch (e) {}
+      }
+    });
 
     // start timer
     resetIdleTimer();
   }
 
   function resetIdleTimer() {
-    if (idleTimeout) { clearTimeout(idleTimeout); idleTimeout = null; }
-    lastActive = Date.now();
-    try { localStorage.setItem('lastActive', String(lastActive)); } catch (e) {}
-    idleTimeout = setTimeout(() => {
-      showInactivityPrompt().catch(err => console.error('[Inactivity] showInactivityPrompt error', err));
-    }, IDLE_TIME);
+    try {
+      const now = Date.now();
+      if (now - lastResetCall < RESET_DEBOUNCE_MS) {
+        // debounced
+        // We log only occasionally to avoid log spam, but keep a small marker
+        // (no-op to reduce noise)
+        return;
+      }
+      lastResetCall = now;
+
+      if (idleTimeout) { clearTimeout(idleTimeout); idleTimeout = null; window.__inactivityLog.info('Cleared previous idleTimeout'); }
+      lastActive = now;
+      try { localStorage.setItem('lastActive', String(lastActive)); } catch (e) {}
+      window.__inactivityLog.info('resetIdleTimer called, scheduling inactivity in ' + IDLE_TIME + ' ms. lastActive=' + new Date(lastActive).toISOString());
+
+      idleTimeout = setTimeout(() => {
+        window.__inactivityLog.info('IDLE TIMEOUT reached -> calling showInactivityPrompt()');
+        showInactivityPrompt().catch(err => window.__inactivityLog.error('[Inactivity] showInactivityPrompt error', err));
+      }, IDLE_TIME);
+    } catch (e) { window.__inactivityLog.error('[resetIdleTimer] error', e); }
   }
 
+  // show reauth modal (safe: checks both local and window-scope definitions)
   async function showReauthModal() {
-    if (!reauthModal) { console.warn('[Reauth] reauthModal missing'); return; }
+    window.__inactivityLog.info('showReauthModal() called');
+    cacheDomRefs();
+    if (!reauthModal) { window.__inactivityLog.error('[Reauth] reauthModal missing'); return; }
+
+    // If the project's own initReauthModal exists on window, prefer that (ensures bundler/script order is okay)
     try {
-      await initReauthModal({ show: false }); // ensure prepared
-    } catch (e) { /* ignore */ }
+      if (typeof window.initReauthModal === 'function') {
+        window.__inactivityLog.info('Calling window.initReauthModal({show:true})');
+        await window.initReauthModal({ show: true });
+        return;
+      }
+    } catch (e) { window.__inactivityLog.error('[showReauthModal] window.initReauthModal threw', e); }
 
-    // unhide reauth modal
-    reauthModal.classList.remove('hidden');
-
-    const isBio = localStorage.getItem('biometricsEnabled') === 'true' && ('PublicKeyCredential' in window);
-    if (isBio && biometricView) {
-      biometricView.style.display = 'block';
-      if (pinView) pinView.style.display = 'none';
-      try { verifyBiometricBtn?.focus(); } catch (e) {}
-    } else {
-      if (biometricView) biometricView.style.display = 'none';
-      if (pinView) pinView.style.display = 'block';
-      try { (getReauthInputs()[0])?.focus(); } catch (e) {}
+    // Otherwise, call this module's implementation (if present)
+    try {
+      await initReauthModal({ show: true });
+    } catch (e) {
+      window.__inactivityLog.error('[showReauthModal] initReauthModal failed', e);
+      // fallback: just unhide modal to avoid blocking user
+      try { reauthModal.classList.remove('hidden'); } catch (err) { window.__inactivityLog.error('Failed to unhide reauthModal fallback', err); }
     }
   }
 
   async function showInactivityPrompt() {
-    if (!(await shouldReauth())) return;
-
+    window.__inactivityLog.info('showInactivityPrompt() invoked');
+    if (!(await shouldReauth())) {
+      window.__inactivityLog.info('showInactivityPrompt -> shouldReauth=false, aborting');
+      return;
+    }
+    cacheDomRefs();
     if (!promptModal || !yesBtn) {
-      console.warn('[Inactivity] prompt DOM missing - falling back to reauth');
+      window.__inactivityLog.error('[Inactivity] prompt DOM missing - falling back to reauth modal');
       await showReauthModal();
       return;
     }
+    if (!promptModal.classList.contains('hidden')) {
+      window.__inactivityLog.info('Prompt already visible, skipping.');
+      return;
+    }
 
-    // already visible?
-    if (!promptModal.classList.contains('hidden')) return;
-
-    // show prompt
+    window.__inactivityLog.info('Showing inactivity prompt modal');
     promptModal.classList.remove('hidden');
 
-    // cleanup any previous handlers/timeouts
     let promptTimeout = null;
     const yesHandler = () => {
+      window.__inactivityLog.info('Yes button clicked -> user is active again');
       try {
         promptModal.classList.add('hidden');
         if (promptTimeout) clearTimeout(promptTimeout);
         yesBtn.removeEventListener('click', yesHandler);
         resetIdleTimer();
-      } catch (e) { /* ignore */ }
+      } catch (e) { window.__inactivityLog.error('[yesHandler] error', e); }
     };
 
     yesBtn.addEventListener('click', yesHandler, { once: true });
 
     if (PROMPT_AUTO_CLOSE) {
+      window.__inactivityLog.info('Prompt will auto-close in ' + PROMPT_TIMEOUT + ' ms if no action');
       promptTimeout = setTimeout(async () => {
         if (!promptModal.classList.contains('hidden')) {
+          window.__inactivityLog.info('Prompt auto-closing, showing reauth modal…');
           promptModal.classList.add('hidden');
-          yesBtn.removeEventListener('click', yesHandler);
+          try { yesBtn.removeEventListener('click', yesHandler); } catch (e) {}
           await showReauthModal();
         }
       }, PROMPT_TIMEOUT);
@@ -6917,35 +7110,33 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // testing / external helpers
   async function forceInactivityCheck() {
-    if (idleTimeout) { clearTimeout(idleTimeout); idleTimeout = null; }
+    window.__inactivityLog.info('forceInactivityCheck() called');
+    if (idleTimeout) { clearTimeout(idleTimeout); idleTimeout = null; window.__inactivityLog.info('Cleared idleTimeout in forceInactivityCheck'); }
     await showInactivityPrompt();
   }
 
   function onSuccessfulReauth() {
+    window.__inactivityLog.info('onSuccessfulReauth() called, hiding modals and resetting timer');
     try {
+      cacheDomRefs();
       if (reauthModal) reauthModal.classList.add('hidden');
       if (promptModal) promptModal.classList.add('hidden');
-    } catch (e) {}
+    } catch (e) { window.__inactivityLog.error('[onSuccessfulReauth] error', e); }
     resetIdleTimer();
   }
 
-  // -----------------------
-  // Start the flow:
-  // 1) Prepare the modal (do not show)
-  // 2) Start inactivity checks (only after init)
-  // -----------------------
+  /* -----------------------
+     Boot sequence
+     ----------------------- */
   (async function initFlow() {
-    try {
-      await initReauthModal({ show: false });
-    } catch (e) { console.warn('[Init] initReauthModal error', e); }
-    try {
-      await setupInactivity();
-    } catch (e) { console.warn('[Init] setupInactivity error', e); }
+    window.__inactivityLog.info('initFlow starting…');
+    try { await initReauthModal({ show: false }); } catch (e) { window.__inactivityLog.error('[Init] initReauthModal error', e); }
+    try { await setupInactivity(); } catch (e) { window.__inactivityLog.error('[Init] setupInactivity error', e); }
+    window.__inactivityLog.info('initFlow complete');
   })();
 
-  // Expose some debug helpers to window for easy testing in console
+  // Expose functions to global scope (helpful for debugging & mobile)
   window.__reauth = {
     initReauthModal,
     setupInactivity,
@@ -6954,19 +7145,15 @@ document.addEventListener('DOMContentLoaded', () => {
     showReauthModal
   };
 
-}); // end DOMContentLoaded
+  // Make sure the project's own global references can find our functions if it expects them at window
+  // (attach only if not already defined to avoid clobbering)
+  try { if (!window.initReauthModal) window.initReauthModal = initReauthModal; } catch (e) {}
+  try { if (!window.setupInactivity) window.setupInactivity = setupInactivity; } catch (e) {}
+  try { if (!window.forceInactivityCheck) window.forceInactivityCheck = forceInactivityCheck; } catch (e) {}
+  try { if (!window.showReauthModal) window.showReauthModal = showReauthModal; } catch (e) {}
+  try { if (!window.onSuccessfulReauth) window.onSuccessfulReauth = onSuccessfulReauth; } catch (e) {}
 
-
-
-// Make shouldReauth available in console / other code (dev-friendly)
-try {
-  window.shouldReauth = shouldReauth;
-  if (!window.__reauth) window.__reauth = {};
-  window.__reauth.shouldReauth = shouldReauth;
-  console.debug('[init] shouldReauth exposed to window.shouldReauth and window.__reauth.shouldReauth');
-} catch (e) { console.warn('[init] expose shouldReauth failed', e); }
-
-
+})(); // end main module
 
 
 
