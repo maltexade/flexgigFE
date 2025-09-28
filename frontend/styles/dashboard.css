@@ -2656,197 +2656,229 @@ html.dark-mode .theme-toggle .toggle-knob { transform: translateX(20px); }
 }
 
 
-/* Reauth Modal Base */
-/* Reauth Modal Base */
-/* Reauth Modal Base */
-/* Reauth Modal Base */
-.reauthmodal {
+
+/* utility hidden — must be present and loaded BEFORE modal display is used */
+.hidden {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+
+/* Modal backdrop + base */
+.reauthmodal,
+.Inactivitymodal {
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: rgba(0, 0, 0, 0.7); /* Semi-transparent overlay */
+  inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
-  transition: opacity 0.3s ease;
+  z-index: 1100;
+  padding: 20px;
+  background: linear-gradient(180deg, rgba(2,6,23,0.6), rgba(2,6,23,0.75));
+  backdrop-filter: blur(6px) saturate(120%);
+  -webkit-backdrop-filter: blur(6px) saturate(120%);
 }
 
-.reauthmodal.hidden {
-  display: none;
+/* Modal content card */
+.reauthmodal-content,
+.Inactivitymodal-content {
+  width: min(var(--max-width-modal), 96vw);
+  background: linear-gradient(180deg, var(--card), rgba(18,24,38,0.98));
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 20px;
+  color: var(--text);
+  transform-origin: center;
+  transition: transform var(--ease), opacity var(--ease);
+  opacity: 1;
 }
 
-.reauthmodal-content {
-  background: #1e1e1e; /* Dark gray */
-  border-radius: 16px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-  width: 90%;
-  max-width: 320px;
-  padding: 24px;
-  text-align: center;
-  position: relative;
+/* Slight pop animation when added */
+.reauthmodal:not(.hidden) .reauthmodal-content,
+.Inactivitymodal:not(.hidden) .Inactivitymodal-content {
+  transform: translateY(0);
 }
 
-/* Close Button (optional, hidden by default) */
+/* Close button (hidden by default for security, but styled) */
 .reauthclose-btn {
   position: absolute;
-  top: 8px;
-  right: 8px;
-  background: none;
-  border: none;
-  color: #aaa;
-  font-size: 24px;
-  cursor: pointer;
-}
-
-.reauthclose-btn:hover {
-  color: #fff;
-}
-
-/* Avatar */
-.avatar-container img {
-  border: 2px solid #333;
-}
-
-/* Texts */
-.reauthmodal-content h2 {
+  top: 10px;
+  right: 10px;
+  background: transparent;
+  color: var(--muted);
+  border: 0;
   font-size: 20px;
-  margin: 0;
-  color: #fff;
-}
-
-.reauthmodal-content p {
-  font-size: 14px;
-  color: #aaa;
-  margin: 4px 0;
-}
-
-/* Biometric View Specific */
-#biometricView .fingerprint-icon { /* If using SVG or font, adjust */
-  font-size: 64px;
-  color: #00bfa5; /* Teal like oPay */
-}
-
-#verifyBiometricBtn {
-  background: #00bfa5;
-  color: #fff;
-  border: none;
-  border-radius: 24px;
-  padding: 12px;
-  font-size: 16px;
-  font-weight: bold;
   cursor: pointer;
-  transition: background 0.2s;
-  width: 100%;
+  padding: 6px;
+  border-radius: 8px;
+}
+.reauthclose-btn:focus { outline: var(--focus); }
+
+/* Avatar container */
+.avatar-container { display:flex; justify-content:center; align-items:center; margin-bottom: 10px; }
+.avatar-container img#reauthAvatar{
+  width: 84px; height: 84px; border-radius: 50%;
+  object-fit: cover; border: 2px solid rgba(255,255,255,0.06);
+  box-shadow: 0 6px 18px rgba(0,0,0,0.6);
 }
 
-#verifyBiometricBtn:hover {
-  background: #009688;
+/* Name and headings */
+#reauthName { margin: 4px 0 10px; font-size: 18px; color: var(--text); font-weight: 700; }
+.reauthmodal-content h2 { margin: 6px 0 10px; font-size: 20px; color: var(--text); }
+.reauthmodal-content p { margin: 0 0 12px; color: var(--muted); font-size: 14px; }
+
+/* Views wrapper */
+.view { width:100%; display: block; }
+
+/* Biometric view specifics */
+#biometricView { text-align:center; padding: 8px 0; }
+#biometricView .fingerprint-icon { font-size: 64px; color: var(--accent); margin-bottom: 12px; }
+
+/* Buttons */
+button {
+  cursor: pointer;
+  border: 0;
+  border-radius: 999px;
+  transition: transform var(--ease), box-shadow var(--ease);
+  font-weight: 700;
+}
+button:active { transform: translateY(1px); }
+button:focus { outline: var(--focus); outline-offset: 2px; }
+
+/* Primary action */
+#verifyBiometricBtn,
+#yesActiveBtn {
+  display:inline-block;
+  width:100%;
+  padding: 12px 16px;
+  background: var(--accent);
+  color: #042022;
+  box-shadow: 0 6px 18px rgba(0,191,165,0.12);
+  border-radius: 999px;
+  font-size: 15px;
 }
 
-#verifyBiometricBtn:focus {
-  outline: 2px solid #00bfa5;
+/* Danger & subtle links */
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; color: #00d1b3; }
+a[style*="color: #f00"] { color: var(--danger); }
+
+/* PIN View layout */
+#pinView { padding: 8px 0; position: relative; }
+
+/* Switch to biometric link (top-left inside views) */
+#switchToBiometric, #switchToPin {
+  position: absolute; left: 12px; top: 12px; font-size: 13px; color: var(--accent);
 }
 
-/* PIN View Specific
-.reauthpin-inputs input {
-  width: 40px;
-  height: 40px;
+/* PIN inputs row */
+.reauthpin-inputs {
+  display:flex;
+  justify-content:center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.reauthpin-inputs input[data-fg-pin] {
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
+  background: var(--glass);
+  border: 1px solid rgba(255,255,255,0.04);
+  color: var(--text);
+  font-size: 22px;
   text-align: center;
-  font-size: 20px;
-  background: #333;
-  color: #fff;
-  border: 1px solid #444;
-  border-radius: 8px;
-  margin: 0 4px;
-  caret-color: #00bfa5;
-}
-
-.pin-inputs input:focus {
-  border-color: #00bfa5;
   outline: none;
+  -webkit-appearance: none;
+  caret-color: transparent;
+  transition: box-shadow var(--ease), transform var(--ease), border-color var(--ease);
+}
+.reauthpin-inputs input[data-fg-pin]:focus {
+  border-color: rgba(0,191,165,0.9);
+  box-shadow: 0 6px 18px rgba(0,191,165,0.08);
+}
+.reauthpin-inputs input[data-fg-pin].invalid {
+  border-color: var(--danger);
+  box-shadow: 0 4px 12px rgba(255,77,79,0.08);
 }
 
-.pin-keypad button {
-  background: #333;
-  color: #fff;
-  border: none;
-  border-radius: 50%;
-  width: 48px;
-  height: 48px;
-  font-size: 20px;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-.pin-keypad button:hover {
-  background: #444;
-}
-
-.pin-keypad button:focus {
-  outline: 2px solid #00bfa5;
-}
-
-#deleteReauthKey {
-  font-size: 24px;
-}
-
-/* Alert */
-.alert {
-  background: #f44336; /* Red for error */
-  color: #fff;
-  padding: 8px;
-  border-radius: 8px;
-  margin-bottom: 16px;
-  font-size: 14px;
-}
-
-.alert.hidden {
+/* Alert box (hidden by default) */
+.reauthalert {
+  margin: 8px auto 12px;
+  padding: 10px 12px;
+  background: rgba(255,77,79,0.06);
+  color: #ffd6d6;
+  border-radius: 10px;
+  font-size: 13px;
   display: none;
 }
+.reauthalert.active { display:block; }
+.reauthalert.hidden { display:none; }
 
-/* Bottom Links */
-a {
-  text-decoration: none;
+/* Keypad */
+.reauthpin-keypad {
+  display:grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin: 8px auto 16px;
+  width: 100%;
+  max-width: 260px;
+}
+.reauthpin-keypad button {
+  height: 52px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.03);
+  color: var(--text);
+  font-size: 18px;
+  box-shadow: none;
+  transition: background var(--ease), transform var(--ease);
+}
+.reauthpin-keypad button[data-key="0"] { grid-column: 2; }
+.reauthpin-keypad button:active { transform: translateY(1px) scale(0.998); background: rgba(255,255,255,0.05); }
+
+/* delete key special */
+#deleteReauthKey {
+  background: rgba(255,255,255,0.02);
+  color: var(--muted);
 }
 
-a:hover {
-  text-decoration: underline;
+/* Inactivity prompt modal (small card) */
+.Inactivitymodal {
+  align-items: center;
 }
-
-/* Responsiveness */
-@media (min-width: 768px) {
-  .modal-content {
-    padding: 32px;
-  }
-  
-  .pin-inputs input {
-    width: 48px;
-    height: 48px;
-  }
-  
-  .pin-keypad button {
-    width: 56px;
-    height: 56px;
-  }
-} */
-
-/* Accessibility */
-[aria-label] {
-  cursor: default;
-}
-
-
-#inactivityPrompt .modal-content {
+.Inactivitymodal .Inactivitymodal-content {
+  width: 320px;
+  max-width: 94%;
+  border-radius: 12px;
+  padding: 18px;
+  background: linear-gradient(180deg, #111827, #0b1220);
   text-align: center;
+  box-shadow: 0 12px 40px rgba(2,6,23,0.7);
+}
+.Inactivitymodal h3 { color: var(--text); margin:0 0 12px; font-size:18px; }
+.Inactivitymodal button { width: 120px; margin: 0 auto; }
+
+/* Small responsive tweaks */
+@media (max-width: 420px) {
+  .reauthpin-inputs input[data-fg-pin] { width: 48px; height: 48px; font-size: 20px; }
+  .reauthpin-keypad button { height: 48px; font-size: 17px; }
+  .reauthmodal-content { padding: 16px; border-radius: 12px; }
 }
 
-#yesActiveBtn:hover {
-  background: #009688;
+/* Accessibility: show focus ring for keyboard users */
+:focus-visible {
+  outline: var(--focus);
+  outline-offset: 2px;
 }
 
-#yesActiveBtn:focus {
-  outline: 2px solid #00bfa5;
+/* Generic invalid state for inputs */
+.invalid { box-shadow: 0 4px 16px rgba(255,77,79,0.06) !important; }
+
+/* Optional subtle entrance for content */
+.reauthmodal-content,
+.Inactivitymodal-content { transform: translateY(6px); opacity: 0; animation: modalIn 220ms forwards; }
+@keyframes modalIn {
+  to { transform: translateY(0); opacity: 1; }
 }
+
+/* End of reauth CSS */
