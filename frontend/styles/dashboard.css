@@ -2682,7 +2682,7 @@ html.dark-mode .theme-toggle .toggle-knob { transform: translateX(20px); }
 
 
 /* Modal backdrop + base */
-.Inactivitymodal {
+.inactivitymodal {
   position: fixed;
   inset: 0;
   display: flex;
@@ -2752,7 +2752,7 @@ body.modal-opened {
 
 
 /* Modal content card */
-.Inactivitymodal-content {
+.inactivitymodal-content {
   width: min(var(--max-width-modal), 96vw);
   background: linear-gradient(180deg, var(--card), rgba(18,24,38,0.98));
   border-radius: var(--radius);
@@ -2766,7 +2766,7 @@ body.modal-opened {
 
 /* Slight pop animation when added */
 .reauthmodal:not(.hidden) .reauthmodal-content,
-.Inactivitymodal:not(.hidden) .Inactivitymodal-content {
+.inactivitymodal:not(.hidden) .inactivitymodal-content {
   transform: translateY(0);
 }
 
@@ -2851,10 +2851,10 @@ a[style*="color: #f00"] { color: var(--danger); }
 
 
 /* Inactivity prompt modal (small card) */
-.Inactivitymodal {
+.inactivitymodal {
   align-items: center;
 }
-.Inactivitymodal .Inactivitymodal-content {
+.inactivitymodal .inactivitymodal-content {
   width: 320px;
   max-width: 94%;
   border-radius: 12px;
@@ -2863,8 +2863,8 @@ a[style*="color: #f00"] { color: var(--danger); }
   text-align: center;
   box-shadow: 0 12px 40px rgba(2,6,23,0.7);
 }
-.Inactivitymodal h3 { color: var(--text); margin:0 0 12px; font-size:18px; }
-.Inactivitymodal button { width: 120px; margin: 0 auto; }
+.inactivitymodal h3 { color: var(--text); margin:0 0 12px; font-size:18px; }
+.inactivitymodal button { width: 120px; margin: 0 auto; }
 
 
 
@@ -2879,7 +2879,7 @@ a[style*="color: #f00"] { color: var(--danger); }
 
 /* Optional subtle entrance for content */
 .reauthmodal-content,
-.Inactivitymodal-content { transform: translateY(6px); opacity: 0; animation: modalIn 220ms forwards; }
+.inactivitymodal-content { transform: translateY(6px); opacity: 0; animation: modalIn 220ms forwards; }
 @keyframes modalIn {
   to { transform: translateY(0); opacity: 1; }
 }
@@ -2887,3 +2887,7 @@ a[style*="color: #f00"] { color: var(--danger); }
 /* End of reauth CSS */
 
 
+/* use id-based rule so case/casing doesn't bite you */
+#inactivityPrompt.hidden { display: none !important; }
+#inactivityPrompt { position: fixed; inset: 0; display: flex; align-items:center; justify-content:center; z-index:100000; background: rgba(0,0,0,0.5); }
+#inactivityPrompt .inactivitymodal-content { max-width: 320px; /* ... */ }

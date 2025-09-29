@@ -3200,24 +3200,6 @@ function __fg_pin_clearAllInputs() {
     }
   }
 
-  // Inactivity handling
-  function resetInactivityTimer() {
-    clearTimeout(inactivityTimer);
-    clearTimeout(inactivityPopupTimer);
-    inactivityTimer = setTimeout(() => {
-      window.ModalManager.openModal('inactivityModal');
-      inactivityPopupTimer = setTimeout(() => {
-        window.ModalManager.closeModal('inactivityModal');
-        window.checkPinExists((hasPin) => {
-          if (hasPin) {
-            window.ModalManager.openModal('pinVerifyModal');
-          } else {
-            window.ModalManager.openModal('pinModal');
-          }
-        }, 'inactivity');
-      }, 30 * 1000);
-    }, 10 * 60 * 1000);
-  }
 
   // Initialize PIN modal
   function initPinModal() {
@@ -6973,7 +6955,7 @@ window.__secModalController = {
      Inactivity logic
      ----------------------- */
   let idleTimeout = null;
-  const IDLE_TIME = 10 * 60 * 1000; // 10 min prod
+  const IDLE_TIME = 10 * 1000; // 10 min prod
   const PROMPT_TIMEOUT = 5000;
   const PROMPT_AUTO_CLOSE = true;
   let lastActive = Date.now();
