@@ -5532,49 +5532,37 @@ document.querySelectorAll('.contact-box').forEach((box) => {
 
   /* Set biometric UI state */
   /* Set biometric UI state (fixed defaulting & no `|| true` bug) */
+/* Set biometric UI state */
+/* Set biometric UI state */
 function __sec_setBiometrics(parentOn, animate = true) {
   if (!__sec_parentSwitch) { __sec_log.w('parent switch element missing'); return; }
-  __sec_setChecked(__sec_parentSwitch, parentOn);
+  _sec_setChecked(_sec_parentSwitch, parentOn);
   try { localStorage.setItem(__sec_KEYS.biom, parentOn ? '1' : '0'); } catch (e) {}
 
   if (parentOn) {
-    // Read raw stored values so we can distinguish "missing" (null) vs set '0'/'1'
-    const rawLogin = localStorage.getItem(__sec_KEYS.bioLogin); // '1' | '0' | null
-    const rawTx = localStorage.getItem(__sec_KEYS.bioTx);
-
-    // If there's no stored preference, default children to true (first-time enabling).
-    const defaultLogin = rawLogin === null ? true : (rawLogin === '1');
-    const defaultTx = rawTx === null ? true : (rawTx === '1');
-
     if (animate) {
       __sec_revealChildrenAnimated();
-      setTimeout(() => {
-        __sec_setChecked(__sec_bioLogin, defaultLogin);
-        __sec_setChecked(__sec_bioTx, defaultTx);
-
-        // Persist whichever value we actually applied (defensive).
-        try {
-          localStorage.setItem(__sec_KEYS.bioLogin, __sec_isChecked(__sec_bioLogin) ? '1' : '0');
-          localStorage.setItem(__sec_KEYS.bioTx, __sec_isChecked(__sec_bioTx) ? '1' : '0');
-        } catch (e) {}
-      }, 60);
     } else {
       __sec_revealChildrenNoAnimate();
-      __sec_setChecked(__sec_bioLogin, defaultLogin);
-      __sec_setChecked(__sec_bioTx, defaultTx);
-      try {
-        localStorage.setItem(__sec_KEYS.bioLogin, __sec_isChecked(__sec_bioLogin) ? '1' : '0');
-        localStorage.setItem(__sec_KEYS.bioTx, __sec_isChecked(__sec_bioTx) ? '1' : '0');
-      } catch (e) {}
     }
-    __sec_log.i('biom ON', { rawLogin, rawTx, animate });
+
+    // Always force both children on when parent is activated
+    if (__sec_bioLogin) {
+      _sec_setChecked(_sec_bioLogin, true);
+      try { localStorage.setItem(__sec_KEYS.bioLogin, '1'); } catch (e) {}
+    }
+    if (__sec_bioTx) {
+      _sec_setChecked(_sec_bioTx, true);
+      try { localStorage.setItem(__sec_KEYS.bioTx, '1'); } catch (e) {}
+    }
+    __sec_log.i('biom ON', { animate });
   } else {
     try {
       localStorage.setItem(__sec_KEYS.bioLogin, '0');
       localStorage.setItem(__sec_KEYS.bioTx, '0');
     } catch (e) {}
-    if (__sec_bioLogin) __sec_setChecked(__sec_bioLogin, false);
-    if (__sec_bioTx) __sec_setChecked(__sec_bioTx, false);
+    if (_sec_bioLogin) __sec_setChecked(_sec_bioLogin, false);
+    if (_sec_bioTx) __sec_setChecked(_sec_bioTx, false);
     if (animate) __sec_hideChildrenAnimated();
     else {
       if (__sec_bioOptions) {
@@ -5588,24 +5576,24 @@ function __sec_setBiometrics(parentOn, animate = true) {
   }
 }
 
-  /* If both child switches are off, turn the parent off */
-  function __sec_maybeDisableParentIfChildrenOff() {
-    try {
-      if (!__sec_parentSwitch) return;
-      if (!__sec_bioLogin || !__sec_bioTx) return;
-      const loginOn = __sec_isChecked(__sec_bioLogin);
-      const txOn = __sec_isChecked(__sec_bioTx);
-      if (!loginOn && !txOn && __sec_isChecked(__sec_parentSwitch)) {
-        __sec_log.i('Both biometric children off — turning parent OFF');
-        __sec_setBiometrics(false, true);
-      }
-    } catch (err) {
-      __sec_log.e('maybeDisableParentIfChildrenOff error', err);
+/* If both child switches are off, turn the parent off */
+function __sec_maybeDisableParentIfChildrenOff() {
+  try {
+    if (!__sec_parentSwitch) return;
+    if (!_sec_bioLogin || !_sec_bioTx) return;
+    const loginOn = _sec_isChecked(_sec_bioLogin);
+    const txOn = _sec_isChecked(_sec_bioTx);
+    if (!loginOn && !txOn && _sec_isChecked(_sec_parentSwitch)) {
+      __sec_log.i('Both biometric children off — turning parent OFF');
+      __sec_setBiometrics(false, true);
     }
+  } catch (err) {
+    __sec_log.e('maybeDisableParentIfChildrenOff error', err);
   }
+}
 
-  /* Initialize from storage */
-  function __sec_initFromStorage() {
+/* Initialize from storage */
+function __sec_initFromStorage() {
   try {
     const rawBiom = localStorage.getItem(__sec_KEYS.biom); // '1' | '0' | null
     const rawLogin = localStorage.getItem(__sec_KEYS.bioLogin);
@@ -5613,29 +5601,27 @@ function __sec_setBiometrics(parentOn, animate = true) {
     const rawBalance = localStorage.getItem(__sec_KEYS.balance); // '1' | '0' | null
 
     const biomStored = rawBiom === '1';
-    // For child switches: default false if no stored value (so we don't accidentally enable them)
-    // If you'd rather default them to true when parent is enabled for first time, keep the logic in setBiometrics.
     const loginStored = rawLogin === '1';
     const txStored = rawTx === '1';
-    // Balance: default to visible (true) when missing; change if you want opposite.
     const balanceStored = rawBalance === null ? true : (rawBalance === '1');
 
-    if (__sec_parentSwitch) __sec_setChecked(__sec_parentSwitch, biomStored);
+    if (_sec_parentSwitch) __sec_setChecked(_sec_parentSwitch, biomStored);
 
     if (__sec_bioOptions) {
       if (biomStored) {
         __sec_revealChildrenNoAnimate();
-        if (__sec_bioLogin) __sec_setChecked(__sec_bioLogin, loginStored);
-        if (__sec_bioTx) __sec_setChecked(__sec_bioTx, txStored);
+        if (_sec_bioLogin) __sec_setChecked(_sec_bioLogin, loginStored);
+        if (_sec_bioTx) __sec_setChecked(_sec_bioTx, txStored);
+        __sec_maybeDisableParentIfChildrenOff();  // Add: handle inconsistent states
       } else {
         __sec_bioOptions.hidden = true;
         __sec_bioOptions.classList.remove('show');
-        if (__sec_bioLogin) __sec_setChecked(__sec_bioLogin, false);
-        if (__sec_bioTx) __sec_setChecked(__sec_bioTx, false);
+        if (_sec_bioLogin) __sec_setChecked(_sec_bioLogin, false);
+        if (_sec_bioTx) __sec_setChecked(_sec_bioTx, false);
       }
     }
 
-    if (__sec_balanceSwitch) __sec_setChecked(__sec_balanceSwitch, balanceStored);
+    if (_sec_balanceSwitch) __sec_setChecked(_sec_balanceSwitch, balanceStored);
 
     __sec_log.d('initFromStorage', { rawBiom, rawLogin, rawTx, rawBalance, biomStored, loginStored, txStored, balanceStored });
   } catch (err) {
@@ -6483,6 +6469,141 @@ window.__secModalController = {
 })(supabaseClient);
 
 
+/* ---------------------------
+   Top slide-in notifier utils
+   --------------------------- */
+function ensureTopNotifier() {
+  if (document.getElementById('fg-top-notifier')) return document.getElementById('fg-top-notifier');
+  const el = document.createElement('div');
+  el.id = 'fg-top-notifier';
+  el.innerHTML = `<div class="msg" aria-live="polite"></div>
+                  <div class="countdown" style="display:none"></div>
+                  <div class="close" title="Dismiss">✕</div>`;
+  document.body.appendChild(el);
+  el.querySelector('.close').addEventListener('click', () => hideTopNotifier());
+  return el;
+}
+
+function showTopNotifier(message, type = 'info', { autoHide = true, duration = 6000, countdownUntil = null } = {}) {
+  const n = ensureTopNotifier();
+  n.className = ''; // reset classes
+  n.classList.add(type);
+  n.querySelector('.msg').textContent = message;
+  const countdownEl = n.querySelector('.countdown');
+  if (countdownUntil) {
+    countdownEl.style.display = '';
+    updateCountdownDisplay(countdownEl, countdownUntil);
+    startGlobalLockoutTicker(countdownEl, countdownUntil);
+  } else {
+    countdownEl.style.display = 'none';
+  }
+  requestAnimationFrame(() => n.classList.add('show'));
+  if (autoHide && !countdownUntil) {
+    setTimeout(() => hideTopNotifier(), duration);
+  }
+}
+
+function hideTopNotifier() {
+  const n = document.getElementById('fg-top-notifier');
+  if (!n) return;
+  n.classList.remove('show');
+  // stop ticker if any
+  if (window.__fg_top_notifier_interval) {
+    clearInterval(window.__fg_top_notifier_interval);
+    window.__fg_top_notifier_interval = null;
+  }
+}
+
+/* ---------------------------
+   Lockout countdown helpers
+   --------------------------- */
+function updateCountdownDisplay(el, untilIso) {
+  const until = new Date(untilIso);
+  const diff = Math.max(0, until - Date.now());
+  if (diff <= 0) {
+    el.textContent = '';
+    return;
+  }
+  const s = Math.floor(diff / 1000);
+  const mm = Math.floor(s / 60);
+  const ss = s % 60;
+  el.textContent = `${mm}m ${String(ss).padStart(2,'0')}s`;
+}
+
+function startGlobalLockoutTicker(countdownEl, untilIso) {
+  // clear previous
+  if (window.__fg_top_notifier_interval) {
+    clearInterval(window.__fg_top_notifier_interval);
+  }
+  window.__fg_top_notifier_interval = setInterval(() => {
+    updateCountdownDisplay(countdownEl, untilIso);
+    if (new Date(untilIso) <= new Date()) {
+      clearInterval(window.__fg_top_notifier_interval);
+      window.__fg_top_notifier_interval = null;
+      hideTopNotifier();
+      // remove persisted lockout
+      try { localStorage.removeItem('pin_lockout_until'); } catch(e){}
+      // Re-enable inputs if you stored a disabling state
+      enableReauthInputs(true);
+    }
+  }, 1000);
+}
+
+/* Simple helpers to disable/enable PIN inputs + keypad */
+function disableReauthInputs(disabled = true) {
+  try {
+    const inputs = document.querySelectorAll('.reauthpin-inputs input');
+    const keys = document.querySelectorAll('.reauthpin-keypad button');
+    inputs.forEach(i => i.disabled = disabled);
+    keys.forEach(k => k.disabled = disabled);
+  } catch (e) { /* ignore */ }
+}
+
+function enableReauthInputs() { disableReauthInputs(false); }
+
+/* Persist lockout until */
+function persistLockout(untilIso) {
+  try { localStorage.setItem('pin_lockout_until', untilIso); } catch(e){}
+}
+
+/* When page / modal opens, call this to resume any lockout countdown */
+function resumeLockoutIfAny() {
+  try {
+    const untilIso = localStorage.getItem('pin_lockout_until');
+    if (!untilIso) return;
+    const until = new Date(untilIso);
+    if (until > new Date()) {
+      // show notifier and disable inputs
+      disableReauthInputs(true);
+      showTopNotifier('Too many incorrect PINs — locked until', 'error', { autoHide: false, countdownUntil: untilIso });
+    } else {
+      localStorage.removeItem('pin_lockout_until');
+      enableReauthInputs();
+    }
+  } catch(e){ console.error('resumeLockoutIfAny', e); }
+}
+
+/* Open Forget PIN modal (try existing links / ModalManager) */
+function openForgetPinFlow() {
+  // If there is a cached DOM ref (your init caches forgetPinLinkPin) try to click it:
+  try {
+    if (typeof forgetPinLinkPin !== 'undefined' && forgetPinLinkPin) {
+      forgetPinLinkPin.click();
+      return;
+    }
+    if (window.ModalManager && typeof ModalManager.openModal === 'function') {
+      ModalManager.openModal('forgetPinModal');
+      return;
+    }
+    // fallback: open a simple modal or show an alert
+    alert('Please use the "Forget PIN" button in the app to reset your PIN.');
+  } catch (e) {
+    console.error('openForgetPinFlow error', e);
+    alert('Please use the "Forget PIN" button in the app to reset your PIN.');
+  }
+}
+
+
 
 
 /* -----------------------------
@@ -6584,62 +6705,129 @@ window.__secModalController = {
   }
 
   // PIN completion handler (server verification)
-  async function handlePinCompletion() {
-    console.log('handlePinCompletion started');
-    if (processing) {
-      console.log('Already processing, aborting');
-      return;
-    }
-    const pin = currentPin;
-    if (!/^\d{4}$/.test(pin)) {
-      console.log('Invalid PIN format');
-      return;
-    }
-    processing = true;
-
-    try {
-      const session = await safeCall(getSession) || {};
-      const userId = session.user?.id || session.user?.uid || localStorage.getItem('userId');
-      console.log('User ID for PIN verify:', userId);
-      if (!userId) throw new Error('No user ID');
-
-      console.log('Sending PIN to server');
-      const res = await fetch('https://api.flexgig.com.ng/api/reauth-pin', {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
-        },
-        body: JSON.stringify({ userId, pin })
-      });
-
-      if (!res.ok) {
-        const errorText = await res.text();
-        console.error('PIN verify failed:', errorText);
-        throw new Error(errorText || 'Reauth failed');
-      }
-
-      console.log('PIN verified successfully');
-      onSuccessfulReauth();
-    } catch (err) {
-      console.error('PIN completion error:', err);
-      // Notify error (use existing notify if available, or fallback)
-      if (typeof notify === 'function') {
-        notify('Incorrect PIN. Try again.', 'error');
-      } else {
-        if (reauthAlertMsg) reauthAlertMsg.textContent = 'Incorrect PIN. Try again.';
-        if (reauthAlert) {
-          reauthAlert.classList.remove('hidden');
-          reauthAlert.classList.add('error');
-          setTimeout(() => reauthAlert.classList.add('hidden'), 3000);
-        }
-      }
-      resetReauthInputs();
-    } finally {
-      processing = false;
-    }
+  // ----- Replace (or drop in) this handlePinCompletion implementation -----
+async function handlePinCompletion() {
+  console.log('handlePinCompletion started (new robust flow)');
+  if (processing) { console.log('Already processing'); return; }
+  const pin = currentPin;
+  if (!/^\d{4}$/.test(pin)) {
+    showTopNotifier('PIN must be 4 digits', 'error');
+    return;
   }
+  processing = true;
+  try {
+    const session = await safeCall(getSession) || {};
+    const userId = session.user?.id || session.user?.uid || localStorage.getItem('userId');
+    if (!userId) throw new Error('No user ID');
+
+    const res = await fetch('https://api.flexgig.com.ng/api/reauth-pin', {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${localStorage.getItem('authToken') || ''}`
+      },
+      body: JSON.stringify({ userId, pin })
+    });
+
+    // Try to parse JSON body if possible
+    let payload = null;
+    try {
+      payload = await res.json();
+    } catch (e) {
+      payload = null;
+    }
+
+    if (res.ok) {
+      // success path
+      showTopNotifier(payload?.message || 'Reauth successful', 'success');
+      // call your existing success handler
+      if (typeof onSuccessfulReauth === 'function') {
+        try { await onSuccessfulReauth(payload); } catch(e){ console.warn('onSuccessfulReauth error', e); }
+      }
+      // clear inputs
+      if (typeof resetReauthInputs === 'function') resetReauthInputs();
+      // clear any stored lockout
+      try { localStorage.removeItem('pin_lockout_until'); } catch(e){}
+      processing = false;
+      return;
+    }
+
+    // --- Error handling: prefer structured JSON, fallback to text ---
+    const serverMsg = (payload && (payload.message || payload.error)) || (await res.text().catch(()=>'')) || `HTTP ${res.status}`;
+    const serverCode = payload && payload.code ? payload.code : null;
+    const meta = payload && payload.meta ? payload.meta : {};
+
+    console.warn('PIN verify server error', { status: res.status, code: serverCode, msg: serverMsg, meta });
+
+    // Special handling by code
+    switch (serverCode) {
+      case 'INCORRECT_PIN_ATTEMPT': {
+        // meta.attemptsLeft expected from server
+        const left = meta?.attemptsLeft ?? null;
+        showTopNotifier(left ? `Incorrect PIN — ${left} attempt(s) left` : (payload?.message || 'Incorrect PIN'), 'error');
+        // small shake animation on inputs (optional)
+        const wrap = document.querySelector('.reauthpin-inputs');
+        if (wrap) {
+          wrap.classList.add('fg-shake');
+          setTimeout(()=>wrap.classList.remove('fg-shake'), 400);
+        }
+        break;
+      }
+      case 'TOO_MANY_ATTEMPTS':
+      case 'TOO_MANY_ATTEMPTS_EMAIL': {
+        // server should include lockoutUntil in meta.lockoutUntil or we can check Retry-After header
+        let untilIso = meta?.lockoutUntil || null;
+        if (!untilIso) {
+          const ra = res.headers.get('Retry-After');
+          if (ra) {
+            const sec = parseInt(ra, 10);
+            if (!isNaN(sec)) untilIso = new Date(Date.now() + sec * 1000).toISOString();
+          }
+        }
+        if (untilIso) {
+          // persist and show countdown
+          persistLockout(untilIso);
+          disableReauthInputs(true);
+          showTopNotifier(payload?.message || 'Too many incorrect PINs — locked', 'error', { autoHide: false, countdownUntil: untilIso });
+        } else {
+          showTopNotifier(payload?.message || 'Too many incorrect PINs — locked', 'error', { autoHide: false });
+        }
+        break;
+      }
+      case 'PIN_ENTRY_LIMIT_EXCEEDED': {
+        // final path: instruct user to use Forget PIN flow
+        showTopNotifier(payload?.message || 'PIN entry limit reached — use Forget PIN', 'error', { autoHide: false });
+        // call forget-pin handler to open modal (client flow)
+        setTimeout(() => openForgetPinFlow(), 800);
+        break;
+      }
+      default: {
+        // fallback generic message
+        showTopNotifier(payload?.message || serverMsg || 'PIN verification failed', 'error');
+      }
+    }
+
+    // Clear inputs visually so user can try again (but only if not locked)
+    if (!['TOO_MANY_ATTEMPTS','TOO_MANY_ATTEMPTS_EMAIL','PIN_ENTRY_LIMIT_EXCEEDED'].includes(serverCode)) {
+      if (typeof resetReauthInputs === 'function') resetReauthInputs();
+      currentPin = '';
+    } else {
+      // locked -> persist lockout (if server provided lockout meta)
+      if (meta?.lockoutUntil) {
+        persistLockout(meta.lockoutUntil);
+        disableReauthInputs(true);
+      }
+    }
+  } catch (err) {
+    console.error('handlePinCompletion network/error', err);
+    showTopNotifier('Network error. Please try again.', 'error');
+    if (typeof resetReauthInputs === 'function') resetReauthInputs();
+  } finally {
+    processing = false;
+  }
+}
+
 
     function initReauthKeypad() {
     console.log('initReauthKeypad started');
@@ -6960,6 +7148,9 @@ window.__secModalController = {
     } catch (e) {
       console.error('Error setting views:', e);
     }
+    // inside initReauthModal(), after you set reauthAvatar/reauthName etc:
+resumeLockoutIfAny();
+
 
     // Bind PIN inputs
     try {
