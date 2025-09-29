@@ -21,6 +21,8 @@ if (updateProfileModal && updateProfileModal.classList.contains('active')) {
 // --- Fetch User Data ---
 // --- Robust getSession() with guarded updates and stable avatar handling ---
 async function getSession() {
+  if (window.__sessionLoading) return;  // Prevent concurrent calls
+  window.__sessionLoading = true;
   const loadId = Date.now();
   window.__lastSessionLoadId = loadId;
 
@@ -241,6 +243,8 @@ async function getSession() {
   } catch (err) {
     console.error('[ERROR] getSession: Failed to fetch session', err);
     return null;
+  } finally {
+    window.__sessionLoading = false;  // <-- Always release the lock
   }
 }
 
@@ -270,6 +274,7 @@ if (window.location.pathname.includes('dashboard.html')) {
   window.addEventListener('load', () => { // Or 'DOMContentLoaded' if preferred
     console.log('[DEBUG] window.load: Starting MutationObserver');
     observeForElements();
+    onDashboardLoad();
   });
 }
 
@@ -306,6 +311,7 @@ function observeForElements() {
 
 // After getSession succeeds
 async function onDashboardLoad() {
+  await getSession();
   await initReauthModal();
   setupInactivity();
 
@@ -447,38 +453,6 @@ async function loadUserProfile(noCache = false) {
 
 
 
-async function openPinModalForReauth() {
-  try {
-    const res = await fetch('https://api.flexgig.com.ng/api/session', {
-      method: 'GET',
-      credentials: 'include',
-    });
-    if (!res.ok) {
-      console.error('[dashboard.js] openPinModalForReauth: Session invalid');
-      window.location.href = '/'; // Redirect if session is invalid
-      return;
-    }
-    const { user } = await res.json();
-    if (!user.pin) {
-      console.log('[dashboard.js] No PIN set, redirecting to PIN creation');
-      pinModal.classList.remove('hidden');
-      pinTitle.textContent = 'Create PIN';
-      pinSubtitle.textContent = 'Create a 4-digit PIN';
-      step = 'create';
-      resetInputs();
-    } else {
-      pinModal.classList.remove('hidden');
-      pinTitle.textContent = 'Re-enter PIN';
-      pinSubtitle.textContent = 'Enter your 4-digit PIN to continue';
-      resetInputs();
-      step = 'reauth';
-    }
-    console.log('[dashboard.js] PIN modal opened for:', user.pin ? 're-authentication' : 'PIN creation');
-  } catch (err) {
-    console.error('[dashboard.js] openPinModalForReauth error:', err);
-    window.location.href = '/';
-  }
-}
 
 
 
@@ -6548,6 +6522,7 @@ window.__secModalController = {
       yesBtn;
 
   function cacheDomRefs() {
+    console.log('cacheDomRefs called');
     reauthModal = safeQuery('reauthModal');
     biometricView = safeQuery('biometricView');
     pinView = safeQuery('pinView');
@@ -6565,88 +6540,438 @@ window.__secModalController = {
     forgetPinLinkPin = safeQuery('forgetPinLinkPin');
     promptModal = safeQuery('inactivityPrompt');
     yesBtn = safeQuery('yesActiveBtn');
+    console.log('Cached refs - pinView:', !!pinView, 'deleteReauthKey:', !!deleteReauthKey);
   }
 
-  function getReauthInputs() {
+    // --------------------
+  // PIN state (shared)
+  // --------------------
+  let currentPin = '';     // Optional global used by some PIN handlers
+  let firstPin = '';
+  let step = 'reauth';     // 'create' | 'confirm' | 'reauth'
+  let processing = false;
+
+
+    function getReauthInputs() {
+    console.log('getReauthInputs called');
     try {
-      return (pinView && pinView.querySelectorAll) ? Array.from(pinView.querySelectorAll('input[data-fg-pin]')) : [];
+      // Use the inputs under .reauthpin-inputs (you said you won't change HTML)
+      if (pinView && pinView.querySelectorAll) {
+        const inputs = Array.from(pinView.querySelectorAll('.reauthpin-inputs input'));
+        console.log('Found inputs:', inputs.length);
+        return inputs;
+      }
     } catch (e) {
-      return [];
+      console.error('Error in getReauthInputs:', e);
+    }
+    console.log('No inputs found');
+    return [];
+  }
+
+  // PIN completion handler (server verification)
+  async function handlePinCompletion() {
+    console.log('handlePinCompletion started');
+    if (processing) {
+      console.log('Already processing, aborting');
+      return;
+    }
+    const pin = currentPin;
+    if (!/^\d{4}$/.test(pin)) {
+      console.log('Invalid PIN format');
+      return;
+    }
+    processing = true;
+
+    try {
+      const session = await safeCall(getSession) || {};
+      const userId = session.user?.id || session.user?.uid || localStorage.getItem('userId');
+      console.log('User ID for PIN verify:', userId);
+      if (!userId) throw new Error('No user ID');
+
+      console.log('Sending PIN to server');
+      const res = await fetch('https://api.flexgig.com.ng/api/reauth-pin', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        },
+        body: JSON.stringify({ userId, pin })
+      });
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error('PIN verify failed:', errorText);
+        throw new Error(errorText || 'Reauth failed');
+      }
+
+      console.log('PIN verified successfully');
+      onSuccessfulReauth();
+    } catch (err) {
+      console.error('PIN completion error:', err);
+      // Notify error (use existing notify if available, or fallback)
+      if (typeof notify === 'function') {
+        notify('Incorrect PIN. Try again.', 'error');
+      } else {
+        if (reauthAlertMsg) reauthAlertMsg.textContent = 'Incorrect PIN. Try again.';
+        if (reauthAlert) {
+          reauthAlert.classList.remove('hidden');
+          reauthAlert.classList.add('error');
+          setTimeout(() => reauthAlert.classList.add('hidden'), 3000);
+        }
+      }
+      resetReauthInputs();
+    } finally {
+      processing = false;
     }
   }
+
+    function initReauthKeypad() {
+    console.log('initReauthKeypad started');
+    cacheDomRefs(); // ensure pinView & deleteReauthKey are up-to-date
+    if (!pinView) {
+      console.error('pinView not found in initReauthKeypad');
+      return;
+    }
+    console.log('pinView found');
+
+    const inputs = getReauthInputs(); // four readonly inputs in your HTML
+    const keypadButtons = pinView.querySelectorAll('.reauthpin-keypad button');
+    console.log('Keypad buttons found:', keypadButtons.length);
+    const localDelete = pinView.querySelector('#deleteReauthKey');
+    console.log('Local delete found:', !!localDelete);
+
+    // If already bound, just reset display (no re-binding)
+    if (pinView.__keypadBound) {
+      console.log('Keypad already bound, resetting');
+      try { resetReauthInputs(); } catch (e) {
+        console.error('Error resetting in bound check:', e);
+        // fallback: clear inputs UI
+        inputs.forEach(i => { i.value = ''; i.classList.remove('filled'); });
+      }
+      return;
+    }
+    pinView.__keypadBound = true;
+    console.log('Binding keypad');
+
+    // Helper: refresh inputs UI from global currentPin (if your code uses it),
+    // or just use inputs' own values (if your handlers update them).
+    function refreshInputsUI() {
+      console.log('refreshInputsUI called, currentPin:', currentPin);
+      // If existing updatePinInputs() is available, prefer it
+      if (typeof updatePinInputs === 'function') {
+        try { 
+          console.log('Calling existing updatePinInputs');
+          updatePinInputs(); 
+          return; 
+        } catch (e) {
+          console.error('Error in updatePinInputs:', e);
+        }
+      }
+      // fallback: draw masked digits from global currentPin
+      inputs.forEach((inp, idx) => {
+        if (currentPin && idx < currentPin.length) {
+          inp.value = '•';
+          inp.classList.add('filled');
+        } else {
+          inp.value = '';
+          inp.classList.remove('filled');
+        }
+      });
+      console.log('UI refreshed for inputs');
+    }
+
+    // Button click wiring (overwrite handlers to avoid stacking)
+    keypadButtons.forEach((btn, index) => {
+      console.log('Setting up button', index, 'text:', btn.textContent.trim());
+      btn.onclick = () => {
+        console.log('Button clicked, index:', index);
+        const raw = (btn.getAttribute('data-key') || btn.dataset.value || btn.textContent || '').trim();
+        const action = (btn.getAttribute('data-action') || btn.dataset.action || '').trim();
+        console.log('Button raw:', raw, 'action:', action);
+
+        // Clear action
+        if (action === 'clear' || raw.toLowerCase() === 'c') {
+          console.log('Clear action');
+          // prefer existing resetReauthInputs() / resetInputs if available
+          if (typeof resetReauthInputs === 'function') {
+            try { resetReauthInputs(); } catch (e) {
+              console.error('Error in resetReauthInputs:', e);
+            }
+          } else if (typeof resetInputs === 'function') {
+            try { resetInputs(); } catch (e) {
+              console.error('Error in resetInputs:', e);
+            }
+          } else {
+            currentPin = '';
+            refreshInputsUI();
+          }
+          return;
+        }
+
+        // Back/delete action
+        if (action === 'back' || btn.id === 'deleteReauthKey' || raw === '⌫' || raw.toLowerCase() === 'del') {
+          console.log('Delete action');
+          if (typeof handleDelete === 'function') {
+            try { handleDelete(); } catch (e) {
+              console.error('Error in handleDelete:', e);
+            }
+          } else {
+            // fallback: remove last filled input
+            if (currentPin && currentPin.length > 0) {
+              currentPin = currentPin.slice(0, -1);
+              console.log('CurrentPin after delete fallback:', currentPin);
+              refreshInputsUI();
+            } else {
+              // fallback: clear last non-empty input
+              const filled = Array.from(inputs).filter(i => i.value);
+              if (filled.length) {
+                const last = filled[filled.length - 1];
+                last.value = '';
+                last.classList.remove('filled');
+                console.log('Cleared last input fallback');
+              }
+            }
+          }
+          return;
+        }
+
+        // Digit pressed
+        if (/^[0-9]$/.test(raw)) {
+          console.log('Digit pressed:', raw);
+          // If your app exposes inputDigit() (that updates shared currentPin), call it
+          if (typeof inputDigit === 'function') {
+            try { 
+              console.log('Calling existing inputDigit');
+              inputDigit(raw); 
+            } catch (e) { 
+              console.error('Error in inputDigit:', e);
+            }
+            // inputDigit should call updatePinInputs() in your app; if not, refresh
+            refreshInputsUI();
+          } else {
+            // fallback: manage currentPin locally (then try to call completion)
+            if (currentPin.length < 4) {
+              currentPin += raw;
+              console.log('CurrentPin after add fallback:', currentPin);
+              refreshInputsUI();
+              if (currentPin.length === 4) {
+                console.log('PIN complete in fallback, calling handlePinCompletion');
+                handlePinCompletion(); // Now defined
+              }
+            } else {
+              console.log('PIN already full, ignoring');
+            }
+          }
+        } else {
+          console.log('Non-digit button clicked:', raw);
+        }
+      };
+    });
+
+    // Delete key explicit click (if separate)
+    if (localDelete) {
+      console.log('Setting up explicit delete click');
+      localDelete.onclick = () => {
+        console.log('Explicit delete clicked');
+        if (typeof handleDelete === 'function') {
+          try { handleDelete(); } catch (e) {
+            console.error('Error in explicit handleDelete:', e);
+          }
+        } else {
+          if (currentPin.length > 0) {
+            currentPin = currentPin.slice(0, -1);
+            console.log('CurrentPin after explicit delete:', currentPin);
+          }
+          refreshInputsUI();
+        }
+      };
+    }
+
+    // Keyboard support: attach once
+    if (!pinView.__keydownHandler) {
+      console.log('Attaching keyboard handler');
+      pinView.__keydownHandler = (e) => {
+        console.log('Keydown in keypad:', e.key, 'pinView hidden?', pinView.classList.contains('hidden'));
+        if (pinView.classList.contains('hidden')) return;
+        if (/^[0-9]$/.test(e.key)) {
+          console.log('Keyboard digit:', e.key);
+          if (typeof inputDigit === 'function') {
+            try { inputDigit(e.key); } catch (err) {
+              console.error('Error in keyboard inputDigit:', err);
+            }
+            refreshInputsUI();
+          } else {
+            if (currentPin.length < 4) {
+              currentPin += e.key;
+              console.log('CurrentPin after keyboard add:', currentPin);
+              refreshInputsUI();
+              if (currentPin.length === 4) {
+                handlePinCompletion(); // Now defined
+              }
+            }
+          }
+        } else if (e.key === 'Backspace') {
+          console.log('Keyboard backspace');
+          if (typeof handleDelete === 'function') {
+            try { handleDelete(); } catch (err) {
+              console.error('Error in keyboard handleDelete:', err);
+            }
+          } else {
+            if (currentPin.length > 0) {
+              currentPin = currentPin.slice(0, -1);
+              console.log('CurrentPin after keyboard delete:', currentPin);
+            }
+            refreshInputsUI();
+          }
+        } else if (e.key === 'Enter') {
+          console.log('Keyboard enter');
+          handlePinCompletion(); // Now defined
+        }
+      };
+      document.addEventListener('keydown', pinView.__keydownHandler);
+    }
+
+    // initial render/reset
+    console.log('Initial reset in initReauthKeypad');
+    try {
+      if (typeof resetReauthInputs === 'function') {
+        console.log('Calling existing resetReauthInputs');
+        resetReauthInputs();
+      }
+      else {
+        console.log('Defining fallback resetReauthInputs');
+        resetReauthInputs = function () { 
+          console.log('Fallback resetReauthInputs called');
+          inputs.forEach(i => { i.value = ''; i.classList.remove('filled'); }); 
+        };
+      }
+    } catch (e) {
+      console.error('Error in initial reset:', e);
+      inputs.forEach(i => { i.value = ''; i.classList.remove('filled'); });
+    }
+    refreshInputsUI();
+    console.log('initReauthKeypad completed');
+  }
+
+
 
   /* -----------------------
      initReauthModal (prepares modal, binds events)
      - Uses safeCall() to call app's helpers if available
      ----------------------- */
   async function initReauthModal({ show = false } = {}) {
+    console.log('initReauthModal called, show:', show);
     cacheDomRefs();
 
     let reauthNeeded = false;
     try {
       reauthNeeded = !!(await shouldReauth());
+      console.log('Reauth needed:', reauthNeeded);
     } catch (e) {
+      console.error('Error in shouldReauth:', e);
       reauthNeeded = false;
     }
-    if (!reauthNeeded) return;
+    if (!reauthNeeded) {
+      console.log('No reauth needed, exiting');
+      return;
+    }
+
+    // Check for pending reauth on load/reload
+    const pendingReauth = localStorage.getItem('reauthPending');
+    if (pendingReauth && Date.now() - parseInt(pendingReauth) < 300000) { // 5 min window
+      console.log('Pending reauth detected, forcing show');
+      show = true;
+    }
 
     // Populate user info (safe)
     try {
+      console.log('Populating user info');
       const session = await safeCall(getSession) || {};
       if (session && session.user) {
         const displayName = session.user.username || (session.user.fullName || '').split(' ')[0] || 'User';
+        console.log('Display name:', displayName);
         if (reauthName) reauthName.textContent = displayName.charAt(0).toUpperCase() + displayName.slice(1);
         const profilePicture = session.user.profilePicture || localStorage.getItem('profilePicture') || '';
         if (reauthAvatar) {
           if (isValidImageSource(profilePicture)) {
             reauthAvatar.src = `${profilePicture}?v=${Date.now()}`;
             reauthAvatar.style.display = '';
+            console.log('Avatar set');
           } else {
             reauthAvatar.style.display = 'none';
+            console.log('Avatar hidden');
           }
         }
+      } else {
+        console.log('No session.user for populate');
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error('Error populating user info:', e);
+    }
 
     // Check biometrics flag (local) and prepare views
     try {
+      console.log('Checking biometrics');
       const isBiometricsEnabled = localStorage.getItem('biometricsEnabled') === 'true';
+      console.log('Biometrics enabled from local:', isBiometricsEnabled);
       if (biometricView) biometricView.style.display = (isBiometricsEnabled && 'PublicKeyCredential' in window) ? 'block' : 'none';
       if (pinView) pinView.style.display = (biometricView && biometricView.style.display === 'block') ? 'none' : 'block';
       if (switchToBiometric) switchToBiometric.style.display = (isBiometricsEnabled && 'PublicKeyCredential' in window) ? '' : 'none';
       if (switchToPin) switchToPin.style.display = '';
-    } catch (e) {}
+      console.log('Views set - biometric display:', biometricView?.style.display, 'pin display:', pinView?.style.display);
+    } catch (e) {
+      console.error('Error setting views:', e);
+    }
 
     // Bind PIN inputs
     try {
+      console.log('Binding PIN inputs');
       const inputs = getReauthInputs();
-      if (typeof bindPinInputs === 'function') safeCall(bindPinInputs, inputs, pinView, reauthModal, reauthAlert, reauthAlertMsg);
-    } catch (e) {}
+      if (typeof bindPinInputs === 'function') {
+        console.log('Calling existing bindPinInputs');
+        safeCall(bindPinInputs, inputs, pinView, reauthModal, reauthAlert, reauthAlertMsg);
+      } else {
+        console.log('No bindPinInputs found, using keypad init');
+      }
+    } catch (e) {
+      console.error('Error binding PIN inputs:', e);
+    }
 
     // PIN form submit - attach once
     try {
+      console.log('Setting up PIN form submit');
       if (pinView && !pinView.__reauthSubmitBound) {
         pinView.addEventListener('submit', async (ev) => {
+          console.log('PIN form submit triggered');
           ev.preventDefault();
           const inputs = getReauthInputs();
           const pin = inputs.map(i => i.value).join('');
+          console.log('Submitted PIN:', pin);
           if (!/^\d{4}$/.test(pin)) {
+            console.log('Invalid PIN format');
             safeCall(notify, 'Invalid PIN', 'error', reauthAlert, reauthAlertMsg);
             return;
           }
 
           const uidInfo = await safeCall(getUid);
+          console.log('UID info:', !!uidInfo);
           if (!uidInfo || !uidInfo.uid) {
+            console.log('No UID, showing error');
             safeCall(notify, 'Session error', 'error', reauthAlert, reauthAlertMsg);
             setTimeout(() => window.location.href = '/', 1500);
             return;
           }
 
+          console.log('Calling reAuthenticateWithPin with UID:', uidInfo.uid);
           await safeCall(reAuthenticateWithPin, uidInfo.uid, pin, (success) => {
+            console.log('reAuthenticateWithPin callback, success:', success);
             if (success) {
               try {
                 if (reauthModal) reauthModal.classList.add('hidden');
-              } catch (e) {}
+              } catch (e) {
+                console.error('Error hiding modal on success:', e);
+              }
               resetReauthInputs();
               safeCall(getSession);
               onSuccessfulReauth();
@@ -6656,34 +6981,48 @@ window.__secModalController = {
           });
         });
         pinView.__reauthSubmitBound = true;
+        console.log('PIN submit bound');
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error('Error setting up PIN submit:', e);
+    }
 
     // Delete key
     try {
+      console.log('Setting up delete key');
       if (deleteReauthKey && !deleteReauthKey.__bound) {
         deleteReauthKey.addEventListener('click', () => {
+          console.log('Delete key clicked');
           const inputs = getReauthInputs();
           const lastFilled = inputs.reverse().find(inp => inp.value);
           if (lastFilled) {
             lastFilled.value = '';
             const prev = lastFilled.previousElementSibling;
             (prev && prev.focus) ? prev.focus() : lastFilled.focus();
+            console.log('Deleted last filled input');
+          } else {
+            console.log('No filled input to delete');
           }
         });
         deleteReauthKey.__bound = true;
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error('Error setting up delete key:', e);
+    }
 
     // Biometric verify - support multiple creds
     try {
+      console.log('Setting up biometric verify');
       if (verifyBiometricBtn && !verifyBiometricBtn.__bound) {
         verifyBiometricBtn.addEventListener('click', async () => {
+          console.log('Biometric verify clicked');
           try {
             const session = await safeCall(getSession) || {};
             const uid = session.user ? session.user.uid : null;
+            console.log('UID for biometric:', uid);
             if (!uid) throw new Error('No UID');
 
+            console.log('Fetching biometric options');
             const optsRes = await fetch('https://api.flexgig.com.ng/webauthn/auth/options', {
               method: 'POST',
               headers: {
@@ -6694,6 +7033,7 @@ window.__secModalController = {
             });
             if (!optsRes.ok) throw new Error('Options failed');
             const { challenge, rpID, allowCredentials } = await optsRes.json(); // allowCredentials from backend
+            console.log('Biometric options received');
 
             const publicKey = {
               challenge: Uint8Array.from(atob(challenge), c => c.charCodeAt(0)),
@@ -6705,7 +7045,9 @@ window.__secModalController = {
               userVerification: 'required'
             };
 
+            console.log('Getting biometric assertion');
             const assertion = await navigator.credentials.get({ publicKey });
+            console.log('Assertion received, verifying');
             const verifyRes = await fetch('https://api.flexgig.com.ng/webauthn/auth/verify', {
               method: 'POST',
               headers: {
@@ -6729,29 +7071,41 @@ window.__secModalController = {
             });
 
             if (verifyRes.ok) {
+              console.log('Biometric verify successful');
               try {
                 if (reauthModal) reauthModal.classList.add('hidden');
-              } catch (e) {}
+              } catch (e) {
+                console.error('Error hiding modal on biometric success:', e);
+              }
               safeCall(getSession);
               onSuccessfulReauth();
             } else {
+              console.log('Biometric verify failed');
               safeCall(notify, 'Biometric verification failed', 'error', reauthAlert, reauthAlertMsg);
             }
           } catch (err) {
+            console.error('Biometric error:', err);
             safeCall(notify, 'Biometric not available - use PIN', 'error');
             try {
               if (switchToPin) switchToPin.click();
-            } catch (e) {}
+            } catch (e) {
+              console.error('Error switching to PIN:', e);
+            }
           }
         });
         verifyBiometricBtn.__bound = true;
+        console.log('Biometric bound');
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error('Error setting up biometric:', e);
+    }
 
     // Switch views
     try {
+      console.log('Setting up view switches');
       if (switchToPin && !switchToPin.__bound) {
         switchToPin.addEventListener('click', (ev) => {
+          console.log('Switch to PIN clicked');
           ev.preventDefault();
           switchViews(false);
         });
@@ -6759,60 +7113,92 @@ window.__secModalController = {
       }
       if (switchToBiometric && !switchToBiometric.__bound) {
         switchToBiometric.addEventListener('click', (ev) => {
+          console.log('Switch to biometric clicked');
           ev.preventDefault();
           switchViews(true);
         });
         switchToBiometric.__bound = true;
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error('Error setting up switches:', e);
+    }
 
     // Logout & forget
     try {
-      [logoutLinkBio, logoutLinkPin].forEach(link => {
+      console.log('Setting up logout and forget links');
+      [logoutLinkBio, logoutLinkPin].forEach((link, idx) => {
         if (link && !link.__bound) {
           link.addEventListener('click', (ev) => {
+            console.log('Logout clicked, link:', idx);
             ev.preventDefault();
             localStorage.clear();
+            localStorage.removeItem('reauthPending');
             window.location.href = '/';
           });
           link.__bound = true;
         }
       });
-      [forgetPinLinkBio, forgetPinLinkPin].forEach(link => {
+      [forgetPinLinkBio, forgetPinLinkPin].forEach((link, idx) => {
         if (link && !link.__bound) {
           link.addEventListener('click', (ev) => {
+            console.log('Forget PIN clicked, link:', idx);
             ev.preventDefault();
+            localStorage.removeItem('reauthPending');
             window.location.href = '/reset-pin.html';
           });
           link.__bound = true;
         }
       });
-    } catch (e) {}
+    } catch (e) {
+      console.error('Error setting up links:', e);
+    }
+
+    // Init keypad (ensures binding even if PIN view is fallback)
+    initReauthKeypad();
 
     // Modal visibility + ARIA/focus trap
     try {
+      console.log('Handling modal visibility, show:', show);
       if (!show) {
         if (reauthModal) reauthModal.classList.add('hidden');
         if (promptModal) promptModal.classList.add('hidden');
+        console.log('Modal hidden');
       } else {
+        // Set pending flag to prevent bypass
+        localStorage.setItem('reauthPending', Date.now().toString());
+        console.log('Reauth pending flag set');
         if (reauthModal) {
           reauthModal.classList.remove('hidden');
           reauthModal.setAttribute('aria-modal', 'true');
           reauthModal.setAttribute('role', 'dialog');
           const isBio = localStorage.getItem('biometricsEnabled') === 'true' && ('PublicKeyCredential' in window);
+          console.log('Is bio for show:', isBio);
           if (isBio && biometricView) {
             biometricView.style.display = 'block';
             if (pinView) pinView.style.display = 'none';
             verifyBiometricBtn.focus();
+            console.log('Showing biometric view');
           } else {
             if (biometricView) biometricView.style.display = 'none';
             if (pinView) pinView.style.display = 'block';
-            getReauthInputs()[0].focus();
+            const firstInput = getReauthInputs()[0];
+            if (firstInput) firstInput.focus();
+            console.log('Showing PIN view, first input focused');
           }
           trapFocus(reauthModal); // Add focus trap
+          console.log('Modal shown with focus trap');
+          // Pause idle timer when modal shows
+          if (idleTimeout) {
+            clearTimeout(idleTimeout);
+            idleTimeout = null;
+            console.log('Idle timer paused on modal show');
+          }
         }
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error('Error handling visibility:', e);
+    }
+    console.log('initReauthModal completed');
   } // end initReauthModal
 
   /* -----------------------
@@ -6820,10 +7206,15 @@ window.__secModalController = {
      - Prevents tab out of modal
      ----------------------- */
   function trapFocus(modal) {
-    if (!modal) return;
+    console.log('trapFocus called for modal');
+    if (!modal) {
+      console.log('No modal for trapFocus');
+      return;
+    }
     const focusable = modal.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
     const first = focusable[0];
     const last = focusable[focusable.length - 1];
+    console.log('Focusable elements in trap:', focusable.length);
 
     modal.addEventListener('keydown', (ev) => {
       if (ev.key === 'Tab') {
@@ -6831,11 +7222,13 @@ window.__secModalController = {
           if (document.activeElement === first) {
             ev.preventDefault();
             last.focus();
+            console.log('Shift-tab wrapped to last');
           }
         } else {
           if (document.activeElement === last) {
             ev.preventDefault();
             first.focus();
+            console.log('Tab wrapped to first');
           }
         }
       }
@@ -6847,11 +7240,14 @@ window.__secModalController = {
      - Call from settings: __reauth.registerBiometrics()
      ----------------------- */
   async function registerBiometrics() {
+    console.log('registerBiometrics called');
     try {
       const session = await safeCall(getSession);
       if (!session || !session.user) throw new Error('No session');
       const { uid, username, fullName } = session.user;
+      console.log('Session for register:', { uid, username });
 
+      console.log('Fetching register options');
       const optsRes = await fetch('https://api.flexgig.com.ng/webauthn/register/options', {
         method: 'POST',
         headers: {
@@ -6862,8 +7258,13 @@ window.__secModalController = {
       });
       if (!optsRes.ok) throw new Error('Options failed');
       const opts = await optsRes.json();
+      console.log('Register options received');
 
+      console.log('Creating credential');
       const cred = await navigator.credentials.create({ publicKey: opts });
+      console.log('Credential created');
+
+      console.log('Verifying credential');
       const verifyRes = await fetch('https://api.flexgig.com.ng/webauthn/register/verify', {
         method: 'POST',
         headers: {
@@ -6884,12 +7285,15 @@ window.__secModalController = {
         })
       });
       if (!verifyRes.ok) throw new Error('Verify failed');
+      console.log('Register verify successful');
 
       localStorage.setItem('credentialId', cred.id); // For single; for multiple, use array
       localStorage.setItem('biometricsEnabled', 'true');
       safeCall(notify, 'Biometrics enabled!', 'success');
       await initReauthModal(); // Refresh
+      console.log('Biometrics registered');
     } catch (err) {
+      console.error('Register biometrics error:', err);
       safeCall(notify, 'Biometrics setup failed - try again', 'error');
     }
   }
@@ -6900,14 +7304,18 @@ window.__secModalController = {
      - Revokes server-side, clears local
      ----------------------- */
   async function disableBiometrics() {
+    console.log('disableBiometrics called');
     try {
       const session = await safeCall(getSession);
       if (!session || !session.user) throw new Error('No session');
       const uid = session.user.uid;
+      console.log('UID for disable:', uid);
 
       const credentialId = localStorage.getItem('credentialId');
+      console.log('Credential ID:', credentialId);
       if (!credentialId) throw new Error('No credential');
 
+      console.log('Revoking credential');
       const revokeRes = await fetch(`https://api.flexgig.com.ng/webauthn/authenticators/${uid}/revoke`, {
         method: 'POST',
         headers: {
@@ -6917,12 +7325,15 @@ window.__secModalController = {
         body: JSON.stringify({ credentialID: credentialId })
       });
       if (!revokeRes.ok) throw new Error('Revoke failed');
+      console.log('Revoke successful');
 
       localStorage.removeItem('credentialId');
       localStorage.removeItem('biometricsEnabled');
       safeCall(notify, 'Biometrics disabled', 'success');
       await initReauthModal(); // Refresh to PIN view
+      console.log('Biometrics disabled');
     } catch (err) {
+      console.error('Disable biometrics error:', err);
       safeCall(notify, 'Disable failed - try again', 'error');
     }
   }
@@ -6931,24 +7342,41 @@ window.__secModalController = {
      Small helpers
      ----------------------- */
   function switchViews(toBiometric = false) {
+    console.log('switchViews called, toBiometric:', toBiometric);
     try {
       if (toBiometric) {
         if (biometricView) biometricView.style.display = 'block';
         if (pinView) pinView.style.display = 'none';
         verifyBiometricBtn.focus();
+        console.log('Switched to biometric');
       } else {
         if (biometricView) biometricView.style.display = 'none';
         if (pinView) pinView.style.display = 'block';
-        getReauthInputs()[0].focus();
+        const firstInput = getReauthInputs()[0];
+        if (firstInput) firstInput.focus();
+        console.log('Switched to PIN');
+        // Ensure keypad is initialized on switch to PIN
+        initReauthKeypad();
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error('Error in switchViews:', e);
+    }
     resetReauthInputs();
   }
 
   function resetReauthInputs() {
+    console.log('resetReauthInputs called');
+    currentPin = ''; // Reset global PIN
     try {
-      getReauthInputs().forEach(inp => inp.value = '');
-    } catch (e) {}
+      const inputs = getReauthInputs();
+      inputs.forEach(inp => {
+        inp.value = '';
+        inp.classList.remove('filled');
+      });
+      console.log('Inputs reset');
+    } catch (e) {
+      console.error('Error in resetReauthInputs:', e);
+    }
   }
 
   /* -----------------------
@@ -6959,6 +7387,7 @@ window.__secModalController = {
   const PROMPT_TIMEOUT = 5000;
   const PROMPT_AUTO_CLOSE = true;
   let lastActive = Date.now();
+  let reauthModalOpen = false; // Track if reauth is open to pause idle
   try {
     localStorage.setItem('lastActive', String(lastActive));
   } catch (e) {}
@@ -6968,33 +7397,46 @@ window.__secModalController = {
   let __inactivitySetupDone = false;
 
   async function shouldReauth() {
+    console.log('shouldReauth called');
     try {
       const session = await safeCall(getSession);
       const hasPin = !!(session && session.user && session.user.hasPin);
       const hasBio = localStorage.getItem('biometricsEnabled') === 'true' && ('PublicKeyCredential' in window);
+      console.log('shouldReauth - hasPin:', hasPin, 'hasBio:', hasBio);
 
       if (!session) {
         const fallbackHasPin = localStorage.getItem('hasPin') === 'true';
+        console.log('No session, fallback hasPin:', fallbackHasPin);
         return fallbackHasPin || hasBio;
       }
       return hasPin || hasBio;
     } catch (err) {
+      console.error('Error in shouldReauth:', err);
       const hasBio = localStorage.getItem('biometricsEnabled') === 'true' && ('PublicKeyCredential' in window);
       const fallbackHasPin = localStorage.getItem('hasPin') === 'true';
+      console.log('Fallback reauth:', hasBio || fallbackHasPin);
       return hasBio || fallbackHasPin;
     }
   }
 
   async function setupInactivity() {
-    if (__inactivitySetupDone) return;
+    console.log('setupInactivity called');
+    if (__inactivitySetupDone) {
+      console.log('Inactivity already setup');
+      return;
+    }
     __inactivitySetupDone = true;
 
-    if (!(await shouldReauth())) return;
+    if (!(await shouldReauth())) {
+      console.log('No reauth needed for inactivity');
+      return;
+    }
 
     const events = ['mousemove', 'keydown', 'touchstart', 'touchend', 'click', 'scroll'];
     events.forEach(evt => {
       document.addEventListener(evt, resetIdleTimer, { passive: true });
     });
+    console.log('Inactivity events added');
 
     let lastVisibilityChange = 0;
     document.addEventListener('visibilitychange', () => {
@@ -7002,9 +7444,11 @@ window.__secModalController = {
       if (now - lastVisibilityChange < RESET_DEBOUNCE_MS) return;
       lastVisibilityChange = now;
 
+      console.log('Visibility changed to:', document.visibilityState);
       if (document.visibilityState === 'visible') {
         const last = Number(localStorage.getItem('lastActive') || 0);
-        if (Date.now() - last > IDLE_TIME) {
+        if (Date.now() - last > IDLE_TIME && !reauthModalOpen) { // Don't trigger if modal open
+          console.log('Idle on visible, showing prompt');
           showInactivityPrompt().catch(() => {});
         } else {
           resetIdleTimer();
@@ -7012,17 +7456,24 @@ window.__secModalController = {
       } else {
         try {
           localStorage.setItem('lastHiddenAt', String(Date.now()));
-        } catch (e) {}
+        } catch (e) {
+          console.error('Error setting lastHiddenAt:', e);
+        }
       }
     });
 
     resetIdleTimer();
+    console.log('setupInactivity completed');
   }
 
   function resetIdleTimer() {
     const now = Date.now();
-    if (now - lastResetCall < RESET_DEBOUNCE_MS) return;
+    if (now - lastResetCall < RESET_DEBOUNCE_MS) {
+      console.log('Reset debounced');
+      return;
+    }
     lastResetCall = now;
+    console.log('resetIdleTimer called');
 
     if (idleTimeout) {
       clearTimeout(idleTimeout);
@@ -7031,43 +7482,65 @@ window.__secModalController = {
     lastActive = now;
     try {
       localStorage.setItem('lastActive', String(lastActive));
-    } catch (e) {}
+    } catch (e) {
+      console.error('Error setting lastActive:', e);
+    }
 
-    idleTimeout = setTimeout(() => {
-      showInactivityPrompt().catch(() => {});
-    }, IDLE_TIME);
+    if (!reauthModalOpen) { // Only restart if no modal open
+      idleTimeout = setTimeout(() => {
+        console.log('Idle timeout fired');
+        showInactivityPrompt().catch(() => {});
+      }, IDLE_TIME);
+    }
   }
 
   async function showReauthModal() {
+    console.log('showReauthModal called');
     cacheDomRefs();
-    if (!reauthModal) return;
+    if (!reauthModal) {
+      console.error('No reauthModal in showReauthModal');
+      return;
+    }
 
     try {
       await initReauthModal({ show: true });
     } catch (e) {
+      console.error('Error in initReauthModal for show:', e);
       try {
         reauthModal.classList.remove('hidden');
-      } catch (err) {}
+      } catch (err) {
+        console.error('Error removing hidden:', err);
+      }
     }
   }
 
   async function showInactivityPrompt() {
-    if (!(await shouldReauth())) return;
+    console.log('showInactivityPrompt called');
+    if (!(await shouldReauth())) {
+      console.log('No reauth for prompt');
+      return;
+    }
     cacheDomRefs();
     if (!promptModal || !yesBtn) {
+      console.log('No promptModal or yesBtn, showing reauth');
       await showReauthModal();
       return;
     }
-    if (!promptModal.classList.contains('hidden')) return;
+    if (!promptModal.classList.contains('hidden')) {
+      console.log('Prompt already shown');
+      return;
+    }
 
     promptModal.classList.remove('hidden');
     promptModal.setAttribute('aria-modal', 'true');
     promptModal.setAttribute('role', 'dialog');
     yesBtn.focus();
     trapFocus(promptModal); // Focus trap
+    console.log('Prompt shown');
 
     let promptTimeout = null;
     const yesHandler = () => {
+      console.log('Yes handler called');
       try {
         promptModal.classList.add('hidden');
         if (promptTimeout) clearTimeout(promptTimeout);
@@ -7075,21 +7548,29 @@ window.__secModalController = {
           yesBtn.removeEventListener('click', yesHandler);
         } catch (e) {}
         resetIdleTimer();
-      } catch (e) {}
+      } catch (e) {
+        console.error('Error in yesHandler:', e);
+      }
     };
 
     try {
       yesBtn.addEventListener('click', yesHandler, { once: true });
-    } catch (e) {}
+    } catch (e) {
+      console.error('Error adding yes click:', e);
+    }
 
     // Escape key closes prompt (UX)
     const escHandler = (ev) => {
-      if (ev.key === 'Escape') yesHandler();
+      if (ev.key === 'Escape') {
+        console.log('Escape pressed in prompt');
+        yesHandler();
+      }
     };
     document.addEventListener('keydown', escHandler, { once: true });
 
     if (PROMPT_AUTO_CLOSE) {
       promptTimeout = setTimeout(async () => {
+        console.log('Prompt auto-close timeout');
         if (!promptModal.classList.contains('hidden')) {
           promptModal.classList.add('hidden');
           try {
@@ -7103,6 +7584,7 @@ window.__secModalController = {
   }
 
   async function forceInactivityCheck() {
+    console.log('forceInactivityCheck called');
     if (idleTimeout) {
       clearTimeout(idleTimeout);
       idleTimeout = null;
@@ -7111,24 +7593,35 @@ window.__secModalController = {
   }
 
   function onSuccessfulReauth() {
+    console.log('onSuccessfulReauth called');
+    reauthModalOpen = false; // Resume idle
+    localStorage.removeItem('reauthPending'); // Clear pending flag
     try {
       cacheDomRefs();
       if (reauthModal) reauthModal.classList.add('hidden');
       if (promptModal) promptModal.classList.add('hidden');
-    } catch (e) {}
-    resetIdleTimer();
+    } catch (e) {
+      console.error('Error hiding modals on success:', e);
+    }
+    resetIdleTimer(); // Restart idle timer
   }
 
   /* -----------------------
      Boot sequence
      ----------------------- */
   (async function initFlow() {
+    console.log('initFlow started');
     try {
       await initReauthModal({ show: false });
-    } catch (e) {}
+    } catch (e) {
+      console.error('Error in initReauthModal boot:', e);
+    }
     try {
       await setupInactivity();
-    } catch (e) {}
+    } catch (e) {
+      console.error('Error in setupInactivity boot:', e);
+    }
+    console.log('initFlow completed');
   })();
 
   // Expose to global scope
