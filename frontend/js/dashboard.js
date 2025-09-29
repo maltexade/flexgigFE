@@ -7420,51 +7420,54 @@ window.__secModalController = {
   }
 
   async function setupInactivity() {
-    console.log('setupInactivity called');
-    if (__inactivitySetupDone) {
-      console.log('Inactivity already setup');
-      return;
-    }
-    __inactivitySetupDone = true;
-
-    if (!(await shouldReauth())) {
-      console.log('No reauth needed for inactivity');
-      return;
-    }
-
-    const events = ['mousemove', 'keydown', 'touchstart', 'touchend', 'click', 'scroll'];
-    events.forEach(evt => {
-      document.addEventListener(evt, resetIdleTimer, { passive: true });
-    });
-    console.log('Inactivity events added');
-
-    let lastVisibilityChange = 0;
-    document.addEventListener('visibilitychange', () => {
-      const now = Date.now();
-      if (now - lastVisibilityChange < RESET_DEBOUNCE_MS) return;
-      lastVisibilityChange = now;
-
-      console.log('Visibility changed to:', document.visibilityState);
-      if (document.visibilityState === 'visible') {
-        const last = Number(localStorage.getItem('lastActive') || 0);
-        if (Date.now() - last > IDLE_TIME && !reauthModalOpen) { // Don't trigger if modal open
-          console.log('Idle on visible, showing prompt');
-          showInactivityPrompt().catch(() => {});
-        } else {
-          resetIdleTimer();
-        }
-      } else {
-        try {
-          localStorage.setItem('lastHiddenAt', String(Date.now()));
-        } catch (e) {
-          console.error('Error setting lastHiddenAt:', e);
-        }
-      }
-    });
-
-    resetIdleTimer();
-    console.log('setupInactivity completed');
+  console.log('setupInactivity called');
+  if (__inactivitySetupDone) {
+    console.log('Inactivity already setup');
+    return;
   }
+
+  // Check if needed *before* setting flag
+  if (!(await shouldReauth())) {
+    console.log('No reauth needed for inactivity');
+    return;
+  }
+
+  // Only set flag and proceed if reauth is needed
+  __inactivitySetupDone = true;
+
+  const events = ['mousemove', 'keydown', 'touchstart', 'touchend', 'click', 'scroll'];
+  events.forEach(evt => {
+    document.addEventListener(evt, resetIdleTimer, { passive: true });
+  });
+  console.log('Inactivity events added');
+
+  let lastVisibilityChange = 0;
+  document.addEventListener('visibilitychange', () => {
+    const now = Date.now();
+    if (now - lastVisibilityChange < RESET_DEBOUNCE_MS) return;
+    lastVisibilityChange = now;
+
+    console.log('Visibility changed to:', document.visibilityState);
+    if (document.visibilityState === 'visible') {
+      const last = Number(localStorage.getItem('lastActive') || 0);
+      if (Date.now() - last > IDLE_TIME && !reauthModalOpen) { // Don't trigger if modal open
+        console.log('Idle on visible, showing prompt');
+        showInactivityPrompt().catch(() => {});
+      } else {
+        resetIdleTimer();
+      }
+    } else {
+      try {
+        localStorage.setItem('lastHiddenAt', String(Date.now()));
+      } catch (e) {
+        console.error('Error setting lastHiddenAt:', e);
+      }
+    }
+  });
+
+  resetIdleTimer();
+  console.log('setupInactivity completed');
+}
 
   function resetIdleTimer() {
     const now = Date.now();
