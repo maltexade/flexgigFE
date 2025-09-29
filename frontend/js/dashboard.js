@@ -162,6 +162,18 @@ async function getSession() {
         'User';
     }
 
+    // Cache composite user data for fast reauth modals (with timestamp for staleness)
+    const userData = {
+      username: user.username || '',
+      fullName: user.fullName || '',
+      profilePicture: user.profilePicture || '',
+      id: user.uid || user.id || '',
+      hasPin: user.hasPin || false,
+      cachedAt: Date.now() // For 1hr staleness check
+    };
+    localStorage.setItem('userData', JSON.stringify(userData));
+    console.log('[DEBUG] getSession: Cached userData', userData);
+
     try {
       localStorage.setItem('userEmail', user.email || '');
       localStorage.setItem('firstName', firstName);
@@ -217,6 +229,9 @@ async function getSession() {
         ) {
           try {
             localStorage.setItem('profilePicture', finalProfilePicture);
+            // Re-cache userData with updated profilePicture
+            userData.profilePicture = finalProfilePicture;
+            localStorage.setItem('userData', JSON.stringify(userData));
           } catch (err) {
             /* ignore */
           }
@@ -5517,49 +5532,37 @@ document.querySelectorAll('.contact-box').forEach((box) => {
 
   /* Set biometric UI state */
   /* Set biometric UI state (fixed defaulting & no `|| true` bug) */
+/* Set biometric UI state */
+/* Set biometric UI state */
 function __sec_setBiometrics(parentOn, animate = true) {
   if (!__sec_parentSwitch) { __sec_log.w('parent switch element missing'); return; }
-  __sec_setChecked(__sec_parentSwitch, parentOn);
+  _sec_setChecked(_sec_parentSwitch, parentOn);
   try { localStorage.setItem(__sec_KEYS.biom, parentOn ? '1' : '0'); } catch (e) {}
 
   if (parentOn) {
-    // Read raw stored values so we can distinguish "missing" (null) vs set '0'/'1'
-    const rawLogin = localStorage.getItem(__sec_KEYS.bioLogin); // '1' | '0' | null
-    const rawTx = localStorage.getItem(__sec_KEYS.bioTx);
-
-    // If there's no stored preference, default children to true (first-time enabling).
-    const defaultLogin = rawLogin === null ? true : (rawLogin === '1');
-    const defaultTx = rawTx === null ? true : (rawTx === '1');
-
     if (animate) {
       __sec_revealChildrenAnimated();
-      setTimeout(() => {
-        __sec_setChecked(__sec_bioLogin, defaultLogin);
-        __sec_setChecked(__sec_bioTx, defaultTx);
-
-        // Persist whichever value we actually applied (defensive).
-        try {
-          localStorage.setItem(__sec_KEYS.bioLogin, __sec_isChecked(__sec_bioLogin) ? '1' : '0');
-          localStorage.setItem(__sec_KEYS.bioTx, __sec_isChecked(__sec_bioTx) ? '1' : '0');
-        } catch (e) {}
-      }, 60);
     } else {
       __sec_revealChildrenNoAnimate();
-      __sec_setChecked(__sec_bioLogin, defaultLogin);
-      __sec_setChecked(__sec_bioTx, defaultTx);
-      try {
-        localStorage.setItem(__sec_KEYS.bioLogin, __sec_isChecked(__sec_bioLogin) ? '1' : '0');
-        localStorage.setItem(__sec_KEYS.bioTx, __sec_isChecked(__sec_bioTx) ? '1' : '0');
-      } catch (e) {}
     }
-    __sec_log.i('biom ON', { rawLogin, rawTx, animate });
+
+    // Always force both children on when parent is activated
+    if (__sec_bioLogin) {
+      _sec_setChecked(_sec_bioLogin, true);
+      try { localStorage.setItem(__sec_KEYS.bioLogin, '1'); } catch (e) {}
+    }
+    if (__sec_bioTx) {
+      _sec_setChecked(_sec_bioTx, true);
+      try { localStorage.setItem(__sec_KEYS.bioTx, '1'); } catch (e) {}
+    }
+    __sec_log.i('biom ON', { animate });
   } else {
     try {
       localStorage.setItem(__sec_KEYS.bioLogin, '0');
       localStorage.setItem(__sec_KEYS.bioTx, '0');
     } catch (e) {}
-    if (__sec_bioLogin) __sec_setChecked(__sec_bioLogin, false);
-    if (__sec_bioTx) __sec_setChecked(__sec_bioTx, false);
+    if (_sec_bioLogin) __sec_setChecked(_sec_bioLogin, false);
+    if (_sec_bioTx) __sec_setChecked(_sec_bioTx, false);
     if (animate) __sec_hideChildrenAnimated();
     else {
       if (__sec_bioOptions) {
@@ -5573,24 +5576,24 @@ function __sec_setBiometrics(parentOn, animate = true) {
   }
 }
 
-  /* If both child switches are off, turn the parent off */
-  function __sec_maybeDisableParentIfChildrenOff() {
-    try {
-      if (!__sec_parentSwitch) return;
-      if (!__sec_bioLogin || !__sec_bioTx) return;
-      const loginOn = __sec_isChecked(__sec_bioLogin);
-      const txOn = __sec_isChecked(__sec_bioTx);
-      if (!loginOn && !txOn && __sec_isChecked(__sec_parentSwitch)) {
-        __sec_log.i('Both biometric children off — turning parent OFF');
-        __sec_setBiometrics(false, true);
-      }
-    } catch (err) {
-      __sec_log.e('maybeDisableParentIfChildrenOff error', err);
+/* If both child switches are off, turn the parent off */
+function __sec_maybeDisableParentIfChildrenOff() {
+  try {
+    if (!__sec_parentSwitch) return;
+    if (!_sec_bioLogin || !_sec_bioTx) return;
+    const loginOn = _sec_isChecked(_sec_bioLogin);
+    const txOn = _sec_isChecked(_sec_bioTx);
+    if (!loginOn && !txOn && _sec_isChecked(_sec_parentSwitch)) {
+      __sec_log.i('Both biometric children off — turning parent OFF');
+      __sec_setBiometrics(false, true);
     }
+  } catch (err) {
+    __sec_log.e('maybeDisableParentIfChildrenOff error', err);
   }
+}
 
-  /* Initialize from storage */
-  function __sec_initFromStorage() {
+/* Initialize from storage */
+function __sec_initFromStorage() {
   try {
     const rawBiom = localStorage.getItem(__sec_KEYS.biom); // '1' | '0' | null
     const rawLogin = localStorage.getItem(__sec_KEYS.bioLogin);
@@ -5598,29 +5601,27 @@ function __sec_setBiometrics(parentOn, animate = true) {
     const rawBalance = localStorage.getItem(__sec_KEYS.balance); // '1' | '0' | null
 
     const biomStored = rawBiom === '1';
-    // For child switches: default false if no stored value (so we don't accidentally enable them)
-    // If you'd rather default them to true when parent is enabled for first time, keep the logic in setBiometrics.
     const loginStored = rawLogin === '1';
     const txStored = rawTx === '1';
-    // Balance: default to visible (true) when missing; change if you want opposite.
     const balanceStored = rawBalance === null ? true : (rawBalance === '1');
 
-    if (__sec_parentSwitch) __sec_setChecked(__sec_parentSwitch, biomStored);
+    if (_sec_parentSwitch) __sec_setChecked(_sec_parentSwitch, biomStored);
 
     if (__sec_bioOptions) {
       if (biomStored) {
         __sec_revealChildrenNoAnimate();
-        if (__sec_bioLogin) __sec_setChecked(__sec_bioLogin, loginStored);
-        if (__sec_bioTx) __sec_setChecked(__sec_bioTx, txStored);
+        if (_sec_bioLogin) __sec_setChecked(_sec_bioLogin, loginStored);
+        if (_sec_bioTx) __sec_setChecked(_sec_bioTx, txStored);
+        __sec_maybeDisableParentIfChildrenOff();  // Add: handle inconsistent states
       } else {
         __sec_bioOptions.hidden = true;
         __sec_bioOptions.classList.remove('show');
-        if (__sec_bioLogin) __sec_setChecked(__sec_bioLogin, false);
-        if (__sec_bioTx) __sec_setChecked(__sec_bioTx, false);
+        if (_sec_bioLogin) __sec_setChecked(_sec_bioLogin, false);
+        if (_sec_bioTx) __sec_setChecked(_sec_bioTx, false);
       }
     }
 
-    if (__sec_balanceSwitch) __sec_setChecked(__sec_balanceSwitch, balanceStored);
+    if (_sec_balanceSwitch) __sec_setChecked(_sec_balanceSwitch, balanceStored);
 
     __sec_log.d('initFromStorage', { rawBiom, rawLogin, rawTx, rawBalance, biomStored, loginStored, txStored, balanceStored });
   } catch (err) {
@@ -6884,27 +6885,49 @@ window.__secModalController = {
       show = true;
     }
 
-    // Populate user info (safe)
+    // Populate user info (cached first)
     try {
-      console.log('Populating user info');
-      const session = await safeCall(getSession) || {};
-      if (session && session.user) {
-        const displayName = session.user.username || (session.user.fullName || '').split(' ')[0] || 'User';
-        console.log('Display name:', displayName);
-        if (reauthName) reauthName.textContent = displayName.charAt(0).toUpperCase() + displayName.slice(1);
-        const profilePicture = session.user.profilePicture || localStorage.getItem('profilePicture') || '';
-        if (reauthAvatar) {
-          if (isValidImageSource(profilePicture)) {
-            reauthAvatar.src = `${profilePicture}?v=${Date.now()}`;
-            reauthAvatar.style.display = '';
-            console.log('Avatar set');
-          } else {
-            reauthAvatar.style.display = 'none';
-            console.log('Avatar hidden');
-          }
+      console.log('Populating user info from cache/server');
+      let user = null;
+      const cached = localStorage.getItem('userData');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        // Check staleness (1hr = 3600000ms)
+        if (Date.now() - parsed.cachedAt < 3600000) {
+          user = parsed;
+          console.log('Using cached user data');
+        } else {
+          console.log('Cache stale, fetching fresh');
         }
-      } else {
-        console.log('No session.user for populate');
+      }
+      if (!user) { // Fallback to server only if cache empty/stale
+        const session = await safeCall(getSession) || {};
+        user = session.user || {};
+        // Re-cache on fetch
+        const userData = {
+          username: user.username || '',
+          fullName: user.fullName || '',
+          profilePicture: user.profilePicture || '',
+          id: user.uid || user.id || '',
+          hasPin: user.hasPin || false,
+          cachedAt: Date.now()
+        };
+        localStorage.setItem('userData', JSON.stringify(userData));
+        console.log('Fresh data fetched and cached');
+      }
+      const displayName = user.username || (user.fullName || '').split(' ')[0] || 'User';
+      console.log('Display name:', displayName);
+      if (reauthName) reauthName.textContent = displayName.charAt(0).toUpperCase() + displayName.slice(1);
+      const profilePicture = user.profilePicture || localStorage.getItem('profilePicture') || '';
+      if (reauthAvatar) {
+        if (isValidImageSource(profilePicture)) {
+          reauthAvatar.src = `${profilePicture}?v=${Date.now()}`;
+          reauthAvatar.style.display = '';
+          console.log('Avatar set');
+        } else {
+          reauthAvatar.style.display = 'none';
+          console.log('Avatar hidden');
+        }
       }
     } catch (e) {
       console.error('Error populating user info:', e);
@@ -7191,12 +7214,6 @@ window.__secModalController = {
           }
           trapFocus(reauthModal); // Add focus trap
           console.log('Modal shown with focus trap');
-          // Pause idle timer when modal shows
-          if (idleTimeout) {
-            clearTimeout(idleTimeout);
-            idleTimeout = null;
-            console.log('Idle timer paused on modal show');
-          }
         }
       }
     } catch (e) {

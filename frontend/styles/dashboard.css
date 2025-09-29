@@ -2696,6 +2696,14 @@ html.dark-mode .theme-toggle .toggle-knob { transform: translateX(20px); }
   overscroll-behavior: contain; /* block pull-to-refresh on mobile */
 }
 
+.reauthmodal {         /* top:0; right:0; bottom:0; left:0; */
+  align-items: center;       /* vertical center */
+  justify-content: center;   /* horizontal center */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  box-sizing: border-box;
+}
+
 
 @media (max-width: 600px) {
   .reauthmodal-content,
