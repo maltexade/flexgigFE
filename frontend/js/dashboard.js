@@ -7169,6 +7169,10 @@ window.__secModalController = {
         console.log('Reauth pending flag set');
         if (reauthModal) {
           reauthModal.classList.remove('hidden');
+          reauthModalOpen = true;
+          clearTimeout(idleTimeout);
+          idleTimeout = null;
+          console.log('Reauth modal opened: inactivity halted');
           reauthModal.setAttribute('aria-modal', 'true');
           reauthModal.setAttribute('role', 'dialog');
           const isBio = localStorage.getItem('biometricsEnabled') === 'true' && ('PublicKeyCredential' in window);
@@ -7519,6 +7523,10 @@ window.__secModalController = {
 
   async function showInactivityPrompt() {
     console.log('showInactivityPrompt called');
+    if (reauthModalOpen) {
+      console.log('Inactivity prompt skipped: reauth modal active');
+      return;
+    }
     if (!(await shouldReauth())) {
       console.log('No reauth for prompt');
       return;
@@ -7596,6 +7604,7 @@ window.__secModalController = {
   }
 
   function onSuccessfulReauth() {
+    console.log('Reauth modal closed: inactivity resumed');
     console.log('onSuccessfulReauth called');
     reauthModalOpen = false; // Resume idle
     localStorage.removeItem('reauthPending'); // Clear pending flag
