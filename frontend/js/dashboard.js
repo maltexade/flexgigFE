@@ -6484,11 +6484,24 @@ function ensureTopNotifier() {
   return el;
 }
 
+// make sure message is a string (safe)
+function stringifyMessage(m) {
+  if (m == null) return '';
+  if (typeof m === 'string') return m;
+  try {
+    // If it's an object with useful fields, show them nicely
+    if (m.message || m.error) return (m.message || m.error) + (m.meta ? ` — ${JSON.stringify(m.meta)}` : '');
+    return typeof m.toString === 'function' ? m.toString() : JSON.stringify(m);
+  } catch (e) {
+    return JSON.stringify(m);
+  }
+}
+
 function showTopNotifier(message, type = 'info', { autoHide = true, duration = 6000, countdownUntil = null } = {}) {
   const n = ensureTopNotifier();
   n.className = ''; // reset classes
   n.classList.add(type);
-  n.querySelector('.msg').textContent = message;
+  n.querySelector('.msg').textContent = stringifyMessage(message);
   const countdownEl = n.querySelector('.countdown');
   if (countdownUntil) {
     countdownEl.style.display = '';
@@ -6502,6 +6515,7 @@ function showTopNotifier(message, type = 'info', { autoHide = true, duration = 6
     setTimeout(() => hideTopNotifier(), duration);
   }
 }
+
 
 function hideTopNotifier() {
   const n = document.getElementById('fg-top-notifier');
