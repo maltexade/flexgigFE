@@ -14,9 +14,32 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <link href="https://fonts.googleapis.com/css2?family=Belanosima:wght@400;600;700&family=Cinzel+Decorative:wght@400;700;900&family=MuseoModerno:ital,wght@0,100..900;1,100..900&display=swap" rel="stylesheet">
 
+  <!-- 🚀 NEW: Service Worker Registration -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/service-worker.js')
+          .then(reg => console.log('dashboard.html: Service Worker registered:', reg.scope))
+          .catch(err => console.error('dashboard.html: Service Worker registration failed:', err));
+      });
+    }
+  </script>
 
 </head>
 <body>
+  <!-- 🚀 NEW: Status Banner (hidden by default) -->
+<div id="status-banner" class="status-banner hidden">
+  <span>Alert: </span><span id="banner-msg"></span>
+  <button onclick="hideBanner()" style="margin-left: 10px;">×</button>
+</div>
+<style>
+  .status-banner {
+    position: fixed; top: 0; left: 0; width: 100%; background: #ef4444; color: white; 
+    text-align: center; z-index: 9999; padding: 10px; font-family: Manrope, sans-serif;
+  }
+  .status-banner.hidden { display: none; }
+  .status-banner button { background: none; border: none; color: white; font-size: 20px; cursor: pointer; }
+</style>
 
 
   <div id="content">

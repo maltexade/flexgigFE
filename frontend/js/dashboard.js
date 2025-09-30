@@ -31,6 +31,9 @@ async function fetchWithAutoRefresh(url, opts = {}) {
   return res;
 }
 
+// 🚀 NEW: App Version (BUMP ON EACH DEPLOY, e.g., '1.0.1')
+const APP_VERSION = '1.0.0';
+
 
 const updateProfileModal = document.getElementById('updateProfileModal');
 if (updateProfileModal && updateProfileModal.classList.contains('active')) {
@@ -382,7 +385,109 @@ async function onDashboardLoad() {
   if (Date.now() - last > IDLE_TIME && await shouldReauth()) {
     showInactivityPrompt();
   }
+
+
+
+  // 🚀 NEW: Automatic Updates & Notifications
+  const STATUS_BANNER = document.getElementById('status-banner');
+  const BANNER_MSG = document.getElementById('banner-msg');
+
+  async function pollStatus() {
+    try {
+      const res = await fetch('/api/status', { credentials: 'include' });
+      if (!res.ok) throw new Error('Status fetch failed');
+      const { status, message } = await res.json();
+      if (status === 'down' && message) {
+        showBanner(message);
+      } else {
+        hideBanner();
+      }
+    } catch (err) {
+      showBanner('Network downtime detected. Retrying...');
+    }
+  }
+
+  function showBanner(msg) {
+    if (STATUS_BANNER && BANNER_MSG) {
+      BANNER_MSG.textContent = msg;
+      STATUS_BANNER.classList.remove('hidden');
+    }
+  }
+
+  function hideBanner() {
+    if (STATUS_BANNER) STATUS_BANNER.classList.add('hidden');
+  }
+
+  // Network status listener
+  window.addEventListener('online', () => {
+    console.log('[DEBUG] Back online, polling status');
+    hideBanner();
+    pollStatus();
+  });
+  window.addEventListener('offline', () => {
+    console.log('[DEBUG] Went offline');
+    showBanner('You are offline. Working with cached data.');
+  });
+
+  // SW Registration & Update Listener
+  async function registerSW() {
+    if ('serviceWorker' in navigator) {
+      try {
+        const reg = await navigator.serviceWorker.register('/service-worker.js');
+        console.log('[DEBUG] SW registered', reg);
+
+        // Listen for updates
+        reg.addEventListener('updatefound', () => {
+          const newWorker = reg.installing;
+          newWorker.addEventListener('statechange', () => {
+            if (newWorker.state === 'installed') {
+              if (navigator.serviceWorker.controller) {
+                // New content available; reload after 2s
+                console.log('[DEBUG] New SW version available. Reloading...');
+                setTimeout(() => {
+                  if (confirm('Update available! Reload for latest features?')) {
+                    window.location.reload();
+                  }
+                }, 2000);
+              } else {
+                // First install
+                console.log('[DEBUG] SW installed, page reload needed');
+                window.location.reload();
+              }
+            }
+          });
+        });
+
+        reg.addEventListener('activated', (e) => {
+          if (e.isUpdate) console.log('[DEBUG] SW activated - new cache loaded');
+        });
+      } catch (err) {
+        console.warn('[WARN] SW registration failed', err);
+      }
+    }
+  }
+
+  // Version check (fetches manifest to detect deploy)
+  async function checkForUpdates() {
+    try {
+      const res = await fetch(`/frontend/pwa/manifest.json?v=${APP_VERSION}`);
+      if (!res.ok) throw new Error('Version check failed');
+      console.log('[DEBUG] App up-to-date');
+    } catch (err) {
+      console.log('[DEBUG] Version mismatch - triggering reload');
+      window.location.reload();
+    }
+  }
+
+  // 🚀 Integrate: Register SW, check updates, start polling
+  registerSW();
+  checkForUpdates();
+  pollStatus(); // Initial
+  setInterval(pollStatus, 30000); // Every 30s
+
+
 }
+
 
 // Call in load: onDashboardLoad();
 
