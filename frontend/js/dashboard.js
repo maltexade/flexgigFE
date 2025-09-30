@@ -517,18 +517,21 @@ window.addEventListener('offline', () => showBanner('You are offline. Working wi
 
 // 🚀 Setup broadcast subscription
 function handleBroadcast(payload) {
-  console.log('[BROADCAST RECEIVED]', payload.new);
-  const { message, url } = payload.new;
-  showBanner(message);
+  console.log('[BROADCAST RECEIVED]', payload);
+  const { message, url } = payload.payload || {};  // broadcast shape
+  if (message) {
+    showBanner(message);
 
-  // Also send to SW for system notifications
-  if (navigator.serviceWorker?.controller) {
-    navigator.serviceWorker.controller.postMessage({
-      type: 'BROADCAST_NOTIFICATION',
-      payload: { message, url }
-    });
+    // Also push to service worker notification
+    if (navigator.serviceWorker?.controller) {
+      navigator.serviceWorker.controller.postMessage({
+        type: 'BROADCAST_NOTIFICATION',
+        payload: { message, url }
+      });
+    }
   }
 }
+
 
 
 function setupBroadcastSubscription() {
