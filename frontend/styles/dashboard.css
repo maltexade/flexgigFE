@@ -21,6 +21,7 @@
       font-family: 'Manrope', sans-serif !important;
       background-color: var(--bg);
       color: #ffffff;
+      padding-top: 6px;
     }
     html, body, h1, h2, h3, h4, h5, h6, p,
     button, input, select, textarea, button, a {
@@ -2942,3 +2943,62 @@ a[style*="color: #f00"] { color: var(--danger); }
   100% { transform: translateX(0); }
 }
 .fg-shake { animation: fgshake 360ms ease-in-out; }
+
+
+
+.banner-wrapper {
+  position: sticky; /* stays visible when scrolling */
+  top: 0;
+  z-index: 9999;
+  display: flex;
+  justify-content: center;
+  width: 100%;
+
+}
+
+.status-banner {
+  width: 95%;               /* only 95% width */
+  background: #00AAFF;
+  color: white;
+  padding: 5px 10px;
+  border-radius: 20px;
+  font-family: 'Belanosima', sans-serif;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-banner.hidden {
+  display: none;
+}
+
+.status-banner .icon {
+  flex-shrink: 0; /* keep icon fixed */
+}
+
+.scroll-container {
+  overflow: hidden;
+  white-space: nowrap;
+  flex: 1;
+  position: relative;
+}
+
+.scroll-inner {
+  display: inline-block;
+  animation: scroll-left 20s linear infinite;
+}
+
+.scroll-text {
+  display: inline-block;
+  padding-right: 50px; /* Adjust this for the gap between messages */
+}
+
+@keyframes scroll-left {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}

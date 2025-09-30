@@ -13,7 +13,7 @@ const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // 🚀 Global banner helpers
 function showBanner(msg) {
   const STATUS_BANNER = document.getElementById('status-banner');
-  const BANNER_MSG = document.getElementById('banner-msg');
+  const BANNER_MSG = document.querySelector('.banner-msg');
   if (STATUS_BANNER && BANNER_MSG) {
     BANNER_MSG.textContent = msg;
     STATUS_BANNER.classList.remove('hidden');
@@ -409,7 +409,7 @@ async function onDashboardLoad() {
 
   // 🚀 NEW: Automatic Updates & Notifications
   const STATUS_BANNER = document.getElementById('status-banner');
-  const BANNER_MSG = document.getElementById('banner-msg');
+  const BANNER_MSG = document.querySelector('.banner-msg');
 
   async function pollStatus() {
     try {
