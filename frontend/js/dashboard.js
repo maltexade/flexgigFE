@@ -11,19 +11,43 @@ const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 
 // 🚀 Global banner helpers
-function showBanner(msg) {
-  const STATUS_BANNER = document.getElementById('status-banner');
-  const BANNER_MSG = document.querySelector('.banner-msg');
-  if (STATUS_BANNER && BANNER_MSG) {
-    BANNER_MSG.textContent = msg;
-    STATUS_BANNER.classList.remove('hidden');
+// Put this in your JS file (replace old showBanner)
+
+function setBannerMessage(msg, repeatTimes = 6) {
+  // create repeated content so the two spans together form a long strip
+  const repeated = (msg).repeat(repeatTimes);
+
+  document.querySelectorAll('.banner-msg').forEach(el => {
+    el.textContent = repeated;
+  });
+
+  // restart CSS animation so measurements reflow and animation restarts cleanly
+  const inner = document.querySelector('.scroll-inner');
+  if (inner) {
+    inner.style.animation = 'none';
+    // force reflow
+    void inner.offsetWidth;
+    inner.style.animation = '';
   }
+}
+
+function showBanner(msg) {
+  // ensure the banner element id matches your HTML
+  const STATUS_BANNER = document.getElementById('status-banner');
+  if (!STATUS_BANNER) return;
+  setBannerMessage(msg, 1); // repeat 6 times; increase if message is short
+  STATUS_BANNER.classList.remove('hidden');
 }
 
 function hideBanner() {
   const STATUS_BANNER = document.getElementById('status-banner');
   if (STATUS_BANNER) STATUS_BANNER.classList.add('hidden');
 }
+
+// close button
+document.addEventListener('click', (e) => {
+  if (e.target && e.target.id === 'banner-close') hideBanner();
+});
 
 
 
@@ -7848,7 +7872,7 @@ resumeLockoutIfAny();
      Inactivity logic
      ----------------------- */
   let idleTimeout = null;
-  const IDLE_TIME = 10 * 1000; // 10 min prod
+  const IDLE_TIME = 10 * 60 * 1000; // 10 min prod
   const PROMPT_TIMEOUT = 5000;
   const PROMPT_AUTO_CLOSE = true;
   let lastActive = Date.now();

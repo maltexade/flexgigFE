@@ -2991,7 +2991,7 @@ a[style*="color: #f00"] { color: var(--danger); }
 
 .scroll-text {
   display: inline-block;
-  padding-right: 50px; /* Adjust this for the gap between messages */
+  padding-right: 90px; /* Adjust this for the gap between messages */
 }
 
 @keyframes scroll-left {
