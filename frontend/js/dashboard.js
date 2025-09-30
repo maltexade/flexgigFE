@@ -13,30 +13,23 @@ const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // 🚀 Global banner helpers
 // Put this in your JS file (replace old showBanner)
 
-// Global banner helpers
 function setBannerMessage(msg, repeatTimes = 6) {
-  // create repeated content so the two spans together form a long strip
   const repeated = msg.repeat(repeatTimes);
-
   document.querySelectorAll('.banner-msg').forEach(el => {
     el.textContent = repeated;
   });
-
-  // restart CSS animation so measurements reflow and animation restarts cleanly
   const inner = document.querySelector('.scroll-inner');
   if (inner) {
     inner.style.animation = 'none';
-    // force reflow
     void inner.offsetWidth;
     inner.style.animation = '';
   }
 }
 
 function showBanner(msg) {
-  // ensure the banner element id matches your HTML
   const STATUS_BANNER = document.getElementById('status-banner');
   if (!STATUS_BANNER) return;
-  setBannerMessage(msg, 6); // repeat 6 times; increase if message is short
+  setBannerMessage(msg, 6); // Ensure long repeat for scrolling
   STATUS_BANNER.classList.remove('hidden');
 }
 
@@ -405,14 +398,13 @@ function observeForElements() {
 
 // After getSession succeeds
 // After getSession succeeds (now cache-first)
-// After getSession succeeds (now cache-first)
 async function onDashboardLoad() {
   // Instant cache render first
   const cachedUserData = localStorage.getItem('userData');
   if (cachedUserData) {
     try {
       const parsed = JSON.parse(cachedUserData);
-      if (Date.now() - parsed.cachedAt < 300000) { // 5min TTL
+      if (Date.now() - parsed.cachedAt < 300000) {
         const firstName = parsed.fullName?.split(' ')[0] || 'User';
         const domReady = await waitForDomReady(); // Reuse your func
         if (domReady) applySessionToDOM(parsed, firstName);
@@ -431,66 +423,115 @@ async function onDashboardLoad() {
     showInactivityPrompt();
   }
 
-  // NEW: Automatic Updates & Notifications
+
+
+  // 🚀 NEW: Automatic Updates & Notifications
   const STATUS_BANNER = document.getElementById('status-banner');
   const BANNER_MSG = document.querySelector('.banner-msg');
 
   async function pollStatus() {
     try {
-      console.log('[DEBUG] pollStatus: Fetching /api/status');
       const res = await fetch('/api/status', { credentials: 'include' });
       if (!res.ok) throw new Error('Status fetch failed');
       const { status, message } = await res.json();
-      console.log('[DEBUG] pollStatus: Received', { status, message: message?.slice(0, 50) + '...' });
       if (status === 'down' && message) {
         showBanner(message);
       } else {
-        // Only hide if explicitly not down (avoids hiding active banners)
-        if (STATUS_BANNER && !STATUS_BANNER.classList.contains('hidden')) {
-          hideBanner();
-        }
+        hideBanner();
       }
     } catch (err) {
-      console.error('[ERROR] pollStatus: Failed', err);
-      // Optional: Show generic error banner briefly
-      // showBanner('Network issue detected. Checking...');
-      // setTimeout(hideBanner, 5000);
+      showBanner('Network downtime detected. Retrying...');
     }
   }
 
-  // Subscribe to Supabase Realtime channel for instant updates
-  const channel = supabaseClient.channel('network-status');
-  channel
-    .on('broadcast', { event: 'network-update' }, ({ payload }) => {
-      console.log('[DEBUG] Realtime push received:', payload);
-      if (payload.status === 'down' && payload.message) {
-        showBanner(payload.message);  // Instant display
-      } else {
-        hideBanner();  // Instant hide
-      }
-    })
-    .subscribe((status) => {
-      console.log('[DEBUG] Realtime subscription status:', status);
-      if (status === 'SUBSCRIBED') {
-        // Initial fetch moved to pollStatus() for consistency—no separate fetch here
-      }
-    });
 
-  // Banner: Immediate status check on load (fixes reload issue)
-  pollStatus();
 
-  // Backup: Poll every 30s if banner is visible (low overhead)
-  const pollInterval = setInterval(() => {
-    if (STATUS_BANNER && !STATUS_BANNER.classList.contains('hidden')) {
-      pollStatus();
+// Subscribe to Supabase Realtime channel for instant updates
+const channel = supabaseClient.channel('network-status');
+channel
+  .on('broadcast', { event: 'network-update' }, ({ payload }) => {
+    console.log('[DEBUG] Realtime push received:', payload);
+    if (payload.status === 'down' && payload.message) {
+      showBanner(payload.message);  // Instant display
+    } else {
+      hideBanner();  // Instant hide
     }
-  }, 30000);
+  })
+  .subscribe((status) => {
+    console.log('[DEBUG] Realtime subscription status:', status);
+    if (status === 'SUBSCRIBED') {
+      // Optional: Fetch initial status via API if needed
+      fetch(`${window.__SEC_API_BASE}/api/status`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.status === 'down' && data.message) showBanner(data.message);
+        })
+        .catch(() => showBanner('Network issue detected. Checking...'));
+    }
+  });
 
-  // Clean up interval on page unload
-  window.addEventListener('beforeunload', () => clearInterval(pollInterval));
+// Network listeners (fallback for offline)
+window.addEventListener('online', hideBanner);
+window.addEventListener('offline', () => showBanner('You are offline. Working with cached data.'));
+
+  // SW Registration & Update Listener
+  async function registerSW() {
+    if ('serviceWorker' in navigator) {
+      try {
+        const reg = await navigator.serviceWorker.register('/service-worker.js');
+        console.log('[DEBUG] SW registered', reg);
+
+        // Listen for updates
+        reg.addEventListener('updatefound', () => {
+          const newWorker = reg.installing;
+          newWorker.addEventListener('statechange', () => {
+            if (newWorker.state === 'installed') {
+              if (navigator.serviceWorker.controller) {
+                // New content available; reload after 2s
+                console.log('[DEBUG] New SW version available. Reloading...');
+                setTimeout(() => {
+                  if (confirm('Update available! Reload for latest features?')) {
+                    window.location.reload();
+                  }
+                }, 2000);
+              } else {
+                // First install
+                console.log('[DEBUG] SW installed, page reload needed');
+                window.location.reload();
+              }
+            }
+          });
+        });
+
+        reg.addEventListener('activated', (e) => {
+          if (e.isUpdate) console.log('[DEBUG] SW activated - new cache loaded');
+        });
+      } catch (err) {
+        console.warn('[WARN] SW registration failed', err);
+      }
+    }
+  }
+
+  // Version check (fetches manifest to detect deploy)
+  async function checkForUpdates() {
+    try {
+      const res = await fetch(`/frontend/pwa/manifest.json?v=${APP_VERSION}`);
+      if (!res.ok) throw new Error('Version check failed');
+      console.log('[DEBUG] App up-to-date');
+    } catch (err) {
+      console.log('[DEBUG] Version mismatch - triggering reload');
+      window.location.reload();
+    }
+  }
+
+  // 🚀 Integrate: Register SW, check updates, start polling
+  registerSW();
+  checkForUpdates();
+  pollStatus(); // Initial
+  setInterval(pollStatus, 30000); // Every 30s
+
+
 }
-
-
 
 // 🚀 Setup broadcast subscription
 function handleBroadcast(payload) {
