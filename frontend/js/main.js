@@ -51,34 +51,34 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
   // Session helpers
   // -----------------------------
   async function getSession() {
-  try {
-    console.log('[DEBUG] main.js: getSession: Initiating fetch');
-    const res = await fetch(`${BACKEND_URL}/api/session`, { credentials: 'include' });
-    console.log('[DEBUG] main.js: getSession: Response status', res.status, 'Headers', [...res.headers]);
-    if (!res.ok) {
-      const text = await res.text();
-      console.error('[main.js] Session API returned error:', res.status, text);
-      if (res.status === 401) {
-        window.location.href = '/frontend/html/login.html';
+    try {
+      console.log('[DEBUG] main.js: getSession: Initiating fetch');
+      const res = await fetch(`${BACKEND_URL}/api/session`, { credentials: 'include' });
+      console.log('[DEBUG] main.js: getSession: Response status', res.status, 'Headers', [...res.headers]);
+      if (!res.ok) {
+        const text = await res.text();
+        console.error('[main.js] Session API returned error:', res.status, text);
+        if (res.status === 401) {
+          window.location.href = '/frontend/html/login.html';
+        } else {
+          alert('Something went wrong while loading your session. Please try again.');
+        }
+        return null;
+      }
+      const data = await res.json();
+      console.log('[main.js] getSession: User data:', data.user);
+      return data.user;
+    } catch (err) {
+      console.error('[main.js] Session fetch error:', err);
+      if (!qs('#content')) {
+        console.error('[ERROR] main.js: #content element not found in getSession');
+        alert('Error: Page not fully loaded. Please refresh the page.');
       } else {
-        alert('Something went wrong while loading your session. Please try again.');
+        console.log('Unable to reach the server. Please check your internet connection and try again.');
       }
       return null;
     }
-    const data = await res.json();
-    console.log('[main.js] getSession: User data:', data.user);
-    return data.user;
-  } catch (err) {
-    console.error('[main.js] Session fetch error:', err);
-    if (!qs('#content')) {
-      console.error('[ERROR] main.js: #content element not found in getSession');
-      alert('Error: Page not fully loaded. Please refresh the page.');
-    } else {
-      console.log('Unable to reach the server. Please check your internet connection and try again.');
-    }
-    return null;
   }
-}
 
   async function ensureSignedInFromSession() {
     setLoading(true, 'Checking authentication...');
@@ -123,61 +123,68 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
   let router = null;
 
   function setupRouter() {
-  if (!window.Navigo) {
-    console.error('[main.js] Navigo is not defined.');
-    return;
-  }
-  // Patch Navigo to ignore modal history states
-window.addEventListener("popstate", (e) => {
-  if (e.state && e.state.modal) {
-    console.log("[DEBUG] Navigo ignored modal popstate", e.state);
-    return; // 🚫 do not let Navigo handle this one
-  }
-});
+    if (!window.Navigo) {
+      console.error('[main.js] Navigo is not defined.');
+      return;
+    }
+    // Patch Navigo to ignore modal history states
+    window.addEventListener("popstate", (e) => {
+      if (e.state && e.state.modal) {
+        console.log("[DEBUG] Navigo ignored modal popstate", e.state);
+        return; // 🚫 do not let Navigo handle this one
+      }
+    });
 
+    router = new Navigo('/', { hash: false });
+    console.log('[DEBUG] main.js: Router initialized', { path: window.location.pathname });
 
-  router = new Navigo('/', { hash: false });
-  console.log('[DEBUG] main.js: Router initialized', { path: window.location.pathname });
-
-  router
-    .on({
-      '/': () => {
-        console.log('[DEBUG] main.js: Routing to / (homepage)');
-        // Do nothing, let index.html show as-is
-      },
-      '/auth/email': () => {
-        console.log('[DEBUG] main.js: Routing to /auth/email');
-        window.location.href = '/frontend/html/login.html';
-      },
-      '/dashboard': async () => {
-        console.log('[DEBUG] main.js: Routing to /dashboard');
-        // Load dashboard.html content if needed, or let browser handle
-        if (!window.location.pathname.includes('dashboard.html')) {
-          await loadContent('/frontend/html/dashboard.html');
+    router
+      .on({
+        '/': async () => {
+          console.log('[DEBUG] main.js: Routing to / (homepage)');
+          // Check session: if signed in, auto-redirect to dashboard
+          const user = await getSession();
+          if (user) {
+            console.log('[DEBUG] main.js: User signed in on homepage, redirecting to dashboard');
+            window.location.href = '/frontend/html/dashboard.html';
+            return;
+          }
+          // Otherwise, show homepage as-is (unauthenticated UI will be set if needed)
+          await ensureSignedInFromSession();
+        },
+        '/auth/email': () => {
+          console.log('[DEBUG] main.js: Routing to /auth/email');
+          window.location.href = '/frontend/html/login.html';
+        },
+        '/dashboard': async () => {
+          console.log('[DEBUG] main.js: Routing to /dashboard');
+          // Load dashboard.html content if needed, or let browser handle
+          if (!window.location.pathname.includes('dashboard.html')) {
+            await loadContent('/frontend/html/dashboard.html');
+          }
+          // Ensure session is checked after content loads
+          await ensureSignedInFromSession();
+        },
+        '/frontend/html/dashboard.html': async () => {
+          console.log('[DEBUG] main.js: Routing to /frontend/html/dashboard.html');
+          // Dashboard is already loaded by browser, just check session
+          await ensureSignedInFromSession();
         }
-        // Ensure session is checked after content loads
-        await ensureSignedInFromSession();
-      },
-      '/frontend/html/dashboard.html': async () => {
-        console.log('[DEBUG] main.js: Routing to /frontend/html/dashboard.html');
-        // Dashboard is already loaded by browser, just check session
-        await ensureSignedInFromSession();
-      }
-    })
-    .notFound(() => {
-      console.log('[DEBUG] main.js: Not found route triggered', {
-        path: window.location.pathname,
-        search: window.location.search
-      });
-      // Only show 404 if not on dashboard
-      if (!window.location.pathname.includes('dashboard.html')) {
-        document.body.innerHTML = '<p>Page not found</p>';
-      } else {
-        console.log('[DEBUG] main.js: Skipping 404 for dashboard.html');
-      }
-    })
-    .resolve();
-}
+      })
+      .notFound(() => {
+        console.log('[DEBUG] main.js: Not found route triggered', {
+          path: window.location.pathname,
+          search: window.location.search
+        });
+        // Only show 404 if not on dashboard
+        if (!window.location.pathname.includes('dashboard.html')) {
+          document.body.innerHTML = '<p>Page not found</p>';
+        } else {
+          console.log('[DEBUG] main.js: Skipping 404 for dashboard.html');
+        }
+      })
+      .resolve();
+  }
 
   // 🔹 Keep loadContent in case you use it for smaller includes later
   async function loadContent(url) {
@@ -192,7 +199,6 @@ window.addEventListener("popstate", (e) => {
       document.body.innerHTML = '<p>Error loading page</p>';
     }
   }
-
 
   // -----------------------------
   // Actions
@@ -224,7 +230,10 @@ window.addEventListener("popstate", (e) => {
     cacheUI();
     bindEvents();
     setupRouter();
-    // await ensureSignedInFromSession();
+    // On homepage, check session immediately for auto-redirect
+    if (window.location.pathname === '/' || window.location.pathname === '') {
+      await ensureSignedInFromSession();
+    }
   }
 
   if (document.readyState === 'loading') {

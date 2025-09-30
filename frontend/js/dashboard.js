@@ -9,6 +9,28 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const { createClient } = supabase;
 const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+// Optional: centralize fetch-with-refresh for reuse (call other APIs with this)
+async function fetchWithAutoRefresh(url, opts = {}) {
+  opts.credentials = 'include';
+  opts.headers = opts.headers || { 'Accept': 'application/json' };
+  let res = await fetch(url, opts);
+  if (res.status === 401) {
+    console.log('[DEBUG] fetchWithAutoRefresh: 401, attempting /auth/refresh');
+    const refresh = await fetch('/auth/refresh', { 
+      method: 'POST', 
+      credentials: 'include', 
+      headers: { 'Accept': 'application/json' } 
+    });
+    if (refresh.ok) {
+      console.log('[DEBUG] fetchWithAutoRefresh: Refresh succeeded, retrying');
+      res = await fetch(url, opts);
+    } else {
+      console.warn('[WARN] fetchWithAutoRefresh: Refresh failed');
+    }
+  }
+  return res;
+}
+
 
 const updateProfileModal = document.getElementById('updateProfileModal');
 if (updateProfileModal && updateProfileModal.classList.contains('active')) {
@@ -21,8 +43,9 @@ if (updateProfileModal && updateProfileModal.classList.contains('active')) {
 // --- Fetch User Data ---
 // --- Robust getSession() with guarded updates and stable avatar handling ---
 // --- Robust getSession() with cache-first rendering ---
+// --- Robust getSession() with cache-first rendering ---
 async function getSession() {
-  if (window.__sessionLoading) return;  // Prevent concurrent calls
+  if (window.__sessionLoading) return;
   window.__sessionLoading = true;
   const loadId = Date.now();
   window.__lastSessionLoadId = loadId;
@@ -47,25 +70,21 @@ async function getSession() {
       return;
     }
 
-    // Fade out shimmer loaders smoothly (your existing logic)
     [greetEl, firstnameEl, avatarEl].forEach(el => {
       if (el.firstChild && el.firstChild.classList?.contains('loading-blur')) {
         el.firstChild.classList.add('fade-out');
-        setTimeout(() => (el.innerHTML = ''), 150); // Faster fade (was 200ms)
+        setTimeout(() => (el.innerHTML = ''), 150);
       }
     });
 
-    // Greeting text (your existing logic)
     const hour = new Date().getHours();
     greetEl.textContent = hour < 12 ? 'Good Morning' : hour < 18 ? 'Good Afternoon' : 'Good Evening';
     greetEl.classList.add('fade-in');
 
-    // Display name
     const displayName = userObj.username || derivedFirstName || 'User';
     firstnameEl.textContent = displayName.charAt(0).toUpperCase() + displayName.slice(1);
     firstnameEl.classList.add('fade-in');
 
-    // Avatar (your existing logic)
     const profilePicture = userObj.profilePicture || '';
     if (isValidImageSource(profilePicture)) {
       avatarEl.innerHTML = `<img src="${profilePicture}" alt="Profile Picture" class="avatar-img fade-in" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`;
@@ -78,7 +97,6 @@ async function getSession() {
   }
 
   async function waitForDomReady(retries = 8, delay = 100) {
-    // Your existing logic...
     for (let i = 0; i < retries; i++) {
       if (document.getElementById('greet') && document.getElementById('firstname') && document.getElementById('avatar')) {
         return true;
@@ -88,14 +106,14 @@ async function getSession() {
     return false;
   }
 
-  // NEW: Cache-first render
+  // Cache-first render
   const cachedUserData = localStorage.getItem('userData');
   let cachedUser = null;
   let derivedFirstName = 'User';
   if (cachedUserData) {
     try {
       const parsed = JSON.parse(cachedUserData);
-      if (Date.now() - parsed.cachedAt < 300000) { // 5min TTL for "fresh"
+      if (Date.now() - parsed.cachedAt < 300000) { // 5min TTL
         cachedUser = parsed;
         derivedFirstName = parsed.fullName?.split(' ')[0] || 'User';
         console.log('[DEBUG] getSession: Using fresh cache for instant render');
@@ -107,9 +125,8 @@ async function getSession() {
     }
   }
 
-  // Background fetch (your existing logic, but parallel to cache render)
+  // Background fetch (cookie-first)
   try {
-    // Show shimmers only if no cache (your existing logic, but conditional)
     if (!cachedUser) {
       const greetEl = document.getElementById('greet');
       const firstnameEl = document.getElementById('firstname');
@@ -121,37 +138,39 @@ async function getSession() {
       }
     }
 
-    console.log('[DEBUG] getSession: Initiating background fetch', new Date().toISOString());
-    let token = localStorage.getItem('authToken') || '';
-    let res = await fetch('https://api.flexgig.com.ng/api/session', {
+    console.log('[DEBUG] getSession: Initiating /api/session fetch', new Date().toISOString());
+
+    // IMPORTANT: Do NOT attach localStorage authToken as a Bearer header.
+    // Allow cookies (token + rt) to be sent automatically by the browser.
+    let res = await fetch('/api/session', {
       method: 'GET',
       credentials: 'include',
-      headers: {
-        'Accept': 'application/json',
-        'Authorization': `Bearer ${token}`
-      }
+      headers: { 'Accept': 'application/json' }
     });
 
-    console.log('[DEBUG] getSession: Response status', res.status);
-
-    if (res.status === 401 && token) {
-      console.log('[DEBUG] getSession: Token expired, attempting refresh');
-      const refreshRes = await fetch('https://api.flexgig.com.ng/auth/refresh', {
+    // If server responds 401 -> attempt refresh endpoint (server will rotate cookies)
+    if (res.status === 401) {
+      console.log('[DEBUG] getSession: /api/session returned 401, attempting /auth/refresh');
+      const refreshRes = await fetch('/auth/refresh', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Accept': 'application/json' }
       });
+
       if (refreshRes.ok) {
-        const { token: newToken } = await refreshRes.json();
-        localStorage.setItem('authToken', newToken);
-        token = newToken;
-        res = await fetch('https://api.flexgig.com.ng/api/session', {
+        console.log('[DEBUG] getSession: /auth/refresh succeeded, retrying /api/session');
+        // cookies (token + rt) were rotated/set by server; retry session
+        res = await fetch('/api/session', {
           method: 'GET',
           credentials: 'include',
-          headers: { 'Accept': 'application/json', 'Authorization': `Bearer ${token}` }
+          headers: { 'Accept': 'application/json' }
         });
       } else {
-        console.error('[ERROR] getSession: Refresh failed', await refreshRes.text());
+        // refresh failed -> user must re-login
+        console.warn('[WARN] getSession: refresh failed', await refreshRes.text().catch(()=>'(no body)'));
+        // Optionally clear client-side cache / redirect to login
+        // localStorage.removeItem('userData'); // optional
+        window.__sessionLoading = false;
         return null;
       }
     }
@@ -159,11 +178,30 @@ async function getSession() {
     if (!res.ok) {
       const text = await res.text().catch(() => '');
       console.error('[ERROR] getSession: Session API returned error:', res.status, text);
+      // fallback to cache if available
+      if (cachedUser) applySessionToDOM(cachedUser, derivedFirstName);
+      window.__sessionLoading = false;
       return null;
     }
 
-    const { user = {}, token: newToken } = await res.json();
-    console.log('[DEBUG] getSession: Raw user data', user, 'Token', newToken);
+    let payload = null;
+    try {
+      // prefer .json() but guard for empty body / invalid json
+      const txt = await res.text();
+      payload = txt ? JSON.parse(txt) : null;
+    } catch (e) {
+      console.warn('[WARN] getSession: Response not valid JSON or empty');
+      payload = null;
+    }
+    if (!payload || !payload.user) {
+      console.error('[ERROR] getSession: invalid payload from /api/session', payload);
+      if (cachedUser) applySessionToDOM(cachedUser, derivedFirstName);
+      window.__sessionLoading = false;
+      return null;
+    }
+
+    const { user, token: newToken } = payload;
+    console.log('[DEBUG] getSession: Raw user data', user);
 
     let firstName = user.fullName?.split(' ')[0] || '';
     if (!firstName && user.email) {
@@ -171,20 +209,18 @@ async function getSession() {
       firstName = (firstName && firstName.charAt(0).toUpperCase() + firstName.slice(1)) || 'User';
     }
 
-    // Update cache (your existing logic, but always with fresh timestamp)
+    // Update cache with user info but DO NOT persist access token to localStorage
     const userData = {
       username: user.username || '',
       fullName: user.fullName || '',
       profilePicture: user.profilePicture || '',
       id: user.uid || user.id || '',
       hasPin: user.hasPin || false,
-      cachedAt: Date.now() // Always fresh
+      cachedAt: Date.now()
     };
-    localStorage.setItem('userData', JSON.stringify(userData));
-    console.log('[DEBUG] getSession: Updated cache', userData);
-
-    // Your existing localStorage sets (email, firstName, etc.)...
     try {
+      localStorage.setItem('userData', JSON.stringify(userData));
+      // Still store convenient user bits
       localStorage.setItem('userEmail', user.email || '');
       localStorage.setItem('firstName', firstName);
       localStorage.setItem('username', user.username || '');
@@ -194,29 +230,26 @@ async function getSession() {
       localStorage.setItem('fullNameEdited', user.fullNameEdited ? 'true' : 'false');
       localStorage.setItem('lastUsernameUpdate', user.lastUsernameUpdate || '');
       localStorage.setItem('profilePicture', user.profilePicture || '');
-      localStorage.setItem('authToken', newToken);
-      localStorage.setItem('authTokenData', JSON.stringify({ user, authToken: newToken }));
-      console.log('[DEBUG] getSession: Stored authToken and authTokenData');
+      // Remove any old stored authToken to avoid stale usage
+      try { localStorage.removeItem('authToken'); } catch (e) {}
     } catch (err) {
       console.warn('[WARN] getSession: Failed to write some localStorage keys', err);
     }
 
-    // Apply fresh data to DOM (your existing logic)
     const domReady = await waitForDomReady();
     if (!domReady) {
       console.warn('[WARN] getSession: DOM elements not ready after waiting');
     }
     applySessionToDOM(user, firstName);
 
-    // NEW: Skip loadUserProfile if cache was already used (or make it lazy)
-    if (typeof loadUserProfile === 'function' && !cachedUser) { // Only if no cache
+    if (typeof loadUserProfile === 'function' && !cachedUser) {
       try {
-        const profileResult = await loadUserProfile(true); // Pass flag for no-cache
+        const profileResult = await loadUserProfile(true);
         if (window.__lastSessionLoadId !== loadId) {
           console.log('[DEBUG] getSession: loadUserProfile result is stale, ignoring');
+          window.__sessionLoading = false;
           return null;
         }
-        // Your existing profile merge/update logic...
         const profileData = profileResult && typeof profileResult === 'object' ? profileResult : {
           profilePicture: localStorage.getItem('profilePicture') || user.profilePicture || ''
         };
@@ -240,16 +273,19 @@ async function getSession() {
     }
 
     console.log('[DEBUG] getSession: Completed (loadId=' + loadId + ')');
-    return { user, authToken: newToken };
+    window.__sessionLoading = false;
+    return { user /* DO NOT return access token for client storage */ };
   } catch (err) {
     console.error('[ERROR] getSession: Failed to fetch session', err);
-    // Fallback to cache if fetch fails
     if (cachedUser) applySessionToDOM(cachedUser, derivedFirstName);
-    return null;
-  } finally {
     window.__sessionLoading = false;
+    return null;
   }
 }
+
+// Make globally accessible
+window.getSession = getSession;
+
 
 // Make globally accessible
 window.getSession = getSession;
@@ -370,39 +406,32 @@ async function loadUserProfile(noCache = false) {
   try {
     console.log('[DEBUG] loadUserProfile: Initiating fetch, credentials: include, time:', new Date().toISOString());
 
+    // Cookie-first: do not use localStorage tokens. Browser will send httpOnly cookies automatically.
     const headers = { 'Accept': 'application/json' };
-    const token = localStorage.getItem('authToken');
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-      console.log('[DEBUG] loadUserProfile: Authorization header:', headers['Authorization']);
-    } else {
-      console.log('[DEBUG] loadUserProfile: No token found in localStorage');
-    }
 
     let url = 'https://api.flexgig.com.ng/api/profile';
     if (noCache) {
       url += `?_${Date.now()}`;
     }
 
-    const response = await fetch(url, {
-      method: 'GET',
-      credentials: 'include',
-      headers
-    });
+    // Use helper for auto-refresh on 401
+    const response = await fetchWithAutoRefresh(url, { method: 'GET', headers });
 
     console.log('[DEBUG] loadUserProfile: Response status', response.status, 'Headers', [...response.headers]);
 
-    const rawText = await response.text().catch(() => '');
     let parsedData = null;
     try {
-      parsedData = rawText ? JSON.parse(rawText) : null;
+      // prefer .json() but guard for empty body / invalid json
+      const txt = await response.text();
+      parsedData = txt ? JSON.parse(txt) : null;
     } catch (e) {
-      console.warn('[WARN] loadUserProfile: Response is not valid JSON');
+      console.warn('[WARN] loadUserProfile: Response not valid JSON or empty');
+      parsedData = null;
     }
 
     if (!response.ok) {
-      console.error('[ERROR] Profile update failed. Status:', response.status, 'Body:', parsedData || rawText);
-      const serverMsg = (parsedData && (parsedData.error || parsedData.message)) || rawText || `HTTP ${response.status}`;
+      const serverMsg = (parsedData && (parsedData.error || parsedData.message)) || `HTTP ${response.status}`;
+      console.error('[ERROR] Profile update failed.', serverMsg);
       throw new Error(serverMsg);
     }
 
@@ -463,57 +492,32 @@ async function loadUserProfile(noCache = false) {
 
     const currentAvatarHTML = avatarEl.innerHTML;
     const newAvatarHTML = isValidProfilePicture 
-      ? `<img src="${profilePicture}" alt="Profile Picture" class="avatar-img" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`
+      ? `<img src="${profilePicture}" alt="Profile Picture" class="avatar-img" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`
       : displayName.charAt(0).toUpperCase();
     if (currentAvatarHTML !== newAvatarHTML) {
+      avatarEl.innerHTML = newAvatarHTML;
       if (isValidProfilePicture) {
-        avatarEl.innerHTML = newAvatarHTML;
+        avatarEl.removeAttribute('aria-label');
       } else {
-        avatarEl.innerHTML = '';
-        avatarEl.textContent = newAvatarHTML;
+        avatarEl.setAttribute('aria-label', displayName);
       }
     }
 
-    console.log('[DEBUG] loadUserProfile: DOM updated', { displayName, profilePicture });
-
-    if (updateProfileModal.classList.contains('active')) {
-      openUpdateProfileModal(data);
-    }
-
-    return data; // Return for chaining
+    return data;
   } catch (err) {
-    console.error('[ERROR] loadUserProfile: Failed to fetch profile', err.message);
-    // Fallback DOM from localStorage (your existing catch logic)...
-    const firstnameEl = document.getElementById('firstname');
-    const avatarEl = document.getElementById('avatar');
-    if (firstnameEl && avatarEl) {
-      const firstName = localStorage.getItem('firstName') || 'User';
-      const profilePicture = localStorage.getItem('profilePicture') || '';
-      const isValidProfilePicture = profilePicture && /^(data:image\/|https?:\/\/|\/)/i.test(profilePicture);
-      const displayName = localStorage.getItem('username') || firstName || 'User';
-
-      const currentDisplay = firstnameEl.textContent?.toLowerCase() || '';
-      const newDisplay = (displayName.charAt(0).toUpperCase() + displayName.slice(1)).toLowerCase();
-      if (currentDisplay !== newDisplay) {
-        firstnameEl.textContent = displayName.charAt(0).toUpperCase() + displayName.slice(1);
-      }
-
-      const currentAvatarHTML = avatarEl.innerHTML;
-      const newAvatarHTML = isValidProfilePicture 
-        ? `<img src="${profilePicture}" alt="Profile Picture" class="avatar-img" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`
-        : displayName.charAt(0).toUpperCase();
-      if (currentAvatarHTML !== newAvatarHTML) {
-        if (isValidProfilePicture) {
-          avatarEl.innerHTML = newAvatarHTML;
-        } else {
-          avatarEl.innerHTML = '';
-          avatarEl.textContent = newAvatarHTML;
-        }
+    console.error('[ERROR] loadUserProfile: Fetch failed', err);
+    // Fallback: return cached data if available
+    if (cachedUserData) {
+      try {
+        return JSON.parse(cachedUserData);
+      } catch (e) {
+        console.warn('[WARN] loadUserProfile: Cache invalid on error fallback');
       }
     }
-    return null;
+    throw err; // Re-throw if no fallback
   }
 }
+
 
 
 
@@ -6805,7 +6809,6 @@ async function handlePinCompletion() {
 
     if (res.ok) {
       // success path
-      showTopNotifier(payload?.message || 'Reauth successful', 'success');
       // call your existing success handler
       if (typeof onSuccessfulReauth === 'function') {
         try { await onSuccessfulReauth(payload); } catch(e){ console.warn('onSuccessfulReauth error', e); }
