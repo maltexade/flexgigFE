@@ -518,11 +518,14 @@ window.addEventListener('offline', () => showBanner('You are offline. Working wi
 // 🚀 Setup broadcast subscription
 function handleBroadcast(payload) {
   console.log('[BROADCAST RECEIVED]', payload);
-  const { message, url } = payload.payload || {};  // broadcast shape
+
+  // Your Supabase broadcast already has message & url at the root
+  const { message, url } = payload;
+
   if (message) {
     showBanner(message);
 
-    // Also push to service worker notification
+    // Optional: forward to SW for push-style notif
     if (navigator.serviceWorker?.controller) {
       navigator.serviceWorker.controller.postMessage({
         type: 'BROADCAST_NOTIFICATION',
@@ -531,6 +534,7 @@ function handleBroadcast(payload) {
     }
   }
 }
+
 
 
 
