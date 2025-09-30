@@ -10,35 +10,8 @@ const { createClient } = supabase;
 const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 
-// assume `sb` is your supabase client (createClient(SUPABASE_URL, SUPABASE_ANON_KEY))
-function setupBroadcastSubscription(sb) {
-  function handleBroadcast(row) {
-    if (!row || !row.message) return;
-    // show in-page banner
-    showBanner(row.message);
-    // notify Service Worker (if available) to show native notification
-    if (navigator.serviceWorker && navigator.serviceWorker.controller) {
-      navigator.serviceWorker.controller.postMessage({ type: 'BROADCAST_NOTIFICATION', payload: row });
-    } else if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-      new Notification('Announcement', { body: row.message, data: { url: row.url || null } });
-    }
-  }
 
-  // supabase-js v2 (channels)
-  if (typeof sb.channel === 'function') {
-    sb.channel('public:broadcasts')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'broadcasts' }, (payload) => {
-        handleBroadcast(payload.new);
-      })
-      .subscribe();
-    return;
-  }
 
-  // supabase-js v1
-  if (typeof sb.from === 'function') {
-    sb.from('broadcasts').on('INSERT', payload => handleBroadcast(payload.new)).subscribe();
-  }
-}
 
 
 // Optional: centralize fetch-with-refresh for reuse (call other APIs with this)
@@ -537,6 +510,37 @@ window.addEventListener('offline', () => showBanner('You are offline. Working wi
 
 
 }
+
+// 🚀 Setup broadcast subscription
+function handleBroadcast(row) {
+  if (!row || !row.message) return;
+  showBanner(row.message);
+
+  if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+    navigator.serviceWorker.controller.postMessage({
+      type: 'BROADCAST_NOTIFICATION',
+      payload: row
+    });
+  } else if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+    new Notification('Announcement', { body: row.message, data: { url: row.url || null } });
+  }
+}
+
+function setupBroadcastSubscription() {
+  if (typeof supabaseClient.channel === 'function') {
+    // supabase-js v2
+    supabaseClient.channel('public:broadcasts')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'broadcasts' }, (payload) => {
+        handleBroadcast(payload.new);
+      })
+      .subscribe();
+  } else if (typeof supabaseClient.from === 'function') {
+    // supabase-js v1
+    supabaseClient.from('broadcasts').on('INSERT', (payload) => handleBroadcast(payload.new)).subscribe();
+  }
+}
+
+setupBroadcastSubscription();
 
 
 // Call in load: onDashboardLoad();
