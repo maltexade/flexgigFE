@@ -5,7 +5,7 @@ const APP_VERSION = '1.0.0'; // Match in dashboard.js
 
 const urlsToCache = [
   '/',
-  'frontend/index.html',
+  '/index.html',
   `frontend/js/main.js?v=${APP_VERSION}`, // Versioned for busting
   `frontend/styles/main.css?v=${APP_VERSION}`,
   `frontend/pwa/manifest.json?v=${APP_VERSION}`,
@@ -19,18 +19,60 @@ const urlsToCache = [
 ];
 
 self.addEventListener('install', (event) => {
-  console.log('service-worker.js: Install event');
-  event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then((cache) => {
-        console.log('service-worker.js: Caching assets with version', APP_VERSION);
-        return cache.addAll(urlsToCache);
-      })
-      .catch(err => console.error('service-worker.js: Cache error:', err))
-  );
-  // Force immediate activation
-  self.skipWaiting();
+  console.log('service-worker.js: Install event (robust caching)');
+  event.waitUntil((async () => {
+    const cache = await caches.open(CACHE_NAME);
+    const failures = [];
+
+    // Try to fetch & cache each URL; don't let a single failure abort install
+    await Promise.all(urlsToCache.map(async (url) => {
+      try {
+        // Try a normal fetch first
+        let response;
+        try {
+          response = await fetch(url, { cache: 'reload' });
+        } catch (e) {
+          // fallback: try fetch with no-cors for cross-origin assets (opaque response)
+          // This may be needed for some CDNs that don't return CORS headers.
+          try {
+            response = await fetch(url, { cache: 'reload', mode: 'no-cors' });
+          } catch (e2) {
+            throw e2;
+          }
+        }
+
+        // Accept successful responses OR opaque ones (cross-origin no-cors)
+        if (response && (response.ok || response.type === 'opaque')) {
+          try {
+            // Save a clone to cache
+            await cache.put(url, response.clone());
+            console.log('service-worker.js: Cached:', url);
+          } catch (putErr) {
+            console.warn('service-worker.js: Cache.put failed for', url, putErr);
+            failures.push({ url, reason: 'cache-put-failed', error: String(putErr) });
+          }
+        } else {
+          // Non-ok (404/500) and not opaque
+          const status = response ? response.status : 'no-response';
+          console.warn('service-worker.js: Skipping (non-ok) resource:', url, 'status:', status);
+          failures.push({ url, reason: `non-ok status ${status}` });
+        }
+      } catch (err) {
+        console.warn('service-worker.js: Failed to fetch/cache', url, err);
+        failures.push({ url, reason: 'fetch-failed', error: String(err) });
+      }
+    }));
+
+    if (failures.length) {
+      console.warn('service-worker.js: Some resources failed to cache on install:', failures);
+      // You may want to report these to your monitoring endpoint here
+    }
+
+    // Force the SW to activate as soon as installation finishes
+    await self.skipWaiting();
+  })());
 });
+
 
 self.addEventListener('activate', (event) => {
   console.log('service-worker.js: Activate event');
