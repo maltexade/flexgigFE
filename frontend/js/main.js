@@ -59,7 +59,7 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
         const text = await res.text();
         console.error('[main.js] Session API returned error:', res.status, text);
         if (res.status === 401) {
-          window.location.href = '/frontend/html/login.html';
+          return null; // Not signed in
         } else {
           alert('Something went wrong while loading your session. Please try again.');
         }
