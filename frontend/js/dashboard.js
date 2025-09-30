@@ -10,6 +10,20 @@ const { createClient } = supabase;
 const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 
+// 🚀 Global banner helpers
+function showBanner(msg) {
+  const STATUS_BANNER = document.getElementById('status-banner');
+  const BANNER_MSG = document.getElementById('banner-msg');
+  if (STATUS_BANNER && BANNER_MSG) {
+    BANNER_MSG.textContent = msg;
+    STATUS_BANNER.classList.remove('hidden');
+  }
+}
+
+function hideBanner() {
+  const STATUS_BANNER = document.getElementById('status-banner');
+  if (STATUS_BANNER) STATUS_BANNER.classList.add('hidden');
+}
 
 
 
@@ -413,16 +427,6 @@ async function onDashboardLoad() {
   }
 
 
-function showBanner(msg) {
-  if (STATUS_BANNER && BANNER_MSG) {
-    BANNER_MSG.textContent = msg;
-    STATUS_BANNER.classList.remove('hidden');
-  }
-}
-
-function hideBanner() {
-  if (STATUS_BANNER) STATUS_BANNER.classList.add('hidden');
-}
 
 // Subscribe to Supabase Realtime channel for instant updates
 const channel = supabaseClient.channel('network-status');
@@ -512,19 +516,20 @@ window.addEventListener('offline', () => showBanner('You are offline. Working wi
 }
 
 // 🚀 Setup broadcast subscription
-function handleBroadcast(row) {
-  if (!row || !row.message) return;
-  showBanner(row.message);
+function handleBroadcast(payload) {
+  console.log('[BROADCAST RECEIVED]', payload.new);
+  const { message, url } = payload.new;
+  showBanner(message);
 
-  if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+  // Also send to SW for system notifications
+  if (navigator.serviceWorker?.controller) {
     navigator.serviceWorker.controller.postMessage({
       type: 'BROADCAST_NOTIFICATION',
-      payload: row
+      payload: { message, url }
     });
-  } else if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-    new Notification('Announcement', { body: row.message, data: { url: row.url || null } });
   }
 }
+
 
 function setupBroadcastSubscription() {
   if (typeof supabaseClient.channel === 'function') {
