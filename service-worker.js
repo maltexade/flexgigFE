@@ -86,6 +86,25 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
+self.addEventListener('message', (ev) => {
+  const data = ev.data || {};
+  if (data.type !== 'BROADCAST_NOTIFICATION') return;
+  const payload = data.payload || {};
+  self.registration.showNotification('Announcement', {
+    body: payload.message || '',
+    data: { url: payload.url || '/' },
+    tag: 'broadcast',
+    renotify: true
+  });
+});
+
+self.addEventListener('notificationclick', (ev) => {
+  ev.notification.close();
+  const url = ev.notification.data?.url || '/';
+  ev.waitUntil(clients.openWindow(url));
+});
+
+
 // Optional: Push notifications for urgent updates (e.g., downtime alerts)
 // self.addEventListener('push', (event) => {
 //   const options = { body: event.data ? event.data.text() : 'FlexGig Update Available', icon: '/frontend/pwa/logo-192x192.png' };
