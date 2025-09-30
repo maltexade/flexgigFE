@@ -20,6 +20,7 @@ if (updateProfileModal && updateProfileModal.classList.contains('active')) {
 // --- Fetch User Data ---
 // --- Fetch User Data ---
 // --- Robust getSession() with guarded updates and stable avatar handling ---
+// --- Robust getSession() with cache-first rendering ---
 async function getSession() {
   if (window.__sessionLoading) return;  // Prevent concurrent calls
   window.__sessionLoading = true;
@@ -46,33 +47,28 @@ async function getSession() {
       return;
     }
 
-    // Fade out shimmer loaders smoothly
+    // Fade out shimmer loaders smoothly (your existing logic)
     [greetEl, firstnameEl, avatarEl].forEach(el => {
       if (el.firstChild && el.firstChild.classList?.contains('loading-blur')) {
         el.firstChild.classList.add('fade-out');
-        setTimeout(() => (el.innerHTML = ''), 200); // remove after fade-out
+        setTimeout(() => (el.innerHTML = ''), 150); // Faster fade (was 200ms)
       }
     });
 
-    // Greeting text
+    // Greeting text (your existing logic)
     const hour = new Date().getHours();
-    greetEl.textContent =
-      hour < 12 ? 'Good Morning' : hour < 18 ? 'Good Afternoon' : 'Good Evening';
+    greetEl.textContent = hour < 12 ? 'Good Morning' : hour < 18 ? 'Good Afternoon' : 'Good Evening';
     greetEl.classList.add('fade-in');
 
     // Display name
     const displayName = userObj.username || derivedFirstName || 'User';
-    firstnameEl.textContent =
-      displayName.charAt(0).toUpperCase() + displayName.slice(1);
+    firstnameEl.textContent = displayName.charAt(0).toUpperCase() + displayName.slice(1);
     firstnameEl.classList.add('fade-in');
 
-    // Avatar
+    // Avatar (your existing logic)
     const profilePicture = userObj.profilePicture || '';
     if (isValidImageSource(profilePicture)) {
-      avatarEl.innerHTML = `<img src="${profilePicture}" 
-        alt="Profile Picture" 
-        class="avatar-img fade-in" 
-        style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`;
+      avatarEl.innerHTML = `<img src="${profilePicture}" alt="Profile Picture" class="avatar-img fade-in" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`;
       avatarEl.removeAttribute('aria-label');
     } else {
       avatarEl.textContent = displayName.charAt(0).toUpperCase();
@@ -82,12 +78,9 @@ async function getSession() {
   }
 
   async function waitForDomReady(retries = 8, delay = 100) {
+    // Your existing logic...
     for (let i = 0; i < retries; i++) {
-      if (
-        document.getElementById('greet') &&
-        document.getElementById('firstname') &&
-        document.getElementById('avatar')
-      ) {
+      if (document.getElementById('greet') && document.getElementById('firstname') && document.getElementById('avatar')) {
         return true;
       }
       await new Promise(r => setTimeout(r, delay));
@@ -95,19 +88,40 @@ async function getSession() {
     return false;
   }
 
-  try {
-    // Show shimmer placeholders while loading
-    const greetEl = document.getElementById('greet');
-    const firstnameEl = document.getElementById('firstname');
-    const avatarEl = document.getElementById('avatar');
+  // NEW: Cache-first render
+  const cachedUserData = localStorage.getItem('userData');
+  let cachedUser = null;
+  let derivedFirstName = 'User';
+  if (cachedUserData) {
+    try {
+      const parsed = JSON.parse(cachedUserData);
+      if (Date.now() - parsed.cachedAt < 300000) { // 5min TTL for "fresh"
+        cachedUser = parsed;
+        derivedFirstName = parsed.fullName?.split(' ')[0] || 'User';
+        console.log('[DEBUG] getSession: Using fresh cache for instant render');
+        const domReady = await waitForDomReady();
+        if (domReady) applySessionToDOM(cachedUser, derivedFirstName);
+      }
+    } catch (e) {
+      console.warn('[WARN] getSession: Invalid cache', e);
+    }
+  }
 
-    if (greetEl && firstnameEl && avatarEl) {
-      greetEl.innerHTML = '<div class="loading-blur"></div>';
-      firstnameEl.innerHTML = '<div class="loading-blur"></div>';
-      avatarEl.innerHTML = '<div class="loading-blur avatar-loader"></div>';
+  // Background fetch (your existing logic, but parallel to cache render)
+  try {
+    // Show shimmers only if no cache (your existing logic, but conditional)
+    if (!cachedUser) {
+      const greetEl = document.getElementById('greet');
+      const firstnameEl = document.getElementById('firstname');
+      const avatarEl = document.getElementById('avatar');
+      if (greetEl && firstnameEl && avatarEl) {
+        greetEl.innerHTML = '<div class="loading-blur"></div>';
+        firstnameEl.innerHTML = '<div class="loading-blur"></div>';
+        avatarEl.innerHTML = '<div class="loading-blur avatar-loader"></div>';
+      }
     }
 
-    console.log('[DEBUG] getSession: Initiating fetch', new Date().toISOString());
+    console.log('[DEBUG] getSession: Initiating background fetch', new Date().toISOString());
     let token = localStorage.getItem('authToken') || '';
     let res = await fetch('https://api.flexgig.com.ng/api/session', {
       method: 'GET',
@@ -153,113 +167,87 @@ async function getSession() {
 
     let firstName = user.fullName?.split(' ')[0] || '';
     if (!firstName && user.email) {
-      firstName = user.email
-        .split('@')[0]
-        .replace(/[^a-zA-Z0-9]/g, '')
-        .replace(/(\d+)/, '');
-      firstName =
-        (firstName && firstName.charAt(0).toUpperCase() + firstName.slice(1)) ||
-        'User';
+      firstName = user.email.split('@')[0].replace(/[^a-zA-Z0-9]/g, '').replace(/(\d+)/, '');
+      firstName = (firstName && firstName.charAt(0).toUpperCase() + firstName.slice(1)) || 'User';
     }
 
-    // Cache composite user data for fast reauth modals (with timestamp for staleness)
+    // Update cache (your existing logic, but always with fresh timestamp)
     const userData = {
       username: user.username || '',
       fullName: user.fullName || '',
       profilePicture: user.profilePicture || '',
       id: user.uid || user.id || '',
       hasPin: user.hasPin || false,
-      cachedAt: Date.now() // For 1hr staleness check
+      cachedAt: Date.now() // Always fresh
     };
     localStorage.setItem('userData', JSON.stringify(userData));
-    console.log('[DEBUG] getSession: Cached userData', userData);
+    console.log('[DEBUG] getSession: Updated cache', userData);
 
+    // Your existing localStorage sets (email, firstName, etc.)...
     try {
       localStorage.setItem('userEmail', user.email || '');
       localStorage.setItem('firstName', firstName);
       localStorage.setItem('username', user.username || '');
       localStorage.setItem('phoneNumber', user.phoneNumber || '');
       localStorage.setItem('address', user.address || '');
-      localStorage.setItem(
-        'fullName',
-        user.fullName || (user.email ? user.email.split('@')[0] : '')
-      );
+      localStorage.setItem('fullName', user.fullName || (user.email ? user.email.split('@')[0] : ''));
       localStorage.setItem('fullNameEdited', user.fullNameEdited ? 'true' : 'false');
       localStorage.setItem('lastUsernameUpdate', user.lastUsernameUpdate || '');
       localStorage.setItem('profilePicture', user.profilePicture || '');
       localStorage.setItem('authToken', newToken);
-      localStorage.setItem(
-        'authTokenData',
-        JSON.stringify({ user, authToken: newToken })
-      );
+      localStorage.setItem('authTokenData', JSON.stringify({ user, authToken: newToken }));
       console.log('[DEBUG] getSession: Stored authToken and authTokenData');
     } catch (err) {
       console.warn('[WARN] getSession: Failed to write some localStorage keys', err);
     }
 
+    // Apply fresh data to DOM (your existing logic)
     const domReady = await waitForDomReady();
     if (!domReady) {
       console.warn('[WARN] getSession: DOM elements not ready after waiting');
     }
-
     applySessionToDOM(user, firstName);
 
-    if (typeof loadUserProfile === 'function') {
+    // NEW: Skip loadUserProfile if cache was already used (or make it lazy)
+    if (typeof loadUserProfile === 'function' && !cachedUser) { // Only if no cache
       try {
-        const profileResult = await loadUserProfile();
+        const profileResult = await loadUserProfile(true); // Pass flag for no-cache
         if (window.__lastSessionLoadId !== loadId) {
           console.log('[DEBUG] getSession: loadUserProfile result is stale, ignoring');
           return null;
         }
-        const profileData =
-          profileResult && typeof profileResult === 'object'
-            ? profileResult
-            : {
-                profilePicture:
-                  localStorage.getItem('profilePicture') || user.profilePicture || ''
-              };
+        // Your existing profile merge/update logic...
+        const profileData = profileResult && typeof profileResult === 'object' ? profileResult : {
+          profilePicture: localStorage.getItem('profilePicture') || user.profilePicture || ''
+        };
         const finalProfilePicture = isValidImageSource(profileData.profilePicture)
           ? profileData.profilePicture
-          : isValidImageSource(user.profilePicture)
-          ? user.profilePicture
-          : '';
-        if (
-          finalProfilePicture &&
-          finalProfilePicture !== (localStorage.getItem('profilePicture') || '')
-        ) {
+          : isValidImageSource(user.profilePicture) ? user.profilePicture : '';
+        if (finalProfilePicture && finalProfilePicture !== (localStorage.getItem('profilePicture') || '')) {
           try {
             localStorage.setItem('profilePicture', finalProfilePicture);
-            // Re-cache userData with updated profilePicture
             userData.profilePicture = finalProfilePicture;
             localStorage.setItem('userData', JSON.stringify(userData));
-          } catch (err) {
-            /* ignore */
-          }
+          } catch (err) { /* ignore */ }
           applySessionToDOM({ ...user, profilePicture: finalProfilePicture }, firstName);
         } else {
-          applySessionToDOM(
-            { ...user, profilePicture: finalProfilePicture || user.profilePicture },
-            firstName
-          );
+          applySessionToDOM({ ...user, profilePicture: finalProfilePicture || user.profilePicture }, firstName);
         }
       } catch (err) {
-        console.warn(
-          '[WARN] getSession: loadUserProfile failed, relying on session data',
-          err && err.message
-        );
+        console.warn('[WARN] getSession: loadUserProfile failed, relying on session data', err?.message);
         applySessionToDOM(user, firstName);
       }
-    } else {
-      applySessionToDOM(user, firstName);
     }
 
     console.log('[DEBUG] getSession: Completed (loadId=' + loadId + ')');
     return { user, authToken: newToken };
   } catch (err) {
     console.error('[ERROR] getSession: Failed to fetch session', err);
+    // Fallback to cache if fetch fails
+    if (cachedUser) applySessionToDOM(cachedUser, derivedFirstName);
     return null;
   } finally {
-    window.__sessionLoading = false;  // <-- Always release the lock
+    window.__sessionLoading = false;
   }
 }
 
@@ -305,6 +293,14 @@ function observeForElements() {
 
     if (greetEl && firstnameEl && avatarEl) {
       console.log('[DEBUG] MutationObserver: Elements detected, running getSession');
+      const cachedUserData = localStorage.getItem('userData');
+      if (cachedUserData) {
+        try {
+          const parsed = JSON.parse(cachedUserData);
+          const firstName = parsed.fullName?.split(' ')[0] || 'User';
+          applySessionToDOM(parsed, firstName);
+        } catch (e) { /* ignore */ }
+      }
       getSession(); // Call directly (no need for safeGetSession retries here)
       obs.disconnect(); // Stop observing once elements are found
     }
@@ -325,22 +321,52 @@ function observeForElements() {
 }
 
 // After getSession succeeds
+// After getSession succeeds (now cache-first)
 async function onDashboardLoad() {
-  await getSession();
+  // Instant cache render first
+  const cachedUserData = localStorage.getItem('userData');
+  if (cachedUserData) {
+    try {
+      const parsed = JSON.parse(cachedUserData);
+      if (Date.now() - parsed.cachedAt < 300000) {
+        const firstName = parsed.fullName?.split(' ')[0] || 'User';
+        const domReady = await waitForDomReady(); // Reuse your func
+        if (domReady) applySessionToDOM(parsed, firstName);
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  // Then background refresh
+  await getSession(); // This will update if needed
   await initReauthModal();
   setupInactivity();
 
-  // Check if long inactive (e.g., tab away >10 min)
+  // Your existing inactivity check...
   const last = parseInt(localStorage.getItem('lastActive')) || 0;
   if (Date.now() - last > IDLE_TIME && await shouldReauth()) {
-    showInactivityPrompt(); // Or direct to reauthModal if preferred
+    showInactivityPrompt();
   }
 }
 
 // Call in load: onDashboardLoad();
 
 // Remove fetchUserData and consolidate into getSession
+// --- Lazy loadUserProfile with cache check ---
 async function loadUserProfile(noCache = false) {
+  // NEW: Early bail if cache is fresh and not forced
+  const cachedUserData = localStorage.getItem('userData');
+  if (!noCache && cachedUserData) {
+    try {
+      const parsed = JSON.parse(cachedUserData);
+      if (Date.now() - parsed.cachedAt < 300000) { // 5min TTL
+        console.log('[DEBUG] loadUserProfile: Fresh cache, skipping fetch');
+        return parsed; // Return cache instead of fetching
+      }
+    } catch (e) {
+      console.warn('[WARN] loadUserProfile: Invalid cache, proceeding to fetch');
+    }
+  }
+
   try {
     console.log('[DEBUG] loadUserProfile: Initiating fetch, credentials: include, time:', new Date().toISOString());
 
@@ -383,7 +409,7 @@ async function loadUserProfile(noCache = false) {
     const data = parsedData || {};
     console.log('[DEBUG] loadUserProfile: Parsed response data', data);
 
-    // Update localStorage with profile data only if it differs
+    // Your existing localStorage updates (only if changed)...
     const currentUsername = localStorage.getItem('username') || '';
     const currentProfilePicture = localStorage.getItem('profilePicture') || '';
     if (data.username && data.username !== currentUsername) {
@@ -407,12 +433,20 @@ async function loadUserProfile(noCache = false) {
       localStorage.setItem('lastUsernameUpdate', data.lastUsernameUpdate);
     }
 
-    // Update DOM only if data has changed
+    // Update userData cache with new profile info
+    const userData = JSON.parse(localStorage.getItem('userData') || '{}');
+    userData.username = data.username || userData.username;
+    userData.fullName = data.fullName || userData.fullName;
+    userData.profilePicture = data.profilePicture || userData.profilePicture;
+    userData.cachedAt = Date.now();
+    localStorage.setItem('userData', JSON.stringify(userData));
+
+    // Your existing DOM update logic (only if changed)...
     const firstnameEl = document.getElementById('firstname');
     const avatarEl = document.getElementById('avatar');
     if (!firstnameEl || !avatarEl) {
       console.error('[ERROR] loadUserProfile: Missing DOM elements', { firstnameEl: !!firstnameEl, avatarEl: !!avatarEl });
-      return;
+      return data;
     }
 
     const firstName = data.fullName?.split(' ')[0] || localStorage.getItem('firstName') || 'User';
@@ -420,15 +454,24 @@ async function loadUserProfile(noCache = false) {
     const isValidProfilePicture = profilePicture && /^(data:image\/|https?:\/\/|\/)/i.test(profilePicture);
     const displayName = data.username || firstName || 'User';
 
-    if (firstnameEl.textContent !== displayName.charAt(0).toUpperCase() + displayName.slice(1)) {
+    // Diff and update only if changed (your logic, but tighter checks)
+    const currentDisplay = firstnameEl.textContent?.toLowerCase() || '';
+    const newDisplay = (displayName.charAt(0).toUpperCase() + displayName.slice(1)).toLowerCase();
+    if (currentDisplay !== newDisplay) {
       firstnameEl.textContent = displayName.charAt(0).toUpperCase() + displayName.slice(1);
     }
 
-    if (isValidProfilePicture && avatarEl.innerHTML !== `<img src="${profilePicture}" alt="Profile Picture" class="avatar-img" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`) {
-      avatarEl.innerHTML = `<img src="${profilePicture}" alt="Profile Picture" class="avatar-img" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`;
-    } else if (!isValidProfilePicture && avatarEl.textContent !== displayName.charAt(0).toUpperCase()) {
-      avatarEl.innerHTML = '';
-      avatarEl.textContent = displayName.charAt(0).toUpperCase();
+    const currentAvatarHTML = avatarEl.innerHTML;
+    const newAvatarHTML = isValidProfilePicture 
+      ? `<img src="${profilePicture}" alt="Profile Picture" class="avatar-img" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`
+      : displayName.charAt(0).toUpperCase();
+    if (currentAvatarHTML !== newAvatarHTML) {
+      if (isValidProfilePicture) {
+        avatarEl.innerHTML = newAvatarHTML;
+      } else {
+        avatarEl.innerHTML = '';
+        avatarEl.textContent = newAvatarHTML;
+      }
     }
 
     console.log('[DEBUG] loadUserProfile: DOM updated', { displayName, profilePicture });
@@ -436,31 +479,39 @@ async function loadUserProfile(noCache = false) {
     if (updateProfileModal.classList.contains('active')) {
       openUpdateProfileModal(data);
     }
+
+    return data; // Return for chaining
   } catch (err) {
     console.error('[ERROR] loadUserProfile: Failed to fetch profile', err.message);
-
+    // Fallback DOM from localStorage (your existing catch logic)...
     const firstnameEl = document.getElementById('firstname');
     const avatarEl = document.getElementById('avatar');
-    if (!firstnameEl || !avatarEl) {
-      console.error('[ERROR] loadUserProfile: Missing DOM elements in catch block', { firstnameEl: !!firstnameEl, avatarEl: !!avatarEl });
-      return;
-    }
+    if (firstnameEl && avatarEl) {
+      const firstName = localStorage.getItem('firstName') || 'User';
+      const profilePicture = localStorage.getItem('profilePicture') || '';
+      const isValidProfilePicture = profilePicture && /^(data:image\/|https?:\/\/|\/)/i.test(profilePicture);
+      const displayName = localStorage.getItem('username') || firstName || 'User';
 
-    const firstName = localStorage.getItem('firstName') || 'User';
-    const profilePicture = localStorage.getItem('profilePicture') || '';
-    const isValidProfilePicture = profilePicture && /^(data:image\/|https?:\/\/|\/)/i.test(profilePicture);
-    const displayName = localStorage.getItem('username') || firstName || 'User';
+      const currentDisplay = firstnameEl.textContent?.toLowerCase() || '';
+      const newDisplay = (displayName.charAt(0).toUpperCase() + displayName.slice(1)).toLowerCase();
+      if (currentDisplay !== newDisplay) {
+        firstnameEl.textContent = displayName.charAt(0).toUpperCase() + displayName.slice(1);
+      }
 
-    if (firstnameEl.textContent !== displayName.charAt(0).toUpperCase() + displayName.slice(1)) {
-      firstnameEl.textContent = displayName.charAt(0).toUpperCase() + displayName.slice(1);
+      const currentAvatarHTML = avatarEl.innerHTML;
+      const newAvatarHTML = isValidProfilePicture 
+        ? `<img src="${profilePicture}" alt="Profile Picture" class="avatar-img" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`
+        : displayName.charAt(0).toUpperCase();
+      if (currentAvatarHTML !== newAvatarHTML) {
+        if (isValidProfilePicture) {
+          avatarEl.innerHTML = newAvatarHTML;
+        } else {
+          avatarEl.innerHTML = '';
+          avatarEl.textContent = newAvatarHTML;
+        }
+      }
     }
-
-    if (isValidProfilePicture && avatarEl.innerHTML !== `<img src="${profilePicture}" alt="Profile Picture" class="avatar-img" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`) {
-      avatarEl.innerHTML = `<img src="${profilePicture}" alt="Profile Picture" class="avatar-img" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`;
-    } else if (!isValidProfilePicture && avatarEl.textContent !== displayName.charAt(0).toUpperCase()) {
-      avatarEl.innerHTML = '';
-      avatarEl.textContent = displayName.charAt(0).toUpperCase();
-    }
+    return null;
   }
 }
 
