@@ -16,10 +16,10 @@ async function fetchWithAutoRefresh(url, opts = {}) {
   let res = await fetch(url, opts);
   if (res.status === 401) {
     console.log('[DEBUG] fetchWithAutoRefresh: 401, attempting /auth/refresh');
-    const refresh = await fetch('/auth/refresh', { 
-      method: 'POST', 
-      credentials: 'include', 
-      headers: { 'Accept': 'application/json' } 
+    const refresh = await fetch(`${window.__SEC_API_BASE}/auth/refresh`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Accept': 'application/json' }
     });
     if (refresh.ok) {
       console.log('[DEBUG] fetchWithAutoRefresh: Refresh succeeded, retrying');
@@ -145,7 +145,7 @@ async function getSession() {
 
     // IMPORTANT: Do NOT attach localStorage authToken as a Bearer header.
     // Allow cookies (token + rt) to be sent automatically by the browser.
-    let res = await fetch('/api/session', {
+    let res = await fetch(`${window.__SEC_API_BASE}/api/session`, {
       method: 'GET',
       credentials: 'include',
       headers: { 'Accept': 'application/json' }
@@ -154,7 +154,7 @@ async function getSession() {
     // If server responds 401 -> attempt refresh endpoint (server will rotate cookies)
     if (res.status === 401) {
       console.log('[DEBUG] getSession: /api/session returned 401, attempting /auth/refresh');
-      const refreshRes = await fetch('/auth/refresh', {
+      const refreshRes = await fetch(`${window.__SEC_API_BASE}/auth/refresh`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Accept': 'application/json' }
@@ -163,7 +163,7 @@ async function getSession() {
       if (refreshRes.ok) {
         console.log('[DEBUG] getSession: /auth/refresh succeeded, retrying /api/session');
         // cookies (token + rt) were rotated/set by server; retry session
-        res = await fetch('/api/session', {
+        res = await fetch(`${window.__SEC_API_BASE}/api/session`, {
           method: 'GET',
           credentials: 'include',
           headers: { 'Accept': 'application/json' }
