@@ -407,27 +407,45 @@ async function onDashboardLoad() {
     }
   }
 
-  function showBanner(msg) {
-    if (STATUS_BANNER && BANNER_MSG) {
-      BANNER_MSG.textContent = msg;
-      STATUS_BANNER.classList.remove('hidden');
+
+function showBanner(msg) {
+  if (STATUS_BANNER && BANNER_MSG) {
+    BANNER_MSG.textContent = msg;
+    STATUS_BANNER.classList.remove('hidden');
+  }
+}
+
+function hideBanner() {
+  if (STATUS_BANNER) STATUS_BANNER.classList.add('hidden');
+}
+
+// Subscribe to Supabase Realtime channel for instant updates
+const channel = supabaseClient.channel('network-status');
+channel
+  .on('broadcast', { event: 'network-update' }, ({ payload }) => {
+    console.log('[DEBUG] Realtime push received:', payload);
+    if (payload.status === 'down' && payload.message) {
+      showBanner(payload.message);  // Instant display
+    } else {
+      hideBanner();  // Instant hide
     }
-  }
-
-  function hideBanner() {
-    if (STATUS_BANNER) STATUS_BANNER.classList.add('hidden');
-  }
-
-  // Network status listener
-  window.addEventListener('online', () => {
-    console.log('[DEBUG] Back online, polling status');
-    hideBanner();
-    pollStatus();
+  })
+  .subscribe((status) => {
+    console.log('[DEBUG] Realtime subscription status:', status);
+    if (status === 'SUBSCRIBED') {
+      // Optional: Fetch initial status via API if needed
+      fetch(`${window.__SEC_API_BASE}/api/status`)
+        .then(res => res.json())
+        .then(data => {
+          if (data.status === 'down' && data.message) showBanner(data.message);
+        })
+        .catch(() => showBanner('Network issue detected. Checking...'));
+    }
   });
-  window.addEventListener('offline', () => {
-    console.log('[DEBUG] Went offline');
-    showBanner('You are offline. Working with cached data.');
-  });
+
+// Network listeners (fallback for offline)
+window.addEventListener('online', hideBanner);
+window.addEventListener('offline', () => showBanner('You are offline. Working with cached data.'));
 
   // SW Registration & Update Listener
   async function registerSW() {
