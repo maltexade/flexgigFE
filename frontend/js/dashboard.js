@@ -2829,7 +2829,7 @@ function __fg_pin_clearAllInputs() {
   }
 
   // Utility to get current signed-in uid
-  async function __fg_pin_getCurrentUid() {
+async function __fg_pin_getCurrentUid() {
   try {
     if (typeof window.getSession === 'function') {
       const s = await window.getSession();
@@ -2860,17 +2860,17 @@ function __fg_pin_clearAllInputs() {
   }
 }
 
-  // Find stored PIN value in Supabase
-  const __fg_pin_TRY_TABLES = ['profiles', 'users', 'accounts'];
-  const __fg_pin_TRY_COLUMNS = [
-    'pin',
-    'account_pin',
-    'accountPin',
-    'pinCode',
-    'pin_hash',
-    'pin_hash_text',
-  ];
-  async function __fg_pin_findStoredPin({ uid }) {
+// Find stored PIN value in Supabase
+const __fg_pin_TRY_TABLES = ['profiles', 'users', 'accounts'];
+const __fg_pin_TRY_COLUMNS = [
+  'pin',
+  'account_pin',
+  'accountPin',
+  'pinCode',
+  'pin_hash',
+  'pin_hash_text',
+];
+async function __fg_pin_findStoredPin({ uid }) {
   if (!uid) {
     __fg_pin_log.w('No uid for findStoredPin');
     return null;
@@ -2880,10 +2880,11 @@ function __fg_pin_clearAllInputs() {
     const res = await fetch('https://api.flexgig.com.ng/api/check-pin', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${localStorage.getItem('token') || ''}`, // Assumes token is stored temporarily during session
+        'Content-Type': 'application/json'
+        // Removed: Invalid Bearer header; cookies handle auth
       },
-      credentials: 'include',
+      credentials: 'include',  // Ensure cookies are sent
+      body: JSON.stringify({ userId: uid })  // Pass uid for server verification
     });
     if (!res.ok) {
       __fg_pin_log.e('Error checking PIN existence:', await res.text());
@@ -2902,8 +2903,8 @@ function __fg_pin_clearAllInputs() {
   }
 }
 
-  // Update stored PIN in Supabase
-  async function __fg_pin_updateStoredPin(uid, table, column, newPin) {
+// Update stored PIN in Supabase
+async function __fg_pin_updateStoredPin(uid, table, column, newPin) {
   if (table !== 'users' || column !== 'pin') {
     __fg_pin_log.e('Invalid updateStoredPin params', { table, column });
     return { ok: false, error: 'invalid_params' };
@@ -2912,11 +2913,14 @@ function __fg_pin_clearAllInputs() {
     const res = await fetch('https://api.flexgig.com.ng/api/save-pin', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${localStorage.getItem('token') || ''}`,
+        'Content-Type': 'application/json'
+        // Removed: Invalid Bearer header; cookies handle auth
       },
-      body: JSON.stringify({ pin: newPin }),
-      credentials: 'include',
+      credentials: 'include',  // Ensure cookies are sent
+      body: JSON.stringify({ 
+        userId: uid,  // Pass uid for server verification
+        pin: newPin 
+      })
     });
     if (!res.ok) {
       const { error } = await res.json();
@@ -7803,103 +7807,106 @@ resumeLockoutIfAny();
      - Call from settings: __reauth.registerBiometrics()
      ----------------------- */
   async function registerBiometrics() {
-    console.log('registerBiometrics called');
-    try {
-      const session = await safeCall(getSession);
-      if (!session || !session.user) throw new Error('No session');
-      const { uid, username, fullName } = session.user;
-      console.log('Session for register:', { uid, username });
+  console.log('registerBiometrics called');
+  try {
+    const session = await safeCall(getSession);
+    if (!session || !session.user) throw new Error('No session');
+    const { uid, username, fullName } = session.user;
+    console.log('Session for register:', { uid, username });
 
-      console.log('Fetching register options');
-      const optsRes = await fetch('https://api.flexgig.com.ng/webauthn/register/options', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
-        },
-        body: JSON.stringify({ userId: uid, username, displayName: fullName || username || 'User' })
-      });
-      if (!optsRes.ok) throw new Error('Options failed');
-      const opts = await optsRes.json();
-      console.log('Register options received');
+    console.log('Fetching register options');
+    const optsRes = await fetch('https://api.flexgig.com.ng/webauthn/register/options', {
+      method: 'POST',
+      credentials: 'include',  // <-- Add this
+      headers: {
+        'Content-Type': 'application/json'
+        // <-- Remove Authorization entirely
+      },
+      body: JSON.stringify({ userId: uid, username, displayName: fullName || username || 'User' })
+    });
+    if (!optsRes.ok) throw new Error('Options failed');
+    const opts = await optsRes.json();
+    console.log('Register options received');
 
-      console.log('Creating credential');
-      const cred = await navigator.credentials.create({ publicKey: opts });
-      console.log('Credential created');
+    console.log('Creating credential');
+    const cred = await navigator.credentials.create({ publicKey: opts });
+    console.log('Credential created');
 
-      console.log('Verifying credential');
-      const verifyRes = await fetch('https://api.flexgig.com.ng/webauthn/register/verify', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
-        },
-        body: JSON.stringify({
-          userId: uid,
-          credential: {
-            id: cred.id,
-            rawId: btoa(String.fromCharCode(...new Uint8Array(cred.rawId))),
-            type: cred.type,
-            response: {
-              clientDataJSON: btoa(String.fromCharCode(...new Uint8Array(cred.response.clientDataJSON))),
-              attestationObject: btoa(String.fromCharCode(...new Uint8Array(cred.response.attestationObject)))
-            }
+    console.log('Verifying credential');
+    const verifyRes = await fetch('https://api.flexgig.com.ng/webauthn/register/verify', {
+      method: 'POST',
+      credentials: 'include',  // <-- Add this
+      headers: {
+        'Content-Type': 'application/json'
+        // <-- Remove Authorization
+      },
+      body: JSON.stringify({
+        userId: uid,
+        credential: {
+          id: cred.id,
+          rawId: btoa(String.fromCharCode(...new Uint8Array(cred.rawId))),
+          type: cred.type,
+          response: {
+            clientDataJSON: btoa(String.fromCharCode(...new Uint8Array(cred.response.clientDataJSON))),
+            attestationObject: btoa(String.fromCharCode(...new Uint8Array(cred.response.attestationObject)))
           }
-        })
-      });
-      if (!verifyRes.ok) throw new Error('Verify failed');
-      console.log('Register verify successful');
+        }
+      })
+    });
+    if (!verifyRes.ok) throw new Error('Verify failed');
+    console.log('Register verify successful');
 
-      localStorage.setItem('credentialId', cred.id); // For single; for multiple, use array
-      localStorage.setItem('biometricsEnabled', 'true');
-      safeCall(notify, 'Biometrics enabled!', 'success');
-      await initReauthModal(); // Refresh
-      console.log('Biometrics registered');
-    } catch (err) {
-      console.error('Register biometrics error:', err);
-      safeCall(notify, 'Biometrics setup failed - try again', 'error');
-    }
+    localStorage.setItem('credentialId', cred.id);
+    localStorage.setItem('biometricsEnabled', 'true');
+    safeCall(notify, 'Biometrics enabled!', 'success');
+    await initReauthModal(); // Refresh
+    console.log('Biometrics registered');
+  } catch (err) {
+    console.error('Register biometrics error:', err);
+    safeCall(notify, 'Biometrics setup failed - try again', 'error');
   }
+}
 
-  /* -----------------------
-     Disable Biometrics (new!)
-     - Call from settings: __reauth.disableBiometrics()
-     - Revokes server-side, clears local
-     ----------------------- */
+/* -----------------------
+   Disable Biometrics (new!)
+   - Call from settings: __reauth.disableBiometrics()
+   - Revokes server-side, clears local
+   ----------------------- */
   async function disableBiometrics() {
-    console.log('disableBiometrics called');
-    try {
-      const session = await safeCall(getSession);
-      if (!session || !session.user) throw new Error('No session');
-      const uid = session.user.uid;
-      console.log('UID for disable:', uid);
+  console.log('disableBiometrics called');
+  try {
+    const session = await safeCall(getSession);
+    if (!session || !session.user) throw new Error('No session');
+    const uid = session.user.uid;
+    console.log('UID for disable:', uid);
 
-      const credentialId = localStorage.getItem('credentialId');
-      console.log('Credential ID:', credentialId);
-      if (!credentialId) throw new Error('No credential');
+    const credentialId = localStorage.getItem('credentialId');
+    console.log('Credential ID:', credentialId);
+    if (!credentialId) throw new Error('No credential');
 
-      console.log('Revoking credential');
-      const revokeRes = await fetch(`https://api.flexgig.com.ng/webauthn/authenticators/${uid}/revoke`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
-        },
-        body: JSON.stringify({ credentialID: credentialId })
-      });
-      if (!revokeRes.ok) throw new Error('Revoke failed');
-      console.log('Revoke successful');
+    console.log('Revoking credential');
+    const revokeRes = await fetch(`https://api.flexgig.com.ng/webauthn/authenticators/${uid}/revoke`, {
+      method: 'POST',
+      credentials: 'include',  // <-- Add this
+      headers: {
+        'Content-Type': 'application/json'
+        // <-- Remove Authorization
+      },
+      body: JSON.stringify({ credentialID: credentialId })
+    });
+    if (!revokeRes.ok) throw new Error('Revoke failed');
+    console.log('Revoke successful');
 
-      localStorage.removeItem('credentialId');
-      localStorage.removeItem('biometricsEnabled');
-      safeCall(notify, 'Biometrics disabled', 'success');
-      await initReauthModal(); // Refresh to PIN view
-      console.log('Biometrics disabled');
-    } catch (err) {
-      console.error('Disable biometrics error:', err);
-      safeCall(notify, 'Disable failed - try again', 'error');
-    }
+    localStorage.removeItem('credentialId');
+    localStorage.removeItem('biometricsEnabled');
+    safeCall(notify, 'Biometrics disabled', 'success');
+    await initReauthModal(); // Refresh to PIN view
+    console.log('Biometrics disabled');
+  } catch (err) {
+    console.error('Disable biometrics error:', err);
+    safeCall(notify, 'Disable failed - try again', 'error');
   }
+}
 
   /* -----------------------
      Small helpers
