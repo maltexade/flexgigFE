@@ -599,68 +599,45 @@ function handleBroadcast(payload) {
 
 
 function setupBroadcastSubscription() {
-  // unified handler: payload is a broadcast row (new or old depending on event)
   function handleBroadcastRow(row) {
-    try {
-      if (!row) return;
-      // If row is active and not expired -> show it
-      const now = new Date();
-      const startsOk = !row.starts_at || new Date(row.starts_at) <= now;
-      const notExpired = !row.expire_at || new Date(row.expire_at) > now;
-      if (row.active && startsOk && notExpired) {
-        showBanner(row.message || '');
-        localStorage.setItem('active_broadcast_id', row.id);
-      } else {
-        // If the broadcast is inactive or expired -> hide if it's the one showing
-        const showingId = localStorage.getItem('active_broadcast_id');
-        if (showingId && String(showingId) === String(row.id)) {
-          hideBanner();
-          localStorage.removeItem('active_broadcast_id');
-        }
+    if (!row) return;
+    const now = new Date();
+    const startsOk = !row.starts_at || new Date(row.starts_at) <= now;
+    const notExpired = !row.expire_at || new Date(row.expire_at) > now;
+    if (row.active && startsOk && notExpired) {
+      showBanner(row.message || '');
+      localStorage.setItem('active_broadcast_id', row.id);
+    } else {
+      const showingId = localStorage.getItem('active_broadcast_id');
+      if (showingId && String(showingId) === String(row.id)) {
+        hideBanner();
+        localStorage.removeItem('active_broadcast_id');
       }
-    } catch (e) {
-      console.error('handleBroadcastRow error', e);
     }
   }
 
-  if (typeof supabaseClient.channel === 'function') {
-    const ch = supabaseClient.channel('public:broadcasts')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'broadcasts' }, ({ payload }) => {
-        handleBroadcastRow(payload.new);
-      })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'broadcasts' }, ({ payload }) => {
-        // payload.new contains updated row
-        handleBroadcastRow(payload.new);
-      })
-      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'broadcasts' }, ({ payload }) => {
-        // payload.old contains deleted row
-        handleBroadcastRow(payload.old);
-      })
-      .subscribe(async (status) => {
-        console.log('[DEBUG] Broadcast channel status', status);
-        if (status === 'SUBSCRIBED' || status?.status === 'ok') {
-          // On successful subscribe, fetch current active broadcasts (ensures new signins / refresh get persistent banners).
-          await fetchActiveBroadcasts();
-        }
-      });
-    // store channel if you want to unsubscribe later
-    window.__broadcastChannel = ch;
-  } else if (typeof supabaseClient.from === 'function') {
-    // v1 fallback (subscribe to INSERT/UPDATE/DELETE separately)
-    try {
-      supabaseClient.from('broadcasts').on('INSERT', payload => handleBroadcastRow(payload.new)).subscribe();
-      supabaseClient.from('broadcasts').on('UPDATE', payload => handleBroadcastRow(payload.new)).subscribe();
-      supabaseClient.from('broadcasts').on('DELETE', payload => handleBroadcastRow(payload.old)).subscribe();
-    } catch (e) {
-      console.warn('Supabase fallback subscription failed', e);
-    }
-    // fetch once initially
-    fetchActiveBroadcasts();
-  } else {
-    // No supabase: just fetch once
-    fetchActiveBroadcasts();
-  }
+  supabaseClient
+    .channel('public:broadcasts')
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'broadcasts' }, (payload) => {
+      console.log('[BROADCAST INSERT]', payload);
+      handleBroadcastRow(payload.new);
+    })
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'broadcasts' }, (payload) => {
+      console.log('[BROADCAST UPDATE]', payload);
+      handleBroadcastRow(payload.new);
+    })
+    .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'broadcasts' }, (payload) => {
+      console.log('[BROADCAST DELETE]', payload);
+      handleBroadcastRow(payload.old);
+    })
+    .subscribe(async (status) => {
+      if (status === 'SUBSCRIBED') {
+        // fetch current active when subscription first connects
+        await fetchActiveBroadcasts();
+      }
+    });
 }
+
 
 
 
