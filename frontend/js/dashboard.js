@@ -9,6 +9,71 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const { createClient } = supabase;
 const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+/* ============================================================================
+   Safety fallbacks: ensure reauth + inactivity helpers exist early
+   Insert this block immediately after `const supabaseClient = createClient(...)`
+   ============================================================================ */
+(function () {
+  // diagnostic helper
+  function logType(name) {
+    try { console.log(`[BOOT-HELPER] ${name}:`, typeof window[name]); } catch (e) {}
+  }
+
+  // initReauthModal fallback (async) - does nothing but avoids ReferenceError
+  if (typeof window.initReauthModal === 'undefined') {
+    window.initReauthModal = async function initReauthModalFallback(opts = {}) {
+      console.warn('[BOOT-HELPER] initReauthModal not yet available; using fallback. opts=', opts);
+      // Minimal behavior: call any exported __reauth.initReauthModal if available later
+      // and attempt to set a small pending flag so callers relying on it see a resolved promise.
+      try {
+        // if the real module attaches later to window.__reauth, call it then
+        if (window.__reauth && typeof window.__reauth.initReauthModal === 'function') {
+          return await window.__reauth.initReauthModal(opts);
+        }
+      } catch (e) {
+        console.warn('[BOOT-HELPER] fallback attempt to delegate initReauthModal failed', e);
+      }
+      return; // resolved promise, no-op
+    };
+  }
+
+  // resetInactivityTimer fallback - updates lastActive and sets a simple timeout
+  if (typeof window.resetInactivityTimer === 'undefined') {
+    window.__inactivityTimeoutHandle = null;
+    window.resetInactivityTimer = function resetInactivityTimerFallback() {
+      try {
+        localStorage.setItem('lastActive', String(Date.now()));
+      } catch (e) {}
+      if (window.__inactivityTimeoutHandle) {
+        clearTimeout(window.__inactivityTimeoutHandle);
+      }
+      // schedule a conservative check (will be short-lived if real impl replaces it)
+      const idle = (typeof window.IDLE_TIME === 'number' && window.IDLE_TIME > 0) ? window.IDLE_TIME : (15 * 60 * 1000);
+      window.__inactivityTimeoutHandle = setTimeout(() => {
+        try {
+          if (typeof window.showInactivityPrompt === 'function') {
+            window.showInactivityPrompt();
+          } else {
+            console.warn('[BOOT-HELPER] inactivity threshold reached (fallback), but showInactivityPrompt not defined');
+          }
+        } catch (e) { console.error('[BOOT-HELPER] inactivity check error (fallback)', e); }
+      }, Math.min(60*1000, Math.max(5000, Math.floor(idle / 4)))); // short fallback timeout (5s - 60s)
+    };
+  }
+
+  // Also provide a safe alias: setupInactivity vs initInactivity (some code uses one or the other)
+  if (typeof window.setupInactivity === 'undefined' && typeof window.initInactivity === 'function') {
+    window.setupInactivity = window.initInactivity;
+  } else if (typeof window.initInactivity === 'undefined' && typeof window.setupInactivity === 'function') {
+    window.initInactivity = window.setupInactivity;
+  }
+
+  // Print diagnostics to console so you know fallback ran
+  logType('initReauthModal');
+  logType('resetInactivityTimer');
+})();
+
+
 
 // 🚀 Global banner helpers
 // Put this in your JS file (replace old showBanner)
