@@ -778,6 +778,418 @@ async function loadUserProfile(noCache = false) {
 }
 
 
+  /* -----------------------
+     initReauthModal (prepares modal, binds events)
+     - Uses safeCall() to call app's helpers if available
+     ----------------------- */
+  async function initReauthModal({ show = false } = {}) {
+    console.log('initReauthModal called, show:', show);
+    cacheDomRefs();
+
+    let reauthNeeded = false;
+    try {
+      reauthNeeded = !!(await shouldReauth());
+      console.log('Reauth needed:', reauthNeeded);
+    } catch (e) {
+      console.error('Error in shouldReauth:', e);
+      reauthNeeded = false;
+    }
+    if (!reauthNeeded) {
+      console.log('No reauth needed, exiting');
+      return;
+    }
+
+    // Check for pending reauth on load/reload
+    const pendingReauth = localStorage.getItem('reauthPending');
+    if (pendingReauth && Date.now() - parseInt(pendingReauth) < 300000) { // 5 min window
+      console.log('Pending reauth detected, forcing show');
+      show = true;
+    }
+
+    // Populate user info (cached first)
+    try {
+      console.log('Populating user info from cache/server');
+      let user = null;
+      const cached = localStorage.getItem('userData');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        // Check staleness (1hr = 3600000ms)
+        if (Date.now() - parsed.cachedAt < 3600000) {
+          user = parsed;
+          console.log('Using cached user data');
+        } else {
+          console.log('Cache stale, fetching fresh');
+        }
+      }
+      if (!user) { // Fallback to server only if cache empty/stale
+        const session = await safeCall(getSession) || {};
+        user = session.user || {};
+        // Re-cache on fetch
+        const userData = {
+          username: user.username || '',
+          fullName: user.fullName || '',
+          profilePicture: user.profilePicture || '',
+          id: user.uid || user.id || '',
+          hasPin: user.hasPin || false,
+          cachedAt: Date.now()
+        };
+        localStorage.setItem('userData', JSON.stringify(userData));
+        console.log('Fresh data fetched and cached');
+      }
+      const displayName = user.username || (user.fullName || '').split(' ')[0] || 'User';
+      console.log('Display name:', displayName);
+      if (reauthName) reauthName.textContent = displayName.charAt(0).toUpperCase() + displayName.slice(1);
+      const profilePicture = user.profilePicture || localStorage.getItem('profilePicture') || '';
+      if (reauthAvatar) {
+        if (isValidImageSource(profilePicture)) {
+          reauthAvatar.src = `${profilePicture}?v=${Date.now()}`;
+          reauthAvatar.style.display = '';
+          console.log('Avatar set');
+        } else {
+          reauthAvatar.style.display = 'none';
+          console.log('Avatar hidden');
+        }
+      }
+    } catch (e) {
+      console.error('Error populating user info:', e);
+    }
+
+    // Check biometrics flag (local) and prepare views
+    try {
+      console.log('Checking biometrics');
+      const isBiometricsEnabled = localStorage.getItem('biometricsEnabled') === 'true';
+      console.log('Biometrics enabled from local:', isBiometricsEnabled);
+      if (biometricView) biometricView.style.display = (isBiometricsEnabled && 'PublicKeyCredential' in window) ? 'block' : 'none';
+      if (pinView) pinView.style.display = (biometricView && biometricView.style.display === 'block') ? 'none' : 'block';
+      if (switchToBiometric) switchToBiometric.style.display = (isBiometricsEnabled && 'PublicKeyCredential' in window) ? '' : 'none';
+      if (switchToPin) switchToPin.style.display = '';
+      console.log('Views set - biometric display:', biometricView?.style.display, 'pin display:', pinView?.style.display);
+    } catch (e) {
+      console.error('Error setting views:', e);
+    }
+    // inside initReauthModal(), after you set reauthAvatar/reauthName etc:
+resumeLockoutIfAny();
+
+
+    // Bind PIN inputs
+    try {
+      console.log('Binding PIN inputs');
+      const inputs = getReauthInputs();
+      if (typeof bindPinInputs === 'function') {
+        console.log('Calling existing bindPinInputs');
+        safeCall(bindPinInputs, inputs, pinView, reauthModal, reauthAlert, reauthAlertMsg);
+      } else {
+        console.log('No bindPinInputs found, using keypad init');
+      }
+    } catch (e) {
+      console.error('Error binding PIN inputs:', e);
+    }
+
+    // PIN form submit - attach once
+    try {
+      console.log('Setting up PIN form submit');
+      if (pinView && !pinView.__reauthSubmitBound) {
+        pinView.addEventListener('submit', async (ev) => {
+          console.log('PIN form submit triggered');
+          ev.preventDefault();
+          const inputs = getReauthInputs();
+          const pin = inputs.map(i => i.value).join('');
+          console.log('Submitted PIN:', pin);
+          if (!/^\d{4}$/.test(pin)) {
+            console.log('Invalid PIN format');
+            safeCall(notify, 'Invalid PIN', 'error', reauthAlert, reauthAlertMsg);
+            return;
+          }
+
+          const uidInfo = await safeCall(getUid);
+          console.log('UID info:', !!uidInfo);
+          if (!uidInfo || !uidInfo.uid) {
+            console.log('No UID, showing error');
+            safeCall(notify, 'Session error', 'error', reauthAlert, reauthAlertMsg);
+            setTimeout(() => window.location.href = '/', 1500);
+            return;
+          }
+
+          console.log('Calling reAuthenticateWithPin with UID:', uidInfo.uid);
+          await safeCall(reAuthenticateWithPin, uidInfo.uid, pin, (success) => {
+            console.log('reAuthenticateWithPin callback, success:', success);
+            if (success) {
+              try {
+                if (reauthModal) reauthModal.classList.add('hidden');
+              } catch (e) {
+                console.error('Error hiding modal on success:', e);
+              }
+              resetReauthInputs();
+              safeCall(getSession);
+              onSuccessfulReauth();
+            } else {
+              resetReauthInputs();
+            }
+          });
+        });
+        pinView.__reauthSubmitBound = true;
+        console.log('PIN submit bound');
+      }
+    } catch (e) {
+      console.error('Error setting up PIN submit:', e);
+    }
+
+    // Delete key
+    try {
+      console.log('Setting up delete key');
+      if (deleteReauthKey && !deleteReauthKey.__bound) {
+        deleteReauthKey.addEventListener('click', () => {
+          console.log('Delete key clicked');
+          const inputs = getReauthInputs();
+          const lastFilled = inputs.reverse().find(inp => inp.value);
+          if (lastFilled) {
+            lastFilled.value = '';
+            const prev = lastFilled.previousElementSibling;
+            (prev && prev.focus) ? prev.focus() : lastFilled.focus();
+            console.log('Deleted last filled input');
+          } else {
+            console.log('No filled input to delete');
+          }
+        });
+        deleteReauthKey.__bound = true;
+      }
+    } catch (e) {
+      console.error('Error setting up delete key:', e);
+    }
+
+    // Biometric verify - support multiple creds
+    try {
+      console.log('Setting up biometric verify');
+      if (verifyBiometricBtn && !verifyBiometricBtn.__bound) {
+        verifyBiometricBtn.addEventListener('click', async () => {
+          console.log('Biometric verify clicked');
+          try {
+            const session = await safeCall(getSession) || {};
+            const uid = session.user ? session.user.uid : null;
+            console.log('UID for biometric:', uid);
+            if (!uid) throw new Error('No UID');
+
+            console.log('Fetching biometric options');
+            const optsRes = await fetch('https://api.flexgig.com.ng/webauthn/auth/options', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+              },
+              body: JSON.stringify({ userId: uid })
+            });
+            if (!optsRes.ok) throw new Error('Options failed');
+            const { challenge, rpID, allowCredentials } = await optsRes.json(); // allowCredentials from backend
+            console.log('Biometric options received');
+
+            const publicKey = {
+              challenge: Uint8Array.from(atob(challenge), c => c.charCodeAt(0)),
+              rpId: rpID, // Backend provides
+              allowCredentials: allowCredentials.map(cred => ({
+                ...cred,
+                id: Uint8Array.from(atob(cred.id), c => c.charCodeAt(0))
+              })),
+              userVerification: 'required'
+            };
+
+            console.log('Getting biometric assertion');
+            const assertion = await navigator.credentials.get({ publicKey });
+            console.log('Assertion received, verifying');
+            const verifyRes = await fetch('https://api.flexgig.com.ng/webauthn/auth/verify', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+              },
+              body: JSON.stringify({
+                userId: uid,
+                credential: {
+                  id: assertion.id,
+                  rawId: btoa(String.fromCharCode(...new Uint8Array(assertion.rawId))),
+                  type: assertion.type,
+                  response: {
+                    authenticatorData: btoa(String.fromCharCode(...new Uint8Array(assertion.response.authenticatorData))),
+                    clientDataJSON: btoa(String.fromCharCode(...new Uint8Array(assertion.response.clientDataJSON))),
+                    signature: btoa(String.fromCharCode(...new Uint8Array(assertion.response.signature))),
+                    userHandle: assertion.response.userHandle ? btoa(String.fromCharCode(...new Uint8Array(assertion.response.userHandle))) : null
+                  }
+                }
+              })
+            });
+
+            if (verifyRes.ok) {
+              console.log('Biometric verify successful');
+              try {
+                if (reauthModal) reauthModal.classList.add('hidden');
+              } catch (e) {
+                console.error('Error hiding modal on biometric success:', e);
+              }
+              safeCall(getSession);
+              onSuccessfulReauth();
+            } else {
+              console.log('Biometric verify failed');
+              safeCall(notify, 'Biometric verification failed', 'error', reauthAlert, reauthAlertMsg);
+            }
+          } catch (err) {
+            console.error('Biometric error:', err);
+            safeCall(notify, 'Biometric not available - use PIN', 'error');
+            try {
+              if (switchToPin) switchToPin.click();
+            } catch (e) {
+              console.error('Error switching to PIN:', e);
+            }
+          }
+        });
+        verifyBiometricBtn.__bound = true;
+        console.log('Biometric bound');
+      }
+    } catch (e) {
+      console.error('Error setting up biometric:', e);
+    }
+
+    // Switch views
+    try {
+      console.log('Setting up view switches');
+      if (switchToPin && !switchToPin.__bound) {
+        switchToPin.addEventListener('click', (ev) => {
+          console.log('Switch to PIN clicked');
+          ev.preventDefault();
+          switchViews(false);
+        });
+        switchToPin.__bound = true;
+      }
+      if (switchToBiometric && !switchToBiometric.__bound) {
+        switchToBiometric.addEventListener('click', (ev) => {
+          console.log('Switch to biometric clicked');
+          ev.preventDefault();
+          switchViews(true);
+        });
+        switchToBiometric.__bound = true;
+      }
+    } catch (e) {
+      console.error('Error setting up switches:', e);
+    }
+
+    // Logout & forget
+    try {
+      console.log('Setting up logout and forget links');
+      [logoutLinkBio, logoutLinkPin].forEach((link, idx) => {
+        if (link && !link.__bound) {
+          link.addEventListener('click', (ev) => {
+            console.log('Logout clicked, link:', idx);
+            ev.preventDefault();
+            localStorage.clear();
+            localStorage.removeItem('reauthPending');
+            window.location.href = '/';
+          });
+          link.__bound = true;
+        }
+      });
+      [forgetPinLinkBio, forgetPinLinkPin].forEach((link, idx) => {
+        if (link && !link.__bound) {
+          link.addEventListener('click', (ev) => {
+            console.log('Forget PIN clicked, link:', idx);
+            ev.preventDefault();
+            localStorage.removeItem('reauthPending');
+            window.location.href = '/reset-pin.html';
+          });
+          link.__bound = true;
+        }
+      });
+    } catch (e) {
+      console.error('Error setting up links:', e);
+    }
+
+    // Init keypad (ensures binding even if PIN view is fallback)
+    initReauthKeypad();
+
+    // Modal visibility + ARIA/focus trap
+    try {
+      console.log('Handling modal visibility, show:', show);
+      if (!show) {
+        if (reauthModal) reauthModal.classList.add('hidden');
+        if (promptModal) promptModal.classList.add('hidden');
+        console.log('Modal hidden');
+      } else {
+        // Set pending flag to prevent bypass
+        localStorage.setItem('reauthPending', Date.now().toString());
+        console.log('Reauth pending flag set');
+        if (reauthModal) {
+          reauthModal.classList.remove('hidden');
+          reauthModalOpen = true;
+          clearTimeout(idleTimeout);
+          idleTimeout = null;
+          console.log('Reauth modal opened: inactivity halted');
+          reauthModal.setAttribute('aria-modal', 'true');
+          reauthModal.setAttribute('role', 'dialog');
+          const isBio = localStorage.getItem('biometricsEnabled') === 'true' && ('PublicKeyCredential' in window);
+          console.log('Is bio for show:', isBio);
+          if (isBio && biometricView) {
+            biometricView.style.display = 'block';
+            if (pinView) pinView.style.display = 'none';
+            verifyBiometricBtn.focus();
+            console.log('Showing biometric view');
+          } else {
+            if (biometricView) biometricView.style.display = 'none';
+            if (pinView) pinView.style.display = 'block';
+            const firstInput = getReauthInputs()[0];
+            if (firstInput) firstInput.focus();
+            console.log('Showing PIN view, first input focused');
+          }
+          trapFocus(reauthModal); // Add focus trap
+          console.log('Modal shown with focus trap');
+        }
+      }
+    } catch (e) {
+      console.error('Error handling visibility:', e);
+    }
+    console.log('initReauthModal completed');
+  } // end initReauthModal
+
+
+
+  // --- resetInactivityTimer (used by event listeners) ---
+// Updates localStorage lastActive and re-schedules the inactivity check.
+// Will not clobber an existing implementation.
+if (typeof resetInactivityTimer === 'undefined') {
+  window.__inactivityTimeoutHandle = null;
+
+  window.resetInactivityTimer = function resetInactivityTimer() {
+    try {
+      localStorage.setItem('lastActive', String(Date.now()));
+    } catch (e) { /* ignore storage errors */ }
+
+    // clear any pending timer
+    if (window.__inactivityTimeoutHandle) {
+      clearTimeout(window.__inactivityTimeoutHandle);
+    }
+
+    // schedule the inactivity check (fires after IDLE_TIME)
+    const idleMs = (typeof IDLE_TIME === 'number' && IDLE_TIME > 0) ? IDLE_TIME : (15 * 60 * 1000);
+    window.__inactivityTimeoutHandle = setTimeout(async () => {
+      try {
+        const last = parseInt(localStorage.getItem('lastActive') || '0', 10) || 0;
+        if (Date.now() - last > idleMs) {
+          // call shouldReauth() if available; default to true (ask for reauth)
+          let needs = true;
+          if (typeof shouldReauth === 'function') {
+            try { needs = await shouldReauth(); } catch (e) { needs = true; }
+          }
+          if (needs) {
+            if (typeof showInactivityPrompt === 'function') {
+              showInactivityPrompt();
+            } else {
+              // fallback: log so you can see a prompt should have shown
+              console.warn('[inactivity] showInactivityPrompt not defined; reauth required.');
+            }
+          }
+        }
+      } catch (err) {
+        console.error('[inactivity] check error', err);
+      }
+    }, idleMs + 50); // add a tiny buffer
+  };
+}
 
 
 
@@ -7404,373 +7816,7 @@ async function handlePinCompletion() {
 
 
 
-  /* -----------------------
-     initReauthModal (prepares modal, binds events)
-     - Uses safeCall() to call app's helpers if available
-     ----------------------- */
-  async function initReauthModal({ show = false } = {}) {
-    console.log('initReauthModal called, show:', show);
-    cacheDomRefs();
 
-    let reauthNeeded = false;
-    try {
-      reauthNeeded = !!(await shouldReauth());
-      console.log('Reauth needed:', reauthNeeded);
-    } catch (e) {
-      console.error('Error in shouldReauth:', e);
-      reauthNeeded = false;
-    }
-    if (!reauthNeeded) {
-      console.log('No reauth needed, exiting');
-      return;
-    }
-
-    // Check for pending reauth on load/reload
-    const pendingReauth = localStorage.getItem('reauthPending');
-    if (pendingReauth && Date.now() - parseInt(pendingReauth) < 300000) { // 5 min window
-      console.log('Pending reauth detected, forcing show');
-      show = true;
-    }
-
-    // Populate user info (cached first)
-    try {
-      console.log('Populating user info from cache/server');
-      let user = null;
-      const cached = localStorage.getItem('userData');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        // Check staleness (1hr = 3600000ms)
-        if (Date.now() - parsed.cachedAt < 3600000) {
-          user = parsed;
-          console.log('Using cached user data');
-        } else {
-          console.log('Cache stale, fetching fresh');
-        }
-      }
-      if (!user) { // Fallback to server only if cache empty/stale
-        const session = await safeCall(getSession) || {};
-        user = session.user || {};
-        // Re-cache on fetch
-        const userData = {
-          username: user.username || '',
-          fullName: user.fullName || '',
-          profilePicture: user.profilePicture || '',
-          id: user.uid || user.id || '',
-          hasPin: user.hasPin || false,
-          cachedAt: Date.now()
-        };
-        localStorage.setItem('userData', JSON.stringify(userData));
-        console.log('Fresh data fetched and cached');
-      }
-      const displayName = user.username || (user.fullName || '').split(' ')[0] || 'User';
-      console.log('Display name:', displayName);
-      if (reauthName) reauthName.textContent = displayName.charAt(0).toUpperCase() + displayName.slice(1);
-      const profilePicture = user.profilePicture || localStorage.getItem('profilePicture') || '';
-      if (reauthAvatar) {
-        if (isValidImageSource(profilePicture)) {
-          reauthAvatar.src = `${profilePicture}?v=${Date.now()}`;
-          reauthAvatar.style.display = '';
-          console.log('Avatar set');
-        } else {
-          reauthAvatar.style.display = 'none';
-          console.log('Avatar hidden');
-        }
-      }
-    } catch (e) {
-      console.error('Error populating user info:', e);
-    }
-
-    // Check biometrics flag (local) and prepare views
-    try {
-      console.log('Checking biometrics');
-      const isBiometricsEnabled = localStorage.getItem('biometricsEnabled') === 'true';
-      console.log('Biometrics enabled from local:', isBiometricsEnabled);
-      if (biometricView) biometricView.style.display = (isBiometricsEnabled && 'PublicKeyCredential' in window) ? 'block' : 'none';
-      if (pinView) pinView.style.display = (biometricView && biometricView.style.display === 'block') ? 'none' : 'block';
-      if (switchToBiometric) switchToBiometric.style.display = (isBiometricsEnabled && 'PublicKeyCredential' in window) ? '' : 'none';
-      if (switchToPin) switchToPin.style.display = '';
-      console.log('Views set - biometric display:', biometricView?.style.display, 'pin display:', pinView?.style.display);
-    } catch (e) {
-      console.error('Error setting views:', e);
-    }
-    // inside initReauthModal(), after you set reauthAvatar/reauthName etc:
-resumeLockoutIfAny();
-
-
-    // Bind PIN inputs
-    try {
-      console.log('Binding PIN inputs');
-      const inputs = getReauthInputs();
-      if (typeof bindPinInputs === 'function') {
-        console.log('Calling existing bindPinInputs');
-        safeCall(bindPinInputs, inputs, pinView, reauthModal, reauthAlert, reauthAlertMsg);
-      } else {
-        console.log('No bindPinInputs found, using keypad init');
-      }
-    } catch (e) {
-      console.error('Error binding PIN inputs:', e);
-    }
-
-    // PIN form submit - attach once
-    try {
-      console.log('Setting up PIN form submit');
-      if (pinView && !pinView.__reauthSubmitBound) {
-        pinView.addEventListener('submit', async (ev) => {
-          console.log('PIN form submit triggered');
-          ev.preventDefault();
-          const inputs = getReauthInputs();
-          const pin = inputs.map(i => i.value).join('');
-          console.log('Submitted PIN:', pin);
-          if (!/^\d{4}$/.test(pin)) {
-            console.log('Invalid PIN format');
-            safeCall(notify, 'Invalid PIN', 'error', reauthAlert, reauthAlertMsg);
-            return;
-          }
-
-          const uidInfo = await safeCall(getUid);
-          console.log('UID info:', !!uidInfo);
-          if (!uidInfo || !uidInfo.uid) {
-            console.log('No UID, showing error');
-            safeCall(notify, 'Session error', 'error', reauthAlert, reauthAlertMsg);
-            setTimeout(() => window.location.href = '/', 1500);
-            return;
-          }
-
-          console.log('Calling reAuthenticateWithPin with UID:', uidInfo.uid);
-          await safeCall(reAuthenticateWithPin, uidInfo.uid, pin, (success) => {
-            console.log('reAuthenticateWithPin callback, success:', success);
-            if (success) {
-              try {
-                if (reauthModal) reauthModal.classList.add('hidden');
-              } catch (e) {
-                console.error('Error hiding modal on success:', e);
-              }
-              resetReauthInputs();
-              safeCall(getSession);
-              onSuccessfulReauth();
-            } else {
-              resetReauthInputs();
-            }
-          });
-        });
-        pinView.__reauthSubmitBound = true;
-        console.log('PIN submit bound');
-      }
-    } catch (e) {
-      console.error('Error setting up PIN submit:', e);
-    }
-
-    // Delete key
-    try {
-      console.log('Setting up delete key');
-      if (deleteReauthKey && !deleteReauthKey.__bound) {
-        deleteReauthKey.addEventListener('click', () => {
-          console.log('Delete key clicked');
-          const inputs = getReauthInputs();
-          const lastFilled = inputs.reverse().find(inp => inp.value);
-          if (lastFilled) {
-            lastFilled.value = '';
-            const prev = lastFilled.previousElementSibling;
-            (prev && prev.focus) ? prev.focus() : lastFilled.focus();
-            console.log('Deleted last filled input');
-          } else {
-            console.log('No filled input to delete');
-          }
-        });
-        deleteReauthKey.__bound = true;
-      }
-    } catch (e) {
-      console.error('Error setting up delete key:', e);
-    }
-
-    // Biometric verify - support multiple creds
-    try {
-      console.log('Setting up biometric verify');
-      if (verifyBiometricBtn && !verifyBiometricBtn.__bound) {
-        verifyBiometricBtn.addEventListener('click', async () => {
-          console.log('Biometric verify clicked');
-          try {
-            const session = await safeCall(getSession) || {};
-            const uid = session.user ? session.user.uid : null;
-            console.log('UID for biometric:', uid);
-            if (!uid) throw new Error('No UID');
-
-            console.log('Fetching biometric options');
-            const optsRes = await fetch('https://api.flexgig.com.ng/webauthn/auth/options', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${localStorage.getItem('authToken')}`
-              },
-              body: JSON.stringify({ userId: uid })
-            });
-            if (!optsRes.ok) throw new Error('Options failed');
-            const { challenge, rpID, allowCredentials } = await optsRes.json(); // allowCredentials from backend
-            console.log('Biometric options received');
-
-            const publicKey = {
-              challenge: Uint8Array.from(atob(challenge), c => c.charCodeAt(0)),
-              rpId: rpID, // Backend provides
-              allowCredentials: allowCredentials.map(cred => ({
-                ...cred,
-                id: Uint8Array.from(atob(cred.id), c => c.charCodeAt(0))
-              })),
-              userVerification: 'required'
-            };
-
-            console.log('Getting biometric assertion');
-            const assertion = await navigator.credentials.get({ publicKey });
-            console.log('Assertion received, verifying');
-            const verifyRes = await fetch('https://api.flexgig.com.ng/webauthn/auth/verify', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${localStorage.getItem('authToken')}`
-              },
-              body: JSON.stringify({
-                userId: uid,
-                credential: {
-                  id: assertion.id,
-                  rawId: btoa(String.fromCharCode(...new Uint8Array(assertion.rawId))),
-                  type: assertion.type,
-                  response: {
-                    authenticatorData: btoa(String.fromCharCode(...new Uint8Array(assertion.response.authenticatorData))),
-                    clientDataJSON: btoa(String.fromCharCode(...new Uint8Array(assertion.response.clientDataJSON))),
-                    signature: btoa(String.fromCharCode(...new Uint8Array(assertion.response.signature))),
-                    userHandle: assertion.response.userHandle ? btoa(String.fromCharCode(...new Uint8Array(assertion.response.userHandle))) : null
-                  }
-                }
-              })
-            });
-
-            if (verifyRes.ok) {
-              console.log('Biometric verify successful');
-              try {
-                if (reauthModal) reauthModal.classList.add('hidden');
-              } catch (e) {
-                console.error('Error hiding modal on biometric success:', e);
-              }
-              safeCall(getSession);
-              onSuccessfulReauth();
-            } else {
-              console.log('Biometric verify failed');
-              safeCall(notify, 'Biometric verification failed', 'error', reauthAlert, reauthAlertMsg);
-            }
-          } catch (err) {
-            console.error('Biometric error:', err);
-            safeCall(notify, 'Biometric not available - use PIN', 'error');
-            try {
-              if (switchToPin) switchToPin.click();
-            } catch (e) {
-              console.error('Error switching to PIN:', e);
-            }
-          }
-        });
-        verifyBiometricBtn.__bound = true;
-        console.log('Biometric bound');
-      }
-    } catch (e) {
-      console.error('Error setting up biometric:', e);
-    }
-
-    // Switch views
-    try {
-      console.log('Setting up view switches');
-      if (switchToPin && !switchToPin.__bound) {
-        switchToPin.addEventListener('click', (ev) => {
-          console.log('Switch to PIN clicked');
-          ev.preventDefault();
-          switchViews(false);
-        });
-        switchToPin.__bound = true;
-      }
-      if (switchToBiometric && !switchToBiometric.__bound) {
-        switchToBiometric.addEventListener('click', (ev) => {
-          console.log('Switch to biometric clicked');
-          ev.preventDefault();
-          switchViews(true);
-        });
-        switchToBiometric.__bound = true;
-      }
-    } catch (e) {
-      console.error('Error setting up switches:', e);
-    }
-
-    // Logout & forget
-    try {
-      console.log('Setting up logout and forget links');
-      [logoutLinkBio, logoutLinkPin].forEach((link, idx) => {
-        if (link && !link.__bound) {
-          link.addEventListener('click', (ev) => {
-            console.log('Logout clicked, link:', idx);
-            ev.preventDefault();
-            localStorage.clear();
-            localStorage.removeItem('reauthPending');
-            window.location.href = '/';
-          });
-          link.__bound = true;
-        }
-      });
-      [forgetPinLinkBio, forgetPinLinkPin].forEach((link, idx) => {
-        if (link && !link.__bound) {
-          link.addEventListener('click', (ev) => {
-            console.log('Forget PIN clicked, link:', idx);
-            ev.preventDefault();
-            localStorage.removeItem('reauthPending');
-            window.location.href = '/reset-pin.html';
-          });
-          link.__bound = true;
-        }
-      });
-    } catch (e) {
-      console.error('Error setting up links:', e);
-    }
-
-    // Init keypad (ensures binding even if PIN view is fallback)
-    initReauthKeypad();
-
-    // Modal visibility + ARIA/focus trap
-    try {
-      console.log('Handling modal visibility, show:', show);
-      if (!show) {
-        if (reauthModal) reauthModal.classList.add('hidden');
-        if (promptModal) promptModal.classList.add('hidden');
-        console.log('Modal hidden');
-      } else {
-        // Set pending flag to prevent bypass
-        localStorage.setItem('reauthPending', Date.now().toString());
-        console.log('Reauth pending flag set');
-        if (reauthModal) {
-          reauthModal.classList.remove('hidden');
-          reauthModalOpen = true;
-          clearTimeout(idleTimeout);
-          idleTimeout = null;
-          console.log('Reauth modal opened: inactivity halted');
-          reauthModal.setAttribute('aria-modal', 'true');
-          reauthModal.setAttribute('role', 'dialog');
-          const isBio = localStorage.getItem('biometricsEnabled') === 'true' && ('PublicKeyCredential' in window);
-          console.log('Is bio for show:', isBio);
-          if (isBio && biometricView) {
-            biometricView.style.display = 'block';
-            if (pinView) pinView.style.display = 'none';
-            verifyBiometricBtn.focus();
-            console.log('Showing biometric view');
-          } else {
-            if (biometricView) biometricView.style.display = 'none';
-            if (pinView) pinView.style.display = 'block';
-            const firstInput = getReauthInputs()[0];
-            if (firstInput) firstInput.focus();
-            console.log('Showing PIN view, first input focused');
-          }
-          trapFocus(reauthModal); // Add focus trap
-          console.log('Modal shown with focus trap');
-        }
-      }
-    } catch (e) {
-      console.error('Error handling visibility:', e);
-    }
-    console.log('initReauthModal completed');
-  } // end initReauthModal
 
   /* -----------------------
      Focus Trap for Modals (new!)
