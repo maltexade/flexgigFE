@@ -29,7 +29,7 @@ function setBannerMessage(msg, repeatTimes = 6) {
 function showBanner(msg) {
   const STATUS_BANNER = document.getElementById('status-banner');
   if (!STATUS_BANNER) return;
-  setBannerMessage(msg, 6); // Ensure long repeat for scrolling
+  setBannerMessage(msg, 1); // Ensure long repeat for scrolling
   STATUS_BANNER.classList.remove('hidden');
 }
 
@@ -42,6 +42,47 @@ function hideBanner() {
 document.addEventListener('click', (e) => {
   if (e.target && e.target.id === 'banner-close') hideBanner();
 });
+
+// Fetch active broadcasts on load and show the first applicable one
+async function fetchActiveBroadcasts() {
+  try {
+    const res = await fetch(`${window.__SEC_API_BASE || ''}/api/broadcasts/active`, { credentials: 'include' });
+    if (!res.ok) {
+      console.warn('[BCAST] /api/broadcasts/active returned', res.status);
+      return [];
+    }
+    const json = await res.json();
+    const broadcasts = json.broadcasts || [];
+    // If you want the latest/highest priority first, sort here (by starts_at asc or created_at)
+    broadcasts.sort((a,b) => {
+      const aStart = a.starts_at ? new Date(a.starts_at).getTime() : 0;
+      const bStart = b.starts_at ? new Date(b.starts_at).getTime() : 0;
+      return aStart - bStart;
+    });
+
+    if (broadcasts.length > 0) {
+      // Show the first one (you can render multiple if you like)
+      const b = broadcasts[0];
+      // defensive: check expiry on client too
+      if (!b.expire_at || new Date(b.expire_at) > new Date()) {
+        showBanner(b.message || '');
+        // store visible broadcast id if you need to reference later
+        localStorage.setItem('active_broadcast_id', b.id);
+      } else {
+        hideBanner();
+        localStorage.removeItem('active_broadcast_id');
+      }
+    } else {
+      hideBanner();
+      localStorage.removeItem('active_broadcast_id');
+    }
+    return broadcasts;
+  } catch (err) {
+    console.error('[BCAST] fetchActiveBroadcasts error', err);
+    return [];
+  }
+}
+
 
 
 
@@ -414,6 +455,7 @@ async function onDashboardLoad() {
 
   // Then background refresh
   await getSession(); // This will update if needed
+  setupBroadcastSubscription();
   await initReauthModal();
   setupInactivity();
 
@@ -557,20 +599,71 @@ function handleBroadcast(payload) {
 
 
 function setupBroadcastSubscription() {
+  // unified handler: payload is a broadcast row (new or old depending on event)
+  function handleBroadcastRow(row) {
+    try {
+      if (!row) return;
+      // If row is active and not expired -> show it
+      const now = new Date();
+      const startsOk = !row.starts_at || new Date(row.starts_at) <= now;
+      const notExpired = !row.expire_at || new Date(row.expire_at) > now;
+      if (row.active && startsOk && notExpired) {
+        showBanner(row.message || '');
+        localStorage.setItem('active_broadcast_id', row.id);
+      } else {
+        // If the broadcast is inactive or expired -> hide if it's the one showing
+        const showingId = localStorage.getItem('active_broadcast_id');
+        if (showingId && String(showingId) === String(row.id)) {
+          hideBanner();
+          localStorage.removeItem('active_broadcast_id');
+        }
+      }
+    } catch (e) {
+      console.error('handleBroadcastRow error', e);
+    }
+  }
+
   if (typeof supabaseClient.channel === 'function') {
-    // supabase-js v2
-    supabaseClient.channel('public:broadcasts')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'broadcasts' }, (payload) => {
-        handleBroadcast(payload.new);
+    const ch = supabaseClient.channel('public:broadcasts')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'broadcasts' }, ({ payload }) => {
+        handleBroadcastRow(payload.new);
       })
-      .subscribe();
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'broadcasts' }, ({ payload }) => {
+        // payload.new contains updated row
+        handleBroadcastRow(payload.new);
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'broadcasts' }, ({ payload }) => {
+        // payload.old contains deleted row
+        handleBroadcastRow(payload.old);
+      })
+      .subscribe(async (status) => {
+        console.log('[DEBUG] Broadcast channel status', status);
+        if (status === 'SUBSCRIBED' || status?.status === 'ok') {
+          // On successful subscribe, fetch current active broadcasts (ensures new signins / refresh get persistent banners).
+          await fetchActiveBroadcasts();
+        }
+      });
+    // store channel if you want to unsubscribe later
+    window.__broadcastChannel = ch;
   } else if (typeof supabaseClient.from === 'function') {
-    // supabase-js v1
-    supabaseClient.from('broadcasts').on('INSERT', (payload) => handleBroadcast(payload.new)).subscribe();
+    // v1 fallback (subscribe to INSERT/UPDATE/DELETE separately)
+    try {
+      supabaseClient.from('broadcasts').on('INSERT', payload => handleBroadcastRow(payload.new)).subscribe();
+      supabaseClient.from('broadcasts').on('UPDATE', payload => handleBroadcastRow(payload.new)).subscribe();
+      supabaseClient.from('broadcasts').on('DELETE', payload => handleBroadcastRow(payload.old)).subscribe();
+    } catch (e) {
+      console.warn('Supabase fallback subscription failed', e);
+    }
+    // fetch once initially
+    fetchActiveBroadcasts();
+  } else {
+    // No supabase: just fetch once
+    fetchActiveBroadcasts();
   }
 }
 
-setupBroadcastSubscription();
+
+
 
 
 // Call in load: onDashboardLoad();
