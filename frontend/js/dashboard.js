@@ -5647,6 +5647,24 @@ document.querySelectorAll('.contact-box').forEach((box) => {
   const __sec_balanceSwitch = __sec_q('#balanceSwitch');
   const __sec_launcherBtn = __sec_q('#securityBtn');
 
+  // -------------------------------
+// Backwards-compatibility aliases
+// Some older code in this file mistakenly uses single-underscore names
+// (e.g. _sec_parentSwitch, _sec_setChecked). Create aliases so both
+// naming styles work without touching every call site.
+// -------------------------------
+const _sec_parentSwitch  = __sec_parentSwitch;
+const _sec_bioOptions    = __sec_bioOptions;
+const _sec_bioLogin      = __sec_bioLogin;
+const _sec_bioTx         = __sec_bioTx;
+const _sec_balanceSwitch = __sec_balanceSwitch;
+const _sec_launcherBtn   = __sec_launcherBtn;
+
+// helper aliases for the setChecked/isChecked helpers (used in many places)
+const _sec_setChecked = __sec_setChecked;
+const _sec_isChecked  = __sec_isChecked;
+
+
   __sec_log.d('Modal elements:', {
     modal: !!__sec_modal,
     closeBtn: !!__sec_closeBtn,
