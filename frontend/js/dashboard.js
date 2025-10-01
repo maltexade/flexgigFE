@@ -511,7 +511,7 @@ channel
     console.log('[DEBUG] Realtime subscription status:', status);
     if (status === 'SUBSCRIBED') {
       // Optional: Fetch initial status via API if needed
-      fetch(`${window.__SEC_API_BASE}/api/status`)
+      fetch(`${window.__SEC_API_BASE}/api/status`, { credentials: 'include' })
         .then(res => res.json())
         .then(data => {
           if (data.status === 'down' && data.message) showBanner(data.message);
@@ -2829,7 +2829,7 @@ function __fg_pin_clearAllInputs() {
   }
 
   // Utility to get current signed-in uid
-async function __fg_pin_getCurrentUid() {
+  async function __fg_pin_getCurrentUid() {
   try {
     if (typeof window.getSession === 'function') {
       const s = await window.getSession();
@@ -2860,17 +2860,17 @@ async function __fg_pin_getCurrentUid() {
   }
 }
 
-// Find stored PIN value in Supabase
-const __fg_pin_TRY_TABLES = ['profiles', 'users', 'accounts'];
-const __fg_pin_TRY_COLUMNS = [
-  'pin',
-  'account_pin',
-  'accountPin',
-  'pinCode',
-  'pin_hash',
-  'pin_hash_text',
-];
-async function __fg_pin_findStoredPin({ uid }) {
+  // Find stored PIN value in Supabase
+  const __fg_pin_TRY_TABLES = ['profiles', 'users', 'accounts'];
+  const __fg_pin_TRY_COLUMNS = [
+    'pin',
+    'account_pin',
+    'accountPin',
+    'pinCode',
+    'pin_hash',
+    'pin_hash_text',
+  ];
+  async function __fg_pin_findStoredPin({ uid }) {
   if (!uid) {
     __fg_pin_log.w('No uid for findStoredPin');
     return null;
@@ -2881,10 +2881,10 @@ async function __fg_pin_findStoredPin({ uid }) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
-        // Removed: Invalid Bearer header; cookies handle auth
+        // Removed Authorization
       },
-      credentials: 'include',  // Ensure cookies are sent
-      body: JSON.stringify({ userId: uid })  // Pass uid for server verification
+      credentials: 'include',
+      body: JSON.stringify({ userId: uid })  // Pass for verification
     });
     if (!res.ok) {
       __fg_pin_log.e('Error checking PIN existence:', await res.text());
@@ -2893,7 +2893,7 @@ async function __fg_pin_findStoredPin({ uid }) {
     const { hasPin } = await res.json();
     if (hasPin) {
       __fg_pin_log.d('PIN found in users.pin');
-      return { table: 'users', column: 'pin' }; // Standardize to users(pin)
+      return { table: 'users', column: 'pin' };
     }
     __fg_pin_log.w('No stored PIN found');
     return null;
@@ -2903,8 +2903,8 @@ async function __fg_pin_findStoredPin({ uid }) {
   }
 }
 
-// Update stored PIN in Supabase
-async function __fg_pin_updateStoredPin(uid, table, column, newPin) {
+  // Update stored PIN in Supabase
+  async function __fg_pin_updateStoredPin(uid, table, column, newPin) {
   if (table !== 'users' || column !== 'pin') {
     __fg_pin_log.e('Invalid updateStoredPin params', { table, column });
     return { ok: false, error: 'invalid_params' };
@@ -2913,14 +2913,11 @@ async function __fg_pin_updateStoredPin(uid, table, column, newPin) {
     const res = await fetch('https://api.flexgig.com.ng/api/save-pin', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
-        // Removed: Invalid Bearer header; cookies handle auth
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${localStorage.getItem('token') || ''}`,
       },
-      credentials: 'include',  // Ensure cookies are sent
-      body: JSON.stringify({ 
-        userId: uid,  // Pass uid for server verification
-        pin: newPin 
-      })
+      body: JSON.stringify({ pin: newPin }),
+      credentials: 'include',
     });
     if (!res.ok) {
       const { error } = await res.json();
@@ -3315,15 +3312,17 @@ async function __fg_pin_updateStoredPin(uid, table, column, newPin) {
 
   // Get user ID from Supabase
   async function getUid() {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user || !user.id) throw new Error('No signed-in user');
-      return { uid: user.id, email: user.email };
-    } catch (err) {
-      log.e('getUid error', err);
-      return null;
-    }
+  try {
+    const s = await window.getSession();
+    log.d('getSession result', s);
+    if (s && s.user && s.user.uid) return { uid: s.user.uid, session: s };
+    // No fallback - rely on cookies/session
+    throw new Error('No signed-in user');
+  } catch (err) {
+    log.e('getUid error', err);
+    return null;
   }
+}
 
   // Find stored PIN in Supabase
   async function findStoredPin(uid) {
@@ -3331,10 +3330,11 @@ async function __fg_pin_updateStoredPin(uid, table, column, newPin) {
     const response = await fetch('https://api.flexgig.com.ng/api/check-pin', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${localStorage.getItem('authToken') || ''}`,
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/json'
+        // Removed Authorization
       },
       credentials: 'include',
+      body: JSON.stringify({ userId: uid })  // Pass for verification
     });
     if (!response.ok) {
       console.error('[PinModal] Failed to check PIN:', await response.text());
@@ -3359,11 +3359,11 @@ async function __fg_pin_updateStoredPin(uid, table, column, newPin) {
     const response = await fetch('https://api.flexgig.com.ng/api/save-pin', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${localStorage.getItem('authToken') || ''}`,
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/json'
+        // Removed Authorization
       },
       credentials: 'include',
-      body: JSON.stringify({ pin: newPin }),
+      body: JSON.stringify({ userId: uid, pin: newPin })  // Pass userId
     });
     if (!response.ok) {
       const { error } = await response.json();
@@ -3389,10 +3389,10 @@ async function __fg_pin_updateStoredPin(uid, table, column, newPin) {
     const res = await fetch('https://api.flexgig.com.ng/api/verify-pin', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${localStorage.getItem('authToken') || ''}`,
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/json'
+        // Removed Authorization
       },
-      body: JSON.stringify({ pin }),
+      body: JSON.stringify({ userId: uid, pin }),
       credentials: 'include',
     });
     if (!res.ok) {
@@ -3536,7 +3536,7 @@ async function __fg_pin_updateStoredPin(uid, table, column, newPin) {
   }
   const found = await findStoredPin(info.uid) || { table: 'profiles', column: 'pin' };
   notify('Setting PIN...', 'info');
-  const upd = await updateStoredPin(info.uid, found.table, found.column, pin);
+  const upd = await updateStoredPin(info.uid, pin);  // Updated call (removed table/column if not needed)
   if (upd.ok) {
     notify('PIN set successfully', 'success');
     pinInputs.forEach(inp => inp.value = '');
@@ -3638,24 +3638,27 @@ async function __fg_pin_updateStoredPin(uid, table, column, newPin) {
           notify('Cannot verify PIN. Use Reset PIN.', 'error');
           return;
         }
-        if (found.value !== currentPin) {
-          notify('Current PIN is incorrect', 'error');
-          return;
-        }
-        notify('Updating PIN...', 'info');
-        const upd = await updateStoredPin(info.uid, found.table, found.column, newPin);
-        if (upd.ok) {
-          notify('PIN changed successfully', 'success');
-          q('#currentPin').value = '';
-          q('#newPin').value = '';
-          q('#confirmPin').value = '';
-          window.ModalManager.closeModal('securityPinModal');
-          if (lastModalSource === 'security') {
-            window.ModalManager.openModal('securityModal');
+        // Note: Assuming backend verify-pin can check currentPin; if found.value is hashed, use reAuthenticateWithPin for current
+        await reAuthenticateWithPin(info.uid, currentPin, async (success) => {
+          if (!success) {
+            notify('Current PIN is incorrect', 'error');
+            return;
           }
-        } else {
-          notify('Failed to update PIN. Try again.', 'error');
-        }
+          notify('Updating PIN...', 'info');
+          const upd = await updateStoredPin(info.uid, newPin);
+          if (upd.ok) {
+            notify('PIN changed successfully', 'success');
+            q('#currentPin').value = '';
+            q('#newPin').value = '';
+            q('#confirmPin').value = '';
+            window.ModalManager.closeModal('securityPinModal');
+            if (lastModalSource === 'security') {
+              window.ModalManager.openModal('securityModal');
+            }
+          } else {
+            notify('Failed to update PIN. Try again.', 'error');
+          }
+        });
       });
     }
     const resetPinBtn = q('#resetPinBtn');
@@ -5697,119 +5700,78 @@ document.querySelectorAll('.contact-box').forEach((box) => {
 
   /* Async: get current user (use stored authToken and sync with custom API) */
   async function __sec_getCurrentUser() {
-    try {
-      __sec_log.d('__sec_getCurrentUser: Starting');
-      let sessionData = JSON.parse(localStorage.getItem('authTokenData') || '{}');
-      __sec_log.d('__sec_getCurrentUser: Retrieved authTokenData', sessionData);
-      let user = sessionData.user;
-      let authToken = sessionData.authToken;
+  try {
+    __sec_log.d('__sec_getCurrentUser: Starting');
 
-      // Check if token is expired (parse JWT to get exp)
-      if (authToken) {
-        try {
-          const payload = authToken.split('.')[1];
-          const decoded = JSON.parse(atob(payload));
-          __sec_log.d('__sec_getCurrentUser: Decoded JWT', { iat: decoded.iat, exp: decoded.exp });
-          if (decoded.exp * 1000 < Date.now()) {
-            __sec_log.w('Stored token expired, attempting refresh', { exp: decoded.exp });
-            authToken = null; // Force refresh
+    // Primary: Use window.getSession (cookie-based)
+    if (typeof window.getSession === 'function') {
+      __sec_log.d('__sec_getCurrentUser: Attempting window.getSession');
+      const session = await window.getSession();
+      __sec_log.d('__sec_getCurrentUser: window.getSession result', session);
+      if (session && session.user) {
+        __sec_log.i('Retrieved session from getSession', session.user);
+        return { user: session.user };
+      } else {
+        __sec_log.w('No valid session from getSession', session);
+      }
+    } else {
+      __sec_log.w('window.getSession not available');
+    }
+
+    // Fallback: Fetch /api/session directly with cookies (no Bearer/token)
+    __sec_log.d('__sec_getCurrentUser: Fetching /api/session with cookies');
+    const res = await fetch('https://api.flexgig.com.ng/api/session', {
+      method: 'GET',
+      credentials: 'include',
+      headers: { 'Accept': 'application/json' }
+    });
+    __sec_log.d('__sec_getCurrentUser: /api/session response', { status: res.status, ok: res.ok });
+    if (res.ok) {
+      const { user: fetchedUser } = await res.json();
+      if (fetchedUser) {
+        __sec_log.i('Retrieved session from /api/session', fetchedUser);
+        return { user: fetchedUser };
+      }
+    } else if (res.status === 401) {
+      __sec_log.i('Session expired, attempting refresh');
+      const refreshRes = await fetch('https://api.flexgig.com.ng/auth/refresh', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Accept': 'application/json' }
+      });
+      __sec_log.d('__sec_getCurrentUser: /auth/refresh response', { status: refreshRes.status, ok: refreshRes.ok });
+      if (refreshRes.ok) {
+        __sec_log.d('__sec_getCurrentUser: Refresh successful');
+        // Retry session with refreshed cookies
+        const retryRes = await fetch('https://api.flexgig.com.ng/api/session', {
+          method: 'GET',
+          credentials: 'include',
+          headers: { 'Accept': 'application/json' }
+        });
+        __sec_log.d('__sec_getCurrentUser: Retry /api/session response', { status: retryRes.status, ok: retryRes.ok });
+        if (retryRes.ok) {
+          const { user: fetchedUser } = await retryRes.json();
+          if (fetchedUser) {
+            __sec_log.i('Retrieved session after refresh', fetchedUser);
+            return { user: fetchedUser };
           }
-        } catch (err) {
-          __sec_log.e('__sec_getCurrentUser: Failed to parse JWT', err);
-          authToken = null;
+        } else {
+          __sec_log.e('Failed to retrieve session after refresh', await retryRes.text());
         }
       } else {
-        __sec_log.w('__sec_getCurrentUser: No authToken in sessionData');
+        __sec_log.e('Refresh failed', await refreshRes.text());
       }
-
-      if (!user || !authToken) {
-        __sec_log.w('Stored authTokenData missing or invalid', { user: !!user, authToken: !!authToken });
-        if (typeof window.getSession === 'function') {
-          __sec_log.d('__sec_getCurrentUser: Attempting window.getSession');
-          const session = await window.getSession();
-          __sec_log.d('__sec_getCurrentUser: window.getSession result', session);
-          if (session && session.user && session.authToken) {
-            user = session.user;
-            authToken = session.authToken;
-            localStorage.setItem('authTokenData', JSON.stringify({ user, authToken }));
-            __sec_log.i('Retrieved session from getSession', { user, authToken });
-            return { user, authToken };
-          } else {
-            __sec_log.w('No valid session from getSession', session);
-          }
-        } else {
-          __sec_log.w('window.getSession not available');
-        }
-
-        // Fallback: Try /api/session with stored authToken
-        const token = localStorage.getItem('authToken');
-        __sec_log.d('__sec_getCurrentUser: Retrieved authToken from localStorage', token);
-        if (token) {
-          __sec_log.d('__sec_getCurrentUser: Fetching /api/session with token');
-          const res = await fetch('https://api.flexgig.com.ng/api/session', {
-            method: 'GET',
-            credentials: 'include',
-            headers: { 'Accept': 'application/json', 'Authorization': `Bearer ${token}` }
-          });
-          __sec_log.d('__sec_getCurrentUser: /api/session response', { status: res.status, ok: res.ok });
-          if (res.ok) {
-            const { user: fetchedUser, token: newToken } = await res.json();
-            user = fetchedUser;
-            authToken = newToken;
-            localStorage.setItem('authTokenData', JSON.stringify({ user, authToken: newToken }));
-            __sec_log.i('Retrieved session from /api/session', { user, authToken });
-            return { user, authToken };
-          } else if (res.status === 401) {
-            __sec_log.i('Token expired, attempting refresh');
-            const refreshRes = await fetch('https://api.flexgig.com.ng/auth/refresh', {
-              method: 'POST',
-              credentials: 'include',
-              headers: { 'Accept': 'application/json' }
-            });
-            __sec_log.d('__sec_getCurrentUser: /auth/refresh response', { status: refreshRes.status, ok: refreshRes.ok });
-            if (refreshRes.ok) {
-              const { token: newToken } = await refreshRes.json();
-              localStorage.setItem('authToken', newToken);
-              __sec_log.d('__sec_getCurrentUser: Refreshed token', newToken);
-              const retryRes = await fetch('https://api.flexgig.com.ng/api/session', {
-                method: 'GET',
-                credentials: 'include',
-                headers: { 'Accept': 'application/json', 'Authorization': `Bearer ${newToken}` }
-              });
-              __sec_log.d('__sec_getCurrentUser: Retry /api/session response', { status: retryRes.status, ok: retryRes.ok });
-              if (retryRes.ok) {
-                const { user: fetchedUser, token: finalToken } = await retryRes.json();
-                user = fetchedUser;
-                authToken = finalToken;
-                localStorage.setItem('authTokenData', JSON.stringify({ user, authToken: finalToken }));
-                __sec_log.i('Retrieved session after refresh', { user, authToken });
-                return { user, authToken };
-              } else {
-                __sec_log.e('Failed to retrieve session after refresh', await retryRes.text());
-              }
-            } else {
-              __sec_log.e('Refresh failed', await refreshRes.text());
-            }
-          } else {
-            __sec_log.e('Failed to fetch session', { status: res.status, text: await res.text() });
-          }
-        } else {
-          __sec_log.w('No authToken in localStorage');
-        }
-      }
-
-      if (!user || !authToken) {
-        __sec_log.e('No valid session available', { user: !!user, authToken: !!authToken });
-        return null;
-      }
-
-      __sec_log.i('Returning valid session', { user, authToken });
-      return { user, authToken };
-    } catch (err) {
-      __sec_log.e('Failed to get current user', err.message);
-      return null;
+    } else {
+      __sec_log.e('Failed to fetch session', { status: res.status, text: await res.text() });
     }
+
+    __sec_log.e('No valid session available');
+    return null;
+  } catch (err) {
+    __sec_log.e('Failed to get current user', err.message);
+    return null;
   }
+}
 
   /* Animation helpers */
   let __sec_hideTimer = null;
@@ -5917,6 +5879,15 @@ function __sec_maybeDisableParentIfChildrenOff() {
     }
   } catch (err) {
     __sec_log.e('maybeDisableParentIfChildrenOff error', err);
+  }
+}
+
+// Define missing _sec_parentSwitch (stub; customize if needed)
+function _sec_parentSwitch() {
+  console.log('[__sec] Parent switch called');
+  // Add logic, e.g., postMessage to parent if in iframe
+  if (window.parent !== window) {
+    window.parent.postMessage({ type: '__sec_init', status: 'ready' }, '*');
   }
 }
 
@@ -7579,7 +7550,7 @@ resumeLockoutIfAny();
       console.error('Error setting up delete key:', e);
     }
 
-    // Biometric verify - support multiple creds
+        // Biometric verify - support multiple creds
     try {
       console.log('Setting up biometric verify');
       if (verifyBiometricBtn && !verifyBiometricBtn.__bound) {
@@ -7594,9 +7565,10 @@ resumeLockoutIfAny();
             console.log('Fetching biometric options');
             const optsRes = await fetch('https://api.flexgig.com.ng/webauthn/auth/options', {
               method: 'POST',
+              credentials: 'include',  // Cookies for auth
               headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+                'Content-Type': 'application/json'
+                // Removed Authorization
               },
               body: JSON.stringify({ userId: uid })
             });
@@ -7619,9 +7591,10 @@ resumeLockoutIfAny();
             console.log('Assertion received, verifying');
             const verifyRes = await fetch('https://api.flexgig.com.ng/webauthn/auth/verify', {
               method: 'POST',
+              credentials: 'include',  // Cookies for auth
               headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+                'Content-Type': 'application/json'
+                // Removed Authorization
               },
               body: JSON.stringify({
                 userId: uid,
