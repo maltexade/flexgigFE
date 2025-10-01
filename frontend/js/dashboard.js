@@ -456,8 +456,16 @@ async function onDashboardLoad() {
   // Then background refresh
   await getSession(); // This will update if needed
   setupBroadcastSubscription();
-  await initReauthModal();
-  setupInactivity();
+  if (window.__reauth && typeof window.__reauth.initReauthModal === 'function') {
+  await window.__reauth.initReauthModal();
+} else {
+  console.warn('initReauthModal not available - skipping');
+}
+  if (window.__reauth && typeof window.__reauth.setupInactivity === 'function') {
+  window.__reauth.setupInactivity();
+} else {
+  console.warn('setupInactivity not available - skipping');
+}
 
   // Your existing inactivity check...
   const last = parseInt(localStorage.getItem('lastActive')) || 0;
@@ -3674,20 +3682,20 @@ function __fg_pin_clearAllInputs() {
   }
 
   // Initialize inactivity handling
-  function initInactivity() {
-    const events = ['click', 'keypress', 'scroll', 'mousemove', 'touchstart'];
-    events.forEach(event => {
-      document.addEventListener(event, resetInactivityTimer, { passive: true });
-    });
-    resetInactivityTimer();
-    if (inactivityConfirmBtn) {
-      inactivityConfirmBtn.addEventListener('click', () => {
-        window.ModalManager.closeModal('inactivityModal');
-        clearTimeout(inactivityPopupTimer);
-        resetInactivityTimer();
-      });
-    }
-  }
+  // function initInactivity() {
+  //   const events = ['click', 'keypress', 'scroll', 'mousemove', 'touchstart'];
+  //   events.forEach(event => {
+  //     document.addEventListener(event, resetInactivityTimer, { passive: true });
+  //   });
+  //   resetInactivityTimer();
+  //   if (inactivityConfirmBtn) {
+  //     inactivityConfirmBtn.addEventListener('click', () => {
+  //       window.ModalManager.closeModal('inactivityModal');
+  //       clearTimeout(inactivityPopupTimer);
+  //       resetInactivityTimer();
+  //     });
+  //   }
+  // }
 
   // Initialize on page load
   function boot() {
@@ -3696,7 +3704,9 @@ function __fg_pin_clearAllInputs() {
     initPinVerifyModal();
     initSecurityPinModal();
     initCheckoutPin();
-    initInactivity();
+    if (window.__reauth && typeof window.__reauth.setupInactivity === 'function') {
+  window.__reauth.setupInactivity();
+}
 
     // Check PIN on page load
     window.checkPinExists((hasPin) => {
