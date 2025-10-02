@@ -5648,11 +5648,20 @@ document.querySelectorAll('.contact-box').forEach((box) => {
   __sec_log.d('Security module initializing with supabase:', !!supabase);
 
   const __sec_q = (sel) => {
-    try { return document.querySelector(sel); }
-    catch (err) { __sec_log.e('bad selector', sel, err); return null; }
+    __sec_log.d('Querying selector:', sel);
+    try { 
+      const result = document.querySelector(sel);
+      __sec_log.d('Query result for', sel, !!result);
+      return result;
+    }
+    catch (err) { 
+      __sec_log.e('bad selector', sel, err); 
+      return null; 
+    }
   };
 
   /* Elements — use your IDs */
+  __sec_log.d('Querying all security elements');
   const __sec_modal = __sec_q('#securityModal');
   const __sec_closeBtn = __sec_q('#securityCloseBtn');
   const __sec_parentSwitch = __sec_q('#biometricsSwitch');
@@ -5664,7 +5673,7 @@ document.querySelectorAll('.contact-box').forEach((box) => {
   const __sec_balanceSwitch = __sec_q('#balanceSwitch');
   const __sec_launcherBtn = __sec_q('#securityBtn');
 
-  __sec_log.d('Modal elements:', {
+  __sec_log.d('Modal elements queried:', {
     modal: !!__sec_modal,
     closeBtn: !!__sec_closeBtn,
     launcherBtn: !!__sec_launcherBtn,
@@ -5678,129 +5687,184 @@ document.querySelectorAll('.contact-box').forEach((box) => {
     bioTx: 'security_bio_tx',
     balance: 'security_balance_visible'
   };
+  __sec_log.d('Storage keys defined:', __sec_KEYS);
 
   /* Helpers */
-  const __sec_setChecked = (el, v) => { if (!el) return; el.setAttribute('aria-checked', v ? 'true' : 'false'); };
-  const __sec_isChecked = (el) => !!el && el.getAttribute('aria-checked') === 'true';
+  const __sec_setChecked = (el, v) => { 
+    __sec_log.d('setChecked called for el:', el?.id || 'unknown', 'value:', v);
+    if (!el) return; 
+    el.setAttribute('aria-checked', v ? 'true' : 'false');
+    __sec_log.d('setChecked applied:', el.getAttribute('aria-checked'));
+  };
+  const __sec_isChecked = (el) => { 
+    const checked = !!el && el.getAttribute('aria-checked') === 'true';
+    __sec_log.d('isChecked for el:', el?.id || 'unknown', 'result:', checked);
+    return checked;
+  };
   function __sec_toggleSwitch(el, forced) {
-    if (!el) return false;
+    __sec_log.d('toggleSwitch entry:', { el: el?.id || 'unknown', forced });
+    if (!el) { 
+      __sec_log.w('toggleSwitch: no element'); 
+      return false; 
+    }
     const cur = __sec_isChecked(el);
     const next = (typeof forced === 'boolean') ? forced : !cur;
     __sec_setChecked(el, next);
-    __sec_log.d('toggle', el && el.id, { cur, next });
+    __sec_log.d('toggleSwitch exit:', { cur, next });
     return next;
   }
 
   /* UI lock helpers for async ops */
   function __sec_setBusy(el, busy = true) {
+    __sec_log.d('setBusy called:', { el: el?.id || 'unknown', busy });
     if (!el) return;
-    try { el.disabled = !!busy; } catch (e) {}
-    if (busy) el.setAttribute('aria-busy', 'true'); else el.removeAttribute('aria-busy');
+    try { 
+      el.disabled = !!busy; 
+      __sec_log.d('setBusy disabled:', el.disabled);
+    } catch (e) { 
+      __sec_log.e('setBusy disable error:', e);
+    }
+    if (busy) { 
+      el.setAttribute('aria-busy', 'true'); 
+      __sec_log.d('setBusy aria-busy true');
+    } else { 
+      el.removeAttribute('aria-busy'); 
+      __sec_log.d('setBusy aria-busy removed');
+    }
   }
 
   /* Async: get current user (use stored authToken and sync with custom API) */
   async function __sec_getCurrentUser() {
-  try {
     __sec_log.d('__sec_getCurrentUser: Starting');
 
-    // Primary: Use window.getSession (cookie-based)
     if (typeof window.getSession === 'function') {
       __sec_log.d('__sec_getCurrentUser: Attempting window.getSession');
       const session = await window.getSession();
-      __sec_log.d('__sec_getCurrentUser: window.getSession result', session);
+      __sec_log.d('__sec_getCurrentUser: window.getSession result (raw)', session);
       if (session && session.user) {
         __sec_log.i('Retrieved session from getSession', session.user);
         return { user: session.user };
       } else {
         __sec_log.w('No valid session from getSession', session);
       }
-    } else {
-      __sec_log.w('window.getSession not available');
     }
 
-    // Fallback: Fetch /api/session directly with cookies (no Bearer/token)
     __sec_log.d('__sec_getCurrentUser: Fetching /api/session with cookies');
     const res = await fetch('https://api.flexgig.com.ng/api/session', {
       method: 'GET',
       credentials: 'include',
       headers: { 'Accept': 'application/json' }
     });
-    __sec_log.d('__sec_getCurrentUser: /api/session response', { status: res.status, ok: res.ok });
-    if (res.ok) {
-      const { user: fetchedUser } = await res.json();
-      if (fetchedUser) {
-        __sec_log.i('Retrieved session from /api/session', fetchedUser);
-        return { user: fetchedUser };
-      }
-    } else if (res.status === 401) {
+    const raw = await res.text();
+    __sec_log.d('__sec_getCurrentUser: /api/session raw body', raw);
+
+    let parsed = null;
+    try { 
+      parsed = JSON.parse(raw); 
+      __sec_log.d('__sec_getCurrentUser: JSON parse success');
+    } catch (e) { 
+      __sec_log.e('parse error', e); 
+    }
+    __sec_log.d('__sec_getCurrentUser: parsed', parsed);
+
+    if (res.ok && parsed && parsed.user) {
+      __sec_log.i('Retrieved session from /api/session', parsed.user);
+      return { user: parsed.user };
+    }
+
+    if (res.status === 401) {
       __sec_log.i('Session expired, attempting refresh');
       const refreshRes = await fetch('https://api.flexgig.com.ng/auth/refresh', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Accept': 'application/json' }
       });
-      __sec_log.d('__sec_getCurrentUser: /auth/refresh response', { status: refreshRes.status, ok: refreshRes.ok });
+      const rawRefresh = await refreshRes.text();
+      __sec_log.d('__sec_getCurrentUser: /auth/refresh raw body', rawRefresh);
+
       if (refreshRes.ok) {
-        __sec_log.d('__sec_getCurrentUser: Refresh successful');
-        // Retry session with refreshed cookies
+        __sec_log.d('__sec_getCurrentUser: Refresh successful, retrying session');
         const retryRes = await fetch('https://api.flexgig.com.ng/api/session', {
           method: 'GET',
           credentials: 'include',
           headers: { 'Accept': 'application/json' }
         });
-        __sec_log.d('__sec_getCurrentUser: Retry /api/session response', { status: retryRes.status, ok: retryRes.ok });
-        if (retryRes.ok) {
-          const { user: fetchedUser } = await retryRes.json();
-          if (fetchedUser) {
-            __sec_log.i('Retrieved session after refresh', fetchedUser);
-            return { user: fetchedUser };
-          }
-        } else {
-          __sec_log.e('Failed to retrieve session after refresh', await retryRes.text());
+        const retryRaw = await retryRes.text();
+        __sec_log.d('__sec_getCurrentUser: Retry raw body', retryRaw);
+        let retryParsed = null;
+        try { 
+          retryParsed = JSON.parse(retryRaw); 
+          __sec_log.d('__sec_getCurrentUser: Retry JSON parse success');
+        } catch (e) { 
+          __sec_log.e('Retry parse error', e); 
+        }
+        if (retryRes.ok && retryParsed && retryParsed.user) {
+          __sec_log.i('Retrieved session after refresh', retryParsed.user);
+          return { user: retryParsed.user };
         }
       } else {
-        __sec_log.e('Refresh failed', await refreshRes.text());
+        __sec_log.e('Refresh failed raw', rawRefresh);
       }
-    } else {
-      __sec_log.e('Failed to fetch session', { status: res.status, text: await res.text() });
     }
 
     __sec_log.e('No valid session available');
     return null;
-  } catch (err) {
-    __sec_log.e('Failed to get current user', err.message);
-    return null;
   }
-}
 
   /* Animation helpers */
   let __sec_hideTimer = null;
-  function __sec_clearHideTimer() { if (__sec_hideTimer) { clearTimeout(__sec_hideTimer); __sec_hideTimer = null; } }
+  function __sec_clearHideTimer() { 
+    __sec_log.d('clearHideTimer called, timer exists:', !!__sec_hideTimer);
+    if (__sec_hideTimer) { 
+      clearTimeout(__sec_hideTimer); 
+      __sec_hideTimer = null; 
+      __sec_log.d('clearHideTimer: cleared');
+    }
+  }
 
   function __sec_revealChildrenAnimated() {
-    if (!__sec_bioOptions) return;
+    __sec_log.d('revealChildrenAnimated entry');
+    if (!__sec_bioOptions) { 
+      __sec_log.w('revealChildrenAnimated: bioOptions missing'); 
+      return; 
+    }
     __sec_clearHideTimer();
+    __sec_log.d('revealChildrenAnimated: removing no-animate, setting hidden false');
     __sec_bioOptions.classList.remove('no-animate');
     __sec_bioOptions.hidden = false;
-    requestAnimationFrame(() => __sec_bioOptions.classList.add('show'));
+    requestAnimationFrame(() => {
+      __sec_log.d('revealChildrenAnimated: adding show class');
+      __sec_bioOptions.classList.add('show');
+    });
     const rows = Array.from(__sec_bioOptions.querySelectorAll('.setting-row'));
+    __sec_log.d('revealChildrenAnimated: rows found', rows.length);
     rows.forEach((row, i) => {
       row.classList.remove('visible');
       row.style.transitionDelay = `${i * 80}ms`;
     });
-    requestAnimationFrame(() => rows.forEach(row => row.classList.add('visible')));
+    requestAnimationFrame(() => {
+      rows.forEach(row => row.classList.add('visible'));
+      __sec_log.d('revealChildrenAnimated: visible class added to rows');
+    });
   }
 
   function __sec_hideChildrenAnimated() {
-    if (!__sec_bioOptions) return;
+    __sec_log.d('hideChildrenAnimated entry');
+    if (!__sec_bioOptions) { 
+      __sec_log.w('hideChildrenAnimated: bioOptions missing'); 
+      return; 
+    }
     __sec_clearHideTimer();
     const rows = Array.from(__sec_bioOptions.querySelectorAll('.setting-row'));
+    __sec_log.d('hideChildrenAnimated: rows found', rows.length);
     rows.slice().reverse().forEach((row, idx) => {
       row.style.transitionDelay = `${idx * 60}ms`;
       row.classList.remove('visible');
     });
     const longest = rows.length * 60 + 220;
+    __sec_log.d('hideChildrenAnimated: setting timeout', longest);
     __sec_hideTimer = setTimeout(() => {
+      __sec_log.d('hideChildrenAnimated: timeout fired, removing show');
       __sec_bioOptions.classList.remove('show');
       rows.forEach(r => { r.style.transitionDelay = ''; });
       __sec_bioOptions.hidden = true;
@@ -5809,15 +5873,30 @@ document.querySelectorAll('.contact-box').forEach((box) => {
   }
 
   function __sec_revealChildrenNoAnimate() {
-    if (!__sec_bioOptions) return;
+    __sec_log.d('revealChildrenNoAnimate entry');
+    if (!__sec_bioOptions) { 
+      __sec_log.w('revealChildrenNoAnimate: bioOptions missing'); 
+      return; 
+    }
     __sec_clearHideTimer();
+    __sec_log.d('revealChildrenNoAnimate: removing show, adding no-animate');
     __sec_bioOptions.classList.remove('show');
     __sec_bioOptions.classList.add('no-animate');
     __sec_bioOptions.hidden = false;
     const rows = Array.from(__sec_bioOptions.querySelectorAll('.setting-row'));
-    rows.forEach(row => { row.classList.add('visible'); row.style.transitionDelay = ''; });
-    requestAnimationFrame(() => __sec_bioOptions.classList.add('show'));
-    setTimeout(() => __sec_bioOptions.classList.remove('no-animate'), 60);
+    __sec_log.d('revealChildrenNoAnimate: rows found', rows.length);
+    rows.forEach(row => { 
+      row.classList.add('visible'); 
+      row.style.transitionDelay = ''; 
+    });
+    requestAnimationFrame(() => {
+      __sec_log.d('revealChildrenNoAnimate: adding show');
+      __sec_bioOptions.classList.add('show');
+    });
+    setTimeout(() => {
+      __sec_log.d('revealChildrenNoAnimate: removing no-animate');
+      __sec_bioOptions.classList.remove('no-animate');
+    }, 60);
   }
 
   /* Set biometric UI state */
@@ -5825,11 +5904,21 @@ document.querySelectorAll('.contact-box').forEach((box) => {
 /* Set biometric UI state */
 /* Set biometric UI state */
 function __sec_setBiometrics(parentOn, animate = true) {
-  if (!__sec_parentSwitch) { __sec_log.w('parent switch element missing'); return; }
+  __sec_log.d('setBiometrics entry:', { parentOn, animate });
+  if (!__sec_parentSwitch) { 
+    __sec_log.w('setBiometrics: parent switch element missing'); 
+    return; 
+  }
   __sec_setChecked(__sec_parentSwitch, parentOn);
-  try { localStorage.setItem(__sec_KEYS.biom, parentOn ? '1' : '0'); } catch (e) {}
+  try { 
+    localStorage.setItem(__sec_KEYS.biom, parentOn ? '1' : '0'); 
+    __sec_log.d('setBiometrics: stored biom', parentOn ? '1' : '0');
+  } catch (e) { 
+    __sec_log.e('setBiometrics: storage error', e);
+  }
 
   if (parentOn) {
+    __sec_log.d('setBiometrics: parentOn true, revealing children');
     if (animate) {
       __sec_revealChildrenAnimated();
     } else {
@@ -5839,52 +5928,89 @@ function __sec_setBiometrics(parentOn, animate = true) {
     // Always force both children on when parent is activated
     if (__sec_bioLogin) {
       __sec_setChecked(__sec_bioLogin, true);
-      try { localStorage.setItem(__sec_KEYS.bioLogin, '1'); } catch (e) {}
+      try { 
+        localStorage.setItem(__sec_KEYS.bioLogin, '1'); 
+        __sec_log.d('setBiometrics: stored bioLogin 1');
+      } catch (e) { 
+        __sec_log.e('setBiometrics: bioLogin storage error', e);
+      }
     }
     if (__sec_bioTx) {
       __sec_setChecked(__sec_bioTx, true);
-      try { localStorage.setItem(__sec_KEYS.bioTx, '1'); } catch (e) {}
+      try { 
+        localStorage.setItem(__sec_KEYS.bioTx, '1'); 
+        __sec_log.d('setBiometrics: stored bioTx 1');
+      } catch (e) { 
+        __sec_log.e('setBiometrics: bioTx storage error', e);
+      }
     }
     __sec_log.i('biom ON', { animate });
   } else {
+    __sec_log.d('setBiometrics: parentOn false, hiding children');
     try {
       localStorage.setItem(__sec_KEYS.bioLogin, '0');
       localStorage.setItem(__sec_KEYS.bioTx, '0');
-    } catch (e) {}
-    if (__sec_bioLogin) __sec_setChecked(__sec_bioLogin, false);
-    if (__sec_bioTx) __sec_setChecked(__sec_bioTx, false);
-    if (animate) __sec_hideChildrenAnimated();
+      __sec_log.d('setBiometrics: stored bioLogin/bioTx 0');
+    } catch (e) { 
+      __sec_log.e('setBiometrics: children storage error', e);
+    }
+    if (__sec_bioLogin) { 
+      __sec_setChecked(__sec_bioLogin, false); 
+    }
+    if (__sec_bioTx) { 
+      __sec_setChecked(__sec_bioTx, false); 
+    }
+    if (animate) { 
+      __sec_hideChildrenAnimated(); 
+    }
     else {
       if (__sec_bioOptions) {
+        __sec_log.d('setBiometrics: no animate hide');
         __sec_bioOptions.classList.remove('show');
         __sec_bioOptions.hidden = true;
         const rows = Array.from(__sec_bioOptions.querySelectorAll('.setting-row'));
-        rows.forEach(r => { r.classList.remove('visible'); r.style.transitionDelay = ''; });
+        rows.forEach(r => { 
+          r.classList.remove('visible'); 
+          r.style.transitionDelay = ''; 
+        });
       }
     }
     __sec_log.i('biom OFF', { animate });
   }
+  __sec_log.d('setBiometrics exit');
 }
 
 /* If both child switches are off, turn the parent off */
 function __sec_maybeDisableParentIfChildrenOff() {
+  __sec_log.d('maybeDisableParentIfChildrenOff entry');
   try {
-    if (!__sec_parentSwitch) return;
-    if (!__sec_bioLogin || !__sec_bioTx) return;
+    if (!__sec_parentSwitch) { 
+      __sec_log.w('maybeDisableParentIfChildrenOff: parent missing'); 
+      return; 
+    }
+    if (!__sec_bioLogin || !__sec_bioTx) { 
+      __sec_log.w('maybeDisableParentIfChildrenOff: children missing'); 
+      return; 
+    }
     const loginOn = __sec_isChecked(__sec_bioLogin);
     const txOn = __sec_isChecked(__sec_bioTx);
+    __sec_log.d('maybeDisableParentIfChildrenOff: children state', { loginOn, txOn });
     if (!loginOn && !txOn && __sec_isChecked(__sec_parentSwitch)) {
       __sec_log.i('Both biometric children off — turning parent OFF');
       __sec_setBiometrics(false, true);
+    } else {
+      __sec_log.d('maybeDisableParentIfChildrenOff: no action needed');
     }
   } catch (err) {
     __sec_log.e('maybeDisableParentIfChildrenOff error', err);
   }
+  __sec_log.d('maybeDisableParentIfChildrenOff exit');
 }
 
 
 /* Initialize from storage */
 function __sec_initFromStorage() {
+  __sec_log.d('initFromStorage entry');
   try {
     const rawBiom = localStorage.getItem(__sec_KEYS.biom); // '1' | '0' | null
     const rawLogin = localStorage.getItem(__sec_KEYS.bioLogin);
@@ -5896,53 +6022,101 @@ function __sec_initFromStorage() {
     const txStored = rawTx === '1';
     const balanceStored = rawBalance === null ? true : (rawBalance === '1');
 
-    if (__sec_parentSwitch) __sec_setChecked(__sec_parentSwitch, biomStored);
+    __sec_log.d('initFromStorage raw values:', { rawBiom, rawLogin, rawTx, rawBalance });
+    __sec_log.d('initFromStorage parsed:', { biomStored, loginStored, txStored, balanceStored });
+
+    if (__sec_parentSwitch) { 
+      __sec_setChecked(__sec_parentSwitch, biomStored); 
+    }
 
     if (__sec_bioOptions) {
       if (biomStored) {
+        __sec_log.d('initFromStorage: biomStored true, revealing');
         __sec_revealChildrenNoAnimate();
-        if (__sec_bioLogin) __sec_setChecked(__sec_bioLogin, loginStored);
-        if (__sec_bioTx) __sec_setChecked(__sec_bioTx, txStored);
+        if (__sec_bioLogin) { 
+          __sec_setChecked(__sec_bioLogin, loginStored); 
+        }
+        if (__sec_bioTx) { 
+          __sec_setChecked(__sec_bioTx, txStored); 
+        }
         __sec_maybeDisableParentIfChildrenOff();  // Add: handle inconsistent states
       } else {
+        __sec_log.d('initFromStorage: biomStored false, hiding');
         __sec_bioOptions.hidden = true;
         __sec_bioOptions.classList.remove('show');
-        if (__sec_bioLogin) __sec_setChecked(__sec_bioLogin, false);
-        if (__sec_bioTx) __sec_setChecked(__sec_bioTx, false);
+        if (__sec_bioLogin) { 
+          __sec_setChecked(__sec_bioLogin, false); 
+        }
+        if (__sec_bioTx) { 
+          __sec_setChecked(__sec_bioTx, false); 
+        }
       }
     }
 
-    if (__sec_balanceSwitch) __sec_setChecked(__sec_balanceSwitch, balanceStored);
+    if (__sec_balanceSwitch) { 
+      __sec_setChecked(__sec_balanceSwitch, balanceStored); 
+    }
 
-    __sec_log.d('initFromStorage', { rawBiom, rawLogin, rawTx, rawBalance, biomStored, loginStored, txStored, balanceStored });
+    __sec_log.d('initFromStorage complete', { rawBiom, rawLogin, rawTx, rawBalance, biomStored, loginStored, txStored, balanceStored });
   } catch (err) {
     __sec_log.e('initFromStorage error', err);
   }
+  __sec_log.d('initFromStorage exit');
 }
 
+__sec_log.d('Adding beforeunload listener');
 window.addEventListener('beforeunload', () => {
+  __sec_log.d('beforeunload triggered');
   try {
-    if (__sec_parentSwitch) localStorage.setItem(__sec_KEYS.biom, __sec_isChecked(__sec_parentSwitch) ? '1' : '0');
-    if (__sec_bioLogin) localStorage.setItem(__sec_KEYS.bioLogin, __sec_isChecked(__sec_bioLogin) ? '1' : '0');
-    if (__sec_bioTx) localStorage.setItem(__sec_KEYS.bioTx, __sec_isChecked(__sec_bioTx) ? '1' : '0');
-    if (__sec_balanceSwitch) localStorage.setItem(__sec_KEYS.balance, __sec_isChecked(__sec_balanceSwitch) ? '1' : '0');
-  } catch (e) { /* ignore */ }
+    if (__sec_parentSwitch) { 
+      const val = __sec_isChecked(__sec_parentSwitch) ? '1' : '0';
+      localStorage.setItem(__sec_KEYS.biom, val);
+      __sec_log.d('beforeunload: stored biom', val);
+    }
+    if (__sec_bioLogin) { 
+      const val = __sec_isChecked(__sec_bioLogin) ? '1' : '0';
+      localStorage.setItem(__sec_KEYS.bioLogin, val);
+      __sec_log.d('beforeunload: stored bioLogin', val);
+    }
+    if (__sec_bioTx) { 
+      const val = __sec_isChecked(__sec_bioTx) ? '1' : '0';
+      localStorage.setItem(__sec_KEYS.bioTx, val);
+      __sec_log.d('beforeunload: stored bioTx', val);
+    }
+    if (__sec_balanceSwitch) { 
+      const val = __sec_isChecked(__sec_balanceSwitch) ? '1' : '0';
+      localStorage.setItem(__sec_KEYS.balance, val);
+      __sec_log.d('beforeunload: stored balance', val);
+    }
+  } catch (e) { 
+    __sec_log.e('beforeunload storage error', e);
+  }
 });
 
 
 /* ========== Slide-in Notification ========== */
 function showSlideNotification(message, type = "info") {
+  __sec_log.d('showSlideNotification entry:', { message, type });
   let box = document.createElement("div");
   box.className = "slide-notification " + type;
   box.innerText = message;
   document.body.appendChild(box);
+  __sec_log.d('showSlideNotification: box created and appended');
 
-  requestAnimationFrame(() => box.classList.add("show"));
+  requestAnimationFrame(() => {
+    __sec_log.d('showSlideNotification: adding show class');
+    box.classList.add("show");
+  });
 
   setTimeout(() => {
+    __sec_log.d('showSlideNotification: removing show class');
     box.classList.remove("show");
-    setTimeout(() => box.remove(), 500);
+    setTimeout(() => {
+      __sec_log.d('showSlideNotification: removing box');
+      box.remove();
+    }, 500);
   }, 3000);
+  __sec_log.d('showSlideNotification exit');
 }
 
 /* =========================
