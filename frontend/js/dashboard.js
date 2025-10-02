@@ -6455,8 +6455,6 @@ function __sec_convertRowsToChevron() {
   }
 
 /* ---- WebAuthn register/authenticate flows ---- */
-  // Utility to convert base64url string to ArrayBuffer
-/* ---- WebAuthn utilities ---- */
 /* ---- WebAuthn utilities ---- */
 function base64urlToArrayBuffer(base64url) {
   __sec_log.d('base64urlToArrayBuffer entry', { input: base64url });
@@ -6498,24 +6496,27 @@ function uuidToArrayBuffer(uuid) {
 async function startRegistration(userId, username, displayName) {
   __sec_log.d('startRegistration entry', { userId, username, displayName });
   try {
-    const { authToken } = await __sec_getCurrentUser() || {};
-    __sec_log.d('startRegistration: Retrieved authToken', { authToken: !!authToken });
-    if (!authToken) throw new Error('No auth token');
+    // Get user for UID (no token needed)
+    const currentUser = await __sec_getCurrentUser();
+    __sec_log.d('startRegistration: Retrieved currentUser', { hasUser: !!currentUser?.user });
+    if (!currentUser || !currentUser.user || !currentUser.user.uid) {
+      throw new Error('No valid user session');
+    }
 
     const apiBase = window.__SEC_API_BASE || "https://api.flexgig.com.ng";
     const optUrl = `${apiBase}/webauthn/register/options`;
     __sec_log.d('startRegistration: Fetching options from', optUrl);
     const optRes = await fetch(optUrl, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' },
       credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId, username, displayName }),
     });
     const optRaw = await optRes.text();
     __sec_log.d('startRegistration: Options response', { status: optRes.status, ok: optRes.ok, raw: optRaw });
     if (!optRes.ok) throw new Error(`Options failed: ${optRaw}`);
 
-    const options = await optRes.json();
+    const options = JSON.parse(optRaw);
     __sec_log.d('startRegistration: Parsed options', options);
 
     // Convert challenge
@@ -6540,7 +6541,7 @@ async function startRegistration(userId, username, displayName) {
       __sec_log.d('startRegistration: Converting excludeCredentials', { count: options.excludeCredentials.length });
       options.excludeCredentials = options.excludeCredentials.map(c => {
         const converted = {
-          ...c, 
+          ...c,
           id: new Uint8Array(base64urlToArrayBuffer(c.id))
         };
         __sec_log.d('startRegistration: Converted excludeCredential', { idLength: converted.id.length });
@@ -6548,10 +6549,10 @@ async function startRegistration(userId, username, displayName) {
       });
     }
 
-    __sec_log.d('startRegistration: Final publicKey options before create', { 
-      challengeLength: options.challenge?.length, 
-      userIdLength: options.user?.id?.length, 
-      excludeCount: options.excludeCredentials?.length || 0 
+    __sec_log.d('startRegistration: Final publicKey options before create', {
+      challengeLength: options.challenge?.length,
+      userIdLength: options.user?.id?.length,
+      excludeCount: options.excludeCredentials?.length || 0
     });
 
     // Create credential
@@ -6576,23 +6577,23 @@ async function startRegistration(userId, username, displayName) {
     __sec_log.d('startRegistration: Verifying at', verifyUrl);
     const verifyRes = await fetch(verifyUrl, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' },
       credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId, credential }),
     });
     const verifyRaw = await verifyRes.text();
     __sec_log.d('startRegistration: Verify response', { status: verifyRes.status, ok: verifyRes.ok, raw: verifyRaw });
     if (!verifyRes.ok) throw new Error(`Verify failed: ${verifyRaw}`);
 
-    const verifyResult = await verifyRes.json();
+    const verifyResult = JSON.parse(verifyRaw);
     __sec_log.i('startRegistration: Verify success', verifyResult);
     return verifyResult;
   } catch (err) {
-    __sec_log.e('startRegistration error', { 
-      message: err.message, 
-      stack: err.stack, 
-      userId, 
-      username 
+    __sec_log.e('startRegistration error', {
+      message: err.message,
+      stack: err.stack,
+      userId,
+      username
     });
     throw err;
   }
@@ -6603,24 +6604,27 @@ async function startRegistration(userId, username, displayName) {
 async function startAuthentication(userId) {
   __sec_log.d('startAuthentication entry', { userId });
   try {
-    const { authToken } = await __sec_getCurrentUser() || {};
-    __sec_log.d('startAuthentication: Retrieved authToken', { authToken: !!authToken });
-    if (!authToken) throw new Error('No auth token');
+    // Get user for UID (no token needed)
+    const currentUser = await __sec_getCurrentUser();
+    __sec_log.d('startAuthentication: Retrieved currentUser', { hasUser: !!currentUser?.user });
+    if (!currentUser || !currentUser.user || !currentUser.user.uid) {
+      throw new Error('No valid user session');
+    }
 
     const apiBase = window.__SEC_API_BASE || "https://api.flexgig.com.ng";
     const optUrl = `${apiBase}/webauthn/auth/options`;
     __sec_log.d('startAuthentication: Fetching options from', optUrl);
     const optRes = await fetch(optUrl, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' },
       credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId }),
     });
     const optRaw = await optRes.text();
     __sec_log.d('startAuthentication: Options response', { status: optRes.status, ok: optRes.ok, raw: optRaw });
     if (!optRes.ok) throw new Error(`Auth options failed: ${optRaw}`);
 
-    const options = await optRes.json();
+    const options = JSON.parse(optRaw);
     __sec_log.d('startAuthentication: Parsed options', options);
 
     __sec_log.d('startAuthentication: Converting challenge');
@@ -6631,7 +6635,7 @@ async function startAuthentication(userId) {
       __sec_log.d('startAuthentication: Converting allowCredentials', { count: options.allowCredentials.length });
       options.allowCredentials = options.allowCredentials.map(c => {
         const converted = {
-          ...c, 
+          ...c,
           id: new Uint8Array(base64urlToArrayBuffer(c.id))
         };
         __sec_log.d('startAuthentication: Converted allowCredential', { idLength: converted.id.length });
@@ -6639,9 +6643,9 @@ async function startAuthentication(userId) {
       });
     }
 
-    __sec_log.d('startAuthentication: Final publicKey options before get', { 
-      challengeLength: options.challenge?.length, 
-      allowCount: options.allowCredentials?.length || 0 
+    __sec_log.d('startAuthentication: Final publicKey options before get', {
+      challengeLength: options.challenge?.length,
+      allowCount: options.allowCredentials?.length || 0
     });
 
     __sec_log.i('startAuthentication: Calling navigator.credentials.get');
@@ -6666,22 +6670,22 @@ async function startAuthentication(userId) {
     __sec_log.d('startAuthentication: Verifying at', verifyUrl);
     const verifyRes = await fetch(verifyUrl, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' },
       credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId, credential }),
     });
     const verifyRaw = await verifyRes.text();
     __sec_log.d('startAuthentication: Verify response', { status: verifyRes.status, ok: verifyRes.ok, raw: verifyRaw });
     if (!verifyRes.ok) throw new Error(`Auth verify failed: ${verifyRaw}`);
 
-    const verifyResult = await verifyRes.json();
+    const verifyResult = JSON.parse(verifyRaw);
     __sec_log.i('startAuthentication: Verify success', verifyResult);
     return verifyResult;
   } catch (err) {
-    __sec_log.e('startAuthentication error', { 
-      message: err.message, 
-      stack: err.stack, 
-      userId 
+    __sec_log.e('startAuthentication error', {
+      message: err.message,
+      stack: err.stack,
+      userId
     });
     throw err;
   }
@@ -6693,23 +6697,19 @@ async function __sec_listAuthenticators(userId) {
   __sec_log.d('listAuthenticators entry', { userId });
   try {
     const currentUser = await __sec_getCurrentUser();
-    __sec_log.d('listAuthenticators: Retrieved currentUser', { hasToken: !!currentUser?.authToken });
-    if (!currentUser || !currentUser.authToken) {
-      __sec_log.w('No auth token for listing authenticators');
+    __sec_log.d('listAuthenticators: Retrieved currentUser', { hasUser: !!currentUser?.user });
+    if (!currentUser || !currentUser.user || !currentUser.user.uid) {
+      __sec_log.w('listAuthenticators: No valid user session');
       return null;
     }
-    const token = currentUser.authToken;
 
-    const apiBase = window.__SEC_API_BASE;
+    const apiBase = window.__SEC_API_BASE || "https://api.flexgig.com.ng";
     const url = `${apiBase}/webauthn/authenticators/${encodeURIComponent(userId)}`;
     __sec_log.d('listAuthenticators: Fetching from', url);
     const r = await fetch(url, {
       method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
       credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
     });
 
     const rRaw = await r.text();
@@ -6720,7 +6720,7 @@ async function __sec_listAuthenticators(userId) {
       return null;
     }
 
-    const j = await r.json();
+    const j = JSON.parse(rRaw);
     __sec_log.d('listAuthenticators success', j);
     return j;
   } catch (err) {
@@ -6734,23 +6734,19 @@ async function __sec_revokeAuthenticator(userId, credentialID) {
   __sec_log.d('revokeAuthenticator entry', { userId, credentialID });
   try {
     const currentUser = await __sec_getCurrentUser();
-    __sec_log.d('revokeAuthenticator: Retrieved currentUser', { hasToken: !!currentUser?.authToken });
-    if (!currentUser || !currentUser.authToken) {
-      __sec_log.w('No auth token for revoking authenticator');
+    __sec_log.d('revokeAuthenticator: Retrieved currentUser', { hasUser: !!currentUser?.user });
+    if (!currentUser || !currentUser.user || !currentUser.user.uid) {
+      __sec_log.w('revokeAuthenticator: No valid user session');
       return false;
     }
-    const token = currentUser.authToken;
 
-    const apiBase = window.__SEC_API_BASE;
+    const apiBase = window.__SEC_API_BASE || "https://api.flexgig.com.ng";
     const url = `${apiBase}/webauthn/authenticators/${encodeURIComponent(userId)}/revoke`;
     __sec_log.d('revokeAuthenticator: Posting to', url);
     const r = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
       credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ credentialID }),
     });
 
@@ -6795,15 +6791,15 @@ function __sec_wireEvents() {
       __sec_log.w('no close button (#securityCloseBtn) found');
     }
     if (__sec_closeBtn && __sec_modal) {
+      __sec_log.d('wireEvents: Wiring modal close');
       __sec_closeBtn.addEventListener('click', (e) => {
         __sec_log.d('Security modal close button clicked');
         e.preventDefault();
         __sec_log.i('Security modal close button clicked');
-        __sec_modal.classList.remove('show'); // or whatever class shows it
+        __sec_modal.classList.remove('show');
         __sec_modal.setAttribute('aria-hidden', 'true');
       });
     }
-
 
     document.addEventListener('keydown', (e) => {
       __sec_log.d('keydown event', { key: e.key, modalActive: __sec_modal && __sec_modal.classList.contains('active') });
@@ -6822,10 +6818,10 @@ function __sec_wireEvents() {
         __sec_log.d('__sec_parentHandler: Toggle state', { uiOn });
 
         const currentUser = await __sec_getCurrentUser();
-        __sec_log.d('__sec_parentHandler: Retrieved currentUser', { hasUser: !!currentUser?.user, hasToken: !!currentUser?.authToken });
+        __sec_log.d('__sec_parentHandler: Retrieved currentUser', { hasUser: !!currentUser?.user });
 
-        if (!currentUser) {
-          __sec_log.e('__sec_parentHandler: No current user object returned');
+        if (!currentUser || !currentUser.user || !currentUser.user.uid) {
+          __sec_log.e('__sec_parentHandler: No current user or invalid session');
           __sec_setChecked(__sec_parentSwitch, false);
           __sec_setBusy(__sec_parentSwitch, false);
           alert('You must be signed in to enable biometrics. Please try logging in again.');
@@ -6833,17 +6829,8 @@ function __sec_wireEvents() {
           return;
         }
 
-        const { user, authToken } = currentUser;
-        __sec_log.d('__sec_parentHandler: Extracted user and authToken', { userId: user?.uid, hasToken: !!authToken });
-
-        if (!user || !user.uid) {
-          __sec_log.e('__sec_parentHandler: Invalid user or missing uid', { user });
-          __sec_setChecked(__sec_parentSwitch, false);
-          __sec_setBusy(__sec_parentSwitch, false);
-          alert('You must be signed in to enable biometrics. Please try logging in again.');
-          window.location.href = '/frontend/html/login.html';
-          return;
-        }
+        const { user } = currentUser;
+        __sec_log.d('__sec_parentHandler: Extracted user', { userId: user.uid });
 
         const uid = user.uid;
         __sec_log.d('__sec_parentHandler: Proceeding with uid', uid);
@@ -6882,9 +6869,9 @@ function __sec_wireEvents() {
               for (const a of auths) {
                 const credential_id = a.credential_id || a.credentialID || a.credentialId;
                 __sec_log.d('__sec_parentHandler: Attempting revoke for', credential_id);
-                if (!credential_id) { 
-                  __sec_log.w('__sec_parentHandler: Skipping invalid credential_id', a); 
-                  continue; 
+                if (!credential_id) {
+                  __sec_log.w('__sec_parentHandler: Skipping invalid credential_id', a);
+                  continue;
                 }
                 const ok = await __sec_revokeAuthenticator(uid, credential_id);
                 __sec_log.d('revoke result', credential_id, ok);
@@ -6904,16 +6891,16 @@ function __sec_wireEvents() {
         __sec_log.d('__sec_parentHandler: Exit');
       };
 
-      __sec_parentSwitch.addEventListener('click', (e) => { 
+      __sec_parentSwitch.addEventListener('click', (e) => {
         __sec_log.d('parentSwitch click event');
-        e.preventDefault(); 
-        __sec_parentHandler(); 
+        e.preventDefault();
+        __sec_parentHandler();
       });
-      __sec_parentSwitch.addEventListener('keydown', (e) => { 
+      __sec_parentSwitch.addEventListener('keydown', (e) => {
         __sec_log.d('parentSwitch keydown', { key: e.key });
-        if (e.key === ' ' || e.key === 'Enter') { 
-          e.preventDefault(); 
-          __sec_parentHandler(); 
+        if (e.key === ' ' || e.key === 'Enter') {
+          e.preventDefault();
+          __sec_parentHandler();
         }
       });
     } else {
@@ -6951,10 +6938,10 @@ function __sec_wireEvents() {
         } catch (err) {
           __sec_log.e('bioLogin error or verification failed', { err, newState });
           __sec_setChecked(__sec_bioLogin, false);
-          try { 
-            localStorage.setItem(__sec_KEYS.bioLogin, '0'); 
+          try {
+            localStorage.setItem(__sec_KEYS.bioLogin, '0');
             __sec_log.d('bioLogin: Reset storage to 0');
-          } catch (e) { 
+          } catch (e) {
             __sec_log.e('bioLogin: Storage reset error', e);
           }
           alert('Biometric verification failed: ' + (err.message || 'unknown'));
@@ -6964,11 +6951,11 @@ function __sec_wireEvents() {
         __sec_log.d('bioLogin click handler exit');
       });
 
-      __sec_bioLogin.addEventListener('keydown', (e) => { 
+      __sec_bioLogin.addEventListener('keydown', (e) => {
         __sec_log.d('bioLogin keydown', { key: e.key });
-        if (e.key === ' ' || e.key === 'Enter') { 
-          e.preventDefault(); 
-          __sec_bioLogin.click(); 
+        if (e.key === ' ' || e.key === 'Enter') {
+          e.preventDefault();
+          __sec_bioLogin.click();
         }
       });
     } else {
@@ -7006,10 +6993,10 @@ function __sec_wireEvents() {
         } catch (err) {
           __sec_log.e('bioTx error or verification failed', { err, newState });
           __sec_setChecked(__sec_bioTx, false);
-          try { 
-            localStorage.setItem(__sec_KEYS.bioTx, '0'); 
+          try {
+            localStorage.setItem(__sec_KEYS.bioTx, '0');
             __sec_log.d('bioTx: Reset storage to 0');
-          } catch (e) { 
+          } catch (e) {
             __sec_log.e('bioTx: Storage reset error', e);
           }
           alert('Biometric verification failed: ' + (err.message || 'unknown'));
@@ -7019,11 +7006,11 @@ function __sec_wireEvents() {
         __sec_log.d('bioTx click handler exit');
       });
 
-      __sec_bioTx.addEventListener('keydown', (e) => { 
+      __sec_bioTx.addEventListener('keydown', (e) => {
         __sec_log.d('bioTx keydown', { key: e.key });
-        if (e.key === ' ' || e.key === 'Enter') { 
-          e.preventDefault(); 
-          __sec_bioTx.click(); 
+        if (e.key === ' ' || e.key === 'Enter') {
+          e.preventDefault();
+          __sec_bioTx.click();
         }
       });
     } else {
@@ -7035,10 +7022,10 @@ function __sec_wireEvents() {
       const __sec_balanceHandler = () => {
         __sec_log.d('balanceHandler entry');
         const on = __sec_toggleSwitch(__sec_balanceSwitch);
-        try { 
-          localStorage.setItem(__sec_KEYS.balance, on ? '1' : '0'); 
+        try {
+          localStorage.setItem(__sec_KEYS.balance, on ? '1' : '0');
           __sec_log.d('balanceHandler: Stored', on ? '1' : '0');
-        } catch (e) { 
+        } catch (e) {
           __sec_log.e('balanceHandler: Storage error', e);
         }
         window.dispatchEvent(new CustomEvent('security:balance-visibility-changed', { detail: { visible: on } }));
@@ -7046,11 +7033,11 @@ function __sec_wireEvents() {
         __sec_log.d('balanceHandler exit');
       };
       __sec_balanceSwitch.addEventListener('click', __sec_balanceHandler);
-      __sec_balanceSwitch.addEventListener('keydown', (e) => { 
+      __sec_balanceSwitch.addEventListener('keydown', (e) => {
         __sec_log.d('balance keydown', { key: e.key });
-        if (e.key === ' ' || e.key === 'Enter') { 
-          e.preventDefault(); 
-          __sec_balanceHandler(); 
+        if (e.key === ' ' || e.key === 'Enter') {
+          e.preventDefault();
+          __sec_balanceHandler();
         }
       });
     } else {
