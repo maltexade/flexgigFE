@@ -8406,7 +8406,7 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
      Inactivity logic
      ----------------------- */
   let idleTimeout = null;
-  const IDLE_TIME = 10 * 60 * 1000; // 10 min prod
+  const IDLE_TIME = 15 * 1000; // 10 min prod
   const PROMPT_TIMEOUT = 5000;
   const PROMPT_AUTO_CLOSE = true;
   let lastActive = Date.now();
