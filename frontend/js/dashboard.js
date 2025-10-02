@@ -6454,17 +6454,19 @@ function __sec_convertRowsToChevron() {
     setTimeout(__sec_boot, 0);
   }
 
-  /* ---- WebAuthn register/authenticate flows ---- */
+/* ---- WebAuthn register/authenticate flows ---- */
   // Utility to convert base64url string to ArrayBuffer
 /* ---- WebAuthn utilities ---- */
 /* ---- WebAuthn utilities ---- */
 function base64urlToArrayBuffer(base64url) {
+  __sec_log.d('base64urlToArrayBuffer entry', { input: base64url });
   try {
     const base64 = base64url.replace(/-/g, '+').replace(/_/g, '/');
     const padding = '='.repeat((4 - (base64.length % 4)) % 4);
     const raw = atob(base64 + padding);
     const buffer = new Uint8Array(raw.length);
     for (let i = 0; i < raw.length; i++) buffer[i] = raw.charCodeAt(i);
+    __sec_log.d('base64urlToArrayBuffer success', { input: base64url, outputLength: buffer.length });
     return buffer.buffer;
   } catch (err) {
     __sec_log.e('base64urlToArrayBuffer error', { input: base64url, err });
@@ -6473,56 +6475,89 @@ function base64urlToArrayBuffer(base64url) {
 }
 
 function arrayBufferToBase64url(buffer) {
+  __sec_log.d('arrayBufferToBase64url entry', { bufferLength: buffer.byteLength });
   const bytes = new Uint8Array(buffer);
   let binary = '';
   for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const result = btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  __sec_log.d('arrayBufferToBase64url success', { inputLength: buffer.byteLength, outputLength: result.length });
+  return result;
 }
 
 function uuidToArrayBuffer(uuid) {
+  __sec_log.d('uuidToArrayBuffer entry', { uuid });
   const clean = uuid.replace(/-/g, '');
   if (clean.length !== 32) throw new Error(`Invalid UUID: ${uuid}`);
   const buffer = new Uint8Array(16);
   for (let i = 0; i < 16; i++) buffer[i] = parseInt(clean.substr(i * 2, 2), 16);
+  __sec_log.d('uuidToArrayBuffer success', { input: uuid, outputLength: buffer.length });
   return buffer.buffer;
 }
 
 /* ---- Registration flow ---- */
 async function startRegistration(userId, username, displayName) {
+  __sec_log.d('startRegistration entry', { userId, username, displayName });
   try {
-    __sec_log.d('startRegistration', { userId, username, displayName });
     const { authToken } = await __sec_getCurrentUser() || {};
+    __sec_log.d('startRegistration: Retrieved authToken', { authToken: !!authToken });
     if (!authToken) throw new Error('No auth token');
 
-    const optRes = await fetch(`${window.__SEC_API_BASE || "https://api.flexgig.com.ng"}/webauthn/register/options`, {
+    const apiBase = window.__SEC_API_BASE || "https://api.flexgig.com.ng";
+    const optUrl = `${apiBase}/webauthn/register/options`;
+    __sec_log.d('startRegistration: Fetching options from', optUrl);
+    const optRes = await fetch(optUrl, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify({ userId, username, displayName }),
     });
-    if (!optRes.ok) throw new Error(`Options failed: ${await optRes.text()}`);
+    const optRaw = await optRes.text();
+    __sec_log.d('startRegistration: Options response', { status: optRes.status, ok: optRes.ok, raw: optRaw });
+    if (!optRes.ok) throw new Error(`Options failed: ${optRaw}`);
+
     const options = await optRes.json();
+    __sec_log.d('startRegistration: Parsed options', options);
 
     // Convert challenge
+    __sec_log.d('startRegistration: Converting challenge');
     options.challenge = new Uint8Array(base64urlToArrayBuffer(options.challenge));
+    __sec_log.d('startRegistration: Challenge converted', { challengeLength: options.challenge.length });
 
     // Convert user.id (server might send uuid or base64url)
     if (options.user?.id) {
+      __sec_log.d('startRegistration: Converting user.id');
       try {
         options.user.id = new Uint8Array(base64urlToArrayBuffer(options.user.id));
-      } catch {
+        __sec_log.d('startRegistration: user.id base64url converted', { idLength: options.user.id.length });
+      } catch (convErr) {
+        __sec_log.w('startRegistration: base64url failed, trying uuid');
         options.user.id = new Uint8Array(uuidToArrayBuffer(userId));
+        __sec_log.d('startRegistration: user.id uuid converted', { idLength: options.user.id.length });
       }
     }
 
     if (options.excludeCredentials) {
-      options.excludeCredentials = options.excludeCredentials.map(c => ({
-        ...c, id: new Uint8Array(base64urlToArrayBuffer(c.id))
-      }));
+      __sec_log.d('startRegistration: Converting excludeCredentials', { count: options.excludeCredentials.length });
+      options.excludeCredentials = options.excludeCredentials.map(c => {
+        const converted = {
+          ...c, 
+          id: new Uint8Array(base64urlToArrayBuffer(c.id))
+        };
+        __sec_log.d('startRegistration: Converted excludeCredential', { idLength: converted.id.length });
+        return converted;
+      });
     }
 
+    __sec_log.d('startRegistration: Final publicKey options before create', { 
+      challengeLength: options.challenge?.length, 
+      userIdLength: options.user?.id?.length, 
+      excludeCount: options.excludeCredentials?.length || 0 
+    });
+
     // Create credential
+    __sec_log.i('startRegistration: Calling navigator.credentials.create');
     const cred = await navigator.credentials.create({ publicKey: options });
+    __sec_log.d('startRegistration: Credential created', { id: cred?.id, type: cred?.type });
     if (!cred) throw new Error('No credential returned');
 
     const credential = {
@@ -6535,45 +6570,83 @@ async function startRegistration(userId, username, displayName) {
         transports: cred.response.getTransports ? cred.response.getTransports() : []
       }
     };
+    __sec_log.d('startRegistration: Prepared credential for verify', { id: credential.id, rawIdLength: credential.rawId.length });
 
-    const verifyRes = await fetch(`${window.__SEC_API_BASE || "https://api.flexgig.com.ng"}/webauthn/register/verify`, {
+    const verifyUrl = `${apiBase}/webauthn/register/verify`;
+    __sec_log.d('startRegistration: Verifying at', verifyUrl);
+    const verifyRes = await fetch(verifyUrl, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify({ userId, credential }),
     });
-    if (!verifyRes.ok) throw new Error(`Verify failed: ${await verifyRes.text()}`);
-    return await verifyRes.json();
+    const verifyRaw = await verifyRes.text();
+    __sec_log.d('startRegistration: Verify response', { status: verifyRes.status, ok: verifyRes.ok, raw: verifyRaw });
+    if (!verifyRes.ok) throw new Error(`Verify failed: ${verifyRaw}`);
+
+    const verifyResult = await verifyRes.json();
+    __sec_log.i('startRegistration: Verify success', verifyResult);
+    return verifyResult;
   } catch (err) {
-    __sec_log.e('startRegistration error', err);
+    __sec_log.e('startRegistration error', { 
+      message: err.message, 
+      stack: err.stack, 
+      userId, 
+      username 
+    });
     throw err;
   }
+  __sec_log.d('startRegistration exit');
 }
 
 /* ---- Authentication flow ---- */
 async function startAuthentication(userId) {
+  __sec_log.d('startAuthentication entry', { userId });
   try {
-    __sec_log.d('startAuthentication', { userId });
     const { authToken } = await __sec_getCurrentUser() || {};
+    __sec_log.d('startAuthentication: Retrieved authToken', { authToken: !!authToken });
     if (!authToken) throw new Error('No auth token');
 
-    const optRes = await fetch(`${window.__SEC_API_BASE || "https://api.flexgig.com.ng"}/webauthn/auth/options`, {
+    const apiBase = window.__SEC_API_BASE || "https://api.flexgig.com.ng";
+    const optUrl = `${apiBase}/webauthn/auth/options`;
+    __sec_log.d('startAuthentication: Fetching options from', optUrl);
+    const optRes = await fetch(optUrl, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify({ userId }),
     });
-    if (!optRes.ok) throw new Error(`Auth options failed: ${await optRes.text()}`);
-    const options = await optRes.json();
+    const optRaw = await optRes.text();
+    __sec_log.d('startAuthentication: Options response', { status: optRes.status, ok: optRes.ok, raw: optRaw });
+    if (!optRes.ok) throw new Error(`Auth options failed: ${optRaw}`);
 
+    const options = await optRes.json();
+    __sec_log.d('startAuthentication: Parsed options', options);
+
+    __sec_log.d('startAuthentication: Converting challenge');
     options.challenge = new Uint8Array(base64urlToArrayBuffer(options.challenge));
+    __sec_log.d('startAuthentication: Challenge converted', { challengeLength: options.challenge.length });
+
     if (options.allowCredentials) {
-      options.allowCredentials = options.allowCredentials.map(c => ({
-        ...c, id: new Uint8Array(base64urlToArrayBuffer(c.id))
-      }));
+      __sec_log.d('startAuthentication: Converting allowCredentials', { count: options.allowCredentials.length });
+      options.allowCredentials = options.allowCredentials.map(c => {
+        const converted = {
+          ...c, 
+          id: new Uint8Array(base64urlToArrayBuffer(c.id))
+        };
+        __sec_log.d('startAuthentication: Converted allowCredential', { idLength: converted.id.length });
+        return converted;
+      });
     }
 
+    __sec_log.d('startAuthentication: Final publicKey options before get', { 
+      challengeLength: options.challenge?.length, 
+      allowCount: options.allowCredentials?.length || 0 
+    });
+
+    __sec_log.i('startAuthentication: Calling navigator.credentials.get');
     const assertion = await navigator.credentials.get({ publicKey: options });
+    __sec_log.d('startAuthentication: Assertion received', { id: assertion?.id, type: assertion?.type });
     if (!assertion) throw new Error('No assertion returned');
 
     const credential = {
@@ -6587,43 +6660,60 @@ async function startAuthentication(userId) {
         userHandle: assertion.response.userHandle ? arrayBufferToBase64url(assertion.response.userHandle) : null
       }
     };
+    __sec_log.d('startAuthentication: Prepared credential for verify', { id: credential.id, rawIdLength: credential.rawId.length });
 
-    const verifyRes = await fetch(`${window.__SEC_API_BASE || "https://api.flexgig.com.ng"}/webauthn/auth/verify`, {
+    const verifyUrl = `${apiBase}/webauthn/auth/verify`;
+    __sec_log.d('startAuthentication: Verifying at', verifyUrl);
+    const verifyRes = await fetch(verifyUrl, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify({ userId, credential }),
     });
-    if (!verifyRes.ok) throw new Error(`Auth verify failed: ${await verifyRes.text()}`);
-    return await verifyRes.json();
+    const verifyRaw = await verifyRes.text();
+    __sec_log.d('startAuthentication: Verify response', { status: verifyRes.status, ok: verifyRes.ok, raw: verifyRaw });
+    if (!verifyRes.ok) throw new Error(`Auth verify failed: ${verifyRaw}`);
+
+    const verifyResult = await verifyRes.json();
+    __sec_log.i('startAuthentication: Verify success', verifyResult);
+    return verifyResult;
   } catch (err) {
-    __sec_log.e('startAuthentication error', err);
+    __sec_log.e('startAuthentication error', { 
+      message: err.message, 
+      stack: err.stack, 
+      userId 
+    });
     throw err;
   }
+  __sec_log.d('startAuthentication exit');
 }
 
 /* ---- WebAuthn helper calls to server (list/revoke) ---- */
 async function __sec_listAuthenticators(userId) {
+  __sec_log.d('listAuthenticators entry', { userId });
   try {
-    __sec_log.d('listAuthenticators: starting', { userId });
     const currentUser = await __sec_getCurrentUser();
+    __sec_log.d('listAuthenticators: Retrieved currentUser', { hasToken: !!currentUser?.authToken });
     if (!currentUser || !currentUser.authToken) {
       __sec_log.w('No auth token for listing authenticators');
       return null;
     }
     const token = currentUser.authToken;
 
-    const r = await fetch(
-      `${window.__SEC_API_BASE}/webauthn/authenticators/${encodeURIComponent(userId)}`,
-      {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-      }
-    );
+    const apiBase = window.__SEC_API_BASE;
+    const url = `${apiBase}/webauthn/authenticators/${encodeURIComponent(userId)}`;
+    __sec_log.d('listAuthenticators: Fetching from', url);
+    const r = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include',
+    });
+
+    const rRaw = await r.text();
+    __sec_log.d('listAuthenticators: Response', { status: r.status, ok: r.ok, raw: rRaw });
 
     if (!r.ok) {
       __sec_log.w('listAuthenticators failed', r.status);
@@ -6634,33 +6724,38 @@ async function __sec_listAuthenticators(userId) {
     __sec_log.d('listAuthenticators success', j);
     return j;
   } catch (err) {
-    __sec_log.e('listAuthenticators error', err);
+    __sec_log.e('listAuthenticators error', { err, userId });
     return null;
   }
+  __sec_log.d('listAuthenticators exit');
 }
 
 async function __sec_revokeAuthenticator(userId, credentialID) {
+  __sec_log.d('revokeAuthenticator entry', { userId, credentialID });
   try {
-    __sec_log.d('revokeAuthenticator: starting', { userId, credentialID });
     const currentUser = await __sec_getCurrentUser();
+    __sec_log.d('revokeAuthenticator: Retrieved currentUser', { hasToken: !!currentUser?.authToken });
     if (!currentUser || !currentUser.authToken) {
       __sec_log.w('No auth token for revoking authenticator');
       return false;
     }
     const token = currentUser.authToken;
 
-    const r = await fetch(
-      `${window.__SEC_API_BASE}/webauthn/authenticators/${encodeURIComponent(userId)}/revoke`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-        body: JSON.stringify({ credentialID }),
-      }
-    );
+    const apiBase = window.__SEC_API_BASE;
+    const url = `${apiBase}/webauthn/authenticators/${encodeURIComponent(userId)}/revoke`;
+    __sec_log.d('revokeAuthenticator: Posting to', url);
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include',
+      body: JSON.stringify({ credentialID }),
+    });
+
+    const rRaw = await r.text();
+    __sec_log.d('revokeAuthenticator: Response', { status: r.status, ok: r.ok, raw: rRaw });
 
     if (!r.ok) {
       __sec_log.w('revokeAuthenticator failed', credentialID, r.status);
@@ -6670,16 +6765,20 @@ async function __sec_revokeAuthenticator(userId, credentialID) {
     __sec_log.i('revokeAuthenticator success', credentialID);
     return true;
   } catch (err) {
-    __sec_log.e('revokeAuthenticator error', err);
+    __sec_log.e('revokeAuthenticator error', { err, userId, credentialID });
     return false;
   }
+  __sec_log.d('revokeAuthenticator exit');
 }
 
 /* Wire events (with WebAuthn integration) */
 function __sec_wireEvents() {
+  __sec_log.d('wireEvents entry');
   try {
     if (__sec_launcherBtn) {
+      __sec_log.d('wireEvents: Wiring launcher (#securityBtn)');
       __sec_launcherBtn.addEventListener('click', (ev) => {
+        __sec_log.d('launcher click event');
         ev.preventDefault();
         __sec_openModal();
       });
@@ -6689,6 +6788,7 @@ function __sec_wireEvents() {
     }
 
     if (__sec_closeBtn) {
+      __sec_log.d('wireEvents: Wiring close (#securityCloseBtn)');
       __sec_closeBtn.addEventListener('click', __sec_closeModal);
       __sec_log.d('close button wired (#securityCloseBtn)');
     } else {
@@ -6696,6 +6796,7 @@ function __sec_wireEvents() {
     }
     if (__sec_closeBtn && __sec_modal) {
       __sec_closeBtn.addEventListener('click', (e) => {
+        __sec_log.d('Security modal close button clicked');
         e.preventDefault();
         __sec_log.i('Security modal close button clicked');
         __sec_modal.classList.remove('show'); // or whatever class shows it
@@ -6705,12 +6806,15 @@ function __sec_wireEvents() {
 
 
     document.addEventListener('keydown', (e) => {
+      __sec_log.d('keydown event', { key: e.key, modalActive: __sec_modal && __sec_modal.classList.contains('active') });
       if (e.key === 'Escape' && __sec_modal && __sec_modal.classList.contains('active')) {
+        __sec_log.i('Escape key pressed, closing modal');
         __sec_closeModal();
       }
     });
 
     if (__sec_parentSwitch) {
+      __sec_log.d('wireEvents: Wiring parent switch (#biometricsSwitch)');
       const __sec_parentHandler = async () => {
         __sec_log.d('__sec_parentHandler: Starting');
         __sec_setBusy(__sec_parentSwitch, true);
@@ -6718,7 +6822,7 @@ function __sec_wireEvents() {
         __sec_log.d('__sec_parentHandler: Toggle state', { uiOn });
 
         const currentUser = await __sec_getCurrentUser();
-        __sec_log.d('__sec_parentHandler: Retrieved currentUser', currentUser);
+        __sec_log.d('__sec_parentHandler: Retrieved currentUser', { hasUser: !!currentUser?.user, hasToken: !!currentUser?.authToken });
 
         if (!currentUser) {
           __sec_log.e('__sec_parentHandler: No current user object returned');
@@ -6730,7 +6834,7 @@ function __sec_wireEvents() {
         }
 
         const { user, authToken } = currentUser;
-        __sec_log.d('__sec_parentHandler: Extracted user and authToken', { user, authToken });
+        __sec_log.d('__sec_parentHandler: Extracted user and authToken', { userId: user?.uid, hasToken: !!authToken });
 
         if (!user || !user.uid) {
           __sec_log.e('__sec_parentHandler: Invalid user or missing uid', { user });
@@ -6757,11 +6861,12 @@ function __sec_wireEvents() {
 
           try {
             __sec_log.i('No authenticators found — starting registration flow');
-            await startRegistration(uid, user.email || user.username || uid, user.fullName || user.email || uid);
+            const regResult = await startRegistration(uid, user.email || user.username || uid, user.fullName || user.email || uid);
+            __sec_log.d('__sec_parentHandler: Registration result', regResult);
             __sec_setBiometrics(true, true);
             __sec_log.i('Registration successful');
           } catch (err) {
-            __sec_log.e('Registration failed', err);
+            __sec_log.e('Registration failed', { err, uid });
             __sec_setChecked(__sec_parentSwitch, false);
             __sec_setBiometrics(false, false);
             alert('Biometric registration failed: ' + (err.message || 'unknown error'));
@@ -6776,7 +6881,11 @@ function __sec_wireEvents() {
             if (Array.isArray(auths) && auths.length > 0) {
               for (const a of auths) {
                 const credential_id = a.credential_id || a.credentialID || a.credentialId;
-                if (!credential_id) continue;
+                __sec_log.d('__sec_parentHandler: Attempting revoke for', credential_id);
+                if (!credential_id) { 
+                  __sec_log.w('__sec_parentHandler: Skipping invalid credential_id', a); 
+                  continue; 
+                }
                 const ok = await __sec_revokeAuthenticator(uid, credential_id);
                 __sec_log.d('revoke result', credential_id, ok);
               }
@@ -6785,112 +6894,174 @@ function __sec_wireEvents() {
             }
             __sec_setBiometrics(false, true);
           } catch (err) {
-            __sec_log.e('Error revoking authenticators', err);
+            __sec_log.e('Error revoking authenticators', { err, uid });
             __sec_setBiometrics(false, true);
             alert('Warning: failed to revoke authenticator(s) on server. Check console.');
           } finally {
             __sec_setBusy(__sec_parentSwitch, false);
           }
         }
+        __sec_log.d('__sec_parentHandler: Exit');
       };
 
-      __sec_parentSwitch.addEventListener('click', (e) => { e.preventDefault(); __sec_parentHandler(); });
-      __sec_parentSwitch.addEventListener('keydown', (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); __sec_parentHandler(); } });
+      __sec_parentSwitch.addEventListener('click', (e) => { 
+        __sec_log.d('parentSwitch click event');
+        e.preventDefault(); 
+        __sec_parentHandler(); 
+      });
+      __sec_parentSwitch.addEventListener('keydown', (e) => { 
+        __sec_log.d('parentSwitch keydown', { key: e.key });
+        if (e.key === ' ' || e.key === 'Enter') { 
+          e.preventDefault(); 
+          __sec_parentHandler(); 
+        }
+      });
     } else {
       __sec_log.w('no parent switch (#biometricsSwitch) found');
     }
 
     if (__sec_bioLogin) {
+      __sec_log.d('wireEvents: Wiring bioLogin (#bioLoginSwitch)');
       __sec_bioLogin.addEventListener('click', async () => {
+        __sec_log.d('bioLogin click event');
         if (!__sec_parentSwitch || !__sec_isChecked(__sec_parentSwitch)) {
           __sec_log.d('bioLogin click ignored; parent OFF');
           return;
         }
         __sec_setBusy(__sec_bioLogin, true);
         const newState = __sec_toggleSwitch(__sec_bioLogin);
+        __sec_log.d('bioLogin: New state', { newState });
         try {
           const currentUser = await __sec_getCurrentUser();
+          __sec_log.d('bioLogin: Retrieved currentUser', { hasUser: !!currentUser?.user });
           if (!currentUser || !currentUser.user || !currentUser.user.uid) throw new Error('Not signed in');
           const user = currentUser.user;
 
           if (newState) {
             __sec_log.i('bioLogin enabling: performing authentication test');
-            await startAuthentication(user.uid);
+            const authResult = await startAuthentication(user.uid);
+            __sec_log.d('bioLogin: Auth result', authResult);
             localStorage.setItem(__sec_KEYS.bioLogin, '1');
             __sec_log.i('bioLogin enabled and verified');
           } else {
             localStorage.setItem(__sec_KEYS.bioLogin, '0');
+            __sec_log.d('bioLogin disabled');
             __sec_maybeDisableParentIfChildrenOff();
           }
         } catch (err) {
-          __sec_log.e('bioLogin error or verification failed', err);
+          __sec_log.e('bioLogin error or verification failed', { err, newState });
           __sec_setChecked(__sec_bioLogin, false);
-          try { localStorage.setItem(__sec_KEYS.bioLogin, '0'); } catch (e) {}
+          try { 
+            localStorage.setItem(__sec_KEYS.bioLogin, '0'); 
+            __sec_log.d('bioLogin: Reset storage to 0');
+          } catch (e) { 
+            __sec_log.e('bioLogin: Storage reset error', e);
+          }
           alert('Biometric verification failed: ' + (err.message || 'unknown'));
         } finally {
           __sec_setBusy(__sec_bioLogin, false);
         }
+        __sec_log.d('bioLogin click handler exit');
       });
 
-      __sec_bioLogin.addEventListener('keydown', (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); __sec_bioLogin.click(); } });
+      __sec_bioLogin.addEventListener('keydown', (e) => { 
+        __sec_log.d('bioLogin keydown', { key: e.key });
+        if (e.key === ' ' || e.key === 'Enter') { 
+          e.preventDefault(); 
+          __sec_bioLogin.click(); 
+        }
+      });
     } else {
       __sec_log.w('no bioLogin switch (#bioLoginSwitch) found');
     }
 
     if (__sec_bioTx) {
+      __sec_log.d('wireEvents: Wiring bioTx (#bioTxSwitch)');
       __sec_bioTx.addEventListener('click', async () => {
+        __sec_log.d('bioTx click event');
         if (!__sec_parentSwitch || !__sec_isChecked(__sec_parentSwitch)) {
           __sec_log.d('bioTx click ignored; parent OFF');
           return;
         }
         __sec_setBusy(__sec_bioTx, true);
         const newState = __sec_toggleSwitch(__sec_bioTx);
+        __sec_log.d('bioTx: New state', { newState });
         try {
           const currentUser = await __sec_getCurrentUser();
+          __sec_log.d('bioTx: Retrieved currentUser', { hasUser: !!currentUser?.user });
           if (!currentUser || !currentUser.user || !currentUser.user.uid) throw new Error('Not signed in');
           const user = currentUser.user;
 
           if (newState) {
             __sec_log.i('bioTx enabling: performing authentication test');
-            await startAuthentication(user.uid);
+            const authResult = await startAuthentication(user.uid);
+            __sec_log.d('bioTx: Auth result', authResult);
             localStorage.setItem(__sec_KEYS.bioTx, '1');
             __sec_log.i('bioTx enabled and verified');
           } else {
             localStorage.setItem(__sec_KEYS.bioTx, '0');
+            __sec_log.d('bioTx disabled');
             __sec_maybeDisableParentIfChildrenOff();
           }
         } catch (err) {
-          __sec_log.e('bioTx error or verification failed', err);
+          __sec_log.e('bioTx error or verification failed', { err, newState });
           __sec_setChecked(__sec_bioTx, false);
-          try { localStorage.setItem(__sec_KEYS.bioTx, '0'); } catch (e) {}
+          try { 
+            localStorage.setItem(__sec_KEYS.bioTx, '0'); 
+            __sec_log.d('bioTx: Reset storage to 0');
+          } catch (e) { 
+            __sec_log.e('bioTx: Storage reset error', e);
+          }
           alert('Biometric verification failed: ' + (err.message || 'unknown'));
         } finally {
           __sec_setBusy(__sec_bioTx, false);
         }
+        __sec_log.d('bioTx click handler exit');
       });
 
-      __sec_bioTx.addEventListener('keydown', (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); __sec_bioTx.click(); } });
+      __sec_bioTx.addEventListener('keydown', (e) => { 
+        __sec_log.d('bioTx keydown', { key: e.key });
+        if (e.key === ' ' || e.key === 'Enter') { 
+          e.preventDefault(); 
+          __sec_bioTx.click(); 
+        }
+      });
     } else {
       __sec_log.w('no bioTx switch (#bioTxSwitch) found');
     }
 
     if (__sec_balanceSwitch) {
+      __sec_log.d('wireEvents: Wiring balance (#balanceSwitch)');
       const __sec_balanceHandler = () => {
+        __sec_log.d('balanceHandler entry');
         const on = __sec_toggleSwitch(__sec_balanceSwitch);
-        try { localStorage.setItem(__sec_KEYS.balance, on ? '1' : '0'); } catch (e) {}
+        try { 
+          localStorage.setItem(__sec_KEYS.balance, on ? '1' : '0'); 
+          __sec_log.d('balanceHandler: Stored', on ? '1' : '0');
+        } catch (e) { 
+          __sec_log.e('balanceHandler: Storage error', e);
+        }
         window.dispatchEvent(new CustomEvent('security:balance-visibility-changed', { detail: { visible: on } }));
         __sec_log.i('balanceSwitch ->', on);
+        __sec_log.d('balanceHandler exit');
       };
       __sec_balanceSwitch.addEventListener('click', __sec_balanceHandler);
-      __sec_balanceSwitch.addEventListener('keydown', (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); __sec_balanceHandler(); } });
+      __sec_balanceSwitch.addEventListener('keydown', (e) => { 
+        __sec_log.d('balance keydown', { key: e.key });
+        if (e.key === ' ' || e.key === 'Enter') { 
+          e.preventDefault(); 
+          __sec_balanceHandler(); 
+        }
+      });
     } else {
       __sec_log.w('no balance switch (#balanceSwitch) found');
     }
 
     __sec_log.i('events wired (with WebAuthn integration)');
   } catch (err) {
-    __sec_log.e('wireEvents error', err);
+    __sec_log.e('wireEvents error', { err });
   }
+  __sec_log.d('wireEvents exit');
 }
 
 /* Open/close modal with focus handling */
