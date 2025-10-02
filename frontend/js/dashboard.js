@@ -10,6 +10,7 @@ const { createClient } = supabase;
 const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 
+
 // 🚀 Global banner helpers
 // Put this in your JS file (replace old showBanner)
 
@@ -1527,16 +1528,6 @@ async function triggerCheckoutReauth() {
     return { success: false, requiresModal: true, error: err.message };
   }
 }
-
-// Ensure these are exposed (so existing code can call them)
-window.__reauth = window.__reauth || {};
-Object.assign(window.__reauth, {
-  shouldReauth,
-  verifyBiometrics,
-  initReauthModal,
-  showReauthModal,
-  triggerCheckoutReauth
-});
 
 
   // --- RENDER CHECKOUT MODAL ---
@@ -3721,51 +3712,23 @@ function __fg_pin_clearAllInputs() {
     }
   }
 
-// Initialize checkout reauth (biometric or PIN)
-function initCheckoutPin() {
-  if (payBtn) {
-    payBtn.addEventListener('click', async () => {
-      payBtn.disabled = true;
-      payBtn.textContent = 'Checking…';
-
-      try {
+  // Initialize checkout PIN verification
+  function initCheckoutPin() {
+    if (payBtn) {
+      payBtn.addEventListener('click', async () => {
         const info = await getUid();
         if (!info || !info.uid) {
           notify('You must be signed in to proceed with payment', 'error');
-          payBtn.disabled = false;
-          payBtn.textContent = 'Pay';
           return;
         }
-
-        // 🔐 First enforce biometric/PIN reauth
-        const re = await window.__reauth.triggerCheckoutReauth();
-        if (!re || !re.success) {
-          console.log('Checkout blocked by reauth:', re);
-          payBtn.disabled = false;
-          payBtn.textContent = 'Pay';
-          return; // stop until user reauthenticates via modal
-        }
-
-        // ✅ Passed reauth, now check PIN existence as before
         await window.checkPinExists((hasPin) => {
           if (hasPin) {
             window.ModalManager.openModal('pinVerifyModal');
-          } else {
-            // If no PIN required, you can continue straight to payment logic here
-            console.log('No PIN required, proceed with payment');
           }
         }, 'checkout');
-
-      } catch (err) {
-        console.error('Checkout reauth error:', err);
-        notify('An error occurred. Please try again.', 'error');
-        payBtn.disabled = false;
-        payBtn.textContent = 'Pay';
-      }
-    });
+      });
+    }
   }
-}
-
 
   // Initialize inactivity handling
   // function initInactivity() {
@@ -8406,7 +8369,7 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
      Inactivity logic
      ----------------------- */
   let idleTimeout = null;
-  const IDLE_TIME = 15 * 1000; // 10 min prod
+  const IDLE_TIME = 10 * 60 * 1000; // 10 min prod
   const PROMPT_TIMEOUT = 5000;
   const PROMPT_AUTO_CLOSE = true;
   let lastActive = Date.now();
@@ -8815,15 +8778,18 @@ async function showReauthModal(context = 'reauth') {
   })();
 
   // Expose to global scope
-  window.__reauth = {
+  Object.assign(window.__reauth, {
     initReauthModal,
     setupInactivity,
     forceInactivityCheck,
     onSuccessfulReauth,
     showReauthModal,
     registerBiometrics,
-    disableBiometrics // New!
-  };
+    disableBiometrics, // New!
+    verifyBiometrics,
+    triggerCheckoutReauth,
+    shouldReauth
+  });
 
   // Attach to window if not present
   try {
