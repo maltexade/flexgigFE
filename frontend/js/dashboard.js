@@ -7752,7 +7752,7 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
     const sr = await safeCall(shouldReauth);
     if (typeof sr === 'boolean') {
       reauthStatus.needsReauth = !!sr;
-      reauthStatus.method = sr ? (localStorage.getItem('biometricsEnabled') === 'true' && ('PublicKeyCredential' in window) ? 'biometric' : 'pin') : null;
+      reauthStatus.method = sr ? (localStorage.getItem('biometricsEnabled').toLowerCase() === 'true' && ('PublicKeyCredential' in window) ? 'biometric' : 'pin') : null;
     } else if (sr && typeof sr === 'object') {
       reauthStatus.needsReauth = !!sr.needsReauth;
       reauthStatus.method = sr.method || null;
@@ -7763,8 +7763,8 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
   } catch (e) {
     console.error('Error in shouldReauth:', e);
     // fallback: check local flags
-    const isBio = localStorage.getItem('biometricsEnabled') === 'true' && ('PublicKeyCredential' in window);
-    const hasPin = localStorage.getItem('hasPin') === 'true';
+    const isBio = localStorage.getItem('biometricsEnabled').toLowerCase() === 'true' && ('PublicKeyCredential' in window);
+    const hasPin = localStorage.getItem('hasPin').toLowerCase() === 'true';
     reauthStatus = { needsReauth: (isBio || hasPin), method: isBio ? 'biometric' : (hasPin ? 'pin' : null) };
     console.log('initReauthModal - fallback reauthStatus:', reauthStatus);
   }
@@ -7839,7 +7839,7 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
   // Check biometrics flag (local) and prepare initial view display
   try {
     console.log('Checking biometrics and preparing views');
-    const isBiometricsEnabled = localStorage.getItem('biometricsEnabled') === 'true';
+    const isBiometricsEnabled = localStorage.getItem('biometricsEnabled').toLowerCase() === 'true';
     const webAuthnSupported = ('PublicKeyCredential' in window);
     const showBioView = !!(isBiometricsEnabled && webAuthnSupported && reauthStatus.method === 'biometric');
 
@@ -8117,7 +8117,7 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
         reauthModal.setAttribute('role', 'dialog');
 
         // If biometric is preferred/available, show it; otherwise show PIN
-        const isBio = localStorage.getItem('biometricsEnabled') === 'true' && ('PublicKeyCredential' in window);
+        const isBio = localStorage.getItem('biometricsEnabled').toLowerCase() === 'true' && ('PublicKeyCredential' in window);
         const shouldShowBio = isBio && reauthStatus.method === 'biometric';
         if (shouldShowBio && biometricView) {
           biometricView.style.display = 'block';
@@ -8243,6 +8243,14 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
     if (!optsRes.ok) throw new Error('Options failed');
     const opts = await optsRes.json();
     console.log('Register options received');
+
+    // Ensure biometrics flag persists safely
+    (function () {
+      if (localStorage.getItem('credentialId') && !localStorage.getItem('biometricsEnabled')) {
+        localStorage.setItem('biometricsEnabled', 'true');
+      }
+    })();
+
 
     console.log('Creating credential');
     const cred = await navigator.credentials.create({ publicKey: opts });
@@ -8389,7 +8397,7 @@ async function shouldReauth() {
     const session = await safeCall(getSession);
     const sessionHasPin = !!(session && session.user && (session.user.hasPin || session.user.pin));
     // local flag plus browser support
-    const hasBioFlag = localStorage.getItem('biometricsEnabled') === 'true';
+    const hasBioFlag = localStorage.getItem('biometricsEnabled').toLowerCase() === 'true';
     const webAuthnSupported = ('PublicKeyCredential' in window);
     const hasBio = hasBioFlag && webAuthnSupported;
 
@@ -8408,8 +8416,8 @@ async function shouldReauth() {
     return { needsReauth: !!needs, method };
   } catch (err) {
     console.error('shouldReauth error fallback:', err);
-    const hasBio = localStorage.getItem('biometricsEnabled') === 'true' && ('PublicKeyCredential' in window);
-    const fallbackHasPin = localStorage.getItem('hasPin') === 'true';
+    const hasBio = localStorage.getItem('biometricsEnabled').toLowerCase() === 'true' && ('PublicKeyCredential' in window);
+    const fallbackHasPin = localStorage.getItem('hasPin').toLowerCase() === 'true';
     const needs = hasBio || fallbackHasPin;
     const method = hasBio ? 'biometric' : (fallbackHasPin ? 'pin' : null);
     return { needsReauth: !!needs, method };
