@@ -8016,37 +8016,38 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
   }
 
   // Biometric verify button
-  try {
-    console.log('Setting up biometric verify button');
-    if (verifyBiometricBtn && !verifyBiometricBtn.__bound) {
-      verifyBiometricBtn.addEventListener('click', async () => {
-        console.log('Biometric verify clicked');
-        try {
-          const session = await safeCall(getSession) || {};
-          const uid = session.user ? (session.user.uid || session.user.id) : null;
-          if (!uid) throw new Error('No UID available for biometric auth');
+try {
+  console.log('Setting up biometric verify button');
+  if (verifyBiometricBtn && !verifyBiometricBtn.__bound) {
+    verifyBiometricBtn.addEventListener('click', async () => {
+      console.log('Biometric verify clicked in reauth modal');
+      try {
+        const session = await safeCall(getSession) || {};
+        const uid = session.user ? (session.user.uid || session.user.id) : null;
+        if (!uid) throw new Error('No UID available for biometric auth');
 
-          const res = await verifyBiometrics(uid, context);
-          if (res && res.success) {
-            try { if (reauthModal) reauthModal.classList.add('hidden'); } catch (e) {}
-            safeCall(getSession);
-            onSuccessfulReauth();
-            return;
-          }
-          safeCall(notify, 'Biometric verification failed or cancelled', 'error', reauthAlert, reauthAlertMsg);
-          switchViews(false);
-        } catch (err) {
-          console.error('Biometric error:', err);
-          safeCall(notify, 'Biometric not available — please use PIN', 'error', reauthAlert, reauthAlertMsg);
-          try { if (switchToPin) switchToPin.click(); else switchViews(false); } catch (e) { console.error(e); }
+        const res = await verifyBiometrics(uid, context);
+        if (res && res.success) {
+          try { if (reauthModal) reauthModal.classList.add('hidden'); } catch (e) {}
+          safeCall(getSession);
+          onSuccessfulReauth();
+          return;
         }
-      });
-      verifyBiometricBtn.__bound = true;
-      console.log('Biometric verify button bound');
-    }
-  } catch (e) {
-    console.error('Error setting up biometric verify button:', e);
+        safeCall(notify, 'Biometric verification failed or cancelled', 'error', reauthAlert, reauthAlertMsg);
+        switchViews(false);
+      } catch (err) {
+        console.error('Biometric error in reauth:', err);
+        safeCall(notify, 'Biometric not available — please use PIN', 'error', reauthAlert, reauthAlertMsg);
+        try { if (switchToPin) switchToPin.click(); else switchViews(false); } catch (e) { console.error(e); }
+      }
+    });
+    verifyBiometricBtn.__bound = true;
+    console.log('Biometric verify button bound');
   }
+} catch (e) {
+  console.error('Error setting up biometric verify button:', e);
+}
+
 
   // Switch views
   try {
@@ -8825,8 +8826,6 @@ async function verifyBiometrics(uid, context = 'reauth') {
     return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   }
 
-
-
   try {
     if (!('PublicKeyCredential' in window)) {
       throw new Error('WebAuthn not supported in this browser');
@@ -8860,11 +8859,14 @@ async function verifyBiometrics(uid, context = 'reauth') {
     if (Array.isArray(options.allowCredentials)) {
       options.allowCredentials = options.allowCredentials.map(c => ({
         ...c,
-        id: base64UrlToBuffer(c.id)
+        id: base64UrlToBuffer(c.id),
+        // Restrict to 'internal' transport for platform-only biometrics (consistent with registration)
+        transports: ['internal']
       }));
     }
 
-    // Optional: set timeout/defaults
+    // Enforce user verification for biometric/PIN
+    options.userVerification = 'required';
     options.timeout = options.timeout || 60000;
 
     // 3) navigator.credentials.get()
