@@ -8218,78 +8218,134 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
     });
   }
 
-  /* -----------------------
-     Biometrics Registration
-     - Call from settings: __reauth.registerBiometrics()
-     ----------------------- */
-  async function registerBiometrics() {
-  console.log('registerBiometrics called');
+/* -----------------------
+   Enhanced registerBiometrics (replace existing)
+   - Uses server options (server.js already changed)
+   - Defensive client-side enforcement (platform + required UV)
+   - Persists credentialId, biometricsEnabled, biometricForLogin, biometricForTx
+----------------------- */
+async function registerBiometrics() {
   try {
-    const session = await safeCall(getSession);
-    if (!session || !session.user) throw new Error('No session');
-    const { uid, username, fullName } = session.user;
-    console.log('Session for register:', { uid, username });
+    // ensure session available
+    const session = await (typeof getSession === 'function' ? getSession() : Promise.resolve(null));
+    const user = session && session.user ? (session.user.uid || session.user.id ? session.user : null) : null;
+    const uid = user ? (user.uid || user.id) : (localStorage.getItem('userId') || null);
+    if (!uid) throw new Error('No session/user for registration');
 
-    console.log('Fetching register options');
-    const optsRes = await fetch('https://api.flexgig.com.ng/webauthn/register/options', {
+    const apiBase = window.__SEC_API_BASE || 'https://api.flexgig.com.ng';
+
+    // fetch server options (server already enforces authenticatorAttachment: 'platform')
+    const optsRes = await fetch(`${apiBase}/webauthn/register/options`, {
       method: 'POST',
-      credentials: 'include',  // <-- Add this
-      headers: {
-        'Content-Type': 'application/json'
-        // <-- Remove Authorization entirely
-      },
-      body: JSON.stringify({ userId: uid, username, displayName: fullName || username || 'User' })
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: uid, username: user?.username || '', displayName: user?.fullName || user?.username || 'User' })
     });
-    if (!optsRes.ok) throw new Error('Options failed');
+    if (!optsRes.ok) {
+      const txt = await optsRes.text().catch(()=>'');
+      throw new Error(`Failed to fetch registration options: ${txt || optsRes.status}`);
+    }
+
     const opts = await optsRes.json();
-    console.log('Register options received');
 
-    // Ensure biometrics flag persists safely
-    (function () {
-      if (localStorage.getItem('credentialId') && !localStorage.getItem('biometricsEnabled')) {
-        localStorage.setItem('biometricsEnabled', 'true');
-      }
-    })();
+    // Defensive: ensure platform-only + user verification required on client too
+    opts.authenticatorSelection = opts.authenticatorSelection || {};
+    opts.authenticatorSelection.authenticatorAttachment = 'platform';
+    opts.authenticatorSelection.userVerification = 'required';
+    opts.userVerification = 'required';
+    opts.timeout = opts.timeout || 60000;
 
+    // Convert base64url fields to ArrayBuffers if server returned base64url strings
+    const base64UrlToBuffer = (base64Url) => {
+      if (!base64Url) return new Uint8Array().buffer;
+      let base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+      const pad = base64.length % 4;
+      if (pad) base64 += '='.repeat(4 - pad);
+      const str = atob(base64);
+      const u8 = new Uint8Array(str.length);
+      for (let i = 0; i < str.length; i++) u8[i] = str.charCodeAt(i);
+      return u8.buffer;
+    };
 
-    console.log('Creating credential');
+    // Convert challenge / user.id / any id fields to ArrayBuffer
+    if (opts.challenge && typeof opts.challenge === 'string') opts.challenge = base64UrlToBuffer(opts.challenge);
+    if (opts.user && opts.user.id && typeof opts.user.id === 'string') opts.user.id = base64UrlToBuffer(opts.user.id);
+    if (Array.isArray(opts.excludeCredentials)) {
+      opts.excludeCredentials = opts.excludeCredentials.map(c => ({ ...c, id: base64UrlToBuffer(c.id) }));
+    }
+
+    // call WebAuthn create -> will show system prompt
     const cred = await navigator.credentials.create({ publicKey: opts });
-    console.log('Credential created');
+    if (!cred) throw new Error('No credential created');
 
-    console.log('Verifying credential');
-    const verifyRes = await fetch('https://api.flexgig.com.ng/webauthn/register/verify', {
+    // package credential to send to server (base64url encoding)
+    const bufferToBase64Url = (buffer) => {
+      const bytes = new Uint8Array(buffer);
+      let str = '';
+      for (let i = 0; i < bytes.byteLength; i++) str += String.fromCharCode(bytes[i]);
+      const b64 = btoa(str);
+      return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    };
+
+    const payload = {
+      id: cred.id,
+      rawId: bufferToBase64Url(cred.rawId),
+      type: cred.type,
+      response: {
+        clientDataJSON: bufferToBase64Url(cred.response.clientDataJSON),
+        attestationObject: bufferToBase64Url(cred.response.attestationObject)
+      }
+    };
+
+    // send to server verify endpoint
+    const verifyRes = await fetch(`${apiBase}/webauthn/register/verify`, {
       method: 'POST',
-      credentials: 'include',  // <-- Add this
-      headers: {
-        'Content-Type': 'application/json'
-        // <-- Remove Authorization
-      },
-      body: JSON.stringify({
-        userId: uid,
-        credential: {
-          id: cred.id,
-          rawId: btoa(String.fromCharCode(...new Uint8Array(cred.rawId))),
-          type: cred.type,
-          response: {
-            clientDataJSON: btoa(String.fromCharCode(...new Uint8Array(cred.response.clientDataJSON))),
-            attestationObject: btoa(String.fromCharCode(...new Uint8Array(cred.response.attestationObject)))
-          }
-        }
-      })
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: uid, credential: payload })
     });
-    if (!verifyRes.ok) throw new Error('Verify failed');
-    console.log('Register verify successful');
 
-    localStorage.setItem('credentialId', cred.id);
-    localStorage.setItem('biometricsEnabled', 'true');
-    safeCall(notify, 'Biometrics enabled!', 'success');
-    await initReauthModal(); // Refresh
-    console.log('Biometrics registered');
+    if (!verifyRes.ok) {
+      const txt = await verifyRes.text().catch(()=>'');
+      throw new Error(`Server verify failed: ${txt || verifyRes.status}`);
+    }
+
+    const verifyJson = await verifyRes.json().catch(()=>({}));
+
+    // Success -> persist credential and set flags
+    try {
+      localStorage.setItem('credentialId', cred.id);
+      localStorage.setItem('biometricsEnabled', 'true');
+      // enable both children by default after registration
+      localStorage.setItem('biometricForLogin', 'true');
+      localStorage.setItem('biometricForTx', 'true');
+    } catch (e) { /* ignore localStorage write errors */ }
+
+    // update UI (sync checkboxes)
+    syncBiometricUIFromStorage();
+
+    // notify + refresh reauth modal if present
+    if (typeof notify === 'function') notify('Biometrics enabled on this device', 'success');
+    if (typeof initReauthModal === 'function') await initReauthModal({ show: false });
+
+    return { success: true, credentialId: cred.id, server: verifyJson };
   } catch (err) {
-    console.error('Register biometrics error:', err);
-    safeCall(notify, 'Biometrics setup failed - try again', 'error');
+    // If user cancelled (NotAllowedError) do not spam notify: revert parent toggle
+    const name = err && err.name;
+    if (name === 'NotAllowedError' || name === 'AbortError') {
+      // revert parent toggle in UI
+      setTimeout(()=>syncBiometricUIFromStorage({forceParentOff:true}), 0);
+      return { success: false, cancelled: true, error: err.message || String(err) };
+    }
+    if (typeof notify === 'function') notify(`Biometrics setup failed: ${err.message || err}`, 'error');
+    // revert parent toggle as registration didn't complete
+    setTimeout(()=>syncBiometricUIFromStorage({forceParentOff:true}), 0);
+    return { success: false, error: err.message || String(err) };
   }
 }
+
+
+
 
 /* -----------------------
    Disable Biometrics (new!)
@@ -8331,6 +8387,210 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
     safeCall(notify, 'Disable failed - try again', 'error');
   }
 }
+
+/* -----------------------
+   bindBiometricSettings for role="switch" buttons
+   Call: bindBiometricSettings({
+     parentSelector:'#biometricsSwitch',
+     childLoginSelector:'#bioLoginSwitch',
+     childTxSelector:'#bioTxSwitch',
+     optionsContainerSelector:'#biometricsOptions'
+   });
+----------------------- */
+function bindBiometricSettings(opts = {}) {
+  const parentSel = opts.parentSelector || '#biometricsSwitch';
+  const childLoginSel = opts.childLoginSelector || '#bioLoginSwitch';
+  const childTxSel = opts.childTxSelector || '#bioTxSwitch';
+  const optionsContainerSel = opts.optionsContainerSelector || '#biometricsOptions';
+
+  const parent = document.querySelector(parentSel);
+  const childLogin = document.querySelector(childLoginSel);
+  const childTx = document.querySelector(childTxSel);
+  const optionsContainer = document.querySelector(optionsContainerSel);
+
+  if (!parent) return console.warn('bindBiometricSettings: parent switch not found', parentSel);
+
+  // util: set switch (button) state (aria + class)
+  function setSwitch(btn, on) {
+    if (!btn) return;
+    btn.setAttribute('aria-checked', on ? 'true' : 'false');
+    btn.classList.toggle('on', !!on);
+  }
+
+  function readFlag(key) {
+    try { return localStorage.getItem(key) === 'true'; } catch (e) { return false; }
+  }
+  function writeFlag(key, val) {
+    try { localStorage.setItem(key, val ? 'true' : 'false'); } catch (e) {}
+  }
+
+  // show/hide options container
+  function setOptionsVisible(visible) {
+    if (!optionsContainer) return;
+    if (visible) {
+      optionsContainer.hidden = false;
+      optionsContainer.removeAttribute('aria-hidden');
+    } else {
+      optionsContainer.hidden = true;
+      optionsContainer.setAttribute('aria-hidden', 'true');
+    }
+  }
+
+  // sync UI from localStorage
+  function syncFromStorage() {
+    const parentFlag = readFlag('biometricsEnabled');
+    const loginFlag = readFlag('biometricForLogin');
+    const txFlag = readFlag('biometricForTx');
+
+    setSwitch(parent, parentFlag);
+    setSwitch(childLogin, loginFlag);
+    setSwitch(childTx, txFlag);
+    setOptionsVisible(parentFlag);
+  }
+
+  // safe wrapper to avoid double-processing
+  parent.__bioProcessing = parent.__bioProcessing || false;
+
+  // Parent handler: toggle ON -> register; OFF -> disable
+  async function handleParentToggle(wantOn) {
+    if (parent.__bioProcessing) return;
+    parent.__bioProcessing = true;
+    // optimistic visual change to indicate we are working
+    setSwitch(parent, wantOn);
+    parent.disabled = true;
+
+    try {
+      if (wantOn) {
+        // attempt registration using your existing function
+        // registerBiometrics() should return { success: true, credentialId } on success
+        if (typeof registerBiometrics !== 'function') {
+          throw new Error('registerBiometrics() not defined');
+        }
+        const res = await registerBiometrics();
+        if (res && res.success) {
+          // enable both children by default after successful registration
+          writeFlag('biometricsEnabled', true);
+          writeFlag('biometricForLogin', true);
+          writeFlag('biometricForTx', true);
+          if (res.credentialId) try { localStorage.setItem('credentialId', res.credentialId); } catch(e){}
+          setSwitch(childLogin, true);
+          setSwitch(childTx, true);
+          setOptionsVisible(true);
+        } else {
+          // registration failed or user cancelled — revert
+          writeFlag('biometricsEnabled', false);
+          setSwitch(parent, false);
+          // keep children as they were in storage
+          setSwitch(childLogin, readFlag('biometricForLogin'));
+          setSwitch(childTx, readFlag('biometricForTx'));
+          setOptionsVisible(false);
+        }
+      } else {
+        // turning OFF -> call disableBiometrics (revoke + clear)
+        if (typeof disableBiometrics === 'function') {
+          await disableBiometrics();
+        } else {
+          // fallback: clear flags
+          try { localStorage.removeItem('credentialId'); } catch(e){}
+          writeFlag('biometricsEnabled', false);
+          writeFlag('biometricForLogin', false);
+          writeFlag('biometricForTx', false);
+        }
+        setSwitch(childLogin, false);
+        setSwitch(childTx, false);
+        setOptionsVisible(false);
+      }
+    } catch (err) {
+      // on any fatal error, revert parent to OFF
+      console.error('biometric parent toggle error', err);
+      writeFlag('biometricsEnabled', false);
+      setSwitch(parent, false);
+      setOptionsVisible(false);
+    } finally {
+      parent.__bioProcessing = false;
+      parent.disabled = false;
+    }
+  }
+
+  // wire parent: click and keyboard (space/enter)
+  if (!parent.__bioBound) {
+    parent.addEventListener('click', (e) => {
+      e.preventDefault();
+      const currently = parent.getAttribute('aria-checked') === 'true';
+      handleParentToggle(!currently);
+    });
+    parent.addEventListener('keydown', (e) => {
+      if (e.key === ' ' || e.key === 'Enter') {
+        e.preventDefault(); parent.click();
+      }
+    });
+    parent.__bioBound = true;
+  }
+
+  // child handler: toggle child flag, persist; if enabling child while parent OFF -> trigger parent (and registration)
+  function bindChild(btn, key) {
+    if (!btn || btn.__bioBound) return;
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      const cur = btn.getAttribute('aria-checked') === 'true';
+      const wantOn = !cur;
+
+      // if enabling child, ensure parent enabled and registered
+      const parentOn = parent.getAttribute('aria-checked') === 'true';
+      if (wantOn && !parentOn) {
+        // trigger parent which will attempt registration and if success will enable child
+        // programmatically click parent (this will call handleParentToggle)
+        parent.click();
+        return;
+      }
+
+      // otherwise just toggle child locally
+      setSwitch(btn, wantOn);
+      writeFlag(key, wantOn);
+    });
+
+    btn.addEventListener('keydown', (e) => {
+      if (e.key === ' ' || e.key === 'Enter') {
+        e.preventDefault(); btn.click();
+      }
+    });
+    btn.__bioBound = true;
+  }
+
+  bindChild(childLogin, 'biometricForLogin');
+  bindChild(childTx, 'biometricForTx');
+
+  // when the user manually changes storage elsewhere, keep UI in sync
+  window.addEventListener('storage', (e) => {
+    if (['biometricsEnabled','biometricForLogin','biometricForTx','credentialId'].includes(e.key)) {
+      // small timeout to allow other code to finish
+      setTimeout(syncFromStorage, 50);
+    }
+  });
+
+  // initial sync
+  syncFromStorage();
+
+  // expose sync helper
+  return {
+    parent, childLogin, childTx, optionsContainer,
+    syncFromStorage
+  };
+}
+
+/* -----------------------
+   Call on DOMContentLoaded with your selectors
+----------------------- */
+document.addEventListener('DOMContentLoaded', () => {
+  // Bind using your exact IDs from the markup you pasted
+  bindBiometricSettings({
+    parentSelector: '#biometricsSwitch',
+    childLoginSelector: '#bioLoginSwitch',
+    childTxSelector: '#bioTxSwitch',
+    optionsContainerSelector: '#biometricsOptions'
+  });
+});
+
 
   /* -----------------------
      Small helpers
