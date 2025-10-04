@@ -3002,3 +3002,32 @@ a[style*="color: #f00"] { color: var(--danger); }
     transform: translateX(-50%);
   }
 }
+
+.loader-overlay {
+  position: fixed;
+  inset: 0;
+  background: #000000b3; /* dark background */
+  display: none; /* hidden by default */
+  align-items: center;
+  justify-content: center;
+  z-index: 999999;
+}
+
+
+.logo-spinner {
+  display: inline-block;
+  animation: spinZoom 2s linear infinite;
+}
+
+@keyframes spinZoom {
+  0% {
+    transform: rotate(0deg) scale(0.8);
+  }
+  50% {
+    transform: rotate(180deg) scale(1.2); /* zoom out */
+  }
+  100% {
+    transform: rotate(360deg) scale(0.8);
+  }
+}
+

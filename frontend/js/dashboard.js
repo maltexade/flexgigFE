@@ -9,6 +9,59 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const { createClient } = supabase;
 const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+let __backHandler = null;
+
+function showLoader() {
+  const loader = document.getElementById('appLoader');
+  if (!loader) return;
+
+  loader.hidden = false;
+
+  // 🔹 Disable all interactive elements
+  document.querySelectorAll('button, input, select, textarea, a').forEach(el => {
+    el.setAttribute('data-prev-disabled', el.disabled);
+    el.disabled = true;
+  });
+
+  // 🔹 Lock back button
+  __backHandler = () => {
+    history.pushState(null, '', location.href);
+  };
+  window.addEventListener('popstate', __backHandler);
+  history.pushState(null, '', location.href);
+}
+
+function hideLoader() {
+  const loader = document.getElementById('appLoader');
+  if (!loader) return;
+
+  loader.hidden = true;
+
+  // 🔹 Restore original disabled state
+  document.querySelectorAll('[data-prev-disabled]').forEach(el => {
+    const prev = el.getAttribute('data-prev-disabled') === 'true';
+    el.disabled = prev;
+    el.removeAttribute('data-prev-disabled');
+  });
+
+  // 🔹 Unlock back button
+  if (__backHandler) {
+    window.removeEventListener('popstate', __backHandler);
+    __backHandler = null;
+  }
+}
+
+async function withLoader(task) {
+  showLoader();
+  try {
+    return await task();
+  } finally {
+    hideLoader();
+  }
+}
+
+
+
 
 
 // 🚀 Global banner helpers
@@ -3396,32 +3449,44 @@ function __fg_pin_clearAllInputs() {
 }
 
   // Update PIN in Supabase
-  async function updateStoredPin(uid, newPin) {
-  try {
-    const response = await fetch('https://api.flexgig.com.ng/api/save-pin', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-        // Removed Authorization
-      },
-      credentials: 'include',
-      body: JSON.stringify({ userId: uid, pin: newPin })  // Pass userId
-    });
-    if (!response.ok) {
-      const { error } = await response.json();
-      console.error('[PinModal] PIN update failed:', error?.message || await response.text());
-      return { ok: false, error: error?.message || 'Failed to update PIN' };
+  // Update PIN in Supabase
+async function updateStoredPin(uid, newPin) {
+  return withLoader(async () => {
+    try {
+      const response = await fetch('https://api.flexgig.com.ng/api/save-pin', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+          // Removed Authorization
+        },
+        credentials: 'include',
+        body: JSON.stringify({ userId: uid, pin: newPin })  // Pass userId
+      });
+
+      if (!response.ok) {
+        let errorMsg = 'Failed to update PIN';
+        try {
+          const { error } = await response.json();
+          if (error?.message) errorMsg = error.message;
+        } catch (_) {}
+        console.error('[PinModal] PIN update failed:', errorMsg);
+        return { ok: false, error: errorMsg };
+      }
+
+      console.log('[PinModal] PIN updated successfully');
+      return { ok: true };
+    } catch (err) {
+      console.error('[PinModal] Error updating PIN:', err);
+      return { ok: false, error: err.message };
     }
-    console.log('[PinModal] PIN updated successfully');
-    return { ok: true };
-  } catch (err) {
-    console.error('[PinModal] Error updating PIN:', err);
-    return { ok: false, error: err.message };
-  }
+  });
 }
+
 
   // Re-authenticate with PIN
   async function reAuthenticateWithPin(uid, pin, callback) {
+  return withLoader(async () => {
+
   try {
     const found = await findStoredPin(uid);
     if (!found) {
@@ -3450,6 +3515,7 @@ function __fg_pin_clearAllInputs() {
     notify('Error verifying PIN. Please try again.', 'error', pinVerifyAlert, pinVerifyAlertMsg);
     return false;
   }
+  });
 }
 
   // Reusable PIN check function
@@ -3902,7 +3968,8 @@ if (updateProfileForm) {
 
     const originalBtnContent = saveProfileBtn.innerHTML; // Save original button content
     saveProfileBtn.disabled = true;
-    saveProfileBtn.innerHTML = '<div class="loader"></div>'; // Replace with spinner (CSS required)
+
+    withLoader(async () => {
 
     try {
       // Build FormData
@@ -4034,6 +4101,7 @@ parsedData.message)) || rawText || `HTTP ${response.status}`;
       saveProfileBtn.disabled = false;
       saveProfileBtn.innerHTML = originalBtnContent; // Restore original content
     }
+  });
   };
 
   updateProfileForm.addEventListener('submit', 
@@ -5588,21 +5656,51 @@ loadProfileToSettings();
     });
 
   // Logout (modal)
-  if (logoutBtnModal) {
-    logoutBtnModal.addEventListener('click', async (e) => {
-      e.preventDefault();
-      try {
-        await fetch('/auth/logout', { method: 'POST', credentials: 'include' });
-      } catch (err) {
-        console.warn('Logout API error (continuing client-side)', err);
+if (logoutBtnModal) {
+  logoutBtnModal.addEventListener('click', async (e) => {
+    e.preventDefault();
+    showLoader();
+    try {
+      // Tell backend to clear refresh cookie
+      await fetch('/auth/logout', { method: 'POST', credentials: 'include' });
+    } catch (err) {
+      console.warn('Logout API error (continuing client-side)', err);
+    }
+
+    try {
+      // Clear local + session storage
+      localStorage.clear();
+      sessionStorage.clear();
+
+      // Clear IndexedDB (all databases)
+      if (window.indexedDB) {
+        const dbs = await indexedDB.databases();
+        dbs.forEach(db => {
+          if (db.name) {
+            indexedDB.deleteDatabase(db.name);
+          }
+        });
       }
-      localStorage.removeItem('user');
-      localStorage.removeItem('token');
-      localStorage.removeItem('profile');
-      hideModal();
-      window.location.href = '/frontend/html/login.html';
-    });
-  }
+
+      // Clear client cookies (non-HttpOnly)
+      document.cookie.split(';').forEach(c => {
+        document.cookie = c
+          .replace(/^ +/, '')
+          .replace(/=.*/, `=;expires=${new Date(0).toUTCString()};path=/`);
+      });
+    } catch (err) {
+      console.error('Error during logout cleanup:', err);
+    }
+
+    // Hide modal if function exists
+    try { hideModal(); } catch (_) {}
+    hideLoader();
+
+    // Redirect to login
+    window.location.href = '/';
+  });
+}
+
 
   // Theme toggle
   function setDarkMode(enabled) {
@@ -8067,15 +8165,51 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
   try {
     console.log('Setting up logout and forget links');
     [logoutLinkBio, logoutLinkPin].forEach((link) => {
-      if (link && !link.__bound) {
-        link.addEventListener('click', (ev) => {
-          ev.preventDefault();
-          try { localStorage.clear(); localStorage.removeItem('reauthPending'); } catch (e) {}
-          window.location.href = '/';
+  if (link && !link.__bound) {
+    link.addEventListener('click', async (ev) => {
+      ev.preventDefault();
+      showLoader();
+
+      try {
+        // Tell the backend to clear refresh cookies
+        await fetch('https://api.flexgig.com.ng/auth/logout', {
+          method: 'POST',
+          credentials: 'include'
+        }).catch(() => {});
+
+        // Clear localStorage + sessionStorage
+        localStorage.clear();
+        sessionStorage.clear();
+
+        // Clear IndexedDB (all DBs)
+        if (window.indexedDB) {
+          const dbs = await indexedDB.databases();
+          dbs.forEach(db => {
+            if (db.name) {
+              indexedDB.deleteDatabase(db.name);
+            }
+          });
+        }
+
+        // Clear client cookies (best-effort; won't touch HttpOnly)
+        document.cookie.split(';').forEach(c => {
+          document.cookie = c
+            .replace(/^ +/, '')
+            .replace(/=.*/, `=;expires=${new Date(0).toUTCString()};path=/`);
         });
-        link.__bound = true;
+
+      } catch (err) {
+        console.error('Error during logout cleanup:', err);
       }
+      hideLoader();
+
+      // Redirect to homepage or login
+      window.location.href = '/';
     });
+    link.__bound = true;
+  }
+});
+
     [forgetPinLinkBio, forgetPinLinkPin].forEach((link) => {
       if (link && !link.__bound) {
         link.addEventListener('click', (ev) => {
@@ -8225,6 +8359,8 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
    - Persists credentialId, biometricsEnabled, biometricForLogin, biometricForTx
 ----------------------- */
 async function registerBiometrics() {
+  return withLoader(async () => {
+
   try {
     // ensure session available
     const session = await (typeof getSession === 'function' ? getSession() : Promise.resolve(null));
@@ -8342,6 +8478,7 @@ async function registerBiometrics() {
     setTimeout(()=>syncBiometricUIFromStorage({forceParentOff:true}), 0);
     return { success: false, error: err.message || String(err) };
   }
+  });
 }
 
 
@@ -8353,6 +8490,8 @@ async function registerBiometrics() {
    - Revokes server-side, clears local
    ----------------------- */
   async function disableBiometrics() {
+  return withLoader(async () => {
+
   console.log('disableBiometrics called');
   try {
     const session = await safeCall(getSession);
@@ -8386,6 +8525,7 @@ async function registerBiometrics() {
     console.error('Disable biometrics error:', err);
     safeCall(notify, 'Disable failed - try again', 'error');
   }
+  });
 }
 
 /* -----------------------
@@ -8448,135 +8588,170 @@ function bindBiometricSettings(opts = {}) {
     setOptionsVisible(parentFlag);
   }
 
-  // safe wrapper to avoid double-processing
   parent.__bioProcessing = parent.__bioProcessing || false;
 
+  // Parent toggle ON -> register; OFF -> disable
   // Parent handler: toggle ON -> register; OFF -> disable
-  async function handleParentToggle(wantOn) {
-    if (parent.__bioProcessing) return;
-    parent.__bioProcessing = true;
-    // optimistic visual change to indicate we are working
-    setSwitch(parent, wantOn);
-    parent.disabled = true;
+async function handleParentToggle(wantOn) {
+  if (parent.__bioProcessing) return;
+  parent.__bioProcessing = true;
+  setSwitch(parent, wantOn);
+  parent.disabled = true;
 
-    try {
+  try {
+    await withLoader(async () => {
       if (wantOn) {
-        // attempt registration using your existing function
-        // registerBiometrics() should return { success: true, credentialId } on success
+        // turning ON -> register with server
         if (typeof registerBiometrics !== 'function') {
           throw new Error('registerBiometrics() not defined');
         }
+
         const res = await registerBiometrics();
         if (res && res.success) {
-          // enable both children by default after successful registration
           writeFlag('biometricsEnabled', true);
           writeFlag('biometricForLogin', true);
           writeFlag('biometricForTx', true);
-          if (res.credentialId) try { localStorage.setItem('credentialId', res.credentialId); } catch(e){}
+          if (res.credentialId) {
+            try { localStorage.setItem('credentialId', res.credentialId); } catch(e){}
+          }
           setSwitch(childLogin, true);
           setSwitch(childTx, true);
           setOptionsVisible(true);
         } else {
-          // registration failed or user cancelled — revert
           writeFlag('biometricsEnabled', false);
           setSwitch(parent, false);
-          // keep children as they were in storage
-          setSwitch(childLogin, readFlag('biometricForLogin'));
-          setSwitch(childTx, readFlag('biometricForTx'));
           setOptionsVisible(false);
         }
+
       } else {
-        // turning OFF -> call disableBiometrics (revoke + clear)
-        if (typeof disableBiometrics === 'function') {
-          await disableBiometrics();
-        } else {
-          // fallback: clear flags
-          try { localStorage.removeItem('credentialId'); } catch(e){}
-          writeFlag('biometricsEnabled', false);
-          writeFlag('biometricForLogin', false);
-          writeFlag('biometricForTx', false);
-        }
+        // turning OFF -> 🔹 optimistic client update (instant)
+        writeFlag('biometricsEnabled', false);
+        writeFlag('biometricForLogin', false);
+        writeFlag('biometricForTx', false);
+        try { localStorage.removeItem('credentialId'); } catch(e){}
         setSwitch(childLogin, false);
         setSwitch(childTx, false);
         setOptionsVisible(false);
+
+        // background server cleanup
+        if (typeof disableBiometrics === 'function') {
+          try {
+            await disableBiometrics();
+          } catch (err) {
+            console.error('disableBiometrics failed, reverting UI', err);
+            // revert if server fails
+            writeFlag('biometricsEnabled', true);
+            setSwitch(parent, true);
+            setOptionsVisible(true);
+          }
+        }
       }
-    } catch (err) {
-      // on any fatal error, revert parent to OFF
-      console.error('biometric parent toggle error', err);
-      writeFlag('biometricsEnabled', false);
-      setSwitch(parent, false);
-      setOptionsVisible(false);
-    } finally {
-      parent.__bioProcessing = false;
-      parent.disabled = false;
+    });
+  } catch (err) {
+    console.error('biometric parent toggle error', err);
+    writeFlag('biometricsEnabled', false);
+    setSwitch(parent, false);
+    setOptionsVisible(false);
+  } finally {
+    parent.__bioProcessing = false;
+    parent.disabled = false;
+  }
+}
+
+
+
+// wire parent
+if (!parent.__bioBound) {
+  parent.addEventListener('click', (e) => {
+    e.preventDefault();
+    const currently = parent.getAttribute('aria-checked') === 'true';
+    // loader is already inside handleParentToggle
+    handleParentToggle(!currently);
+  });
+  parent.addEventListener('keydown', (e) => {
+    if (e.key === ' ' || e.key === 'Enter') {
+      e.preventDefault();
+      parent.click();
     }
-  }
+  });
+  parent.__bioBound = true;
+}
 
-  // wire parent: click and keyboard (space/enter)
-  if (!parent.__bioBound) {
-    parent.addEventListener('click', (e) => {
-      e.preventDefault();
-      const currently = parent.getAttribute('aria-checked') === 'true';
-      handleParentToggle(!currently);
-    });
-    parent.addEventListener('keydown', (e) => {
-      if (e.key === ' ' || e.key === 'Enter') {
-        e.preventDefault(); parent.click();
-      }
-    });
-    parent.__bioBound = true;
-  }
+// Child handler: verify biometric on enabling
+function bindChild(btn, key, context) {
+  if (!btn || btn.__bioBound) return;
 
-  // child handler: toggle child flag, persist; if enabling child while parent OFF -> trigger parent (and registration)
-  function bindChild(btn, key) {
-    if (!btn || btn.__bioBound) return;
-    btn.addEventListener('click', async (e) => {
-      e.preventDefault();
-      const cur = btn.getAttribute('aria-checked') === 'true';
-      const wantOn = !cur;
+  btn.addEventListener('click', (e) => {
+    e.preventDefault();
 
-      // if enabling child, ensure parent enabled and registered
-      const parentOn = parent.getAttribute('aria-checked') === 'true';
-      if (wantOn && !parentOn) {
-        // trigger parent which will attempt registration and if success will enable child
-        // programmatically click parent (this will call handleParentToggle)
-        parent.click();
-        return;
-      }
+    const cur = btn.getAttribute('aria-checked') === 'true';
+    const wantOn = !cur;
 
-      // otherwise just toggle child locally
-      setSwitch(btn, wantOn);
-      writeFlag(key, wantOn);
-    });
+    if (wantOn) {
+      // 🔹 Enabling → block with loader
+      withLoader(async () => {
+        // Ensure parent credential exists
+        if (!readFlag('biometricsEnabled') || !localStorage.getItem('credentialId')) {
+          await handleParentToggle(true);
+          if (!readFlag('biometricsEnabled')) return;
+        }
 
-    btn.addEventListener('keydown', (e) => {
-      if (e.key === ' ' || e.key === 'Enter') {
-        e.preventDefault(); btn.click();
-      }
-    });
-    btn.__bioBound = true;
-  }
-
-  bindChild(childLogin, 'biometricForLogin');
-  bindChild(childTx, 'biometricForTx');
-
-  // when the user manually changes storage elsewhere, keep UI in sync
-  window.addEventListener('storage', (e) => {
-    if (['biometricsEnabled','biometricForLogin','biometricForTx','credentialId'].includes(e.key)) {
-      // small timeout to allow other code to finish
-      setTimeout(syncFromStorage, 50);
+        // Verify biometrics before enabling
+        try {
+          const session = await getSession();
+          const uid = session?.user?.id || session?.user?.uid;
+          if (typeof verifyBiometrics === 'function') {
+            const res = await verifyBiometrics(uid, context);
+            if (res && res.success) {
+              setSwitch(btn, true);
+              writeFlag(key, true);
+            }
+          } else {
+            console.warn('verifyBiometrics not defined');
+            setSwitch(btn, true);
+            writeFlag(key, true);
+          }
+        } catch (err) {
+          console.error('Child biometric enable failed', err);
+        }
+      });
+    } else {
+      // 🔹 Disabling → instant, no loader
+      setSwitch(btn, false);
+      writeFlag(key, false);
     }
   });
 
-  // initial sync
-  syncFromStorage();
+  btn.addEventListener('keydown', (e) => {
+    if (e.key === ' ' || e.key === 'Enter') {
+      e.preventDefault();
+      btn.click();
+    }
+  });
 
-  // expose sync helper
-  return {
-    parent, childLogin, childTx, optionsContainer,
-    syncFromStorage
-  };
+  btn.__bioBound = true;
 }
+
+
+bindChild(childLogin, 'biometricForLogin', 'login');
+bindChild(childTx, 'biometricForTx', 'transaction');
+
+// Sync when storage changes elsewhere
+window.addEventListener('storage', (e) => {
+  if (['biometricsEnabled','biometricForLogin','biometricForTx','credentialId'].includes(e.key)) {
+    setTimeout(syncFromStorage, 50);
+  }
+});
+
+// Initial sync
+syncFromStorage();
+
+return {
+  parent, childLogin, childTx, optionsContainer,
+  syncFromStorage
+};
+}
+
 
 /* -----------------------
    Call on DOMContentLoaded with your selectors
@@ -8634,37 +8809,49 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /* -----------------------
-     Inactivity logic
-     ----------------------- */
-  let idleTimeout = null;
-  const IDLE_TIME = 15 * 1000; // 10 min prod
-  const PROMPT_TIMEOUT = 5000;
-  const PROMPT_AUTO_CLOSE = true;
-  let lastActive = Date.now();
-  let reauthModalOpen = false; // Track if reauth is open to pause idle
-  try {
-    localStorage.setItem('lastActive', String(lastActive));
-  } catch (e) {}
+   Inactivity logic (Mobile + Desktop)
+   ----------------------- */
+let idleTimeout = null;
+const IDLE_TIME = 15 * 1000; // 10 min in prod
+const PROMPT_TIMEOUT = 5000;
+const PROMPT_AUTO_CLOSE = true;
+let lastActive = Date.now();
+let reauthModalOpen = false; // Track if reauth is open to pause idle
+try { localStorage.setItem('lastActive', String(lastActive)); } catch (e) {}
 
-  let lastResetCall = 0;
-  const RESET_DEBOUNCE_MS = 150; // Tighter for mobile
-  let __inactivitySetupDone = false;
+let lastResetCall = 0;
+// ⚡ Loosen debounce for mobile — 500ms safer
+const RESET_DEBOUNCE_MS = /Mobi|Android/i.test(navigator.userAgent) ? 500 : 150;
+let __inactivitySetupDone = false;
 
-  // Full replacement for shouldReauth (returns object { needsReauth: bool, method: 'biometric'|'pin'|null })
+// Reset timer
+function resetIdleTimer() {
+  const now = Date.now();
+  if (now - lastResetCall < RESET_DEBOUNCE_MS) return;
+  lastResetCall = now;
+
+  lastActive = now;
+  try { localStorage.setItem('lastActive', String(lastActive)); } catch (e) {}
+  if (idleTimeout) clearTimeout(idleTimeout);
+
+  if (!reauthModalOpen) {
+    idleTimeout = setTimeout(() => {
+      showInactivityPrompt();
+    }, IDLE_TIME);
+  }
+}
+
+// Full replacement for shouldReauth (unchanged from yours)
 async function shouldReauth() {
   console.log('shouldReauth called');
   try {
     const session = await safeCall(getSession);
     const sessionHasPin = !!(session && session.user && (session.user.hasPin || session.user.pin));
-    // local flag plus browser support
-    const hasBioFlag = localStorage.getItem('biometricsEnabled').toLowerCase() === 'true';
+    const hasBioFlag = localStorage.getItem('biometricsEnabled')?.toLowerCase() === 'true';
     const webAuthnSupported = ('PublicKeyCredential' in window);
     const hasBio = hasBioFlag && webAuthnSupported;
 
-    console.log('shouldReauth - sessionHasPin:', sessionHasPin, 'hasBioFlag:', hasBioFlag, 'webAuthnSupported:', webAuthnSupported);
-
     if (!session) {
-      // fallback to localStorage if session not available
       const fallbackHasPin = localStorage.getItem('hasPin') === 'true';
       const needs = fallbackHasPin || hasBio;
       const method = hasBio ? 'biometric' : (fallbackHasPin ? 'pin' : null);
@@ -8676,13 +8863,44 @@ async function shouldReauth() {
     return { needsReauth: !!needs, method };
   } catch (err) {
     console.error('shouldReauth error fallback:', err);
-    const hasBio = localStorage.getItem('biometricsEnabled').toLowerCase() === 'true' && ('PublicKeyCredential' in window);
-    const fallbackHasPin = localStorage.getItem('hasPin').toLowerCase() === 'true';
+    const hasBio = localStorage.getItem('biometricsEnabled')?.toLowerCase() === 'true' && ('PublicKeyCredential' in window);
+    const fallbackHasPin = localStorage.getItem('hasPin')?.toLowerCase() === 'true';
     const needs = hasBio || fallbackHasPin;
     const method = hasBio ? 'biometric' : (fallbackHasPin ? 'pin' : null);
     return { needsReauth: !!needs, method };
   }
 }
+
+// One-time inactivity setup
+async function setupInactivity() {
+  if (__inactivitySetupDone) return;
+  const reauthCheck = await shouldReauth();
+  if (!reauthCheck.needsReauth) return;
+
+  __inactivitySetupDone = true;
+
+  // Events for desktop + mobile
+  const events = ['mousemove', 'keydown', 'click', 'scroll'];
+  const mobileEvents = ['touchstart', 'touchend', 'touchmove'];
+
+  events.forEach(evt => document.addEventListener(evt, resetIdleTimer, { passive: true }));
+  mobileEvents.forEach(evt => document.addEventListener(evt, resetIdleTimer, { passive: false }));
+
+  // On resume, check if they expired
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      const last = Number(localStorage.getItem('lastActive') || 0);
+      if (Date.now() - last > IDLE_TIME) {
+        showInactivityPrompt();
+      } else {
+        resetIdleTimer();
+      }
+    }
+  });
+
+  resetIdleTimer(); // start timer immediately
+}
+
 
 
 /* -----------------------
@@ -8711,6 +8929,9 @@ async function verifyBiometrics(uid, context = 'reauth') {
     let b64 = btoa(str);
     return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   }
+
+  return withLoader(async () => {
+
 
   try {
     if (!('PublicKeyCredential' in window)) {
@@ -8799,6 +9020,7 @@ async function verifyBiometrics(uid, context = 'reauth') {
     safeCall(notify, `Biometric authentication failed: ${message}`, 'error');
     return { success: false, error: message };
   }
+  });
 }
 
 
