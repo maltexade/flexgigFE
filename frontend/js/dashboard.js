@@ -2712,6 +2712,8 @@ payBtn.addEventListener('click', () => {
     }
 
     processing = true;
+    return withLoader(async () => {
+
     try {
       const res = await fetch('https://api.flexgig.com.ng/api/save-pin', {
         method: 'POST',
@@ -2740,9 +2742,12 @@ payBtn.addEventListener('click', () => {
       processing = false;
     }
     return;
+  });
   }
 
   if (step === 'reauth') {
+    return withLoader(async () => {
+
     processing = true;
     try {
       const res = await fetch('https://api.flexgig.com.ng/api/verify-pin', {
@@ -2785,7 +2790,9 @@ payBtn.addEventListener('click', () => {
     } finally {
       processing = false;
     }
+  });
   }
+  
 }
 
     // ---------------------
@@ -6955,6 +6962,7 @@ function __sec_wireEvents() {
       __sec_log.d('wireEvents: Wiring parent switch (#biometricsSwitch)');
       const __sec_parentHandler = async () => {
         __sec_log.d('__sec_parentHandler: Starting');
+        return withLoader(async () => {
         __sec_setBusy(__sec_parentSwitch, true);
         const uiOn = __sec_toggleSwitch(__sec_parentSwitch);
         __sec_log.d('__sec_parentHandler: Toggle state', { uiOn });
@@ -6967,7 +6975,7 @@ function __sec_wireEvents() {
           __sec_setChecked(__sec_parentSwitch, false);
           __sec_setBusy(__sec_parentSwitch, false);
           alert('You must be signed in to enable biometrics. Please try logging in again.');
-          window.location.href = '/frontend/html/login.html';
+          window.location.href = '/';
           return;
         }
 
@@ -7031,6 +7039,7 @@ function __sec_wireEvents() {
           }
         }
         __sec_log.d('__sec_parentHandler: Exit');
+        });
       };
 
       __sec_parentSwitch.addEventListener('click', (e) => {
@@ -7057,6 +7066,7 @@ function __sec_wireEvents() {
           __sec_log.d('bioLogin click ignored; parent OFF');
           return;
         }
+        return withLoader(async () => {
         __sec_setBusy(__sec_bioLogin, true);
         const newState = __sec_toggleSwitch(__sec_bioLogin);
         __sec_log.d('bioLogin: New state', { newState });
@@ -7089,8 +7099,11 @@ function __sec_wireEvents() {
           alert('Biometric verification failed: ' + (err.message || 'unknown'));
         } finally {
           __sec_setBusy(__sec_bioLogin, false);
+        
         }
+        
         __sec_log.d('bioLogin click handler exit');
+        });
       });
 
       __sec_bioLogin.addEventListener('keydown', (e) => {
@@ -7494,6 +7507,8 @@ async function handlePinCompletion() {
     return;
   }
   processing = true;
+    return withLoader(async () => {
+
   try {
     const session = await safeCall(getSession) || {};
     const userId = session.user?.id || session.user?.uid || localStorage.getItem('userId');
@@ -7604,6 +7619,7 @@ async function handlePinCompletion() {
   } finally {
     processing = false;
   }
+    });
 }
 
 
@@ -8361,7 +8377,6 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
    - Persists credentialId, biometricsEnabled, biometricForLogin, biometricForTx
 ----------------------- */
 async function registerBiometrics() {
-  return withLoader(async () => {
 
   try {
     // ensure session available
@@ -8480,7 +8495,6 @@ async function registerBiometrics() {
     setTimeout(()=>syncBiometricUIFromStorage({forceParentOff:true}), 0);
     return { success: false, error: err.message || String(err) };
   }
-  });
 }
 
 
@@ -8492,7 +8506,6 @@ async function registerBiometrics() {
    - Revokes server-side, clears local
    ----------------------- */
   async function disableBiometrics() {
-  return withLoader(async () => {
 
   console.log('disableBiometrics called');
   try {
@@ -8527,7 +8540,6 @@ async function registerBiometrics() {
     console.error('Disable biometrics error:', err);
     safeCall(notify, 'Disable failed - try again', 'error');
   }
-  });
 }
 
 /* -----------------------
@@ -8592,8 +8604,6 @@ function bindBiometricSettings(opts = {}) {
 
   parent.__bioProcessing = parent.__bioProcessing || false;
 
-  // Parent toggle ON -> register; OFF -> disable
-  // Parent handler: toggle ON -> register; OFF -> disable
 async function handleParentToggle(wantOn) {
   if (parent.__bioProcessing) return;
   parent.__bioProcessing = true;
@@ -8601,14 +8611,10 @@ async function handleParentToggle(wantOn) {
   parent.disabled = true;
 
   try {
+    // Loader is only here
     await withLoader(async () => {
       if (wantOn) {
-        // turning ON -> register with server
-        if (typeof registerBiometrics !== 'function') {
-          throw new Error('registerBiometrics() not defined');
-        }
-
-        const res = await registerBiometrics();
+        const res = await registerBiometrics(); // NO loader inside
         if (res && res.success) {
           writeFlag('biometricsEnabled', true);
           writeFlag('biometricForLogin', true);
@@ -8624,9 +8630,8 @@ async function handleParentToggle(wantOn) {
           setSwitch(parent, false);
           setOptionsVisible(false);
         }
-
       } else {
-        // turning OFF -> 🔹 optimistic client update (instant)
+        // turning OFF → instant UI update
         writeFlag('biometricsEnabled', false);
         writeFlag('biometricForLogin', false);
         writeFlag('biometricForTx', false);
@@ -8635,17 +8640,14 @@ async function handleParentToggle(wantOn) {
         setSwitch(childTx, false);
         setOptionsVisible(false);
 
-        // background server cleanup
-        if (typeof disableBiometrics === 'function') {
-          try {
-            await disableBiometrics();
-          } catch (err) {
-            console.error('disableBiometrics failed, reverting UI', err);
-            // revert if server fails
-            writeFlag('biometricsEnabled', true);
-            setSwitch(parent, true);
-            setOptionsVisible(true);
-          }
+        // background cleanup
+        try {
+          await disableBiometrics(); // NO loader inside
+        } catch (err) {
+          console.error('disableBiometrics failed, reverting UI', err);
+          writeFlag('biometricsEnabled', true);
+          setSwitch(parent, true);
+          setOptionsVisible(true);
         }
       }
     });
@@ -8659,6 +8661,7 @@ async function handleParentToggle(wantOn) {
     parent.disabled = false;
   }
 }
+
 
 
 
@@ -8932,7 +8935,6 @@ async function verifyBiometrics(uid, context = 'reauth') {
     return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   }
 
-  return withLoader(async () => {
 
 
   try {
@@ -9022,7 +9024,6 @@ async function verifyBiometrics(uid, context = 'reauth') {
     safeCall(notify, `Biometric authentication failed: ${message}`, 'error');
     return { success: false, error: message };
   }
-  });
 }
 
 
