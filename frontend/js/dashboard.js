@@ -52,6 +52,7 @@ function hideLoader() {
 }
 
 async function withLoader(task) {
+  console.log('[DEBUG ⌛⌛⌛] withLoader: Starting task with loader');
   showLoader();
   try {
     return await task();
@@ -3451,6 +3452,7 @@ function __fg_pin_clearAllInputs() {
   // Update PIN in Supabase
   // Update PIN in Supabase
 async function updateStoredPin(uid, newPin) {
+  console.log('[DEBUG] updateStoredPin CALLED with uid:', uid, 'pin:', newPin);
   return withLoader(async () => {
     try {
       const response = await fetch('https://api.flexgig.com.ng/api/save-pin', {

@@ -3007,10 +3007,13 @@ a[style*="color: #f00"] { color: var(--danger); }
   position: fixed;
   inset: 0;
   background: #000000b3; /* dark background */
-  display: none; /* hidden by default */
+  display: flex; /* hidden by default */
   align-items: center;
   justify-content: center;
   z-index: 999999;
+}
+#appLoader[hidden] {
+  display: none !important; /* hide when [hidden] attribute is set */
 }
 
 
