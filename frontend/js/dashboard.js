@@ -7832,11 +7832,12 @@ async function handlePinCompletion() {
 
 
 
-  /* -----------------------
-     initReauthModal (prepares modal, binds events)
-     - Uses safeCall() to call app's helpers if available
-     ----------------------- */
-  // Full initReauthModal replacement — copy / paste over your existing function
+/* -----------------------
+   initReauthModal (prepares modal, binds events)
+   - Uses safeCall() to call app's helpers if available
+   - Prioritizes biometric login if security_bio_login is enabled
+   - Integrates with __sec_KEYS and startAuthentication from security module
+   ----------------------- */
 async function initReauthModal({ show = false, context = 'reauth' } = {}) {
   console.log('initReauthModal called', { show, context });
   cacheDomRefs();
@@ -7854,14 +7855,14 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
     }
 
     if (!user) {
-      const session = await safeCall(getSession) || {};
+      const session = await safeCall(__sec_getCurrentUser) || {};
       const sUser = session.user || {};
       user = {
-        username: sUser.username || '',
+        username: sUser.username || sUser.email || '',
         fullName: sUser.fullName || '',
         profilePicture: sUser.profilePicture || '',
         id: sUser.uid || sUser.id || '',
-        hasPin: !!(sUser.hasPin || sUser.pin),
+        hasPin: !!(sUser.hasPin || sUser.pin || localStorage.getItem('hasPin')?.toLowerCase() === 'true'),
         cachedAt: Date.now()
       };
       try { localStorage.setItem('userData', JSON.stringify(user)); } catch (e) { console.warn('Could not cache userData:', e); }
@@ -7885,21 +7886,23 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
     console.error('Error populating user info:', e);
   }
 
-  // Check biometrics flag and context
-  try {
-    console.log('Checking biometrics and preparing views');
-    const isBiometricsEnabled = localStorage.getItem('biometricsEnabled').toLowerCase() === 'true';
-    const isBioLoginEnabled = localStorage.getItem('biometricForLogin').toLowerCase() === 'true';
-    const webAuthnSupported = ('PublicKeyCredential' in window);
-    const showBioView = isBiometricsEnabled && webAuthnSupported && (
-      (context === 'login' && isBioLoginEnabled) ||
-      (context === 'transaction' && localStorage.getItem('biometricForTx').toLowerCase() === 'true') ||
-      (context === 'reauth' && (isBioLoginEnabled || localStorage.getItem('biometricForTx').toLowerCase() === 'true'))
-    );
+  // Check reauth requirements
+  const reauthStatus = await shouldReauth(context);
+  console.log('initReauthModal: Reauth status', reauthStatus);
 
-    if (biometricView) biometricView.style.display = showBioView ? 'block' : 'none';
-    if (pinView) pinView.style.display = showBioView ? 'none' : 'block';
-    if (switchToBiometric) switchToBiometric.style.display = (isBiometricsEnabled && webAuthnSupported) ? '' : 'none';
+  if (!reauthStatus.needsReauth) {
+    console.log('No reauth needed');
+    try { if (reauthModal) reauthModal.classList.add('hidden'); } catch (e) {}
+    onSuccessfulReauth();
+    return true;
+  }
+
+  // Set up views
+  const isBioApplicable = reauthStatus.method === 'biometric';
+  try {
+    if (biometricView) biometricView.style.display = isBioApplicable ? 'block' : 'none';
+    if (pinView) pinView.style.display = isBioApplicable ? 'none' : 'block';
+    if (switchToBiometric) switchToBiometric.style.display = localStorage.getItem('security_biom_enabled') === '1' && ('PublicKeyCredential' in window) ? '' : 'none';
     if (switchToPin) switchToPin.style.display = '';
     console.log('Views set - biometric display:', biometricView?.style.display, 'pin display:', pinView?.style.display);
   } catch (e) {
@@ -7943,24 +7946,25 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
           return;
         }
 
-        const uidInfo = await safeCall(getUid) || {};
-        if (!uidInfo || !uidInfo.uid) {
+        const uidInfo = await safeCall(__sec_getCurrentUser) || {};
+        if (!uidInfo || !uidInfo.user || !uidInfo.user.uid) {
           console.log('No UID, forcing logout');
           safeCall(notify, 'Session error', 'error', reauthAlert, reauthAlertMsg);
           setTimeout(() => window.location.href = '/', 1500);
           return;
         }
 
-        console.log('Calling reAuthenticateWithPin with UID:', uidInfo.uid);
-        await safeCall(reAuthenticateWithPin, uidInfo.uid, pin, (success) => {
+        console.log('Calling reAuthenticateWithPin with UID:', uidInfo.user.uid);
+        await safeCall(reAuthenticateWithPin, uidInfo.user.uid, pin, (success) => {
           console.log('reAuthenticateWithPin callback, success:', success);
           if (success) {
             try { if (reauthModal) reauthModal.classList.add('hidden'); } catch (e) { console.error(e); }
             resetReauthInputs();
-            safeCall(getSession);
+            safeCall(__sec_getCurrentUser);
             onSuccessfulReauth();
           } else {
             resetReauthInputs();
+            safeCall(notify, 'PIN authentication failed', 'error', reauthAlert, reauthAlertMsg);
           }
         });
       });
@@ -7995,38 +7999,39 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
   }
 
   // Biometric verify button
-try {
-  console.log('Setting up biometric verify button');
-  if (verifyBiometricBtn && !verifyBiometricBtn.__bound) {
-    verifyBiometricBtn.addEventListener('click', async () => {
-      console.log('Biometric verify clicked in reauth modal');
-      try {
-        const session = await safeCall(getSession) || {};
-        const uid = session.user ? (session.user.uid || session.user.id) : null;
-        if (!uid) throw new Error('No UID available for biometric auth');
+  try {
+    console.log('Setting up biometric verify button');
+    if (verifyBiometricBtn && !verifyBiometricBtn.__bound) {
+      verifyBiometricBtn.addEventListener('click', async () => {
+        console.log('Biometric verify clicked in reauth modal');
+        try {
+          const session = await safeCall(__sec_getCurrentUser) || {};
+          const uid = session.user ? (session.user.uid || session.user.id) : null;
+          if (!uid) throw new Error('No UID available for biometric auth');
 
-        const res = await verifyBiometrics(uid, context);
-        if (res && res.success) {
-          try { if (reauthModal) reauthModal.classList.add('hidden'); } catch (e) {}
-          safeCall(getSession);
-          onSuccessfulReauth();
-          return;
+          showSlideNotification('Please authenticate with biometrics', 'info');
+          const res = await startAuthentication(uid);
+          if (res && res.success) {
+            showSlideNotification('Biometric authentication successful', 'success');
+            try { if (reauthModal) reauthModal.classList.add('hidden'); } catch (e) {}
+            safeCall(__sec_getCurrentUser);
+            onSuccessfulReauth();
+            return;
+          }
+          showSlideNotification('Biometric verification failed or cancelled', 'error');
+          switchViews(false);
+        } catch (err) {
+          console.error('Biometric error in reauth:', err);
+          showSlideNotification('Biometric not available — please use PIN', 'error');
+          try { if (switchToPin) switchToPin.click(); else switchViews(false); } catch (e) { console.error(e); }
         }
-        safeCall(notify, 'Biometric verification failed or cancelled', 'error', reauthAlert, reauthAlertMsg);
-        switchViews(false);
-      } catch (err) {
-        console.error('Biometric error in reauth:', err);
-        safeCall(notify, 'Biometric not available — please use PIN', 'error', reauthAlert, reauthAlertMsg);
-        try { if (switchToPin) switchToPin.click(); else switchViews(false); } catch (e) { console.error(e); }
-      }
-    });
-    verifyBiometricBtn.__bound = true;
-    console.log('Biometric verify button bound');
+      });
+      verifyBiometricBtn.__bound = true;
+      console.log('Biometric verify button bound');
+    }
+  } catch (e) {
+    console.error('Error setting up biometric verify button:', e);
   }
-} catch (e) {
-  console.error('Error setting up biometric verify button:', e);
-}
-
 
   // Switch views
   try {
@@ -8100,78 +8105,69 @@ try {
     console.error('Error calling initReauthKeypad:', e);
   }
 
-  // Modal visibility
+  // Modal visibility and auto-biometric attempt
   try {
     console.log('Handling modal visibility, show:', show);
     if (!show) {
       try { if (reauthModal) reauthModal.classList.add('hidden'); } catch (e) {}
       try { if (promptModal) promptModal.classList.add('hidden'); } catch (e) {}
       console.log('Modal hidden');
-    } else {
-      try {
-        localStorage.setItem('reauthPending', Date.now().toString());
-      } catch (e) { console.warn('Could not set reauthPending:', e); }
-
-      if (reauthModal) {
-        reauthModal.classList.remove('hidden');
-        reauthModalOpen = true;
-        try { if (idleTimeout) { clearTimeout(idleTimeout); idleTimeout = null; } } catch (e) {}
-        reauthModal.setAttribute('aria-modal', 'true');
-        reauthModal.setAttribute('role', 'dialog');
-
-        const isBio = localStorage.getItem('biometricsEnabled').toLowerCase() === 'true' && ('PublicKeyCredential' in window);
-        const isBioLoginEnabled = localStorage.getItem('biometricForLogin').toLowerCase() === 'true';
-        const shouldShowBio = isBio && (
-          (context === 'login' && isBioLoginEnabled) ||
-          (context === 'transaction' && localStorage.getItem('biometricForTx').toLowerCase() === 'true') ||
-          (context === 'reauth' && (isBioLoginEnabled || localStorage.getItem('biometricForTx').toLowerCase() === 'true'))
-        );
-
-        if (shouldShowBio && biometricView) {
-          biometricView.style.display = 'block';
-          if (pinView) pinView.style.display = 'none';
-          try { verifyBiometricBtn && verifyBiometricBtn.focus(); } catch (e) {}
-          console.log('Showing biometric view');
-        } else {
-          if (biometricView) biometricView.style.display = 'none';
-          if (pinView) pinView.style.display = 'block';
-          const firstInput = getReauthInputs()[0];
-          if (firstInput) firstInput.focus();
-          console.log('Showing PIN view and focusing first input');
-        }
-
-        try { trapFocus(reauthModal); } catch (e) { console.warn('trapFocus failed:', e); }
-
-        if (shouldShowBio) {
-          (async () => {
-            try {
-              const session = await safeCall(getSession) || {};
-              const uid = session.user ? (session.user.uid || session.user.id) : null;
-              if (!uid) {
-                console.warn('No uid for auto-biometric verify; showing PIN fallback');
-                switchViews(false);
-                return;
-              }
-
-              const res = await verifyBiometrics(uid, context);
-              if (res && res.success) {
-                console.log('Auto biometric verify success');
-                try { if (reauthModal) reauthModal.classList.add('hidden'); } catch (e) {}
-                safeCall(getSession);
-                onSuccessfulReauth();
-                return;
-              }
-              console.log('Auto biometric verify failed — switching to PIN');
-              switchViews(false);
-            } catch (err) {
-              console.error('Auto biometric attempt error:', err);
-              try { switchViews(false); } catch (e) { console.error(e); }
-            }
-          })();
-        }
-      }
-      console.log('Reauth modal opened: inactivity halted');
+      return true;
     }
+
+    try {
+      localStorage.setItem('reauthPending', Date.now().toString());
+    } catch (e) { console.warn('Could not set reauthPending:', e); }
+
+    if (reauthModal) {
+      reauthModal.classList.remove('hidden');
+      reauthModalOpen = true;
+      try { if (idleTimeout) { clearTimeout(idleTimeout); idleTimeout = null; } } catch (e) {}
+      reauthModal.setAttribute('aria-modal', 'true');
+      reauthModal.setAttribute('role', 'dialog');
+
+      if (isBioApplicable) {
+        (async () => {
+          try {
+            const session = await safeCall(__sec_getCurrentUser) || {};
+            const uid = session.user ? (session.user.uid || session.user.id) : null;
+            if (!uid) {
+              console.warn('No uid for auto-biometric verify; showing PIN fallback');
+              showSlideNotification('Session expired, please log in', 'error');
+              setTimeout(() => window.location.href = '/', 1500);
+              return;
+            }
+
+            showSlideNotification('Please authenticate with biometrics', 'info');
+            const res = await startAuthentication(uid);
+            if (res && res.success) {
+              console.log('Auto biometric verify success');
+              showSlideNotification('Biometric authentication successful', 'success');
+              try { if (reauthModal) reauthModal.classList.add('hidden'); } catch (e) {}
+              safeCall(__sec_getCurrentUser);
+              onSuccessfulReauth();
+              return;
+            }
+            console.log('Auto biometric verify failed — switching to PIN');
+            showSlideNotification('Biometric verification failed or cancelled', 'error');
+            switchViews(false);
+          } catch (err) {
+            console.error('Auto biometric attempt error:', err);
+            showSlideNotification('Biometric not available — please use PIN', 'error');
+            try { if (switchToPin) switchToPin.click(); else switchViews(false); } catch (e) { console.error(e); }
+          }
+        })();
+      } else {
+        if (biometricView) biometricView.style.display = 'none';
+        if (pinView) pinView.style.display = 'block';
+        const firstInput = getReauthInputs()[0];
+        if (firstInput) firstInput.focus();
+        console.log('Showing PIN view and focusing first input');
+      }
+
+      try { trapFocus(reauthModal); } catch (e) { console.warn('trapFocus failed:', e); }
+    }
+    console.log('Reauth modal opened: inactivity halted');
   } catch (e) {
     console.error('Error handling visibility:', e);
   }
