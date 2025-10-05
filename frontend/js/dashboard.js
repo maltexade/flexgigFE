@@ -8933,7 +8933,7 @@ async function verifyBiometrics(uid, context = 'reauth') {
       if (!uid) throw new Error('No user ID');
 
       const apiBase = window.__SEC_API_BASE || '';
-      const credentialId = localStorage.getItem('credentialId');
+      let credentialId = localStorage.getItem('credentialId');
       console.log('[DEBUG verifyBiometrics] credentialId raw read:', credentialId, 
             'origin:', location.origin, 'host:', location.host, 'time:', new Date().toISOString());
 
