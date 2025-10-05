@@ -8529,21 +8529,20 @@ async function bindChild(btn, key, context) {
       return;
     }
 
-    // Enabling: client-side-only — prompt authenticator locally (no server round-trip)
+    // Enabling: STRICT client-side-only — DO NOT auto enable parent or call server
     await withLoader(async () => {
       try {
-        // Ensure parent is enabled and a credentialId exists (try to auto-enable parent if needed)
+        // If parent (global biometric) is not enabled, refuse and instruct user
         if (!readFlag('biometricsEnabled') || !localStorage.getItem('credentialId')) {
-          console.log(`Child ${key}: parent biometric not enabled; attempting to enable parent first`);
-          await handleParentToggle(true);
-          if (!readFlag('biometricsEnabled')) {
-            console.warn(`Child ${key}: parent biometric failed to enable`);
-            safeCall(notify, 'Biometric setup required first', 'error');
-            return;
-          }
+          console.warn(`Child ${key}: parent biometric is not enabled — aborting client-side enable`);
+          safeCall(notify, 'Enable main biometrics first (parent) before activating this option', 'info');
+          // keep UI OFF
+          setSwitch(btn, false);
+          writeFlag(key, false);
+          return;
         }
 
-        // Ensure session / uid exists for safety/logging
+        // Ensure session / uid exists for safety/logging (no server call)
         const session = await safeCall(getSession);
         const uid = session?.user?.id || session?.user?.uid;
         if (!uid) {
