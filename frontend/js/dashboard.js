@@ -8836,6 +8836,10 @@ async function setupInactivity() {
 // - Adds preventSilentAccess() for immediate check: forces prompt if no silent possible
 // - Stores credentialId from options for specific calls next time
 // - Respects all existing: discover fallback, 404 retry, conversions, server verify, errors
+// 🔹 Verify Biometrics (fixed - remove preventSilentAccess to avoid hangs)
+// - Uses 'conditional' mediation: auto-direct fingerprint if possible, prompt otherwise
+// - Stores credentialId from options for specific calls next time
+// - Respects all existing: discover fallback, 404 retry, conversions, server verify, errors
 async function verifyBiometrics(uid, context = 'reauth') {
   console.log('verifyBiometrics called', { uid, context });
 
@@ -8935,7 +8939,6 @@ async function verifyBiometrics(uid, context = 'reauth') {
       options.timeout = 60000;
 
       // 🔹 FIXED: Use 'conditional' mediation for direct fingerprint (auto if possible, prompt otherwise)
-      // + preventSilentAccess() to force clear signal: no silent nulls, immediate prompt if needed
       options.mediation = 'conditional';  // Prefers silent/direct, falls to UI
       console.log('[verifyBiometrics] Final options for get():', {
         challengeLength: options.challenge.byteLength,
@@ -8947,10 +8950,6 @@ async function verifyBiometrics(uid, context = 'reauth') {
 
       let assertion;
       try {
-        // 🔹 NEW: preventSilentAccess() - checks if silent possible; forces prompt if not (avoids null hangs)
-        console.log('[verifyBiometrics] Calling preventSilentAccess() for immediate mediation');
-        await navigator.credentials.preventSilentAccess();
-
         console.log('[verifyBiometrics] About to call navigator.credentials.get()');
         assertion = await navigator.credentials.get({ publicKey: options });
 
@@ -8975,7 +8974,7 @@ async function verifyBiometrics(uid, context = 'reauth') {
 
       if (!assertion) {
         // 🔹 NEW: Enhanced logging for null case
-        console.error('[verifyBiometrics] get() returned null after preventSilentAccess - possible causes:');
+        console.error('[verifyBiometrics] get() returned null - possible causes:');
         console.error('  - User cancelled prompt (fingerprint/PIN)');
         console.error('  - No matching resident credential (re-register?)');
         console.error('  - UV=required but no platform support (test in Chrome)');
