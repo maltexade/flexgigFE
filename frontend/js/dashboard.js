@@ -8413,7 +8413,7 @@ async function disableBiometrics() {
    });
 ----------------------- */
 // 🔹 Bind Biometric Settings (unchanged, but now uses full register/disable)
-// 🔹 Bind Biometric Settings (children = client-side flags only, no server/prompt on toggle)
+// 🔹 Bind Biometric Settings (children = pure client-side flags, NO server/verify on toggle)
 function bindBiometricSettings({
   parentSelector = '#biometricsSwitch',
   childLoginSelector = '#bioLoginSwitch',
@@ -8460,7 +8460,7 @@ function bindBiometricSettings({
     }
   }
 
-  // Parent handler: Enabler (register/revoke shared passkey, auto-sets child flags)
+  // Parent handler: Enabler (server register/revoke, auto-sets child flags)
   async function handleParentToggle(wantOn) {
     if (parent.__bioProcessing) return;
     parent.__bioProcessing = true;
@@ -8470,7 +8470,7 @@ function bindBiometricSettings({
     try {
       await withLoader(async () => {
         if (wantOn) {
-          const res = await registerBiometrics();  // Server register if needed
+          const res = await registerBiometrics();  // Server call only here
           if (res && res.success) {
             writeFlag('biometricsEnabled', true);
             writeFlag('biometricForLogin', true);  // Auto-enable children flags
@@ -8489,7 +8489,7 @@ function bindBiometricSettings({
             safeCall(notify, res?.cancelled ? 'Setup cancelled' : 'Setup failed', 'info');
           }
         } else {
-          const res = await disableBiometrics();  // Server revoke
+          const res = await disableBiometrics();  // Server revoke only here
           writeFlag('biometricsEnabled', false);
           writeFlag('biometricForLogin', false);  // Auto-disable children flags
           writeFlag('biometricForTx', false);
@@ -8513,7 +8513,7 @@ function bindBiometricSettings({
     }
   }
 
-  // Child handler: Client-side flag toggle only (no server/verify/prompt)
+  // 🔹 FIXED Child handler: Pure client-side flag toggle (NO server, NO verify, NO prompt)
   function bindChild(btn, key, label) {
     if (!btn || btn.__bioBound) return;
 
@@ -8522,17 +8522,17 @@ function bindBiometricSettings({
       const cur = btn.getAttribute('aria-checked') === 'true';
       const wantOn = !cur;
 
-      // Gate: Require parent enabled
+      // Gate: Require parent enabled (auto-trigger if off)
       if (wantOn && !readFlag('biometricsEnabled')) {
         safeCall(notify, `${label} requires biometrics enabled first`, 'info');
-        handleParentToggle(true);  // Auto-trigger parent
+        handleParentToggle(true);  // Auto-enables parent (server call here, not child)
         return;
       }
 
-      // Instant toggle: Flip flag only
+      // 🔹 PURE CLIENT-SIDE: Instant flag toggle/save (no server/verify)
       setSwitch(btn, wantOn);
       writeFlag(key, wantOn);
-      console.log(`[bio] ${key} toggled to ${wantOn ? 'ON' : 'OFF'}`);
+      console.log(`[bio] ${key} toggled to ${wantOn ? 'ON' : 'OFF'} (local only)`);
       safeCall(notify, `${label} biometrics ${wantOn ? 'enabled' : 'disabled'}`, wantOn ? 'success' : 'info');
     });
 
