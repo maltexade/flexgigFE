@@ -8708,8 +8708,17 @@ function resetIdleTimer() {
 }
 
 // Full replacement for shouldReauth (unchanged from yours)
+// Full replacement for shouldReauth (unchanged from yours)
 async function shouldReauth(context = 'reauth') {
   console.log('shouldReauth called with context:', context);
+  // 🔹 NEW: Debug localStorage values
+  console.log('[shouldReauth DEBUG] Local flags:', {
+    biometricsEnabled: localStorage.getItem('biometricsEnabled'),
+    biometricForLogin: localStorage.getItem('biometricForLogin'),
+    biometricForTx: localStorage.getItem('biometricForTx'),
+    hasPin: localStorage.getItem('hasPin'),
+    webAuthnSupported: ('PublicKeyCredential' in window),
+  });
   try {
     const session = await safeCall(getSession);
     const sessionHasPin = !!(session && session.user && (session.user.hasPin || session.user.pin));
@@ -8719,12 +8728,12 @@ async function shouldReauth(context = 'reauth') {
 
     // Check context-specific biometric flags
     const bioLoginEnabled = ['true', '1', 'yes'].includes(
-  (
-    localStorage.getItem('biometricForLogin') ||
-    localStorage.getItem('__sec_bioLogin') ||
-    localStorage.getItem('security_bio_login') || ''
-  ).toLowerCase()
-);
+      (
+        localStorage.getItem('biometricForLogin') ||
+        localStorage.getItem('__sec_bioLogin') ||
+        localStorage.getItem('security_bio_login') || ''
+      ).toLowerCase()
+    );
 
     const bioTxEnabled = ['true', '1', 'yes'].includes(
       (
@@ -8743,11 +8752,15 @@ async function shouldReauth(context = 'reauth') {
       const fallbackHasPin = localStorage.getItem('hasPin') === 'true';
       const needs = fallbackHasPin || isBioApplicable;
       const method = isBioApplicable ? 'biometric' : (fallbackHasPin ? 'pin' : null);
+      // 🔹 NEW: Debug result
+      console.log('[shouldReauth DEBUG] No session fallback result:', { needsReauth: !!needs, method });
       return { needsReauth: !!needs, method };
     }
 
     const needs = sessionHasPin || isBioApplicable;
     const method = isBioApplicable ? 'biometric' : (sessionHasPin ? 'pin' : null);
+    // 🔹 NEW: Debug result
+    console.log('[shouldReauth DEBUG] Final result:', { needsReauth: !!needs, method });
     return { needsReauth: !!needs, method };
   } catch (err) {
     console.error('shouldReauth error fallback:', err);
@@ -8774,6 +8787,8 @@ async function shouldReauth(context = 'reauth') {
     const fallbackHasPin = localStorage.getItem('hasPin')?.toLowerCase() === 'true';
     const needs = isBioApplicable || fallbackHasPin;
     const method = isBioApplicable ? 'biometric' : (fallbackHasPin ? 'pin' : null);
+    // 🔹 NEW: Debug result
+    console.log('[shouldReauth DEBUG] Error fallback result:', { needsReauth: !!needs, method });
     return { needsReauth: !!needs, method };
   }
 }
@@ -8825,7 +8840,7 @@ async function setupInactivity() {
    - Ensures all verifications reuse the same credential created by the parent
    - Prevents browser from prompting for “new passkey”
    ----------------------- */
-// 🔹 Verify Biometrics (auto-discover + required verification)
+// 🔹 Verify Biometrics (with fallback for direct prompt)
 async function verifyBiometrics(uid, context = 'reauth') {
   console.log('verifyBiometrics called', { uid, context });
 
@@ -8860,19 +8875,40 @@ async function verifyBiometrics(uid, context = 'reauth') {
       if (!uid) throw new Error('No user ID');
 
       const apiBase = window.__SEC_API_BASE || '';
-      console.log('[verifyBiometrics] stored credentialId:', localStorage.getItem('credentialId'));
-
-      // 🔹 NEW: Retrieve stored credentialId to request specific credential (avoids UI)
       const credentialId = localStorage.getItem('credentialId');
+      console.log('[verifyBiometrics] stored credentialId:', credentialId);
 
-      // 🔹 CHANGED: Use non-discover endpoint (/options) for non-discoverable mode
-      const optRes = await fetch(`${apiBase}/webauthn/auth/options`, {
+      // 🔹 NEW: Prefer specific credential for direct prompt; fallback to discover if fails
+      let optRes;
+      let usedEndpoint = '/webauthn/auth/options'; // Default to non-discover
+      let body = JSON.stringify({ userId: uid, credentialId, context });
+
+      if (!credentialId) {
+        console.warn('[verifyBiometrics] No credentialId - falling back to discover endpoint');
+        usedEndpoint = '/webauthn/auth/options/discover';
+        body = JSON.stringify({ userId: uid, context });
+      }
+
+      optRes = await fetch(`${apiBase}${usedEndpoint}`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        // 🔹 NEW: Include credentialId if available (server will filter to one for direct prompt)
-        body: JSON.stringify({ userId: uid, credentialId, context })
+        body
       });
+
+      // 🔹 NEW: If specific fails (e.g., 404 invalid credentialId), retry with discover
+      if (!optRes.ok && credentialId) {
+        console.warn('[verifyBiometrics] Specific options failed - retrying with discover');
+        usedEndpoint = '/webauthn/auth/options/discover';
+        body = JSON.stringify({ userId: uid, context });
+        optRes = await fetch(`${apiBase}${usedEndpoint}`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body
+        });
+      }
+
       if (!optRes.ok) throw new Error(await optRes.text());
 
       const options = await optRes.json();
@@ -8882,20 +8918,19 @@ async function verifyBiometrics(uid, context = 'reauth') {
 
       options.challenge = base64UrlToBuffer(options.challenge);
 
-      // 🔹 NEW: If allowCredentials is present (non-discoverable), transform IDs
       if (Array.isArray(options.allowCredentials) && options.allowCredentials.length > 0) {
         options.allowCredentials = options.allowCredentials.map(c => ({ ...c, id: base64UrlToBuffer(c.id) }));
         console.log('[verifyBiometrics] Transformed allowCredentials:', options.allowCredentials);
       } else {
-        // Fallback: If no credentials (shouldn't happen), omit for discover but log warning
         console.warn('[verifyBiometrics] No allowCredentials provided - may show UI');
         delete options.allowCredentials;
       }
 
       options.userVerification = 'required';
       options.timeout = 60000;
+      // 🔹 NEW: Force required mediation for prompt (helps direct in some browsers)
+      options.mediation = 'required';
 
-      // 🔹 RAW DEBUG around get()
       console.log('[verifyBiometrics] About to call navigator.credentials.get() with options:', options);
 
       let assertion;
@@ -8918,7 +8953,7 @@ async function verifyBiometrics(uid, context = 'reauth') {
         }
       } catch (e) {
         console.error('[verifyBiometrics] navigator.credentials.get() threw:', e);
-        throw e; // re-throw to trigger outer catch
+        throw e;
       }
 
       if (!assertion) throw new Error('No assertion returned');
