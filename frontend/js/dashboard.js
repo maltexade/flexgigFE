@@ -6772,7 +6772,7 @@ async function startAuthentication(userId) {
     }
 
     const apiBase = window.__SEC_API_BASE || "https://api.flexgig.com.ng";
-    const optUrl = `${apiBase}/webauthn/auth/options`;
+    const optUrl = `${apiBase}/webauthn/auth/options/discover`;
     __sec_log.d('startAuthentication: Fetching options from', optUrl);
     const optRes = await fetch(optUrl, {
       method: 'POST',
@@ -8862,7 +8862,7 @@ async function verifyBiometrics(uid, context = 'reauth') {
       const apiBase = window.__SEC_API_BASE || '';
       console.log('[verifyBiometrics] stored credentialId:', localStorage.getItem('credentialId'));
 
-      const optRes = await fetch(`${apiBase}/webauthn/auth/options`, {
+      const optRes = await fetch(`${apiBase}/webauthn/auth/options/discover`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
