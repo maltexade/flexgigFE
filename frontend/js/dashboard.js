@@ -8369,6 +8369,13 @@ async function registerBiometrics() {
       if (!verifyRes.ok) throw new Error(await verifyRes.text());
 
       const result = await verifyRes.json();
+
+      // 🔹 FIXED: Store credentialId in localStorage immediately for verifyBiometrics reuse
+      if (result.credentialId) {
+        localStorage.setItem('credentialId', result.credentialId);
+        console.log('[registerBiometrics] Stored credentialId in localStorage:', result.credentialId);
+      }
+
       safeCall(notify, 'Biometric registration successful!', 'success');
 
       // 🔹 NEW: Reload to refresh browser passkey cache (fixes immediate .get() failure)
@@ -8385,8 +8392,6 @@ async function registerBiometrics() {
     }
   });
 }
-
-
 
 /* -----------------------
    Disable Biometrics (new!)
