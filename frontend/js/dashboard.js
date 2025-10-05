@@ -8413,6 +8413,7 @@ async function disableBiometrics() {
    });
 ----------------------- */
 // 🔹 Bind Biometric Settings (unchanged, but now uses full register/disable)
+// 🔹 Bind Biometric Settings (children = client-side flags only, no server/prompt on toggle)
 function bindBiometricSettings({
   parentSelector = '#biometricsSwitch',
   childLoginSelector = '#bioLoginSwitch',
@@ -8459,7 +8460,7 @@ function bindBiometricSettings({
     }
   }
 
-  // Parent handler
+  // Parent handler: Enabler (register/revoke shared passkey, auto-sets child flags)
   async function handleParentToggle(wantOn) {
     if (parent.__bioProcessing) return;
     parent.__bioProcessing = true;
@@ -8469,163 +8470,81 @@ function bindBiometricSettings({
     try {
       await withLoader(async () => {
         if (wantOn) {
-          const res = await registerBiometrics();
+          const res = await registerBiometrics();  // Server register if needed
           if (res && res.success) {
             writeFlag('biometricsEnabled', true);
-            writeFlag('biometricForLogin', true);
+            writeFlag('biometricForLogin', true);  // Auto-enable children flags
             writeFlag('biometricForTx', true);
             if (res.credentialId) {
-              try { localStorage.setItem('credentialId', res.credentialId); } catch (e) {}
+              localStorage.setItem('credentialId', res.credentialId);
             }
             setSwitch(childLogin, true);
             setSwitch(childTx, true);
             setOptionsVisible(true);
+            safeCall(notify, 'Biometrics enabled', 'success');
           } else {
             writeFlag('biometricsEnabled', false);
             setSwitch(parent, false);
             setOptionsVisible(false);
-            if (res && res.cancelled) {
-              safeCall(notify, 'Biometric setup cancelled', 'info');
-            }
+            safeCall(notify, res?.cancelled ? 'Setup cancelled' : 'Setup failed', 'info');
           }
         } else {
+          const res = await disableBiometrics();  // Server revoke
           writeFlag('biometricsEnabled', false);
-          writeFlag('biometricForLogin', false);
+          writeFlag('biometricForLogin', false);  // Auto-disable children flags
           writeFlag('biometricForTx', false);
-          try { localStorage.removeItem('credentialId'); } catch (e) {}
+          localStorage.removeItem('credentialId');
           setSwitch(childLogin, false);
           setSwitch(childTx, false);
           setOptionsVisible(false);
-          await disableBiometrics();
+          safeCall(notify, 'Biometrics disabled', 'info');
         }
       });
     } catch (err) {
-      console.error('biometric parent toggle error', err);
+      console.error('Parent toggle error:', err);
       writeFlag('biometricsEnabled', false);
       setSwitch(parent, false);
       setOptionsVisible(false);
-      safeCall(notify, `Biometric setup failed: ${err.message || err}`, 'error');
+      safeCall(notify, `Toggle failed: ${err.message || err}`, 'error');
     } finally {
       parent.__bioProcessing = false;
       parent.disabled = false;
+      syncFromStorage();  // Refresh UI
     }
   }
 
-  // Child handler: verify biometric before enabling
-  // Child handler: client-side-only enable (prompt) + instant disable
-async function bindChild(btn, key, context) {
-  if (!btn || btn.__bioBound) return;
+  // Child handler: Client-side flag toggle only (no server/verify/prompt)
+  function bindChild(btn, key, label) {
+    if (!btn || btn.__bioBound) return;
 
-  btn.addEventListener('click', async (e) => {
-    e.preventDefault();
-    const cur = btn.getAttribute('aria-checked') === 'true';
-    const wantOn = !cur;
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const cur = btn.getAttribute('aria-checked') === 'true';
+      const wantOn = !cur;
 
-    if (!wantOn) {
-      // Disabling: instant update, no verification or server call
-      setSwitch(btn, false);
-      writeFlag(key, false);
-      console.log(`Child ${key} disabled`);
-      return;
-    }
+      // Gate: Require parent enabled
+      if (wantOn && !readFlag('biometricsEnabled')) {
+        safeCall(notify, `${label} requires biometrics enabled first`, 'info');
+        handleParentToggle(true);  // Auto-trigger parent
+        return;
+      }
 
-    // Enabling: STRICT client-side-only — DO NOT auto enable parent or call server
-    await withLoader(async () => {
-      try {
-        // If parent (global biometric) is not enabled, refuse and instruct user
-        if (!readFlag('biometricsEnabled') || !localStorage.getItem('credentialId')) {
-          console.warn(`Child ${key}: parent biometric is not enabled — aborting client-side enable`);
-          safeCall(notify, 'Enable main biometrics first (parent) before activating this option', 'info');
-          // keep UI OFF
-          setSwitch(btn, false);
-          writeFlag(key, false);
-          return;
-        }
+      // Instant toggle: Flip flag only
+      setSwitch(btn, wantOn);
+      writeFlag(key, wantOn);
+      console.log(`[bio] ${key} toggled to ${wantOn ? 'ON' : 'OFF'}`);
+      safeCall(notify, `${label} biometrics ${wantOn ? 'enabled' : 'disabled'}`, wantOn ? 'success' : 'info');
+    });
 
-        // Ensure session / uid exists for safety/logging (no server call)
-        const session = await safeCall(getSession);
-        const uid = session?.user?.id || session?.user?.uid;
-        if (!uid) {
-          console.error(`Child ${key}: no UID available`);
-          safeCall(notify, 'Session error - please log in again', 'error');
-          setTimeout(() => window.location.href = '/', 1500);
-          return;
-        }
-
-        // Check for WebAuthn support
-        if (!('PublicKeyCredential' in window)) {
-          safeCall(notify, 'WebAuthn not supported on this device', 'error');
-          return;
-        }
-
-        // Create a short, local random challenge — only to prompt authenticator locally.
-        const localChallenge = new Uint8Array(32);
-        crypto.getRandomValues(localChallenge);
-
-        // Build a minimal publicKey options object — omit allowCredentials to allow resident keys (discoverable)
-        const tmpPublicKey = {
-          challenge: localChallenge.buffer,
-          timeout: 60000,
-          userVerification: 'required'
-          // intentionally OMIT allowCredentials so resident/discoverable keys can be picked by the authenticator
-        };
-
-        console.log(`[biom] Child ${key}: prompting local biometric (client-only)`);
-        let assertion;
-        try {
-          assertion = await navigator.credentials.get({ publicKey: tmpPublicKey });
-        } catch (err) {
-          console.error(`[biom] Child ${key}: local navigator.credentials.get() error:`, err);
-          // Keep toggle OFF on error/cancel
-          setSwitch(btn, false);
-          writeFlag(key, false);
-          if (err && (err.name === 'NotAllowedError' || err.name === 'AbortError')) {
-            safeCall(notify, 'Biometric prompt cancelled', 'info');
-          } else {
-            safeCall(notify, `Biometric enable failed: ${err.message || err}`, 'error');
-          }
-          return;
-        }
-
-        if (!assertion) {
-          console.warn(`[biom] Child ${key}: navigator.credentials.get() returned null`);
-          setSwitch(btn, false);
-          writeFlag(key, false);
-          safeCall(notify, 'Biometric prompt failed', 'error');
-          return;
-        }
-
-        // If we got an assertion, treat it as local confirmation — do NOT send to server
-        console.log(`[biom] Child ${key}: local biometric prompt success (client-only)`, {
-          id: assertion.id,
-          type: assertion.type,
-          rawIdLength: assertion.rawId ? assertion.rawId.byteLength : 0
-        });
-
-        // Persist client-side flag and update UI
-        setSwitch(btn, true);
-        writeFlag(key, true);
-        safeCall(notify, `${context === 'login' ? 'Login' : 'Transaction'} biometrics enabled (client-only)`, 'success');
-
-      } catch (err) {
-        console.error(`Child ${key} enable error:`, err);
-        setSwitch(btn, false);
-        writeFlag(key, false);
-        safeCall(notify, `Failed to enable ${context === 'login' ? 'login' : 'transaction'} biometrics: ${err.message || err}`, 'error');
+    btn.addEventListener('keydown', (e) => {
+      if (e.key === ' ' || e.key === 'Enter') {
+        e.preventDefault();
+        btn.click();
       }
     });
-  });
 
-  btn.addEventListener('keydown', (e) => {
-    if (e.key === ' ' || e.key === 'Enter') {
-      e.preventDefault();
-      btn.click();
-    }
-  });
-
-  btn.__bioBound = true;
-}
-
+    btn.__bioBound = true;
+  }
 
   // Wire parent
   if (!parent.__bioBound) {
@@ -8643,11 +8562,11 @@ async function bindChild(btn, key, context) {
     parent.__bioBound = true;
   }
 
-  // Wire children
-  bindChild(childLogin, 'biometricForLogin', 'login');
-  bindChild(childTx, 'biometricForTx', 'transaction');
+  // Wire children (flags only)
+  bindChild(childLogin, 'biometricForLogin', 'Login');
+  bindChild(childTx, 'biometricForTx', 'Transaction');
 
-  // Sync when storage changes
+  // Sync on storage change
   window.addEventListener('storage', (e) => {
     if (['biometricsEnabled', 'biometricForLogin', 'biometricForTx', 'credentialId'].includes(e.key)) {
       setTimeout(syncFromStorage, 50);
@@ -8657,10 +8576,7 @@ async function bindChild(btn, key, context) {
   // Initial sync
   syncFromStorage();
 
-  return {
-    parent, childLogin, childTx, optionsContainer,
-    syncFromStorage
-  };
+  return { parent, childLogin, childTx, optionsContainer, syncFromStorage };
 }
 
 
