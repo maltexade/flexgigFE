@@ -8016,6 +8016,7 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
   }
 
   // Biometric verify button
+// Biometric verify button
 try {
   console.log('Setting up biometric verify button');
   if (verifyBiometricBtn && !verifyBiometricBtn.__bound) {
@@ -8028,6 +8029,7 @@ try {
 
         const res = await verifyBiometrics(uid, context);
         if (res && res.success) {
+          console.log('Biometric verify success');
           try { if (reauthModal) reauthModal.classList.add('hidden'); } catch (e) {}
           safeCall(getSession);
           onSuccessfulReauth();
@@ -8046,6 +8048,40 @@ try {
   }
 } catch (e) {
   console.error('Error setting up biometric verify button:', e);
+}
+
+// Auto biometric verification
+if (shouldShowBio && biometricView) {
+  biometricView.style.display = 'block';
+  if (pinView) pinView.style.display = 'none';
+  try { verifyBiometricBtn && verifyBiometricBtn.focus(); } catch (e) {}
+  console.log('Showing biometric view');
+  // Trigger biometric verification immediately for re-auth flows
+  (async () => {
+    try {
+      const session = await safeCall(getSession) || {};
+      const uid = session.user ? (session.user.uid || session.user.id) : null;
+      if (!uid) {
+        console.warn('No uid for auto-biometric verify; showing PIN fallback');
+        switchViews(false);
+        return;
+      }
+
+      const res = await verifyBiometrics(uid, context);
+      if (res && res.success) {
+        console.log('Auto biometric verify success');
+        try { if (reauthModal) reauthModal.classList.add('hidden'); } catch (e) {}
+        safeCall(getSession);
+        onSuccessfulReauth();
+        return;
+      }
+      console.log('Auto biometric verify failed — switching to PIN');
+      switchViews(false);
+    } catch (err) {
+      console.error('Auto biometric attempt error:', err);
+      try { switchViews(false); } catch (e) { console.error(e); }
+    }
+  })();
 }
 
 
@@ -8502,6 +8538,8 @@ function bindBiometricSettings(opts = {}) {
           writeFlag('biometricForLogin', false);
           writeFlag('biometricForTx', false);
           try { localStorage.removeItem('credentialId'); } catch (e) {}
+          try { localStorage.removeItem('credentialIdLogin'); } catch (e) {}
+          try { localStorage.removeItem('credentialIdTx'); } catch (e) {}
           setSwitch(childLogin, false);
           setSwitch(childTx, false);
           setOptionsVisible(false);
@@ -8520,7 +8558,7 @@ function bindBiometricSettings(opts = {}) {
     }
   }
 
-  // Child handler: verify biometric before enabling
+  // Child handler: register new biometric for context
   async function bindChild(btn, key, context) {
     if (!btn || btn.__bioBound) return;
 
@@ -8533,11 +8571,12 @@ function bindBiometricSettings(opts = {}) {
         // Disabling: instant update, no verification
         setSwitch(btn, false);
         writeFlag(key, false);
+        try { localStorage.removeItem(`credentialId${context.charAt(0).toUpperCase() + context.slice(1)}`); } catch (e) {}
         console.log(`Child ${key} disabled`);
         return;
       }
 
-      // Enabling: verify biometric with loader
+      // Enabling: register new biometric with loader
       await withLoader(async () => {
         try {
           // Ensure parent is enabled
@@ -8560,25 +8599,29 @@ function bindBiometricSettings(opts = {}) {
             return;
           }
 
-          // Verify biometric
-          const res = await verifyBiometrics(uid, context);
+          // Register new biometric for context
+          console.log(`Registering biometric for child toggle: ${key} with context ${context}`);
+          const res = await registerBiometricsForContext(uid, context);
           if (res && res.success) {
             setSwitch(btn, true);
             writeFlag(key, true);
-            console.log(`Child ${key} enabled after biometric verification`);
+            if (res.credentialId) {
+              try { localStorage.setItem(`credentialId${context.charAt(0).toUpperCase() + context.slice(1)}`, res.credentialId); } catch (e) {}
+            }
+            console.log(`Child ${key} enabled after biometric registration`);
             safeCall(notify, `${context === 'login' ? 'Login' : 'Transaction'} biometrics enabled`, 'success');
           } else {
             setSwitch(btn, false);
             writeFlag(key, false);
-            console.warn(`Child ${key}: biometric verification failed`);
-            if (res && res.error.includes('NotAllowedError') || res.error.includes('AbortError')) {
-              safeCall(notify, 'Biometric verification cancelled', 'info');
+            console.warn(`Child ${key}: biometric registration failed`);
+            if (res && res.cancelled) {
+              safeCall(notify, 'Biometric registration cancelled', 'info');
             } else {
-              safeCall(notify, 'Biometric verification failed', 'error');
+              safeCall(notify, 'Biometric registration failed', 'error');
             }
           }
         } catch (err) {
-          console.error(`Child ${key} enable error:`, err);
+          console.error(`Child ${key} registration error:`, err);
           setSwitch(btn, false);
           writeFlag(key, false);
           safeCall(notify, `Failed to enable ${context === 'login' ? 'login' : 'transaction'} biometrics: ${err.message || err}`, 'error');
@@ -8618,7 +8661,7 @@ function bindBiometricSettings(opts = {}) {
 
   // Sync when storage changes
   window.addEventListener('storage', (e) => {
-    if (['biometricsEnabled', 'biometricForLogin', 'biometricForTx', 'credentialId'].includes(e.key)) {
+    if (['biometricsEnabled', 'biometricForLogin', 'biometricForTx', 'credentialId', 'credentialIdLogin', 'credentialIdTx'].includes(e.key)) {
       setTimeout(syncFromStorage, 50);
     }
   });
@@ -8767,6 +8810,95 @@ async function shouldReauth(context = 'reauth') {
   }
 }
 
+async function registerBiometricsForContext(uid, context = 'reauth') {
+  try {
+    if (!('PublicKeyCredential' in window)) {
+      throw new Error('WebAuthn not supported');
+    }
+    if (!uid) {
+      throw new Error('No user ID available');
+    }
+
+    const session = await safeCall(getSession);
+    const user = session?.user || {};
+    const username = user.username || uid;
+    const displayName = user.fullName || uid;
+
+    const optionsResponse = await fetch('https://api.flexgig.com.ng/webauthn/register/options', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ uid, context }),
+      credentials: 'include'
+    });
+
+    const options = await optionsResponse.json();
+    if (!options || !options.challenge) {
+      throw new Error('Invalid registration options from server');
+    }
+
+    const publicKey = {
+      challenge: base64urlToArrayBuffer(options.challenge),
+      rp: {
+        name: 'Flexgig',
+        id: window.location.hostname
+      },
+      user: {
+        id: new TextEncoder().encode(uid),
+        name: username,
+        displayName: displayName
+      },
+      pubKeyCredParams: [
+        { type: 'public-key', alg: -7 },
+        { type: 'public-key', alg: -257 }
+      ],
+      authenticatorSelection: {
+        userVerification: 'required',
+        authenticatorAttachment: 'platform'
+      },
+      timeout: 60000,
+      attestation: 'none'
+    };
+
+    const credential = await navigator.credentials.create({ publicKey });
+    if (!credential) {
+      throw new Error('No credential created');
+    }
+
+    const response = credential.response;
+    const clientDataJSON = arrayBufferToBase64url(response.clientDataJSON);
+    const attestationObject = arrayBufferToBase64url(response.attestationObject);
+
+    const verifyResponse = await fetch('https://api.flexgig.com.ng/webauthn/register/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        uid,
+        context,
+        credentialId: arrayBufferToBase64url(credential.id),
+        clientDataJSON,
+        attestationObject
+      }),
+      credentials: 'include'
+    });
+
+    const result = await verifyResponse.json();
+    if (result.success) {
+      console.log(`Biometric registration successful for context: ${context}`);
+      return { success: true, credentialId: result.credentialId };
+    } else {
+      console.warn(`Biometric registration failed for context: ${context}`, result.error || 'Unknown error');
+      return { success: false, error: result.error || 'Registration failed', cancelled: result.cancelled || false };
+    }
+  } catch (err) {
+    console.error(`registerBiometricsForContext error for context ${context}:`, err);
+    return {
+      success: false,
+      error: err.message || 'Biometric registration failed',
+      cancelled: err.name === 'NotAllowedError' || err.name === 'AbortError'
+    };
+  }
+}
+
 // One-time inactivity setup
 async function setupInactivity() {
   if (__inactivitySetupDone) return;
@@ -8805,116 +8937,82 @@ async function setupInactivity() {
    ----------------------- */
 // Full verifyBiometrics - performs navigator.credentials.get + server verify
 async function verifyBiometrics(uid, context = 'reauth') {
-  console.log('verifyBiometrics called', { uid, context });
-
-  // helpers: base64url <> ArrayBuffer
-  function base64UrlToBuffer(base64Url) {
-    let base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-    const pad = base64.length % 4;
-    if (pad) base64 += '='.repeat(4 - pad);
-    const str = atob(base64);
-    const buf = new Uint8Array(str.length);
-    for (let i = 0; i < str.length; i++) buf[i] = str.charCodeAt(i);
-    return buf.buffer;
-  }
-
-  function bufferToBase64Url(buffer) {
-    const bytes = new Uint8Array(buffer);
-    let str = '';
-    for (let i = 0; i < bytes.byteLength; i++) str += String.fromCharCode(bytes[i]);
-    let b64 = btoa(str);
-    return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-  }
-
   try {
+    console.log('verifyBiometrics called', { uid, context });
     if (!('PublicKeyCredential' in window)) {
-      throw new Error('WebAuthn not supported in this browser');
+      throw new Error('WebAuthn not supported');
     }
-    if (!uid) throw new Error('No user id provided');
+    if (!uid) throw new Error('No user ID provided');
 
-    const apiBase = window.__SEC_API_BASE || '';
+    // Use context-specific credentialId
+    const credentialIdKey = context === 'reauth' ? 'credentialId' : `credentialId${context.charAt(0).toUpperCase() + context.slice(1)}`;
+    const credentialId = localStorage.getItem(credentialIdKey);
+    if (!credentialId) {
+      throw new Error(`No credential ID found for context ${context}`);
+    }
 
-    // 1) fetch options from server (send context so server can tailor the challenge)
-    const optRes = await fetch(`${apiBase}/webauthn/auth/options`, {
+    const optionsResponse = await fetch('https://api.flexgig.com.ng/webauthn/auth/options', {
       method: 'POST',
-      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: uid, context })
+      body: JSON.stringify({ uid, context }),
+      credentials: 'include'
     });
 
-    if (!optRes.ok) {
-      const errText = await optRes.text().catch(() => '');
-      console.error('verifyBiometrics: options fetch failed', optRes.status, errText);
-      throw new Error(errText || `Options fetch failed (${optRes.status})`);
-    }
-
-    const options = await optRes.json();
-    // 2) convert challenge + allowCredentials ids to ArrayBuffers
+    const options = await optionsResponse.json();
     if (!options || !options.challenge) {
-      throw new Error('Invalid options from server');
+      throw new Error('Invalid authentication options from server');
     }
 
-    options.challenge = base64UrlToBuffer(options.challenge);
-
-    if (Array.isArray(options.allowCredentials)) {
-      options.allowCredentials = options.allowCredentials.map(c => ({
-        ...c,
-        id: base64UrlToBuffer(c.id),
-        // Restrict to 'internal' transport for platform-only biometrics (consistent with registration)
+    const publicKey = {
+      challenge: base64urlToArrayBuffer(options.challenge),
+      allowCredentials: [{
+        id: base64urlToArrayBuffer(credentialId),
+        type: 'public-key',
         transports: ['internal']
-      }));
-    }
-
-    // Enforce user verification for biometric/PIN
-    options.userVerification = 'required';
-    options.timeout = options.timeout || 60000;
-
-    // 3) navigator.credentials.get()
-    const assertion = await navigator.credentials.get({ publicKey: options });
-    if (!assertion) throw new Error('No assertion from authenticator');
-
-    // 4) prepare payload to send back to server (base64url encoded)
-    const credential = {
-      id: assertion.id,
-      rawId: bufferToBase64Url(assertion.rawId),
-      type: assertion.type,
-      response: {
-        clientDataJSON: bufferToBase64Url(assertion.response.clientDataJSON),
-        authenticatorData: bufferToBase64Url(assertion.response.authenticatorData),
-        signature: bufferToBase64Url(assertion.response.signature),
-        userHandle: assertion.response.userHandle ? bufferToBase64Url(assertion.response.userHandle) : null
-      }
+      }],
+      userVerification: 'required',
+      timeout: 60000
     };
 
-    // 5) verify with server
-    const verifyRes = await fetch(`${apiBase}/webauthn/auth/verify`, {
+    const credential = await navigator.credentials.get({ publicKey });
+    if (!credential) {
+      throw new Error('No credential returned');
+    }
+
+    const response = credential.response;
+    const authData = arrayBufferToBase64url(response.authenticatorData);
+    const clientDataJSON = arrayBufferToBase64url(response.clientDataJSON);
+    const signature = arrayBufferToBase64url(response.signature);
+
+    const verifyResponse = await fetch('https://api.flexgig.com.ng/webauthn/auth/verify', {
       method: 'POST',
-      credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: uid, credential, context })
+      body: JSON.stringify({
+        uid,
+        context,
+        credentialId: arrayBufferToBase64url(credential.id),
+        authData,
+        clientDataJSON,
+        signature
+      }),
+      credentials: 'include'
     });
 
-    if (!verifyRes.ok) {
-      const errText = await verifyRes.text().catch(() => '');
-      console.error('verifyBiometrics: server verify failed', verifyRes.status, errText);
-      throw new Error(errText || `Verify failed (${verifyRes.status})`);
+    const result = await verifyResponse.json();
+    if (result.success) {
+      console.log('Biometric verification successful for context:', context);
+      return { success: true };
+    } else {
+      console.warn('Biometric verification failed:', result.error || 'Unknown error');
+      return { success: false, error: result.error || 'Verification failed', cancelled: result.cancelled || false };
     }
-
-    const result = await verifyRes.json();
-    console.log('verifyBiometrics: success', result);
-    safeCall(notify, 'Biometric authentication successful!', 'success');
-    return { success: true, result };
   } catch (err) {
     console.error('verifyBiometrics error:', err);
-    // Surface friendly message for known DOM errors
-    let message = err.message || 'Biometric verification failed';
-    // Known user aborts: NotAllowedError (user cancelled) -> do not spam notify
-    if (err.name === 'NotAllowedError' || err.name === 'AbortError') {
-      // don't surface a loud error; caller can decide fallback
-      return { success: false, error: message };
-    }
-    safeCall(notify, `Biometric authentication failed: ${message}`, 'error');
-    return { success: false, error: message };
+    return {
+      success: false,
+      error: err.message || 'Biometric verification failed',
+      cancelled: err.name === 'NotAllowedError' || err.name === 'AbortError'
+    };
   }
 }
 
