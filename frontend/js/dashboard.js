@@ -8708,17 +8708,8 @@ function resetIdleTimer() {
 }
 
 // Full replacement for shouldReauth (unchanged from yours)
-// Full replacement for shouldReauth (unchanged from yours)
 async function shouldReauth(context = 'reauth') {
   console.log('shouldReauth called with context:', context);
-  // 🔹 NEW: Debug localStorage values
-  console.log('[shouldReauth DEBUG] Local flags:', {
-    biometricsEnabled: localStorage.getItem('biometricsEnabled'),
-    biometricForLogin: localStorage.getItem('biometricForLogin'),
-    biometricForTx: localStorage.getItem('biometricForTx'),
-    hasPin: localStorage.getItem('hasPin'),
-    webAuthnSupported: ('PublicKeyCredential' in window),
-  });
   try {
     const session = await safeCall(getSession);
     const sessionHasPin = !!(session && session.user && (session.user.hasPin || session.user.pin));
@@ -8728,12 +8719,12 @@ async function shouldReauth(context = 'reauth') {
 
     // Check context-specific biometric flags
     const bioLoginEnabled = ['true', '1', 'yes'].includes(
-      (
-        localStorage.getItem('biometricForLogin') ||
-        localStorage.getItem('__sec_bioLogin') ||
-        localStorage.getItem('security_bio_login') || ''
-      ).toLowerCase()
-    );
+  (
+    localStorage.getItem('biometricForLogin') ||
+    localStorage.getItem('__sec_bioLogin') ||
+    localStorage.getItem('security_bio_login') || ''
+  ).toLowerCase()
+);
 
     const bioTxEnabled = ['true', '1', 'yes'].includes(
       (
@@ -8752,15 +8743,11 @@ async function shouldReauth(context = 'reauth') {
       const fallbackHasPin = localStorage.getItem('hasPin') === 'true';
       const needs = fallbackHasPin || isBioApplicable;
       const method = isBioApplicable ? 'biometric' : (fallbackHasPin ? 'pin' : null);
-      // 🔹 NEW: Debug result
-      console.log('[shouldReauth DEBUG] No session fallback result:', { needsReauth: !!needs, method });
       return { needsReauth: !!needs, method };
     }
 
     const needs = sessionHasPin || isBioApplicable;
     const method = isBioApplicable ? 'biometric' : (sessionHasPin ? 'pin' : null);
-    // 🔹 NEW: Debug result
-    console.log('[shouldReauth DEBUG] Final result:', { needsReauth: !!needs, method });
     return { needsReauth: !!needs, method };
   } catch (err) {
     console.error('shouldReauth error fallback:', err);
@@ -8787,8 +8774,6 @@ async function shouldReauth(context = 'reauth') {
     const fallbackHasPin = localStorage.getItem('hasPin')?.toLowerCase() === 'true';
     const needs = isBioApplicable || fallbackHasPin;
     const method = isBioApplicable ? 'biometric' : (fallbackHasPin ? 'pin' : null);
-    // 🔹 NEW: Debug result
-    console.log('[shouldReauth DEBUG] Error fallback result:', { needsReauth: !!needs, method });
     return { needsReauth: !!needs, method };
   }
 }
@@ -8841,7 +8826,6 @@ async function setupInactivity() {
    - Prevents browser from prompting for “new passkey”
    ----------------------- */
 // 🔹 Verify Biometrics (with fallback for direct prompt)
-// 🔹 Verify Biometrics (with fallback for direct prompt)
 async function verifyBiometrics(uid, context = 'reauth') {
   console.log('verifyBiometrics called', { uid, context });
 
@@ -8879,20 +8863,27 @@ async function verifyBiometrics(uid, context = 'reauth') {
       const credentialId = localStorage.getItem('credentialId');
       console.log('[verifyBiometrics] stored credentialId:', credentialId);
 
-      // 🔹 CHANGED: Always use /options for non-discoverable (direct prompt if one credential)
-      let usedEndpoint = '/webauthn/auth/options';
+      // 🔹 NEW: Prefer specific credential for direct prompt; fallback to discover if fails
+      let optRes;
+      let usedEndpoint = '/webauthn/auth/options'; // Default to non-discover
       let body = JSON.stringify({ userId: uid, credentialId, context });
 
-      let optRes = await fetch(`${apiBase}${usedEndpoint}`, {
+      if (!credentialId) {
+        console.warn('[verifyBiometrics] No credentialId - falling back to discover endpoint');
+        usedEndpoint = '/webauthn/auth/options/discover';
+        body = JSON.stringify({ userId: uid, context });
+      }
+
+      optRes = await fetch(`${apiBase}${usedEndpoint}`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body
       });
 
-      // 🔹 NEW: If fails (e.g., 404 no credential), fallback to discover but log
-      if (!optRes.ok) {
-        console.warn('[verifyBiometrics] /options failed - retrying with discover as last resort');
+      // 🔹 NEW: If specific fails (e.g., 404 invalid credentialId), retry with discover
+      if (!optRes.ok && credentialId) {
+        console.warn('[verifyBiometrics] Specific options failed - retrying with discover');
         usedEndpoint = '/webauthn/auth/options/discover';
         body = JSON.stringify({ userId: uid, context });
         optRes = await fetch(`${apiBase}${usedEndpoint}`, {
@@ -8903,11 +8894,7 @@ async function verifyBiometrics(uid, context = 'reauth') {
         });
       }
 
-      if (!optRes.ok) {
-        const errText = await optRes.text();
-        console.error('[verifyBiometrics] Options fetch failed:', errText);
-        throw new Error(errText);
-      }
+      if (!optRes.ok) throw new Error(await optRes.text());
 
       const options = await optRes.json();
       if (!options.challenge) throw new Error('Invalid options');
@@ -8926,7 +8913,8 @@ async function verifyBiometrics(uid, context = 'reauth') {
 
       options.userVerification = 'required';
       options.timeout = 60000;
-      options.mediation = 'required'; // Force prompt
+      // 🔹 NEW: Force required mediation for prompt (helps direct in some browsers)
+      options.mediation = 'required';
 
       console.log('[verifyBiometrics] About to call navigator.credentials.get() with options:', options);
 
@@ -8986,16 +8974,6 @@ async function verifyBiometrics(uid, context = 'reauth') {
     } catch (err) {
       console.error('verifyBiometrics error:', err);
       const message = err.message || 'Verification failed';
-      if (message.includes('No authenticators') || message.includes('No valid authenticators')) {
-        // 🔹 NEW: If no authenticator, disable biometric flags to fix detection
-        console.warn('[verifyBiometrics] No authenticator found - disabling biometrics');
-        writeFlag('biometricsEnabled', false);
-        writeFlag('biometricForLogin', false);
-        writeFlag('biometricForTx', false);
-        localStorage.removeItem('credentialId');
-        // Optionally notify user: 'Biometrics reset - please re-enable in settings'
-        safeCall(notify, 'Biometrics unavailable - falling back to PIN. Please re-enable in settings.', 'warning');
-      }
       if (err.name === 'NotAllowedError' || err.name === 'AbortError') return { success: false, error: message };
       safeCall(notify, `Verification failed: ${message}`, 'error');
       return { success: false, error: message };
