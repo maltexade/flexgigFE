@@ -6809,17 +6809,7 @@ async function startAuthentication(userId) {
     });
 
     __sec_log.i('startAuthentication: Calling navigator.credentials.get');
-    const getOpts = {
-  publicKey: options,
-  mediation: 'optional', // 🔹 allows silent / direct calls if possible
-};
-
-// Pass user hint to help Chrome auto-select fingerprint credential
-if (uid) getOpts.hints = { user: uid };
-
-console.log('[verifyBiometrics] About to call navigator.credentials.get() with hints:', getOpts);
-assertion = await navigator.credentials.get(getOpts);
-
+    const assertion = await navigator.credentials.get({ publicKey: options });
     __sec_log.d('startAuthentication: Assertion received', { id: assertion?.id, type: assertion?.type });
     if (!assertion) throw new Error('No assertion returned');
 
@@ -6836,7 +6826,7 @@ assertion = await navigator.credentials.get(getOpts);
     };
     __sec_log.d('startAuthentication: Prepared credential for verify', { id: credential.id, rawIdLength: credential.rawId.length });
 
-    const verifyUrl = `${apiBase}/webauthn/auth/verify/discover`;
+    const verifyUrl = `${apiBase}/webauthn/auth/verify`;
     __sec_log.d('startAuthentication: Verifying at', verifyUrl);
     const verifyRes = await fetch(verifyUrl, {
       method: 'POST',
@@ -8872,11 +8862,16 @@ async function verifyBiometrics(uid, context = 'reauth') {
       const apiBase = window.__SEC_API_BASE || '';
       console.log('[verifyBiometrics] stored credentialId:', localStorage.getItem('credentialId'));
 
-      const optRes = await fetch(`${apiBase}/webauthn/auth/options/discover`, {
+      // 🔹 NEW: Retrieve stored credentialId to request specific credential (avoids UI)
+      const credentialId = localStorage.getItem('credentialId');
+
+      // 🔹 CHANGED: Use non-discover endpoint (/options) for non-discoverable mode
+      const optRes = await fetch(`${apiBase}/webauthn/auth/options`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: uid, context })
+        // 🔹 NEW: Include credentialId if available (server will filter to one for direct prompt)
+        body: JSON.stringify({ userId: uid, credentialId, context })
       });
       if (!optRes.ok) throw new Error(await optRes.text());
 
@@ -8887,11 +8882,13 @@ async function verifyBiometrics(uid, context = 'reauth') {
 
       options.challenge = base64UrlToBuffer(options.challenge);
 
+      // 🔹 NEW: If allowCredentials is present (non-discoverable), transform IDs
       if (Array.isArray(options.allowCredentials) && options.allowCredentials.length > 0) {
         options.allowCredentials = options.allowCredentials.map(c => ({ ...c, id: base64UrlToBuffer(c.id) }));
         console.log('[verifyBiometrics] Transformed allowCredentials:', options.allowCredentials);
       } else {
-        console.log('[verifyBiometrics] Omitting allowCredentials for auto-discover');
+        // Fallback: If no credentials (shouldn't happen), omit for discover but log warning
+        console.warn('[verifyBiometrics] No allowCredentials provided - may show UI');
         delete options.allowCredentials;
       }
 
@@ -8903,17 +8900,7 @@ async function verifyBiometrics(uid, context = 'reauth') {
 
       let assertion;
       try {
-        const getOpts = {
-  publicKey: options,
-  mediation: 'optional', // 🔹 allows silent / direct calls if possible
-};
-
-// Pass user hint to help Chrome auto-select fingerprint credential
-if (uid) getOpts.hints = { user: uid };
-
-console.log('[verifyBiometrics] About to call navigator.credentials.get() with hints:', getOpts);
-assertion = await navigator.credentials.get(getOpts);
-
+        assertion = await navigator.credentials.get({ publicKey: options });
 
         console.log('[verifyBiometrics] navigator.credentials.get() returned:', assertion);
 
@@ -8950,7 +8937,7 @@ assertion = await navigator.credentials.get(getOpts);
 
       console.log('[verifyBiometrics] Processed credential ready to send:', credential);
 
-      const verifyRes = await fetch(`${apiBase}/webauthn/auth/verify/discover`, {
+      const verifyRes = await fetch(`${apiBase}/webauthn/auth/verify`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -8973,7 +8960,6 @@ assertion = await navigator.credentials.get(getOpts);
     }
   });
 }
-
 
 
 
