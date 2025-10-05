@@ -9319,41 +9319,31 @@ async function showReauthModal(context = 'reauth') {
   })();
 
   // Expose to global scope
-  Object.assign(window.__reauth, {
-    initReauthModal,
-    setupInactivity,
-    forceInactivityCheck,
-    onSuccessfulReauth,
-    showReauthModal,
-    registerBiometrics,
-    disableBiometrics, // New!
-    verifyBiometrics,
-    triggerCheckoutReauth,
-    shouldReauth
-  });
+  // Ensure window.__reauth is an object before assigning into it
+window.__reauth = window.__reauth || {};
 
-  // Attach to window if not present
-  try {
-    if (!window.initReauthModal) window.initReauthModal = initReauthModal;
-  } catch (e) {}
-  try {
-    if (!window.setupInactivity) window.setupInactivity = setupInactivity;
-  } catch (e) {}
-  try {
-    if (!window.forceInactivityCheck) window.forceInactivityCheck = forceInactivityCheck;
-  } catch (e) {}
-  try {
-    if (!window.showReauthModal) window.showReauthModal = showReauthModal;
-  } catch (e) {}
-  try {
-    if (!window.onSuccessfulReauth) window.onSuccessfulReauth = onSuccessfulReauth;
-  } catch (e) {}
-  try {
-    if (!window.registerBiometrics) window.registerBiometrics = registerBiometrics;
-  } catch (e) {}
-  try {
-    if (!window.disableBiometrics) window.disableBiometrics = disableBiometrics;
-  } catch (e) {}
+Object.assign(window.__reauth, {
+  initReauthModal,
+  setupInactivity,
+  forceInactivityCheck,
+  onSuccessfulReauth,
+  showReauthModal,
+  registerBiometrics,
+  disableBiometrics, // New!
+  verifyBiometrics,
+  triggerCheckoutReauth,
+  shouldReauth
+});
+
+// Attach to window if not present (keeps your existing try/catches)
+try { if (!window.initReauthModal) window.initReauthModal = initReauthModal; } catch (e) {}
+try { if (!window.setupInactivity) window.setupInactivity = setupInactivity; } catch (e) {}
+try { if (!window.forceInactivityCheck) window.forceInactivityCheck = forceInactivityCheck; } catch (e) {}
+try { if (!window.showReauthModal) window.showReauthModal = showReauthModal; } catch (e) {}
+try { if (!window.onSuccessfulReauth) window.onSuccessfulReauth = onSuccessfulReauth; } catch (e) {}
+try { if (!window.registerBiometrics) window.registerBiometrics = registerBiometrics; } catch (e) {}
+try { if (!window.disableBiometrics) window.disableBiometrics = disableBiometrics; } catch (e) {}
+
 })();
 
 
