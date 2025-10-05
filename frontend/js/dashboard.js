@@ -8818,6 +8818,11 @@ async function setupInactivity() {
    - Ensures all verifications reuse the same credential created by the parent
    - Prevents browser from prompting for “new passkey”
    ----------------------- */
+/* -----------------------
+   Verify Biometrics (patched - FIXED for child toggles)
+   - Trusts server-fetched allowCredentials (no override)
+   - Prevents "No passkeys available" by avoiding mismatched storedId
+   ----------------------- */
 async function verifyBiometrics(uid, context = 'reauth') {
   console.log('verifyBiometrics called', { uid, context });
 
@@ -8872,22 +8877,30 @@ async function verifyBiometrics(uid, context = 'reauth') {
       // 2️⃣ Convert challenge to buffer
       options.challenge = base64UrlToBuffer(options.challenge);
 
-      // 3️⃣ Force allowCredentials to reuse stored credentialId (parent one)
-      if (storedId) {
-        options.allowCredentials = [{
-          id: base64UrlToBuffer(storedId),
-          type: 'public-key'
-        }];
-      } else if (Array.isArray(options.allowCredentials)) {
+      // 3️⃣ FIXED: Always convert server's allowCredentials to buffers (no storedId override)
+      // This trusts the DB-fetched list, avoiding mismatches
+      if (Array.isArray(options.allowCredentials)) {
         options.allowCredentials = options.allowCredentials.map(c => ({
           ...c,
-          id: base64UrlToBuffer(c.id)
+          id: base64UrlToBuffer(c.id)  // Convert server's base64url ID to buffer
         }));
+      } else {
+        // If server returned empty (shouldn't happen post-registration), log warning
+        console.warn('[verifyBiometrics] Server returned empty allowCredentials - check DB');
+        options.allowCredentials = [];
+      }
+
+      // 🔹 DEBUG LOG: Check what the browser will see before get()
+      console.log('[verifyBiometrics] Final options.allowCredentials before get():', options.allowCredentials);
+      if (options.allowCredentials.length === 0) {
+        console.error('[verifyBiometrics] Empty allowCredentials - this will cause "No passkeys available"');
+      } else {
+        console.log('[verifyBiometrics] allowCredentials IDs (base64url):', options.allowCredentials.map(c => bufferToBase64Url(c.id)));
       }
 
       options.timeout = options.timeout || 60000;
 
-      // 4️⃣ Perform WebAuthn assertion (verifies stored credential)
+      // 4️⃣ Perform WebAuthn assertion
       const assertion = await navigator.credentials.get({ publicKey: options });
       if (!assertion) throw new Error('No assertion from authenticator');
 
