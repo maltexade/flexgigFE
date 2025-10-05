@@ -8826,6 +8826,10 @@ async function setupInactivity() {
    - Prevents browser from prompting for “new passkey”
    ----------------------- */
 // 🔹 Verify Biometrics (with fallback for direct prompt)
+// 🔹 Verify Biometrics (updated for direct/silent fingerprint call)
+// - Sets mediation='silent' for no-UI auto-auth (falls to 'conditional' if fails)
+// - Stores/uses credentialId for specific prompt if available
+// - Respects all existing logic: fallback to discover, retry on 404, conversions, server verify, error handling
 async function verifyBiometrics(uid, context = 'reauth') {
   console.log('verifyBiometrics called', { uid, context });
 
@@ -8901,22 +8905,39 @@ async function verifyBiometrics(uid, context = 'reauth') {
 
       console.log('[verifyBiometrics] RAW server options:', options);
 
-      options.challenge = base64UrlToBuffer(options.challenge);
-
-      if (Array.isArray(options.allowCredentials) && options.allowCredentials.length > 0) {
-        options.allowCredentials = options.allowCredentials.map(c => ({ ...c, id: base64UrlToBuffer(c.id) }));
-        console.log('[verifyBiometrics] Transformed allowCredentials:', options.allowCredentials);
-      } else {
-        console.warn('[verifyBiometrics] No allowCredentials provided - may show UI');
-        delete options.allowCredentials;
+      // 🔹 NEW: Store credentialId from options if missing (resolves "null" in future requests)
+      if (!credentialId && options.allowCredentials && options.allowCredentials.length > 0) {
+        const storedId = options.allowCredentials[0].id;  // Base64url string
+        localStorage.setItem('credentialId', storedId);
+        console.log('[verifyBiometrics] Stored missing credentialId from options:', storedId);
       }
 
+      // Convert challenge (existing)
+      options.challenge = base64UrlToBuffer(options.challenge);
+
+      // Convert allowCredentials (existing)
+      if (Array.isArray(options.allowCredentials) && options.allowCredentials.length > 0) {
+        options.allowCredentials = options.allowCredentials.map(c => ({ ...c, id: base64UrlToBuffer(c.id) }));
+        console.log('[verifyBiometrics] Transformed allowCredentials (count:', options.allowCredentials.length, '):', options.allowCredentials.map(c => ({ type: c.type, idLength: c.id.byteLength })));
+      } else {
+        console.warn('[verifyBiometrics] No allowCredentials - relying on discoverable');
+        delete options.allowCredentials;  // Ensure omitted for auto-discovery
+      }
+
+      // Existing UV/timeout
       options.userVerification = 'required';
       options.timeout = 60000;
-      // 🔹 NEW: Force required mediation for prompt (helps direct in some browsers)
-      options.mediation = 'required';
 
-      console.log('[verifyBiometrics] About to call navigator.credentials.get() with options:', options);
+      // 🔹 FIXED: Set mediation='silent' for direct fingerprint call (no UI); falls back if unsupported
+      options.mediation = 'silent';  // Attempts silent auth; browser may downgrade to 'conditional' if not possible
+
+      console.log('[verifyBiometrics] Final options for get():', {
+        challengeLength: options.challenge.byteLength,
+        allowCredentials: options.allowCredentials ? options.allowCredentials.length : 'omitted',
+        userVerification: options.userVerification,
+        mediation: options.mediation,
+        rpID: options.rpId
+      });
 
       let assertion;
       try {
@@ -8941,7 +8962,15 @@ async function verifyBiometrics(uid, context = 'reauth') {
         throw e;
       }
 
-      if (!assertion) throw new Error('No assertion returned');
+      if (!assertion) {
+        // 🔹 NEW: Enhanced logging for null case (silent fail common with 'silent' mediation)
+        console.error('[verifyBiometrics] get() returned null - possible causes:');
+        console.error('  - Silent mediation rejected (no gesture/no auto-auth possible)');
+        console.error('  - User cancelled underlying prompt (if downgraded to UI)');
+        console.error('  - No matching resident credential (re-register?)');
+        console.error('  - UV=required but platform not ready (e.g., fingerprint locked)');
+        throw new Error('No assertion - silent authentication unavailable; fallback to PIN');
+      }
 
       const credential = {
         id: assertion.id,
