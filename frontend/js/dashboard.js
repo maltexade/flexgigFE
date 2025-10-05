@@ -8841,6 +8841,7 @@ async function setupInactivity() {
    - Prevents browser from prompting for “new passkey”
    ----------------------- */
 // 🔹 Verify Biometrics (with fallback for direct prompt)
+// 🔹 Verify Biometrics (with fallback for direct prompt)
 async function verifyBiometrics(uid, context = 'reauth') {
   console.log('verifyBiometrics called', { uid, context });
 
@@ -8878,27 +8879,20 @@ async function verifyBiometrics(uid, context = 'reauth') {
       const credentialId = localStorage.getItem('credentialId');
       console.log('[verifyBiometrics] stored credentialId:', credentialId);
 
-      // 🔹 NEW: Prefer specific credential for direct prompt; fallback to discover if fails
-      let optRes;
-      let usedEndpoint = '/webauthn/auth/options'; // Default to non-discover
+      // 🔹 CHANGED: Always use /options for non-discoverable (direct prompt if one credential)
+      let usedEndpoint = '/webauthn/auth/options';
       let body = JSON.stringify({ userId: uid, credentialId, context });
 
-      if (!credentialId) {
-        console.warn('[verifyBiometrics] No credentialId - falling back to discover endpoint');
-        usedEndpoint = '/webauthn/auth/options/discover';
-        body = JSON.stringify({ userId: uid, context });
-      }
-
-      optRes = await fetch(`${apiBase}${usedEndpoint}`, {
+      let optRes = await fetch(`${apiBase}${usedEndpoint}`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body
       });
 
-      // 🔹 NEW: If specific fails (e.g., 404 invalid credentialId), retry with discover
-      if (!optRes.ok && credentialId) {
-        console.warn('[verifyBiometrics] Specific options failed - retrying with discover');
+      // 🔹 NEW: If fails (e.g., 404 no credential), fallback to discover but log
+      if (!optRes.ok) {
+        console.warn('[verifyBiometrics] /options failed - retrying with discover as last resort');
         usedEndpoint = '/webauthn/auth/options/discover';
         body = JSON.stringify({ userId: uid, context });
         optRes = await fetch(`${apiBase}${usedEndpoint}`, {
@@ -8909,7 +8903,11 @@ async function verifyBiometrics(uid, context = 'reauth') {
         });
       }
 
-      if (!optRes.ok) throw new Error(await optRes.text());
+      if (!optRes.ok) {
+        const errText = await optRes.text();
+        console.error('[verifyBiometrics] Options fetch failed:', errText);
+        throw new Error(errText);
+      }
 
       const options = await optRes.json();
       if (!options.challenge) throw new Error('Invalid options');
@@ -8928,8 +8926,7 @@ async function verifyBiometrics(uid, context = 'reauth') {
 
       options.userVerification = 'required';
       options.timeout = 60000;
-      // 🔹 NEW: Force required mediation for prompt (helps direct in some browsers)
-      options.mediation = 'required';
+      options.mediation = 'required'; // Force prompt
 
       console.log('[verifyBiometrics] About to call navigator.credentials.get() with options:', options);
 
@@ -8989,6 +8986,16 @@ async function verifyBiometrics(uid, context = 'reauth') {
     } catch (err) {
       console.error('verifyBiometrics error:', err);
       const message = err.message || 'Verification failed';
+      if (message.includes('No authenticators') || message.includes('No valid authenticators')) {
+        // 🔹 NEW: If no authenticator, disable biometric flags to fix detection
+        console.warn('[verifyBiometrics] No authenticator found - disabling biometrics');
+        writeFlag('biometricsEnabled', false);
+        writeFlag('biometricForLogin', false);
+        writeFlag('biometricForTx', false);
+        localStorage.removeItem('credentialId');
+        // Optionally notify user: 'Biometrics reset - please re-enable in settings'
+        safeCall(notify, 'Biometrics unavailable - falling back to PIN. Please re-enable in settings.', 'warning');
+      }
       if (err.name === 'NotAllowedError' || err.name === 'AbortError') return { success: false, error: message };
       safeCall(notify, `Verification failed: ${message}`, 'error');
       return { success: false, error: message };
