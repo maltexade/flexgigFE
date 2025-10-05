@@ -691,14 +691,13 @@ function setupBroadcastSubscription() {
     })
     .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'broadcasts' }, (payload) => {
       console.log('[BROADCAST DELETE]', payload);
-      handleBroadcastRow(payload.old);
-    })
-    .subscribe(async (status) => {
-      if (status === 'SUBSCRIBED') {
-        // fetch current active when subscription first connects
-        await fetchActiveBroadcasts();
+      const showingId = localStorage.getItem('active_broadcast_id');
+      if (showingId && String(showingId) === String(payload.old.id)) {
+        hideBanner();
+        localStorage.removeItem('active_broadcast_id');
       }
-    });
+    })
+    .subscribe();
 }
 
 
@@ -8241,127 +8240,125 @@ try {
    - Defensive client-side enforcement (platform + required UV)
    - Persists credentialId, biometricsEnabled, biometricForLogin, biometricForTx
 ----------------------- */
+// 🔹 NEW: Biometrics Registration (full flow)
 async function registerBiometrics() {
-
-  try {
-    // ensure session available
-    const session = await (typeof getSession === 'function' ? getSession() : Promise.resolve(null));
-    const user = session && session.user ? (session.user.uid || session.user.id ? session.user : null) : null;
-    const uid = user ? (user.uid || user.id) : (localStorage.getItem('userId') || null);
-    if (!uid) throw new Error('No session/user for registration');
-
-    const apiBase = window.__SEC_API_BASE || 'https://api.flexgig.com.ng';
-
-    // fetch server options (server already enforces authenticatorAttachment: 'platform')
-    const optsRes = await fetch(`${apiBase}/webauthn/register/options`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: uid, username: user?.username || '', displayName: user?.fullName || user?.username || 'User' })
-    });
-    if (!optsRes.ok) {
-      const txt = await optsRes.text().catch(()=>'');
-      throw new Error(`Failed to fetch registration options: ${txt || optsRes.status}`);
-    }
-
-    const opts = await optsRes.json();
-
-    // Defensive: ensure platform-only + user verification required on client too
-    opts.authenticatorSelection = opts.authenticatorSelection || {};
-    opts.authenticatorSelection.authenticatorAttachment = 'platform';
-    opts.authenticatorSelection.userVerification = 'required';
-    opts.userVerification = 'required';
-    opts.timeout = opts.timeout || 60000;
-
-    // Convert base64url fields to ArrayBuffers if server returned base64url strings
-    const base64UrlToBuffer = (base64Url) => {
-      if (!base64Url) return new Uint8Array().buffer;
-      let base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-      const pad = base64.length % 4;
-      if (pad) base64 += '='.repeat(4 - pad);
-      const str = atob(base64);
-      const u8 = new Uint8Array(str.length);
-      for (let i = 0; i < str.length; i++) u8[i] = str.charCodeAt(i);
-      return u8.buffer;
-    };
-
-    // Convert challenge / user.id / any id fields to ArrayBuffer
-    if (opts.challenge && typeof opts.challenge === 'string') opts.challenge = base64UrlToBuffer(opts.challenge);
-    if (opts.user && opts.user.id && typeof opts.user.id === 'string') opts.user.id = base64UrlToBuffer(opts.user.id);
-    if (Array.isArray(opts.excludeCredentials)) {
-      opts.excludeCredentials = opts.excludeCredentials.map(c => ({ ...c, id: base64UrlToBuffer(c.id) }));
-    }
-
-    // call WebAuthn create -> will show system prompt
-    const cred = await navigator.credentials.create({ publicKey: opts });
-    if (!cred) throw new Error('No credential created');
-
-    // package credential to send to server (base64url encoding)
-    const bufferToBase64Url = (buffer) => {
-      const bytes = new Uint8Array(buffer);
-      let str = '';
-      for (let i = 0; i < bytes.byteLength; i++) str += String.fromCharCode(bytes[i]);
-      const b64 = btoa(str);
-      return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-    };
-
-    const payload = {
-      id: cred.id,
-      rawId: bufferToBase64Url(cred.rawId),
-      type: cred.type,
-      response: {
-        clientDataJSON: bufferToBase64Url(cred.response.clientDataJSON),
-        attestationObject: bufferToBase64Url(cred.response.attestationObject)
-      }
-    };
-
-    // send to server verify endpoint
-    const verifyRes = await fetch(`${apiBase}/webauthn/register/verify`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: uid, credential: payload })
-    });
-
-    if (!verifyRes.ok) {
-      const txt = await verifyRes.text().catch(()=>'');
-      throw new Error(`Server verify failed: ${txt || verifyRes.status}`);
-    }
-
-    const verifyJson = await verifyRes.json().catch(()=>({}));
-
-    // Success -> persist credential and set flags
-    try {
-      localStorage.setItem('credentialId', cred.id);
-      localStorage.setItem('biometricsEnabled', 'true');
-      // enable both children by default after registration
-      localStorage.setItem('biometricForLogin', 'true');
-      localStorage.setItem('biometricForTx', 'true');
-    } catch (e) { /* ignore localStorage write errors */ }
-
-    // update UI (sync checkboxes)
-    syncBiometricUIFromStorage();
-
-    // notify + refresh reauth modal if present
-    if (typeof notify === 'function') notify('Biometrics enabled on this device', 'success');
-    if (typeof initReauthModal === 'function') await initReauthModal({ show: false });
-
-    return { success: true, credentialId: cred.id, server: verifyJson };
-  } catch (err) {
-    // If user cancelled (NotAllowedError) do not spam notify: revert parent toggle
-    const name = err && err.name;
-    if (name === 'NotAllowedError' || name === 'AbortError') {
-      // revert parent toggle in UI
-      setTimeout(()=>syncBiometricUIFromStorage({forceParentOff:true}), 0);
-      return { success: false, cancelled: true, error: err.message || String(err) };
-    }
-    if (typeof notify === 'function') notify(`Biometrics setup failed: ${err.message || err}`, 'error');
-    // revert parent toggle as registration didn't complete
-    setTimeout(()=>syncBiometricUIFromStorage({forceParentOff:true}), 0);
-    return { success: false, error: err.message || String(err) };
+  console.log('registerBiometrics called');
+  function base64UrlToBuffer(base64Url) {
+    let base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const pad = base64.length % 4;
+    if (pad) base64 += '='.repeat(4 - pad);
+    const str = atob(base64);
+    const buf = new Uint8Array(str.length);
+    for (let i = 0; i < str.length; i++) buf[i] = str.charCodeAt(i);
+    return buf.buffer;
   }
-}
 
+  function bufferToBase64Url(buffer) {
+    const bytes = new Uint8Array(buffer);
+    let str = '';
+    for (let i = 0; i < bytes.byteLength; i++) str += String.fromCharCode(bytes[i]);
+    let b64 = btoa(str);
+    return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
+  return withLoader(async () => {
+    try {
+      if (!('PublicKeyCredential' in window)) {
+        throw new Error('WebAuthn not supported in this browser');
+      }
+
+      const session = await safeCall(getSession);
+      const uid = session?.user?.id || session?.user?.uid;
+      if (!uid) {
+        console.error('registerBiometrics: no UID available');
+        safeCall(notify, 'Session error - please log in again', 'error');
+        setTimeout(() => window.location.href = '/', 1500);
+        return { success: false };
+      }
+
+      const apiBase = window.__SEC_API_BASE || '';
+
+      // 1️⃣ Fetch registration options
+      const optRes = await fetch(`${apiBase}/webauthn/register/options`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: uid })
+      });
+
+      if (!optRes.ok) {
+        const errText = await optRes.text().catch(() => '');
+        console.error('registerBiometrics: options fetch failed', optRes.status, errText);
+        throw new Error(errText || `Options fetch failed (${optRes.status})`);
+      }
+
+      const options = await optRes.json();
+      if (!options || !options.challenge) {
+        throw new Error('Invalid options from server');
+      }
+
+      // 2️⃣ Convert challenge and user.id to buffers
+      options.challenge = base64UrlToBuffer(options.challenge);
+      options.user.id = base64UrlToBuffer(options.user.id);
+
+      // Convert excludeCredentials ids
+      if (Array.isArray(options.excludeCredentials)) {
+        options.excludeCredentials = options.excludeCredentials.map(c => ({
+          ...c,
+          id: base64UrlToBuffer(c.id)
+        }));
+      }
+
+      options.timeout = options.timeout || 60000;
+
+      // 3️⃣ Perform WebAuthn registration
+      const credential = await navigator.credentials.create({ publicKey: options });
+      if (!credential) throw new Error('No credential from authenticator');
+
+      // 4️⃣ Encode response to send to server
+      const credToSend = {
+        id: credential.id,
+        rawId: bufferToBase64Url(credential.rawId),
+        type: credential.type,
+        response: {
+          clientDataJSON: bufferToBase64Url(credential.response.clientDataJSON),
+          attestationObject: bufferToBase64Url(credential.response.attestationObject),
+        },
+        transports: credential.response.getTransports ? credential.response.getTransports() : []
+      };
+
+      // 5️⃣ Send verification to server
+      const verifyRes = await fetch(`${apiBase}/webauthn/register/verify`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: uid, credential: credToSend })
+      });
+
+      if (!verifyRes.ok) {
+        const errText = await verifyRes.text().catch(() => '');
+        console.error('registerBiometrics: server verify failed', verifyRes.status, errText);
+        throw new Error(errText || `Verify failed (${verifyRes.status})`);
+      }
+
+      const result = await verifyRes.json();
+      console.log('registerBiometrics: success', result);
+      safeCall(notify, 'Biometric registration successful!', 'success');
+
+      // Return with credentialId (from server)
+      return { success: true, credentialId: result.credentialId };
+
+    } catch (err) {
+      console.error('registerBiometrics error:', err);
+      const message = err.message || 'Biometric registration failed';
+      if (err.name === 'NotAllowedError' || err.name === 'AbortError') {
+        return { success: false, cancelled: true, error: message };
+      }
+      safeCall(notify, `Biometric registration failed: ${message}`, 'error');
+      return { success: false, error: message };
+    }
+  });
+}
 
 
 
@@ -8370,41 +8367,53 @@ async function registerBiometrics() {
    - Call from settings: __reauth.disableBiometrics()
    - Revokes server-side, clears local
    ----------------------- */
-  async function disableBiometrics() {
-
+  // 🔹 NEW: Disable/Revoke Biometrics
+async function disableBiometrics() {
   console.log('disableBiometrics called');
-  try {
-    const session = await safeCall(getSession);
-    if (!session || !session.user) throw new Error('No session');
-    const uid = session.user.uid;
-    console.log('UID for disable:', uid);
-
-    const credentialId = localStorage.getItem('credentialId');
-    console.log('Credential ID:', credentialId);
-    if (!credentialId) throw new Error('No credential');
-
-    console.log('Revoking credential');
-    const revokeRes = await fetch(`https://api.flexgig.com.ng/webauthn/authenticators/${uid}/revoke`, {
-      method: 'POST',
-      credentials: 'include',  // <-- Add this
-      headers: {
-        'Content-Type': 'application/json'
-        // <-- Remove Authorization
-      },
-      body: JSON.stringify({ credentialID: credentialId })
-    });
-    if (!revokeRes.ok) throw new Error('Revoke failed');
-    console.log('Revoke successful');
-
-    localStorage.removeItem('credentialId');
-    localStorage.removeItem('biometricsEnabled');
-    safeCall(notify, 'Biometrics disabled', 'success');
-    await initReauthModal(); // Refresh to PIN view
-    console.log('Biometrics disabled');
-  } catch (err) {
-    console.error('Disable biometrics error:', err);
-    safeCall(notify, 'Disable failed - try again', 'error');
+  const storedId = localStorage.getItem('credentialId');
+  if (!storedId) {
+    console.log('disableBiometrics: No stored credentialId, nothing to revoke');
+    return { success: true };
   }
+
+  return withLoader(async () => {
+    try {
+      const session = await safeCall(getSession);
+      const uid = session?.user?.id || session?.user?.uid;
+      if (!uid) {
+        console.error('disableBiometrics: no UID available');
+        safeCall(notify, 'Session error - please log in again', 'error');
+        setTimeout(() => window.location.href = '/', 1500);
+        return { success: false };
+      }
+
+      const apiBase = window.__SEC_API_BASE || '';
+
+      const res = await fetch(`${apiBase}/webauthn/authenticators/${uid}/revoke`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ credentialID: storedId })
+      });
+
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        console.error('disableBiometrics: revoke failed', res.status, errText);
+        throw new Error(errText || `Revoke failed (${res.status})`);
+      }
+
+      const result = await res.json();
+      console.log('disableBiometrics: success', result);
+      safeCall(notify, 'Biometrics disabled successfully', 'success');
+      localStorage.removeItem('credentialId');
+      return { success: true };
+
+    } catch (err) {
+      console.error('disableBiometrics error:', err);
+      safeCall(notify, `Failed to disable biometrics: ${err.message || err}`, 'error');
+      return { success: false, error: err.message || 'Disable failed' };
+    }
+  });
 }
 
 /* -----------------------
@@ -8416,59 +8425,54 @@ async function registerBiometrics() {
      optionsContainerSelector:'#biometricsOptions'
    });
 ----------------------- */
-function bindBiometricSettings(opts = {}) {
-  const parentSel = opts.parentSelector || '#biometricsSwitch';
-  const childLoginSel = opts.childLoginSelector || '#bioLoginSwitch';
-  const childTxSel = opts.childTxSelector || '#bioTxSwitch';
-  const optionsContainerSel = opts.optionsContainerSelector || '#biometricsOptions';
+// 🔹 Bind Biometric Settings (unchanged, but now uses full register/disable)
+function bindBiometricSettings({
+  parentSelector = '#biometricsSwitch',
+  childLoginSelector = '#bioLoginSwitch',
+  childTxSelector = '#bioTxSwitch',
+  optionsContainerSelector = '#biometricsOptions'
+} = {}) {
+  const parent = document.querySelector(parentSelector);
+  const childLogin = document.querySelector(childLoginSelector);
+  const childTx = document.querySelector(childTxSelector);
+  const optionsContainer = document.querySelector(optionsContainerSelector);
 
-  const parent = document.querySelector(parentSel);
-  const childLogin = document.querySelector(childLoginSel);
-  const childTx = document.querySelector(childTxSel);
-  const optionsContainer = document.querySelector(optionsContainerSel);
-
-  if (!parent) return console.warn('bindBiometricSettings: parent switch not found', parentSel);
-
-  // Utility: set switch (button) state (aria + class)
-  function setSwitch(btn, on) {
-    if (!btn) return;
-    btn.setAttribute('aria-checked', on ? 'true' : 'false');
-    btn.classList.toggle('on', !!on);
+  if (!parent || !childLogin || !childTx || !optionsContainer) {
+    console.warn('Biometric elements not found');
+    return null;
   }
 
-  // Utility: read/write localStorage flags
-  function readFlag(key) {
-    try { return localStorage.getItem(key) === 'true'; } catch (e) { return false; }
-  }
-  function writeFlag(key, val) {
-    try { localStorage.setItem(key, val ? 'true' : 'false'); } catch (e) {}
-  }
-
-  // Utility: show/hide options container
   function setOptionsVisible(visible) {
-    if (!optionsContainer) return;
-    if (visible) {
-      optionsContainer.hidden = false;
-      optionsContainer.removeAttribute('aria-hidden');
+    optionsContainer.style.display = visible ? 'block' : 'none';
+  }
+
+  function readFlag(key) {
+    return localStorage.getItem(key) === 'true';
+  }
+
+  function writeFlag(key, val) {
+    localStorage.setItem(key, val ? 'true' : 'false');
+  }
+
+  function setSwitch(btn, on) {
+    btn.setAttribute('aria-checked', on ? 'true' : 'false');
+    btn.classList.toggle('active', on);
+  }
+
+  function syncFromStorage() {
+    const enabled = readFlag('biometricsEnabled');
+    setSwitch(parent, enabled);
+    setOptionsVisible(enabled);
+    if (enabled) {
+      setSwitch(childLogin, readFlag('biometricForLogin'));
+      setSwitch(childTx, readFlag('biometricForTx'));
     } else {
-      optionsContainer.hidden = true;
-      optionsContainer.setAttribute('aria-hidden', 'true');
+      setSwitch(childLogin, false);
+      setSwitch(childTx, false);
     }
   }
 
-  // Sync UI from localStorage
-  function syncFromStorage({ forceParentOff = false } = {}) {
-    const parentFlag = forceParentOff ? false : readFlag('biometricsEnabled');
-    const loginFlag = readFlag('biometricForLogin');
-    const txFlag = readFlag('biometricForTx');
-
-    setSwitch(parent, parentFlag);
-    setSwitch(childLogin, loginFlag);
-    setSwitch(childTx, txFlag);
-    setOptionsVisible(parentFlag);
-  }
-
-  // Handle parent toggle
+  // Parent handler
   async function handleParentToggle(wantOn) {
     if (parent.__bioProcessing) return;
     parent.__bioProcessing = true;
@@ -8804,6 +8808,11 @@ async function setupInactivity() {
    - Performs WebAuthn authentication for login or checkout
    ----------------------- */
 // Full verifyBiometrics - performs navigator.credentials.get + server verify
+/* -----------------------
+   Verify Biometrics (patched)
+   - Ensures all verifications reuse the same credential created by the parent
+   - Prevents browser from prompting for “new passkey”
+   ----------------------- */
 /* -----------------------
    Verify Biometrics (patched)
    - Ensures all verifications reuse the same credential created by the parent
