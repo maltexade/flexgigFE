@@ -8826,9 +8826,10 @@ async function setupInactivity() {
    - Prevents browser from prompting for “new passkey”
    ----------------------- */
 // 🔹 Verify Biometrics (with fallback for direct prompt)
-// 🔹 Verify Biometrics (updated for direct/silent fingerprint + fallback retry)
-// - Stores credentialId from options (even discover) for future specific calls
-// - Tries 'silent' first; auto-retries 'conditional' on null (prompt if needed)
+// 🔹 Verify Biometrics (fixed for direct fingerprint - conditional mediation + preventSilentAccess)
+// - Uses 'conditional' mediation: auto-direct if possible, prompt otherwise (no null hangs)
+// - Adds preventSilentAccess() for immediate check: forces prompt if no silent possible
+// - Stores credentialId from options for specific calls next time
 // - Respects all existing: discover fallback, 404 retry, conversions, server verify, errors
 async function verifyBiometrics(uid, context = 'reauth') {
   console.log('verifyBiometrics called', { uid, context });
@@ -8928,60 +8929,53 @@ async function verifyBiometrics(uid, context = 'reauth') {
       options.userVerification = 'required';
       options.timeout = 60000;
 
-      // 🔹 FIXED: Try 'silent' first for direct fingerprint; retry with 'conditional' if null
-      let mediationMode = 'silent';  // Start silent for no-UI
+      // 🔹 FIXED: Use 'conditional' mediation for direct fingerprint (auto if possible, prompt otherwise)
+      // + preventSilentAccess() to force clear signal: no silent nulls, immediate prompt if needed
+      options.mediation = 'conditional';  // Prefers silent/direct, falls to UI
+      console.log('[verifyBiometrics] Final options for get():', {
+        challengeLength: options.challenge.byteLength,
+        allowCredentials: options.allowCredentials ? options.allowCredentials.length : 'omitted',
+        userVerification: options.userVerification,
+        mediation: options.mediation,
+        rpID: options.rpId
+      });
+
       let assertion;
-      let retryCount = 0;
-      const maxRetries = 1;  // One retry: silent → conditional
+      try {
+        // 🔹 NEW: preventSilentAccess() - checks if silent possible; forces prompt if not (avoids null hangs)
+        console.log('[verifyBiometrics] Calling preventSilentAccess() for immediate mediation');
+        await navigator.credentials.preventSilentAccess();
 
-      while (retryCount <= maxRetries) {
-        options.mediation = mediationMode;
-        console.log(`[verifyBiometrics] Trying get() with mediation='${mediationMode}' (retry ${retryCount})`);
+        console.log('[verifyBiometrics] About to call navigator.credentials.get()');
+        assertion = await navigator.credentials.get({ publicKey: options });
 
-        try {
-          assertion = await navigator.credentials.get({ publicKey: options });
+        console.log('[verifyBiometrics] navigator.credentials.get() returned:', assertion);
 
-          console.log('[verifyBiometrics] navigator.credentials.get() returned:', assertion);
-
-          if (assertion) {
-            console.log('[verifyBiometrics] Raw assertion fields:');
-            console.log('id:', assertion.id);
-            console.log('type:', assertion.type);
-            console.log('rawId (hex):', bufferToHex(assertion.rawId));
-            console.log('clientDataJSON (hex):', bufferToHex(assertion.response.clientDataJSON));
-            console.log('authenticatorData (hex):', bufferToHex(assertion.response.authenticatorData));
-            console.log('signature (hex):', bufferToHex(assertion.response.signature));
-            console.log('userHandle (hex or null):', assertion.response.userHandle ? bufferToHex(assertion.response.userHandle) : null);
-            break;  // Success—exit loop
-          } else {
-            console.log('[verifyBiometrics] get() returned null in', mediationMode, 'mode');
-            if (retryCount < maxRetries) {
-              console.log('[verifyBiometrics] Silent failed—retrying with conditional (may prompt)');
-              mediationMode = 'conditional';
-              retryCount++;
-              continue;
-            }
-          }
-        } catch (e) {
-          console.error('[verifyBiometrics] get() threw in', mediationMode, 'mode:', e.name, e.message);
-          if (retryCount < maxRetries && e.name === 'NotAllowedError') {  // Common silent reject
-            console.log('[verifyBiometrics] NotAllowed in silent—retrying conditional');
-            mediationMode = 'conditional';
-            retryCount++;
-            continue;
-          }
-          throw e;  // No more retries
+        if (assertion) {
+          console.log('[verifyBiometrics] Raw assertion fields:');
+          console.log('id:', assertion.id);
+          console.log('type:', assertion.type);
+          console.log('rawId (hex):', bufferToHex(assertion.rawId));
+          console.log('clientDataJSON (hex):', bufferToHex(assertion.response.clientDataJSON));
+          console.log('authenticatorData (hex):', bufferToHex(assertion.response.authenticatorData));
+          console.log('signature (hex):', bufferToHex(assertion.response.signature));
+          console.log('userHandle (hex or null):', assertion.response.userHandle ? bufferToHex(assertion.response.userHandle) : null);
+        } else {
+          console.log('[verifyBiometrics] navigator.credentials.get() returned null');
         }
+      } catch (e) {
+        console.error('[verifyBiometrics] navigator.credentials.get() threw:', e);
+        throw e;
       }
 
       if (!assertion) {
-        // 🔹 NEW: Enhanced logging for final null (after retries)
-        console.error('[verifyBiometrics] get() returned null after retries - possible causes:');
-        console.error('  - No gesture context for silent (call from button click?)');
-        console.error('  - Platform authenticator unavailable (fingerprint locked/offline)');
-        console.error('  - Credential not resident/discoverable (re-register with residentKey=required)');
-        console.error('  - Browser policy (Edge: check Windows Hello enrollment)');
-        throw new Error('No assertion - direct authentication unavailable; fallback to PIN');
+        // 🔹 NEW: Enhanced logging for null case
+        console.error('[verifyBiometrics] get() returned null after preventSilentAccess - possible causes:');
+        console.error('  - User cancelled prompt (fingerprint/PIN)');
+        console.error('  - No matching resident credential (re-register?)');
+        console.error('  - UV=required but no platform support (test in Chrome)');
+        console.error('  - RP ID/origin mismatch (check SecurityError in console)');
+        throw new Error('No assertion - authentication cancelled or unavailable; fallback to PIN');
       }
 
       const credential = {
