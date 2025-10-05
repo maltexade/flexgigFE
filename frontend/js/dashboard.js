@@ -62,6 +62,44 @@ async function withLoader(task) {
 }
 
 
+// ---------- STORAGE INSTRUMENTATION (paste once near top of script) ----------
+(function instrumentStorage() {
+  try {
+    const origRemove = Storage.prototype.removeItem;
+    Storage.prototype.removeItem = function(key) {
+      if (key === 'credentialId') {
+        console.log('[STORAGE TRACE] removeItem called for', key, 'time:', new Date().toISOString());
+        console.trace();
+      }
+      return origRemove.apply(this, arguments);
+    };
+
+    window.addEventListener('storage', (e) => {
+      if (e.key === 'credentialId') {
+        console.log('[STORAGE EVENT] storage event for credentialId:', {
+          oldValue: e.oldValue,
+          newValue: e.newValue,
+          url: e.url,
+          time: new Date().toISOString()
+        });
+      }
+    });
+
+    window.addEventListener('beforeunload', () => {
+      try {
+        console.log('[STORAGE TRACE] beforeunload — credentialId currently:', localStorage.getItem('credentialId'), 'time:', new Date().toISOString());
+      } catch (err) {
+        console.error('[STORAGE TRACE] beforeunload read error', err);
+      }
+    });
+
+    console.log('[STORAGE TRACE] Instrumentation installed');
+  } catch (e) {
+    console.error('[STORAGE TRACE] Failed to install instrumentation', e);
+  }
+})();
+
+
 
 
 
@@ -8355,9 +8393,7 @@ async function registerBiometrics() {
 
       if (Array.isArray(options.excludeCredentials)) {
         console.log('[registerBiometrics] Exclude credentials count:', options.excludeCredentials.length);
-        options.excludeCredentials = options.excludeCredentials.map(c => ({
-          ...c, id: base64UrlToBuffer(c.id)
-        }));
+        options.excludeCredentials = options.excludeCredentials.map(c => ({ ...c, id: base64UrlToBuffer(c.id) }));
       }
 
       options.timeout = 60000;
@@ -8369,6 +8405,16 @@ async function registerBiometrics() {
       console.log('[registerBiometrics] navigator.credentials.create() returned:', credential);
 
       if (!credential) throw new Error('No credential created (navigator returned null)');
+
+      // --- Persist rawId immediately (pre-verify fallback) ---
+      const localIdFallback = bufferToBase64Url(credential.rawId);
+      try {
+        localStorage.setItem('credentialId', localIdFallback);
+        localStorage.setItem('credentialSavedAt', new Date().toISOString());
+        console.log('[DEBUG register] Pre-verify stored credentialId (rawId fallback):', localIdFallback, 'origin:', location.origin);
+      } catch (e) {
+        console.error('[DEBUG register] Failed to write pre-verify credentialId to localStorage', e);
+      }
 
       const credToSend = {
         id: credential.id,
@@ -8395,27 +8441,31 @@ async function registerBiometrics() {
       const result = await verifyRes.json();
       console.log('[registerBiometrics] Verify server result:', result);
 
+      // Overwrite with canonical server ID if provided
       if (result.credentialId) {
-        localStorage.setItem('credentialId', result.credentialId);
-        // Immediately after setting
-console.log('[DEBUG] After setItem credentialId ->', localStorage.getItem('credentialId'));
-console.log('[DEBUG] origin, host, pathname:', location.origin, location.host, location.pathname);
-console.assert(localStorage.getItem('credentialId') === result.credentialId, 'credentialId not persisted!');
-
+        try {
+          localStorage.setItem('credentialId', result.credentialId);
+          localStorage.setItem('credentialSavedAt', new Date().toISOString());
+          console.log('[DEBUG register] Overwrote credentialId with server value:', result.credentialId);
+          console.assert(localStorage.getItem('credentialId') === result.credentialId, 'credentialId not persisted after server response!');
+        } catch (e) {
+          console.error('[DEBUG register] Failed to set server credentialId', e);
+        }
         console.log('%c[registerBiometrics] STORED credentialId in localStorage:', 'color:lime', result.credentialId);
       } else {
-        console.warn('[registerBiometrics] No credentialId returned by server');
+        console.warn('[registerBiometrics] No credentialId returned by server — using local fallback:', localIdFallback);
       }
 
       console.log('%c[registerBiometrics] COMPLETED SUCCESSFULLY', 'color:lime;font-weight:bold');
       safeCall(notify, 'Biometric registration successful!', 'success');
 
-      setTimeout(() => {
-        console.log('[registerBiometrics] Reloading page to refresh cache...');
-        window.location.reload();
-      }, 1000);
+      // Temporarily commented out reload while debugging:
+      // setTimeout(() => {
+      //   console.log('[registerBiometrics] Reloading page to refresh cache...');
+      //   window.location.reload();
+      // }, 1000);
 
-      return { success: true, credentialId: result.credentialId };
+      return { success: true, credentialId: result.credentialId || localIdFallback };
 
     } catch (err) {
       console.error('%c[registerBiometrics] ERROR:', 'color:red', err);
@@ -8429,6 +8479,7 @@ console.assert(localStorage.getItem('credentialId') === result.credentialId, 'cr
     }
   });
 }
+
 
 /* -----------------------
    Disable Biometrics (new!)
