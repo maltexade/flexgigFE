@@ -8817,6 +8817,11 @@ async function verifyBiometrics(uid, context = 'reauth') {
     return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   }
 
+  function bufferToHex(buffer) {
+    const bytes = new Uint8Array(buffer);
+    return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
   return withLoader(async () => {
     try {
       if (!('PublicKeyCredential' in window)) throw new Error('WebAuthn not supported');
@@ -8826,7 +8831,9 @@ async function verifyBiometrics(uid, context = 'reauth') {
       console.log('[verifyBiometrics] stored credentialId:', localStorage.getItem('credentialId'));
 
       const optRes = await fetch(`${apiBase}/webauthn/auth/options`, {
-        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: uid, context })
       });
       if (!optRes.ok) throw new Error(await optRes.text());
@@ -8849,11 +8856,32 @@ async function verifyBiometrics(uid, context = 'reauth') {
       options.userVerification = 'required';
       options.timeout = 60000;
 
-      console.log('[verifyBiometrics] Calling navigator.credentials.get() with options:', options);
+      // 🔹 RAW DEBUG around get()
+      console.log('[verifyBiometrics] About to call navigator.credentials.get() with options:', options);
 
-      const assertion = await navigator.credentials.get({ publicKey: options });
+      let assertion;
+      try {
+        assertion = await navigator.credentials.get({ publicKey: options });
 
-      console.log('[verifyBiometrics] Raw assertion returned by get():', assertion);
+        console.log('[verifyBiometrics] navigator.credentials.get() returned:', assertion);
+
+        if (assertion) {
+          console.log('[verifyBiometrics] Raw assertion fields:');
+          console.log('id:', assertion.id);
+          console.log('type:', assertion.type);
+          console.log('rawId (hex):', bufferToHex(assertion.rawId));
+          console.log('clientDataJSON (hex):', bufferToHex(assertion.response.clientDataJSON));
+          console.log('authenticatorData (hex):', bufferToHex(assertion.response.authenticatorData));
+          console.log('signature (hex):', bufferToHex(assertion.response.signature));
+          console.log('userHandle (hex or null):', assertion.response.userHandle ? bufferToHex(assertion.response.userHandle) : null);
+        } else {
+          console.log('[verifyBiometrics] navigator.credentials.get() returned null');
+        }
+      } catch (e) {
+        console.error('[verifyBiometrics] navigator.credentials.get() threw:', e);
+        throw e; // re-throw to trigger outer catch
+      }
+
       if (!assertion) throw new Error('No assertion returned');
 
       const credential = {
@@ -8871,7 +8899,9 @@ async function verifyBiometrics(uid, context = 'reauth') {
       console.log('[verifyBiometrics] Processed credential ready to send:', credential);
 
       const verifyRes = await fetch(`${apiBase}/webauthn/auth/verify`, {
-        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: uid, credential, context })
       });
       if (!verifyRes.ok) throw new Error(await verifyRes.text());
