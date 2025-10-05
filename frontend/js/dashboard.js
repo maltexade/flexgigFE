@@ -8804,10 +8804,14 @@ async function setupInactivity() {
    - Performs WebAuthn authentication for login or checkout
    ----------------------- */
 // Full verifyBiometrics - performs navigator.credentials.get + server verify
+/* -----------------------
+   Verify Biometrics (patched)
+   - Ensures all verifications reuse the same credential created by the parent
+   - Prevents browser from prompting for “new passkey”
+   ----------------------- */
 async function verifyBiometrics(uid, context = 'reauth') {
   console.log('verifyBiometrics called', { uid, context });
 
-  // helpers: base64url <> ArrayBuffer
   function base64UrlToBuffer(base64Url) {
     let base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
     const pad = base64.length % 4;
@@ -8826,97 +8830,102 @@ async function verifyBiometrics(uid, context = 'reauth') {
     return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   }
 
-  try {
-    if (!('PublicKeyCredential' in window)) {
-      throw new Error('WebAuthn not supported in this browser');
-    }
-    if (!uid) throw new Error('No user id provided');
-
-    const apiBase = window.__SEC_API_BASE || '';
-
-    // 1) fetch options from server (send context so server can tailor the challenge)
-    const optRes = await fetch(`${apiBase}/webauthn/auth/options`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: uid, context })
-    });
-
-    if (!optRes.ok) {
-      const errText = await optRes.text().catch(() => '');
-      console.error('verifyBiometrics: options fetch failed', optRes.status, errText);
-      throw new Error(errText || `Options fetch failed (${optRes.status})`);
-    }
-
-    const options = await optRes.json();
-    // 2) convert challenge + allowCredentials ids to ArrayBuffers
-    if (!options || !options.challenge) {
-      throw new Error('Invalid options from server');
-    }
-
-    options.challenge = base64UrlToBuffer(options.challenge);
-
-    if (Array.isArray(options.allowCredentials)) {
-      options.allowCredentials = options.allowCredentials.map(c => ({
-        ...c,
-        id: base64UrlToBuffer(c.id),
-        // Restrict to 'internal' transport for platform-only biometrics (consistent with registration)
-        transports: ['internal']
-      }));
-    }
-
-    // Enforce user verification for biometric/PIN
-    options.userVerification = 'required';
-    options.timeout = options.timeout || 60000;
-
-    // 3) navigator.credentials.get()
-    const assertion = await navigator.credentials.get({ publicKey: options });
-    if (!assertion) throw new Error('No assertion from authenticator');
-
-    // 4) prepare payload to send back to server (base64url encoded)
-    const credential = {
-      id: assertion.id,
-      rawId: bufferToBase64Url(assertion.rawId),
-      type: assertion.type,
-      response: {
-        clientDataJSON: bufferToBase64Url(assertion.response.clientDataJSON),
-        authenticatorData: bufferToBase64Url(assertion.response.authenticatorData),
-        signature: bufferToBase64Url(assertion.response.signature),
-        userHandle: assertion.response.userHandle ? bufferToBase64Url(assertion.response.userHandle) : null
+  return withLoader(async () => {
+    try {
+      if (!('PublicKeyCredential' in window)) {
+        throw new Error('WebAuthn not supported in this browser');
       }
-    };
+      if (!uid) throw new Error('No user id provided');
 
-    // 5) verify with server
-    const verifyRes = await fetch(`${apiBase}/webauthn/auth/verify`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: uid, credential, context })
-    });
+      const apiBase = window.__SEC_API_BASE || '';
+      const storedId = localStorage.getItem('credentialId');
+      console.log('[verifyBiometrics] stored credentialId:', storedId);
 
-    if (!verifyRes.ok) {
-      const errText = await verifyRes.text().catch(() => '');
-      console.error('verifyBiometrics: server verify failed', verifyRes.status, errText);
-      throw new Error(errText || `Verify failed (${verifyRes.status})`);
-    }
+      // 1️⃣ Fetch options from server
+      const optRes = await fetch(`${apiBase}/webauthn/auth/options`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: uid, context })
+      });
 
-    const result = await verifyRes.json();
-    console.log('verifyBiometrics: success', result);
-    safeCall(notify, 'Biometric authentication successful!', 'success');
-    return { success: true, result };
-  } catch (err) {
-    console.error('verifyBiometrics error:', err);
-    // Surface friendly message for known DOM errors
-    let message = err.message || 'Biometric verification failed';
-    // Known user aborts: NotAllowedError (user cancelled) -> do not spam notify
-    if (err.name === 'NotAllowedError' || err.name === 'AbortError') {
-      // don't surface a loud error; caller can decide fallback
+      if (!optRes.ok) {
+        const errText = await optRes.text().catch(() => '');
+        console.error('verifyBiometrics: options fetch failed', optRes.status, errText);
+        throw new Error(errText || `Options fetch failed (${optRes.status})`);
+      }
+
+      const options = await optRes.json();
+      if (!options || !options.challenge) {
+        throw new Error('Invalid options from server');
+      }
+
+      // 2️⃣ Convert challenge to buffer
+      options.challenge = base64UrlToBuffer(options.challenge);
+
+      // 3️⃣ Force allowCredentials to reuse stored credentialId (parent one)
+      if (storedId) {
+        options.allowCredentials = [{
+          id: base64UrlToBuffer(storedId),
+          type: 'public-key'
+        }];
+      } else if (Array.isArray(options.allowCredentials)) {
+        options.allowCredentials = options.allowCredentials.map(c => ({
+          ...c,
+          id: base64UrlToBuffer(c.id)
+        }));
+      }
+
+      options.timeout = options.timeout || 60000;
+
+      // 4️⃣ Perform WebAuthn assertion (verifies stored credential)
+      const assertion = await navigator.credentials.get({ publicKey: options });
+      if (!assertion) throw new Error('No assertion from authenticator');
+
+      // 5️⃣ Encode response to send to server
+      const credential = {
+        id: assertion.id,
+        rawId: bufferToBase64Url(assertion.rawId),
+        type: assertion.type,
+        response: {
+          clientDataJSON: bufferToBase64Url(assertion.response.clientDataJSON),
+          authenticatorData: bufferToBase64Url(assertion.response.authenticatorData),
+          signature: bufferToBase64Url(assertion.response.signature),
+          userHandle: assertion.response.userHandle ? bufferToBase64Url(assertion.response.userHandle) : null
+        }
+      };
+
+      // 6️⃣ Send verification to server
+      const verifyRes = await fetch(`${apiBase}/webauthn/auth/verify`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: uid, credential, context })
+      });
+
+      if (!verifyRes.ok) {
+        const errText = await verifyRes.text().catch(() => '');
+        console.error('verifyBiometrics: server verify failed', verifyRes.status, errText);
+        throw new Error(errText || `Verify failed (${verifyRes.status})`);
+      }
+
+      const result = await verifyRes.json();
+      console.log('verifyBiometrics: success', result);
+      safeCall(notify, 'Biometric authentication successful!', 'success');
+      return { success: true, result };
+
+    } catch (err) {
+      console.error('verifyBiometrics error:', err);
+      const message = err.message || 'Biometric verification failed';
+      if (err.name === 'NotAllowedError' || err.name === 'AbortError') {
+        return { success: false, error: message };
+      }
+      safeCall(notify, `Biometric authentication failed: ${message}`, 'error');
       return { success: false, error: message };
     }
-    safeCall(notify, `Biometric authentication failed: ${message}`, 'error');
-    return { success: false, error: message };
-  }
+  });
 }
+
 
 
   async function setupInactivity() {
