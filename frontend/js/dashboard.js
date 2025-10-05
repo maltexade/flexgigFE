@@ -1555,22 +1555,34 @@ async function triggerCheckoutReauth() {
     }
 
     if (reauthStatus.method === 'biometric') {
-      const session = await safeCall(getSession) || {};
-      const uid = session.user ? (session.user.uid || session.user.id) : null;
-      if (!uid) {
-        console.warn('triggerCheckoutReauth: no uid, opening modal for PIN/fallback');
-        await showReauthModal('checkout');
-        return { success: false, requiresModal: true };
-      }
-      const { success, result, error } = await verifyBiometrics(uid, 'checkout');
-      if (success) {
-        console.log('triggerCheckoutReauth: biometric success for checkout');
-        return { success: true, result };
-      }
-      console.log('triggerCheckoutReauth: biometric failed for checkout, opening modal');
-      await showReauthModal('checkout');
-      return { success: false, requiresModal: true, error };
-    }
+  const session = await safeCall(getSession) || {};
+  const uid = session.user ? (session.user.uid || session.user.id) : null;
+  if (!uid) {
+    console.warn('triggerCheckoutReauth: no uid, opening modal for PIN/fallback');
+    await showReauthModal('checkout');
+    return { success: false, requiresModal: true };
+  }
+
+  // Client-side guard: ensure biometrics enabled globally and for transactions
+  const isBiometricsEnabled = localStorage.getItem('biometricsEnabled') === 'true';
+  const bioTxEnabled = localStorage.getItem('biometricForTx') === 'true';
+  if (!isBiometricsEnabled || !bioTxEnabled) {
+    // fallback to modal / PIN flow
+    await showReauthModal('checkout');
+    return { success: false, requiresModal: true, error: 'biometrics-disabled-for-transaction' };
+  }
+
+  // Use 'transaction' so it matches your shouldReauth/server checks
+  const { success, result, error } = await verifyBiometrics(uid, 'transaction');
+  if (success) {
+    console.log('triggerCheckoutReauth: biometric success for checkout');
+    return { success: true, result };
+  }
+  console.log('triggerCheckoutReauth: biometric failed for checkout, opening modal');
+  await showReauthModal('checkout');
+  return { success: false, requiresModal: true, error };
+}
+
 
     // PIN path: show modal (will handle the PIN flow)
     await showReauthModal('checkout');
@@ -8500,80 +8512,121 @@ function bindBiometricSettings({
   }
 
   // Child handler: verify biometric before enabling
-  async function bindChild(btn, key, context) {
-    if (!btn || btn.__bioBound) return;
+  // Child handler: client-side-only enable (prompt) + instant disable
+async function bindChild(btn, key, context) {
+  if (!btn || btn.__bioBound) return;
 
-    btn.addEventListener('click', async (e) => {
-      e.preventDefault();
-      const cur = btn.getAttribute('aria-checked') === 'true';
-      const wantOn = !cur;
+  btn.addEventListener('click', async (e) => {
+    e.preventDefault();
+    const cur = btn.getAttribute('aria-checked') === 'true';
+    const wantOn = !cur;
 
-      if (!wantOn) {
-        // Disabling: instant update, no verification
-        setSwitch(btn, false);
-        writeFlag(key, false);
-        console.log(`Child ${key} disabled`);
-        return;
-      }
+    if (!wantOn) {
+      // Disabling: instant update, no verification or server call
+      setSwitch(btn, false);
+      writeFlag(key, false);
+      console.log(`Child ${key} disabled`);
+      return;
+    }
 
-      // Enabling: verify biometric with loader
-      await withLoader(async () => {
-        try {
-          // Ensure parent is enabled
-          if (!readFlag('biometricsEnabled') || !localStorage.getItem('credentialId')) {
-            await handleParentToggle(true);
-            if (!readFlag('biometricsEnabled')) {
-              console.warn(`Child ${key}: parent biometric failed to enable`);
-              safeCall(notify, 'Biometric setup required first', 'error');
-              return;
-            }
-          }
-
-          // Get user ID
-          const session = await safeCall(getSession);
-          const uid = session?.user?.id || session?.user?.uid;
-          if (!uid) {
-            console.error(`Child ${key}: no UID available`);
-            safeCall(notify, 'Session error - please log in again', 'error');
-            setTimeout(() => window.location.href = '/', 1500);
+    // Enabling: client-side-only — prompt authenticator locally (no server round-trip)
+    await withLoader(async () => {
+      try {
+        // Ensure parent is enabled and a credentialId exists (try to auto-enable parent if needed)
+        if (!readFlag('biometricsEnabled') || !localStorage.getItem('credentialId')) {
+          console.log(`Child ${key}: parent biometric not enabled; attempting to enable parent first`);
+          await handleParentToggle(true);
+          if (!readFlag('biometricsEnabled')) {
+            console.warn(`Child ${key}: parent biometric failed to enable`);
+            safeCall(notify, 'Biometric setup required first', 'error');
             return;
           }
+        }
 
-          // Verify biometric
-          const res = await verifyBiometrics(uid, context);
-          if (res && res.success) {
-            setSwitch(btn, true);
-            writeFlag(key, true);
-            console.log(`Child ${key} enabled after biometric verification`);
-            safeCall(notify, `${context === 'login' ? 'Login' : 'Transaction'} biometrics enabled`, 'success');
-          } else {
-            setSwitch(btn, false);
-            writeFlag(key, false);
-            console.warn(`Child ${key}: biometric verification failed`);
-            if (res && res.error.includes('NotAllowedError') || res.error.includes('AbortError')) {
-              safeCall(notify, 'Biometric verification cancelled', 'info');
-            } else {
-              safeCall(notify, 'Biometric verification failed', 'error');
-            }
-          }
+        // Ensure session / uid exists for safety/logging
+        const session = await safeCall(getSession);
+        const uid = session?.user?.id || session?.user?.uid;
+        if (!uid) {
+          console.error(`Child ${key}: no UID available`);
+          safeCall(notify, 'Session error - please log in again', 'error');
+          setTimeout(() => window.location.href = '/', 1500);
+          return;
+        }
+
+        // Check for WebAuthn support
+        if (!('PublicKeyCredential' in window)) {
+          safeCall(notify, 'WebAuthn not supported on this device', 'error');
+          return;
+        }
+
+        // Create a short, local random challenge — only to prompt authenticator locally.
+        const localChallenge = new Uint8Array(32);
+        crypto.getRandomValues(localChallenge);
+
+        // Build a minimal publicKey options object — omit allowCredentials to allow resident keys (discoverable)
+        const tmpPublicKey = {
+          challenge: localChallenge.buffer,
+          timeout: 60000,
+          userVerification: 'required'
+          // intentionally OMIT allowCredentials so resident/discoverable keys can be picked by the authenticator
+        };
+
+        console.log(`[biom] Child ${key}: prompting local biometric (client-only)`);
+        let assertion;
+        try {
+          assertion = await navigator.credentials.get({ publicKey: tmpPublicKey });
         } catch (err) {
-          console.error(`Child ${key} enable error:`, err);
+          console.error(`[biom] Child ${key}: local navigator.credentials.get() error:`, err);
+          // Keep toggle OFF on error/cancel
           setSwitch(btn, false);
           writeFlag(key, false);
-          safeCall(notify, `Failed to enable ${context === 'login' ? 'login' : 'transaction'} biometrics: ${err.message || err}`, 'error');
+          if (err && (err.name === 'NotAllowedError' || err.name === 'AbortError')) {
+            safeCall(notify, 'Biometric prompt cancelled', 'info');
+          } else {
+            safeCall(notify, `Biometric enable failed: ${err.message || err}`, 'error');
+          }
+          return;
         }
-      });
-    });
 
-    btn.addEventListener('keydown', (e) => {
-      if (e.key === ' ' || e.key === 'Enter') {
-        e.preventDefault();
-        btn.click();
+        if (!assertion) {
+          console.warn(`[biom] Child ${key}: navigator.credentials.get() returned null`);
+          setSwitch(btn, false);
+          writeFlag(key, false);
+          safeCall(notify, 'Biometric prompt failed', 'error');
+          return;
+        }
+
+        // If we got an assertion, treat it as local confirmation — do NOT send to server
+        console.log(`[biom] Child ${key}: local biometric prompt success (client-only)`, {
+          id: assertion.id,
+          type: assertion.type,
+          rawIdLength: assertion.rawId ? assertion.rawId.byteLength : 0
+        });
+
+        // Persist client-side flag and update UI
+        setSwitch(btn, true);
+        writeFlag(key, true);
+        safeCall(notify, `${context === 'login' ? 'Login' : 'Transaction'} biometrics enabled (client-only)`, 'success');
+
+      } catch (err) {
+        console.error(`Child ${key} enable error:`, err);
+        setSwitch(btn, false);
+        writeFlag(key, false);
+        safeCall(notify, `Failed to enable ${context === 'login' ? 'login' : 'transaction'} biometrics: ${err.message || err}`, 'error');
       }
     });
+  });
 
-    btn.__bioBound = true;
-  }
+  btn.addEventListener('keydown', (e) => {
+    if (e.key === ' ' || e.key === 'Enter') {
+      e.preventDefault();
+      btn.click();
+    }
+  });
+
+  btn.__bioBound = true;
+}
+
 
   // Wire parent
   if (!parent.__bioBound) {
