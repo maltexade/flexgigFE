@@ -7878,8 +7878,13 @@ setTimeout(() => {
 
   // 🔸 Determine if biometrics enabled for login (client-side only)
   const bioLoginEnabled = ['true', '1', 'yes'].includes(
-    (localStorage.getItem('biometricForLogin') || localStorage.getItem('__sec_bioLogin') || '').toLowerCase()
-  );
+  (
+    localStorage.getItem('biometricForLogin') ||
+    localStorage.getItem('__sec_bioLogin') ||
+    localStorage.getItem('security_bio_login') || ''
+  ).toLowerCase()
+);
+
 
   // Hide button if biometric not enabled
   bioBtn.style.display = bioLoginEnabled ? 'inline-flex' : 'none';
@@ -8713,8 +8718,21 @@ async function shouldReauth(context = 'reauth') {
     const hasBio = hasBioFlag && webAuthnSupported;
 
     // Check context-specific biometric flags
-    const bioLoginEnabled = localStorage.getItem('biometricForLogin')?.toLowerCase() === 'true';
-    const bioTxEnabled = localStorage.getItem('biometricForTx')?.toLowerCase() === 'true';
+    const bioLoginEnabled = ['true', '1', 'yes'].includes(
+  (
+    localStorage.getItem('biometricForLogin') ||
+    localStorage.getItem('__sec_bioLogin') ||
+    localStorage.getItem('security_bio_login') || ''
+  ).toLowerCase()
+);
+
+    const bioTxEnabled = ['true', '1', 'yes'].includes(
+      (
+        localStorage.getItem('biometricForTx') ||
+        localStorage.getItem('__sec_bioTx') ||
+        localStorage.getItem('security_bio_tx') || ''
+      ).toLowerCase()
+    );
     const isBioApplicable = hasBio && (
       (context === 'login' && bioLoginEnabled) ||
       (context === 'transaction' && bioTxEnabled) ||
@@ -8734,8 +8752,20 @@ async function shouldReauth(context = 'reauth') {
   } catch (err) {
     console.error('shouldReauth error fallback:', err);
     const hasBio = localStorage.getItem('biometricsEnabled')?.toLowerCase() === 'true' && ('PublicKeyCredential' in window);
-    const bioLoginEnabled = localStorage.getItem('biometricForLogin')?.toLowerCase() === 'true';
-    const bioTxEnabled = localStorage.getItem('biometricForTx')?.toLowerCase() === 'true';
+    const bioLoginEnabled = ['true', '1', 'yes'].includes(
+      (
+        localStorage.getItem('biometricForLogin') ||
+        localStorage.getItem('__sec_bioLogin') ||
+        localStorage.getItem('security_bio_login') || ''
+      ).toLowerCase()
+    );
+    const bioTxEnabled = ['true', '1', 'yes'].includes(
+      (
+        localStorage.getItem('biometricForTx') ||
+        localStorage.getItem('__sec_bioTx') ||
+        localStorage.getItem('security_bio_tx') || ''
+      ).toLowerCase()
+    );
     const isBioApplicable = hasBio && (
       (context === 'login' && bioLoginEnabled) ||
       (context === 'transaction' && bioTxEnabled) ||
