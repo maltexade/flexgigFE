@@ -7871,47 +7871,55 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
       console.log('Fresh user data populated and cached');
     }
 
-    // 🔹 Bind biometric button in Reauth PIN modal
-document.addEventListener('DOMContentLoaded', () => {
+    // 🔹 Bind biometric button in Reauth PIN modal (directly inside initReauthModal)
+try {
   const bioBtn = document.getElementById('pinBiometricBtn');
-  if (!bioBtn) return;
+  if (bioBtn && !bioBtn.__bound) {
+    bioBtn.addEventListener('click', async () => {
+      console.log('[reauth] Biometric button clicked (PIN modal)');
 
-  bioBtn.addEventListener('click', async () => {
-    console.log('[reauth] Biometric button clicked');
+      const bioLoginEnabled =
+        localStorage.getItem('__sec_bioLogin') === 'true' ||
+        localStorage.getItem('biometricForLogin') === 'true';
 
-    // Get local biometric login toggle
-    const bioLoginEnabled = localStorage.getItem('__sec_bioLogin') === 'true';
-    const session = await safeCall(getSession);
-    const uid = session?.user?.id || session?.user?.uid;
+      const session = await safeCall(getSession);
+      const uid = session?.user?.uid || session?.user?.id;
 
-    if (!bioLoginEnabled) {
-      console.warn('[reauth] Biometric login not enabled locally.');
-      safeCall(notify, 'Biometric login not enabled', 'warn');
-      return;
-    }
-
-    if (!uid) {
-      console.error('[reauth] No valid user ID for biometric reauth.');
-      safeCall(notify, 'Session expired - please log in again', 'error');
-      return;
-    }
-
-    try {
-      console.log('[reauth] Starting biometric verification for reauth...');
-      const result = await verifyBiometrics(uid, 'reauth');
-
-      if (result?.success) {
-        console.log('[reauth] Biometric verified successfully');
-        hideReauthModal(); // ✅ Automatically close modal on success
-      } else {
-        console.warn('[reauth] Biometric verification failed or cancelled', result);
+      if (!bioLoginEnabled) {
+        console.warn('[reauth] Biometric login not enabled locally.');
+        safeCall(notify, 'Biometric login not enabled', 'warn');
+        return;
       }
-    } catch (err) {
-      console.error('[reauth] Biometric verification error:', err);
-      safeCall(notify, 'Biometric verification failed', 'error');
-    }
-  });
-});
+
+      if (!uid) {
+        console.error('[reauth] No valid user ID for biometric reauth.');
+        safeCall(notify, 'Session expired - please log in again', 'error');
+        return;
+      }
+
+      try {
+        console.log('[reauth] Starting biometric verification for reauth...');
+        const result = await verifyBiometrics(uid, 'reauth');
+
+        if (result?.success) {
+          console.log('[reauth] Biometric verified successfully');
+          hideReauthModal();
+          onSuccessfulReauth();
+        } else {
+          console.warn('[reauth] Biometric verification failed or cancelled', result);
+          safeCall(notify, 'Biometric verification failed', 'error');
+        }
+      } catch (err) {
+        console.error('[reauth] Biometric verification error:', err);
+        safeCall(notify, 'Biometric verification failed', 'error');
+      }
+    });
+    bioBtn.__bound = true;
+    console.log('Biometric reauth button bound');
+  }
+} catch (err) {
+  console.error('Error binding biometric reauth button:', err);
+}
 
 
     const displayName = user.username || (user.fullName || '').split(' ')[0] || 'User';
