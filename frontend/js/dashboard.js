@@ -8241,7 +8241,7 @@ try {
    - Persists credentialId, biometricsEnabled, biometricForLogin, biometricForTx
 ----------------------- */
 // 🔹 NEW: Biometrics Registration (full flow)
-// 🔹 Biometrics Registration (with fixed encoder)
+// 🔹 Biometrics Registration (with discoverable + reload)
 async function registerBiometrics() {
   console.log('registerBiometrics called');
   function base64UrlToBuffer(base64Url) {
@@ -8254,11 +8254,11 @@ async function registerBiometrics() {
     return buf.buffer;
   }
 
-  function bufferToBase64Url(buffer) {  // 🔹 FIXED
+  function bufferToBase64Url(buffer) {
     const bytes = new Uint8Array(buffer);
     let binary = '';
     for (let i = 0; i < bytes.byteLength; i++) {
-      binary += String.fromCharCode(bytes[i] & 0xff);
+      binary += String.fromCharCode(bytes[i] & 0xff);  // Binary safe
     }
     let b64 = btoa(binary);
     return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -8286,6 +8286,10 @@ async function registerBiometrics() {
       const options = await optRes.json();
       if (!options.challenge) throw new Error('Invalid options');
 
+      // 🔹 Reinforce discoverable
+      options.residentKey = 'required';
+      options.userVerification = 'required';
+
       options.challenge = base64UrlToBuffer(options.challenge);
       options.user.id = base64UrlToBuffer(options.user.id);
       if (Array.isArray(options.excludeCredentials)) {
@@ -8298,11 +8302,11 @@ async function registerBiometrics() {
 
       const credToSend = {
         id: credential.id,
-        rawId: bufferToBase64Url(credential.rawId),  // 🔹 Uses fixed encoder
+        rawId: bufferToBase64Url(credential.rawId),
         type: credential.type,
         response: {
-          clientDataJSON: bufferToBase64Url(credential.response.clientDataJSON),  // 🔹 Fixed
-          attestationObject: bufferToBase64Url(credential.response.attestationObject),  // 🔹 Fixed
+          clientDataJSON: bufferToBase64Url(credential.response.clientDataJSON),
+          attestationObject: bufferToBase64Url(credential.response.attestationObject),
         },
         transports: credential.response.getTransports ? credential.response.getTransports() : []
       };
@@ -8315,6 +8319,10 @@ async function registerBiometrics() {
 
       const result = await verifyRes.json();
       safeCall(notify, 'Biometric registration successful!', 'success');
+
+      // 🔹 NEW: Reload to refresh browser passkey cache (fixes immediate .get() failure)
+      setTimeout(() => window.location.reload(), 1000);
+
       return { success: true, credentialId: result.credentialId };
 
     } catch (err) {
@@ -8785,6 +8793,7 @@ async function setupInactivity() {
    - Ensures all verifications reuse the same credential created by the parent
    - Prevents browser from prompting for “new passkey”
    ----------------------- */
+// 🔹 Verify Biometrics (auto-discover + required verification)
 async function verifyBiometrics(uid, context = 'reauth') {
   console.log('verifyBiometrics called', { uid, context });
 
@@ -8798,7 +8807,7 @@ async function verifyBiometrics(uid, context = 'reauth') {
     return buf.buffer;
   }
 
-  function bufferToBase64Url(buffer) {  // 🔹 FIXED (same as above)
+  function bufferToBase64Url(buffer) {
     const bytes = new Uint8Array(buffer);
     let binary = '';
     for (let i = 0; i < bytes.byteLength; i++) {
@@ -8825,47 +8834,41 @@ async function verifyBiometrics(uid, context = 'reauth') {
       const options = await optRes.json();
       if (!options.challenge) throw new Error('Invalid options');
 
-      // 🔹 DEBUG: Raw server options
-      console.log('[verifyBiometrics] RAW server options:', {
-        challenge: options.challenge?.substring(0, 20) + '...',
-        allowCredentials: options.allowCredentials,  // Expect [{id: '...', type: 'public-key'}]
-        userVerification: options.userVerification
-      });
+      console.log('[verifyBiometrics] RAW server options:', options);
 
       options.challenge = base64UrlToBuffer(options.challenge);
 
-      // Convert allowCredentials (trust server)
       if (Array.isArray(options.allowCredentials) && options.allowCredentials.length > 0) {
         options.allowCredentials = options.allowCredentials.map(c => ({ ...c, id: base64UrlToBuffer(c.id) }));
-        console.log('[verifyBiometrics] allowCredentials buffers ready (count:', options.allowCredentials.length, ')');
+        console.log('[verifyBiometrics] Transformed allowCredentials:', options.allowCredentials);
       } else {
-        console.warn('[verifyBiometrics] Empty allowCredentials from server - omitting for auto-scan');
-        delete options.allowCredentials;  // Let browser find any passkey for RP
+        console.log('[verifyBiometrics] Omitting allowCredentials for auto-discover');
+        delete options.allowCredentials;
       }
 
-      options.userVerification = 'required';  // Force biometric prompt
+      options.userVerification = 'required';
       options.timeout = 60000;
 
-      // 🔹 DEBUG: Options before get()
-      console.log('[verifyBiometrics] Options for get():', {
-        challenge: options.challenge.byteLength + ' bytes',
-        allowCredentials: options.allowCredentials ? options.allowCredentials.length + ' items' : 'omitted'
-      });
+      console.log('[verifyBiometrics] Calling navigator.credentials.get() with options:', options);
 
       const assertion = await navigator.credentials.get({ publicKey: options });
+
+      console.log('[verifyBiometrics] Raw assertion returned by get():', assertion);
       if (!assertion) throw new Error('No assertion returned');
 
       const credential = {
         id: assertion.id,
-        rawId: bufferToBase64Url(assertion.rawId),  // 🔹 Fixed
+        rawId: bufferToBase64Url(assertion.rawId),
         type: assertion.type,
         response: {
-          clientDataJSON: bufferToBase64Url(assertion.response.clientDataJSON),  // 🔹 Fixed
-          authenticatorData: bufferToBase64Url(assertion.response.authenticatorData),  // 🔹 Fixed
-          signature: bufferToBase64Url(assertion.response.signature),  // 🔹 Fixed
-          userHandle: assertion.response.userHandle ? bufferToBase64Url(assertion.response.userHandle) : null  // 🔹 Fixed
+          clientDataJSON: bufferToBase64Url(assertion.response.clientDataJSON),
+          authenticatorData: bufferToBase64Url(assertion.response.authenticatorData),
+          signature: bufferToBase64Url(assertion.response.signature),
+          userHandle: assertion.response.userHandle ? bufferToBase64Url(assertion.response.userHandle) : null
         }
       };
+
+      console.log('[verifyBiometrics] Processed credential ready to send:', credential);
 
       const verifyRes = await fetch(`${apiBase}/webauthn/auth/verify`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
@@ -8875,6 +8878,8 @@ async function verifyBiometrics(uid, context = 'reauth') {
 
       const result = await verifyRes.json();
       safeCall(notify, 'Biometric authentication successful!', 'success');
+      console.log('[verifyBiometrics] Server verification result:', result);
+
       return { success: true, result };
 
     } catch (err) {
@@ -8886,6 +8891,7 @@ async function verifyBiometrics(uid, context = 'reauth') {
     }
   });
 }
+
 
 
 
