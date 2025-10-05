@@ -6809,7 +6809,17 @@ async function startAuthentication(userId) {
     });
 
     __sec_log.i('startAuthentication: Calling navigator.credentials.get');
-    const assertion = await navigator.credentials.get({ publicKey: options });
+    const getOpts = {
+  publicKey: options,
+  mediation: 'optional', // 🔹 allows silent / direct calls if possible
+};
+
+// Pass user hint to help Chrome auto-select fingerprint credential
+if (uid) getOpts.hints = { user: uid };
+
+console.log('[verifyBiometrics] About to call navigator.credentials.get() with hints:', getOpts);
+assertion = await navigator.credentials.get(getOpts);
+
     __sec_log.d('startAuthentication: Assertion received', { id: assertion?.id, type: assertion?.type });
     if (!assertion) throw new Error('No assertion returned');
 
@@ -8893,7 +8903,17 @@ async function verifyBiometrics(uid, context = 'reauth') {
 
       let assertion;
       try {
-        assertion = await navigator.credentials.get({ publicKey: options });
+        const getOpts = {
+  publicKey: options,
+  mediation: 'optional', // 🔹 allows silent / direct calls if possible
+};
+
+// Pass user hint to help Chrome auto-select fingerprint credential
+if (uid) getOpts.hints = { user: uid };
+
+console.log('[verifyBiometrics] About to call navigator.credentials.get() with hints:', getOpts);
+assertion = await navigator.credentials.get(getOpts);
+
 
         console.log('[verifyBiometrics] navigator.credentials.get() returned:', assertion);
 
