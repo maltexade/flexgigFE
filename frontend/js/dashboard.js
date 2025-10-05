@@ -6974,82 +6974,82 @@ function __sec_wireEvents() {
       const __sec_parentHandler = async () => {
         __sec_log.d('__sec_parentHandler: Starting');
         return withLoader(async () => {
-        __sec_setBusy(__sec_parentSwitch, true);
-        const uiOn = __sec_toggleSwitch(__sec_parentSwitch);
-        __sec_log.d('__sec_parentHandler: Toggle state', { uiOn });
+          __sec_setBusy(__sec_parentSwitch, true);
+          const uiOn = __sec_toggleSwitch(__sec_parentSwitch);
+          __sec_log.d('__sec_parentHandler: Toggle state', { uiOn });
 
-        const currentUser = await __sec_getCurrentUser();
-        __sec_log.d('__sec_parentHandler: Retrieved currentUser', { hasUser: !!currentUser?.user });
+          const currentUser = await __sec_getCurrentUser();
+          __sec_log.d('__sec_parentHandler: Retrieved currentUser', { hasUser: !!currentUser?.user });
 
-        if (!currentUser || !currentUser.user || !currentUser.user.uid) {
-          __sec_log.e('__sec_parentHandler: No current user or invalid session');
-          __sec_setChecked(__sec_parentSwitch, false);
-          __sec_setBusy(__sec_parentSwitch, false);
-          alert('You must be signed in to enable biometrics. Please try logging in again.');
-          window.location.href = '/';
-          return;
-        }
-
-        const { user } = currentUser;
-        __sec_log.d('__sec_parentHandler: Extracted user', { userId: user.uid });
-
-        const uid = user.uid;
-        __sec_log.d('__sec_parentHandler: Proceeding with uid', uid);
-
-        if (uiOn) {
-          __sec_log.i('Parent toggle ON requested — checking existing authenticators for user', uid);
-          const auths = await __sec_listAuthenticators(uid);
-          __sec_log.d('__sec_parentHandler: Authenticators', auths);
-          if (Array.isArray(auths) && auths.length > 0) {
-            __sec_log.i('Existing authenticators found — showing children without registering new one');
-            __sec_setBiometrics(true, true);
+          if (!currentUser || !currentUser.user || !currentUser.user.uid) {
+            __sec_log.e('__sec_parentHandler: No current user or invalid session');
+            __sec_setChecked(__sec_parentSwitch, false);
             __sec_setBusy(__sec_parentSwitch, false);
+            alert('You must be signed in to enable biometrics. Please try logging in again.');
+            window.location.href = '/';
             return;
           }
 
-          try {
-            __sec_log.i('No authenticators found — starting registration flow');
-            const regResult = await startRegistration(uid, user.email || user.username || uid, user.fullName || user.email || uid);
-            __sec_log.d('__sec_parentHandler: Registration result', regResult);
-            __sec_setBiometrics(true, true);
-            __sec_log.i('Registration successful');
-          } catch (err) {
-            __sec_log.e('Registration failed', { err, uid });
-            __sec_setChecked(__sec_parentSwitch, false);
-            __sec_setBiometrics(false, false);
-            alert('Biometric registration failed: ' + (err.message || 'unknown error'));
-          } finally {
-            __sec_setBusy(__sec_parentSwitch, false);
-          }
-        } else {
-          try {
-            __sec_log.i('Parent toggle OFF requested — revoking authenticators for user', uid);
+          const { user } = currentUser;
+          __sec_log.d('__sec_parentHandler: Extracted user', { userId: user.uid });
+
+          const uid = user.uid;
+          __sec_log.d('__sec_parentHandler: Proceeding with uid', uid);
+
+          if (uiOn) {
+            __sec_log.i('Parent toggle ON requested — checking existing authenticators for user', uid);
             const auths = await __sec_listAuthenticators(uid);
-            __sec_log.d('__sec_parentHandler: Authenticators to revoke', auths);
+            __sec_log.d('__sec_parentHandler: Authenticators', auths);
             if (Array.isArray(auths) && auths.length > 0) {
-              for (const a of auths) {
-                const credential_id = a.credential_id || a.credentialID || a.credentialId;
-                __sec_log.d('__sec_parentHandler: Attempting revoke for', credential_id);
-                if (!credential_id) {
-                  __sec_log.w('__sec_parentHandler: Skipping invalid credential_id', a);
-                  continue;
-                }
-                const ok = await __sec_revokeAuthenticator(uid, credential_id);
-                __sec_log.d('revoke result', credential_id, ok);
-              }
-            } else {
-              __sec_log.d('No authenticators to revoke for user', uid);
+              __sec_log.i('Existing authenticators found — showing children without registering new one');
+              __sec_setBiometrics(true, true);
+              __sec_setBusy(__sec_parentSwitch, false);
+              return;
             }
-            __sec_setBiometrics(false, true);
-          } catch (err) {
-            __sec_log.e('Error revoking authenticators', { err, uid });
-            __sec_setBiometrics(false, true);
-            alert('Warning: failed to revoke authenticator(s) on server. Check console.');
-          } finally {
-            __sec_setBusy(__sec_parentSwitch, false);
+
+            try {
+              __sec_log.i('No authenticators found — starting registration flow');
+              const regResult = await startRegistration(uid, user.email || user.username || uid, user.fullName || user.email || uid);
+              __sec_log.d('__sec_parentHandler: Registration result', regResult);
+              __sec_setBiometrics(true, true);
+              __sec_log.i('Registration successful');
+            } catch (err) {
+              __sec_log.e('Registration failed', { err, uid });
+              __sec_setChecked(__sec_parentSwitch, false);
+              __sec_setBiometrics(false, false);
+              alert('Biometric registration failed: ' + (err.message || 'unknown error'));
+            } finally {
+              __sec_setBusy(__sec_parentSwitch, false);
+            }
+          } else {
+            try {
+              __sec_log.i('Parent toggle OFF requested — revoking authenticators for user', uid);
+              const auths = await __sec_listAuthenticators(uid);
+              __sec_log.d('__sec_parentHandler: Authenticators to revoke', auths);
+              if (Array.isArray(auths) && auths.length > 0) {
+                for (const a of auths) {
+                  const credential_id = a.credential_id || a.credentialID || a.credentialId;
+                  __sec_log.d('__sec_parentHandler: Attempting revoke for', credential_id);
+                  if (!credential_id) {
+                    __sec_log.w('__sec_parentHandler: Skipping invalid credential_id', a);
+                    continue;
+                  }
+                  const ok = await __sec_revokeAuthenticator(uid, credential_id);
+                  __sec_log.d('revoke result', credential_id, ok);
+                }
+              } else {
+                __sec_log.d('No authenticators to revoke for user', uid);
+              }
+              __sec_setBiometrics(false, true);
+            } catch (err) {
+              __sec_log.e('Error revoking authenticators', { err, uid });
+              __sec_setBiometrics(false, true);
+              alert('Warning: failed to revoke authenticator(s) on server. Check console.');
+            } finally {
+              __sec_setBusy(__sec_parentSwitch, false);
+            }
           }
-        }
-        __sec_log.d('__sec_parentHandler: Exit');
+          __sec_log.d('__sec_parentHandler: Exit');
         });
       };
 
@@ -7071,50 +7071,32 @@ function __sec_wireEvents() {
 
     if (__sec_bioLogin) {
       __sec_log.d('wireEvents: Wiring bioLogin (#bioLoginSwitch)');
-      __sec_bioLogin.addEventListener('click', async () => {
+      __sec_bioLogin.addEventListener('click', async (e) => {
         __sec_log.d('bioLogin click event');
+        e.preventDefault();
         if (!__sec_parentSwitch || !__sec_isChecked(__sec_parentSwitch)) {
           __sec_log.d('bioLogin click ignored; parent OFF');
+          showSlideNotification('Biometrics must be enabled first', 'info');
+          __sec_parentHandler(); // Auto-enable parent
           return;
         }
-        return withLoader(async () => {
         __sec_setBusy(__sec_bioLogin, true);
         const newState = __sec_toggleSwitch(__sec_bioLogin);
         __sec_log.d('bioLogin: New state', { newState });
         try {
-          const currentUser = await __sec_getCurrentUser();
-          __sec_log.d('bioLogin: Retrieved currentUser', { hasUser: !!currentUser?.user });
-          if (!currentUser || !currentUser.user || !currentUser.user.uid) throw new Error('Not signed in');
-          const user = currentUser.user;
-
-          if (newState) {
-            __sec_log.i('bioLogin enabling: performing authentication test');
-            const authResult = await startAuthentication(user.uid);
-            __sec_log.d('bioLogin: Auth result', authResult);
-            localStorage.setItem(__sec_KEYS.bioLogin, '1');
-            __sec_log.i('bioLogin enabled and verified');
-          } else {
-            localStorage.setItem(__sec_KEYS.bioLogin, '0');
-            __sec_log.d('bioLogin disabled');
-            __sec_maybeDisableParentIfChildrenOff();
-          }
+          localStorage.setItem(__sec_KEYS.bioLogin, newState ? '1' : '0');
+          __sec_log.i(`bioLogin ${newState ? 'enabled' : 'disabled'} (local only)`);
+          showSlideNotification(`Login biometrics ${newState ? 'enabled' : 'disabled'}`, newState ? 'success' : 'info');
+          if (!newState) __sec_maybeDisableParentIfChildrenOff();
         } catch (err) {
-          __sec_log.e('bioLogin error or verification failed', { err, newState });
+          __sec_log.e('bioLogin: Storage error', { err, newState });
           __sec_setChecked(__sec_bioLogin, false);
-          try {
-            localStorage.setItem(__sec_KEYS.bioLogin, '0');
-            __sec_log.d('bioLogin: Reset storage to 0');
-          } catch (e) {
-            __sec_log.e('bioLogin: Storage reset error', e);
-          }
-          alert('Biometric verification failed: ' + (err.message || 'unknown'));
+          localStorage.setItem(__sec_KEYS.bioLogin, '0');
+          showSlideNotification('Failed to update login biometrics', 'error');
         } finally {
           __sec_setBusy(__sec_bioLogin, false);
-        
         }
-        
         __sec_log.d('bioLogin click handler exit');
-        });
       });
 
       __sec_bioLogin.addEventListener('keydown', (e) => {
@@ -7130,42 +7112,28 @@ function __sec_wireEvents() {
 
     if (__sec_bioTx) {
       __sec_log.d('wireEvents: Wiring bioTx (#bioTxSwitch)');
-      __sec_bioTx.addEventListener('click', async () => {
+      __sec_bioTx.addEventListener('click', async (e) => {
         __sec_log.d('bioTx click event');
+        e.preventDefault();
         if (!__sec_parentSwitch || !__sec_isChecked(__sec_parentSwitch)) {
           __sec_log.d('bioTx click ignored; parent OFF');
+          showSlideNotification('Biometrics must be enabled first', 'info');
+          __sec_parentHandler(); // Auto-enable parent
           return;
         }
         __sec_setBusy(__sec_bioTx, true);
         const newState = __sec_toggleSwitch(__sec_bioTx);
         __sec_log.d('bioTx: New state', { newState });
         try {
-          const currentUser = await __sec_getCurrentUser();
-          __sec_log.d('bioTx: Retrieved currentUser', { hasUser: !!currentUser?.user });
-          if (!currentUser || !currentUser.user || !currentUser.user.uid) throw new Error('Not signed in');
-          const user = currentUser.user;
-
-          if (newState) {
-            __sec_log.i('bioTx enabling: performing authentication test');
-            const authResult = await startAuthentication(user.uid);
-            __sec_log.d('bioTx: Auth result', authResult);
-            localStorage.setItem(__sec_KEYS.bioTx, '1');
-            __sec_log.i('bioTx enabled and verified');
-          } else {
-            localStorage.setItem(__sec_KEYS.bioTx, '0');
-            __sec_log.d('bioTx disabled');
-            __sec_maybeDisableParentIfChildrenOff();
-          }
+          localStorage.setItem(__sec_KEYS.bioTx, newState ? '1' : '0');
+          __sec_log.i(`bioTx ${newState ? 'enabled' : 'disabled'} (local only)`);
+          showSlideNotification(`Transaction biometrics ${newState ? 'enabled' : 'disabled'}`, newState ? 'success' : 'info');
+          if (!newState) __sec_maybeDisableParentIfChildrenOff();
         } catch (err) {
-          __sec_log.e('bioTx error or verification failed', { err, newState });
+          __sec_log.e('bioTx: Storage error', { err, newState });
           __sec_setChecked(__sec_bioTx, false);
-          try {
-            localStorage.setItem(__sec_KEYS.bioTx, '0');
-            __sec_log.d('bioTx: Reset storage to 0');
-          } catch (e) {
-            __sec_log.e('bioTx: Storage reset error', e);
-          }
-          alert('Biometric verification failed: ' + (err.message || 'unknown'));
+          localStorage.setItem(__sec_KEYS.bioTx, '0');
+          showSlideNotification('Failed to update transaction biometrics', 'error');
         } finally {
           __sec_setBusy(__sec_bioTx, false);
         }
