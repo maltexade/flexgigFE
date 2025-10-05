@@ -8285,25 +8285,6 @@ setTimeout(() => {
     });
   }
 
-function debugStorageKey(key, where) {
-  try {
-    const v = localStorage.getItem(key);
-    console.log(`[STORAGE DEBUG] [${where}] key=${key} value=`, v, 'origin=', location.origin, 'time=', new Date().toISOString());
-  } catch (e) {
-    console.error('[STORAGE DEBUG] localStorage read error', e);
-  }
-}
-
-function debugTrace(msg) { console.log(msg); console.trace(); }
-
-// In registerBiometrics: after setItem(...)
-localStorage.setItem('credentialId', result.credentialId);
-debugStorageKey('credentialId', 'after-register setItem');
-
-// In verifyBiometrics: at start
-debugStorageKey('credentialId', 'verifyBiometrics-entry');
-
-
 /* -----------------------
    Enhanced registerBiometrics (replace existing)
    - Uses server options (server.js already changed)
@@ -8933,7 +8914,7 @@ async function verifyBiometrics(uid, context = 'reauth') {
       if (!uid) throw new Error('No user ID');
 
       const apiBase = window.__SEC_API_BASE || '';
-      let credentialId = localStorage.getItem('credentialId');
+      const credentialId = localStorage.getItem('credentialId');
       console.log('[DEBUG verifyBiometrics] credentialId raw read:', credentialId, 
             'origin:', location.origin, 'host:', location.host, 'time:', new Date().toISOString());
 
