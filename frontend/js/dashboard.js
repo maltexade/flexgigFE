@@ -6836,7 +6836,7 @@ assertion = await navigator.credentials.get(getOpts);
     };
     __sec_log.d('startAuthentication: Prepared credential for verify', { id: credential.id, rawIdLength: credential.rawId.length });
 
-    const verifyUrl = `${apiBase}/webauthn/auth/verify`;
+    const verifyUrl = `${apiBase}/webauthn/auth/verify/discover`;
     __sec_log.d('startAuthentication: Verifying at', verifyUrl);
     const verifyRes = await fetch(verifyUrl, {
       method: 'POST',
@@ -8950,7 +8950,7 @@ assertion = await navigator.credentials.get(getOpts);
 
       console.log('[verifyBiometrics] Processed credential ready to send:', credential);
 
-      const verifyRes = await fetch(`${apiBase}/webauthn/auth/verify`, {
+      const verifyRes = await fetch(`${apiBase}/webauthn/auth/verify/discover`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
