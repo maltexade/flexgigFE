@@ -7830,6 +7830,8 @@ async function handlePinCompletion() {
     console.log('initReauthKeypad completed');
   }
 
+  
+
 
 
 /* -----------------------
@@ -7868,6 +7870,49 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
       try { localStorage.setItem('userData', JSON.stringify(user)); } catch (e) { console.warn('Could not cache userData:', e); }
       console.log('Fresh user data populated and cached');
     }
+
+    // 🔹 Bind biometric button in Reauth PIN modal
+document.addEventListener('DOMContentLoaded', () => {
+  const bioBtn = document.getElementById('pinBiometricBtn');
+  if (!bioBtn) return;
+
+  bioBtn.addEventListener('click', async () => {
+    console.log('[reauth] Biometric button clicked');
+
+    // Get local biometric login toggle
+    const bioLoginEnabled = localStorage.getItem('__sec_bioLogin') === 'true';
+    const session = await safeCall(getSession);
+    const uid = session?.user?.id || session?.user?.uid;
+
+    if (!bioLoginEnabled) {
+      console.warn('[reauth] Biometric login not enabled locally.');
+      safeCall(notify, 'Biometric login not enabled', 'warn');
+      return;
+    }
+
+    if (!uid) {
+      console.error('[reauth] No valid user ID for biometric reauth.');
+      safeCall(notify, 'Session expired - please log in again', 'error');
+      return;
+    }
+
+    try {
+      console.log('[reauth] Starting biometric verification for reauth...');
+      const result = await verifyBiometrics(uid, 'reauth');
+
+      if (result?.success) {
+        console.log('[reauth] Biometric verified successfully');
+        hideReauthModal(); // ✅ Automatically close modal on success
+      } else {
+        console.warn('[reauth] Biometric verification failed or cancelled', result);
+      }
+    } catch (err) {
+      console.error('[reauth] Biometric verification error:', err);
+      safeCall(notify, 'Biometric verification failed', 'error');
+    }
+  });
+});
+
 
     const displayName = user.username || (user.fullName || '').split(' ')[0] || 'User';
     if (reauthName) reauthName.textContent = displayName.charAt(0).toUpperCase() + displayName.slice(1);
