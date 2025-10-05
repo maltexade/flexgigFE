@@ -7834,9 +7834,9 @@ async function handlePinCompletion() {
 
 /* -----------------------
    initReauthModal (prepares modal, binds events)
-   - Uses safeCall() to call app's helpers if available
    - Prioritizes biometric login if security_bio_login is enabled
-   - Integrates with __sec_KEYS and startAuthentication from security module
+   - Instant sync: Queries localStorage directly (no reload needed)
+   - Falls back to PIN if biometric not enabled or fails
    ----------------------- */
 async function initReauthModal({ show = false, context = 'reauth' } = {}) {
   console.log('initReauthModal called', { show, context });
@@ -7886,7 +7886,7 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
     console.error('Error populating user info:', e);
   }
 
-  // Check reauth requirements
+  // Check reauth requirements (prioritize biometric login)
   const reauthStatus = await shouldReauth(context);
   console.log('initReauthModal: Reauth status', reauthStatus);
 
@@ -7897,7 +7897,7 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
     return true;
   }
 
-  // Set up views
+  // Set up views (instant sync from localStorage)
   const isBioApplicable = reauthStatus.method === 'biometric';
   try {
     if (biometricView) biometricView.style.display = isBioApplicable ? 'block' : 'none';
@@ -7998,7 +7998,7 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
     console.error('Error setting up delete key:', e);
   }
 
-  // Biometric verify button
+  // Biometric verify button (manual fallback)
   try {
     console.log('Setting up biometric verify button');
     if (verifyBiometricBtn && !verifyBiometricBtn.__bound) {
@@ -8105,7 +8105,7 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
     console.error('Error calling initReauthKeypad:', e);
   }
 
-  // Modal visibility and auto-biometric attempt
+  // Modal visibility and auto-biometric attempt (instant sync from localStorage)
   try {
     console.log('Handling modal visibility, show:', show);
     if (!show) {
@@ -8127,6 +8127,7 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
       reauthModal.setAttribute('role', 'dialog');
 
       if (isBioApplicable) {
+        // Auto-attempt biometric if enabled (instant check from localStorage)
         (async () => {
           try {
             const session = await safeCall(__sec_getCurrentUser) || {};
@@ -8158,6 +8159,7 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
           }
         })();
       } else {
+        // Direct fallback to PIN if no biometric
         if (biometricView) biometricView.style.display = 'none';
         if (pinView) pinView.style.display = 'block';
         const firstInput = getReauthInputs()[0];
