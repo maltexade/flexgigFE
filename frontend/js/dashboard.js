@@ -8285,6 +8285,25 @@ setTimeout(() => {
     });
   }
 
+function debugStorageKey(key, where) {
+  try {
+    const v = localStorage.getItem(key);
+    console.log(`[STORAGE DEBUG] [${where}] key=${key} value=`, v, 'origin=', location.origin, 'time=', new Date().toISOString());
+  } catch (e) {
+    console.error('[STORAGE DEBUG] localStorage read error', e);
+  }
+}
+
+function debugTrace(msg) { console.log(msg); console.trace(); }
+
+// In registerBiometrics: after setItem(...)
+localStorage.setItem('credentialId', result.credentialId);
+debugStorageKey('credentialId', 'after-register setItem');
+
+// In verifyBiometrics: at start
+debugStorageKey('credentialId', 'verifyBiometrics-entry');
+
+
 /* -----------------------
    Enhanced registerBiometrics (replace existing)
    - Uses server options (server.js already changed)
@@ -8397,6 +8416,11 @@ async function registerBiometrics() {
 
       if (result.credentialId) {
         localStorage.setItem('credentialId', result.credentialId);
+        // Immediately after setting
+console.log('[DEBUG] After setItem credentialId ->', localStorage.getItem('credentialId'));
+console.log('[DEBUG] origin, host, pathname:', location.origin, location.host, location.pathname);
+console.assert(localStorage.getItem('credentialId') === result.credentialId, 'credentialId not persisted!');
+
         console.log('%c[registerBiometrics] STORED credentialId in localStorage:', 'color:lime', result.credentialId);
       } else {
         console.warn('[registerBiometrics] No credentialId returned by server');
@@ -8468,6 +8492,7 @@ async function disableBiometrics() {
       const result = await res.json();
       console.log('disableBiometrics: success', result);
       safeCall(notify, 'Biometrics disabled successfully', 'success');
+      console.log('[DEBUG] About to remove credentialId (caller: disableBiometrics or toggle) at', new Date().toISOString());
       localStorage.removeItem('credentialId');
       return { success: true };
 
@@ -8569,6 +8594,7 @@ function bindBiometricSettings({
           writeFlag('biometricsEnabled', false);
           writeFlag('biometricForLogin', false);  // Auto-disable children flags
           writeFlag('biometricForTx', false);
+          console.log('[DEBUG] About to remove credentialId (caller: disableBiometrics or toggle) at', new Date().toISOString());
           localStorage.removeItem('credentialId');
           setSwitch(childLogin, false);
           setSwitch(childTx, false);
@@ -8907,7 +8933,10 @@ async function verifyBiometrics(uid, context = 'reauth') {
       if (!uid) throw new Error('No user ID');
 
       const apiBase = window.__SEC_API_BASE || '';
-      let credentialId = localStorage.getItem('credentialId');
+      const credentialId = localStorage.getItem('credentialId');
+      console.log('[DEBUG verifyBiometrics] credentialId raw read:', credentialId, 
+            'origin:', location.origin, 'host:', location.host, 'time:', new Date().toISOString());
+
       console.log('%c[verifyBiometrics] Retrieved credentialId from localStorage:', 'color:orange', credentialId);
 
       let usedEndpoint = '/webauthn/auth/options';
