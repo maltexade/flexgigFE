@@ -9259,7 +9259,6 @@ async function verifyBiometrics(uid, context = 'reauth') {
       if (!uid) throw new Error('No user ID');
 
       const apiBase = window.__SEC_API_BASE || '';
-      // robust read
       let stored = null;
       try {
         stored = localStorage.getItem('credentialId');
@@ -9268,20 +9267,18 @@ async function verifyBiometrics(uid, context = 'reauth') {
       }
       console.log('[verifyBiometrics] credentialId raw read:', stored, 'origin:', location.origin, 'time:', new Date().toISOString());
 
-      let usedEndpoint = '/webauthn/auth/options/discover';
-      let body = JSON.stringify({ userId: uid, context });
-      if (!stored) {
-        console.warn('[verifyBiometrics] No stored credentialId — using discover endpoint');
-        usedEndpoint = '/webauthn/auth/options/discover';
-        body = JSON.stringify({ userId: uid, context });
-      }
+      // Use /webauthn/auth/options if we have a credentialId, else discover
+      let usedEndpoint = stored ? '/webauthn/auth/options' : '/webauthn/auth/options/discover';
+      let body = stored
+        ? JSON.stringify({ userId: uid, credentialId: stored, context })
+        : JSON.stringify({ userId: uid, context });
 
       console.log('[verifyBiometrics] Fetching options from:', `${apiBase}${usedEndpoint}`, 'body:', JSON.parse(body));
       let optRes = await fetch(`${apiBase}${usedEndpoint}`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body
       });
 
-      // retry discover on 404 if we tried specific
+      // fallback: retry discover if specific options fail
       if (!optRes.ok && stored) {
         console.warn('[verifyBiometrics] specific options failed; retrying discover...');
         usedEndpoint = '/webauthn/auth/options/discover';
@@ -9324,12 +9321,10 @@ async function verifyBiometrics(uid, context = 'reauth') {
       options.userVerification = 'required';
       options.timeout = options.timeout || 60000;
 
-      // Try conditional mediation first (silent/direct if supported), then fallback to prompt
-      const tryOptions = (mediation) => {
-        const copy = { ...options };
-        if (mediation) copy.mediation = mediation;
-        return copy;
-      };
+      // ---- KEY CHANGE: Force mediation to "required" for direct device prompt ----
+      // Remove conditional fallback unless you want the old picker.
+      // The browser will now always open the device biometrics prompt for this credential.
+      const getOptions = { publicKey: options, mediation: "required" };
 
       // Log final options summary
       console.log('[verifyBiometrics] Final options summary for get():', {
@@ -9337,30 +9332,17 @@ async function verifyBiometrics(uid, context = 'reauth') {
         allowCredentials: options.allowCredentials ? options.allowCredentials.length : 'omitted',
         userVerification: options.userVerification,
         rpId: options.rpId,
-        mediation: 'conditional (first attempt)',
+        mediation: 'required',
       });
 
       let assertion = null;
-      // attempt 1: conditional (silent/direct)
       try {
-        console.log('[verifyBiometrics] Attempting navigator.credentials.get() — conditional (silent/direct if supported)');
-        assertion = await navigator.credentials.get({ publicKey: tryOptions('conditional') });
-        console.log('[verifyBiometrics] conditional get() returned:', assertion);
+        console.log('[verifyBiometrics] Attempting navigator.credentials.get() — mediation: required');
+        assertion = await navigator.credentials.get(getOptions);
+        console.log('[verifyBiometrics] get() returned:', assertion);
       } catch (e) {
-        console.warn('[verifyBiometrics] conditional get() threw:', e);
-      }
-
-      // if conditional yielded nothing, attempt interactive prompt (no mediation)
-      if (!assertion) {
-        try {
-          console.log('[verifyBiometrics] Attempting navigator.credentials.get() — fallback with prompt (no mediation)');
-          assertion = await navigator.credentials.get({ publicKey: tryOptions(undefined) });
-          console.log('[verifyBiometrics] fallback prompt get() returned:', assertion);
-        } catch (e) {
-          console.error('[verifyBiometrics] Prompt attempt threw:', e);
-          // final error
-          throw e;
-        }
+        console.error('[verifyBiometrics] get() threw:', e);
+        throw e;
       }
 
       if (!assertion) {
