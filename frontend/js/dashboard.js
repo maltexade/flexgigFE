@@ -61,29 +61,6 @@ async function withLoader(task) {
   }
 }
 
-// Auto-migrate legacy bio flags (runs once per session)
-const LEGACY_MIGRATED = 'legacyBioMigrated';
-if (!localStorage.getItem(LEGACY_MIGRATED)) {
-  const legacyEnabled = localStorage.getItem('security_biom_enabled') === '1';
-  const legacyLogin = localStorage.getItem('security_bio_login') === '1';
-  const legacyTx = localStorage.getItem('security_bio_tx') === '1';
-
-  if (legacyEnabled !== undefined || legacyLogin !== undefined || legacyTx !== undefined) {
-    localStorage.setItem('biometricsEnabled', legacyEnabled ? 'true' : 'false');
-    localStorage.setItem('biometricForLogin', legacyLogin ? 'true' : 'false');
-    localStorage.setItem('biometricForTx', legacyTx ? 'true' : 'false');
-
-    // Clean up
-    ['security_biom_enabled', 'security_bio_login', 'security_bio_tx', '__sec_bioLogin', 'security_bio_login'].forEach(key => {
-      localStorage.removeItem(key);
-    });
-
-    localStorage.setItem(LEGACY_MIGRATED, 'true');
-    console.log('[MIGRATION] Legacy bio flags synced to new format');
-  } else {
-    localStorage.setItem(LEGACY_MIGRATED, 'true');  // No-op if no legacy
-  }
-}
 
 // ---------- STORAGE INSTRUMENTATION (paste once near top of script) ----------
 (function instrumentStorage() {
