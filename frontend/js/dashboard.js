@@ -9340,7 +9340,8 @@ async function verifyBiometrics(uid, context = 'reauth') {
       let assertion = null;
       try {
         console.log('[verifyBiometrics] Attempting navigator.credentials.get() (conditional)');
-        assertion = await navigator.credentials.get({ publicKey: opts, mediation: 'conditional' });
+        assertion = await navigator.credentials.get({ publicKey: opts });
+
       } catch (e) {
         console.warn('[verifyBiometrics] conditional get() failed:', e);
       }
