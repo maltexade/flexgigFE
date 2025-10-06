@@ -100,7 +100,13 @@
     .add-money .icon-wrap { background: linear-gradient(135deg, rgba(0, 170, 255, 0.12), rgba(0, 170, 255, 0.06)); }
 
     .balance { padding: 6px 0 0 0; }
-    .balance h4{margin:0;font-size:0.85rem}
+    .balance h4{
+      margin:0;
+      font-size:0.85rem;
+    }
+    .balance-eye-toggle {
+      background:none;border:0;padding:0;margin-left:3px;display:inline-grid;align-items:center;cursor:pointer;width:28px;height:28px;color:inherit;position:relative; text-decoration: none; user-select: none; -webkit-user-select: none; -ms-user-select: none; -webkit-tap-highlight-color: transparent;
+    }
     .balance p { margin: 4px 0 0 0; font-size: 1.7rem; color: var(--muted); }
 
     /* action row */

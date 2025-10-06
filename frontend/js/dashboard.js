@@ -2441,19 +2441,157 @@ payBtn.addEventListener('click', () => {
   handleResize();
 
 
-  // --- BALANCE MANAGEMENT ---
-  let userBalance = parseFloat(localStorage.getItem('userBalance')) || 50000; // Initialize to ₦50,000
-  const balanceEl = document.querySelector('.balance p');
 
-  function updateBalanceDisplay() {
-      // Format with commas + 2 decimal places
-    balanceEl.textContent = `₦${userBalance.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-    localStorage.setItem('userBalance', userBalance);
-    console.log('[DEBUG] updateBalanceDisplay: Balance updated:', userBalance);
+
+/* --- BALANCE MANAGEMENT (keep original globals intact) --- */
+// keep same global names so other functions still work
+let userBalance = parseFloat(localStorage.getItem('userBalance')) || 50000; // Initialize to ₦50,000
+const balanceEl = document.querySelector('.balance p'); // same selector you used before
+
+// helper: format number as Naira with commas & 2 decimals
+function formatBalance(n) {
+  try {
+    return '₦' + Number(n).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  } catch (e) {
+    return '₦' + Number(n).toFixed(2);
+  }
+}
+
+// attempt to find the masked/real spans (preferred)
+const maskedSpan = document.querySelector('.balance-masked');
+const realSpan = document.querySelector('.balance-real');
+
+// update function (keeps localStorage like your original)
+function updateBalanceDisplay() {
+  const formatted = formatBalance(userBalance);
+
+  // if page includes the .balance-real span, update it (preserves masking)
+  if (realSpan) {
+    realSpan.textContent = formatted;
+  } else if (balanceEl) {
+    // fallback: match your old behavior and write directly to <p>
+    balanceEl.textContent = formatted;
   }
 
-  // Initialize balance display
+  try { localStorage.setItem('userBalance', String(userBalance)); } catch (e) { /* ignore storage errors */ }
+  console.log('[DEBUG] updateBalanceDisplay: Balance updated:', formatted);
+}
+
+// expose setter so other modules can update the balance (keeps same global var)
+window.setUserBalance = function(amount) {
+  const parsed = parseFloat(amount);
+  if (isNaN(parsed)) return;
+  userBalance = parsed;
   updateBalanceDisplay();
+};
+
+// initialize balance display (same as your previous code)
+updateBalanceDisplay();
+
+/* --- VISIBILITY / EYE TOGGLE (uses existing DOM ids/classes) --- */
+(function () {
+  const container = document.querySelector('.balance');
+  if (!container) return;
+
+  const toggle = container.querySelector('.balance-eye-toggle');
+  const eyeOpen = toggle && toggle.querySelector('.eye-open-svg');
+  const eyeClosed = toggle && toggle.querySelector('.eye-closed-svg');
+  const masked = maskedSpan || container.querySelector('.balance-masked'); // reuse found earlier
+  const real = realSpan || container.querySelector('.balance-real');
+  const p = balanceEl; // use your original reference
+
+  // read saved visibility (default: masked/hidden)
+  let visible = localStorage.getItem('balanceVisible') === 'true';
+
+  // prepare svg default styles if present (ensures smooth transitions)
+  if (eyeOpen) {
+    eyeOpen.style.transformOrigin = eyeOpen.style.transformOrigin || '50% 50%';
+    if (!eyeOpen.style.transform) eyeOpen.style.transform = 'translate(-50%,-50%) scaleY(.25)';
+    if (!eyeOpen.style.transition) eyeOpen.style.transition = 'transform 650ms cubic-bezier(.2,.9,.3,1), opacity 420ms ease';
+    eyeOpen.style.left = eyeOpen.style.left || '50%';
+    eyeOpen.style.top = eyeOpen.style.top || '50%';
+  }
+  if (eyeClosed) {
+    eyeClosed.style.transformOrigin = eyeClosed.style.transformOrigin || '50% 50%';
+    if (!eyeClosed.style.transform) eyeClosed.style.transform = 'translate(-50%,-50%) scaleY(1)';
+    if (!eyeClosed.style.transition) eyeClosed.style.transition = 'transform 520ms cubic-bezier(.2,.9,.3,1), opacity 320ms ease';
+    eyeClosed.style.left = eyeClosed.style.left || '50%';
+    eyeClosed.style.top = eyeClosed.style.top || '50%';
+  }
+
+  // animation helpers (match your centered transforms)
+  function animateToOpen() {
+    if (!eyeOpen || !eyeClosed) return;
+    eyeOpen.style.opacity = '1';
+    eyeOpen.style.transform = 'translate(-50%,-50%) scaleY(1) translateY(0)';
+    eyeClosed.style.opacity = '0';
+    eyeClosed.style.transform = 'translate(-50%,-50%) scaleY(.3) translateY(0)';
+  }
+  function animateToClosed() {
+    if (!eyeOpen || !eyeClosed) return;
+    eyeClosed.style.opacity = '1';
+    eyeClosed.style.transform = 'translate(-50%,-50%) scaleY(1) translateY(0)';
+    eyeOpen.style.opacity = '0';
+    eyeOpen.style.transform = 'translate(-50%,-50%) scaleY(.25) translateY(0)';
+  }
+
+  // single setter to update UI + persist state
+  function setState(v) {
+    visible = !!v;
+
+    if (visible) {
+      // show real amount
+      if (masked) masked.style.display = 'none';
+      if (real) {
+        real.style.display = 'inline';
+        setTimeout(() => { real.style.opacity = '1'; }, 10);
+      } else if (p) {
+        // if no .balance-real, update p text to formatted value (we already do that via updateBalanceDisplay)
+        p.style.opacity = '1';
+      }
+
+      setTimeout(animateToOpen, 60);
+      if (toggle) { toggle.setAttribute('aria-pressed', 'true'); toggle.setAttribute('aria-label', 'Hide balance'); }
+    } else {
+      // animate close then mask
+      animateToClosed();
+
+      if (real) {
+        real.style.opacity = '0';
+        setTimeout(() => {
+          real.style.display = 'none';
+          if (masked) masked.style.display = 'inline';
+        }, 360);
+      } else if (p) {
+        // fallback: fade the p content (keeping old behavior)
+        p.style.opacity = '0';
+        setTimeout(() => { p.style.opacity = '1'; if (masked) masked.style.display = 'inline'; }, 360);
+      }
+
+      if (toggle) { toggle.setAttribute('aria-pressed', 'false'); toggle.setAttribute('aria-label', 'Show balance'); }
+    }
+
+    try { localStorage.setItem('balanceVisible', visible); } catch (e) { /* ignore storage errors */ }
+  }
+
+  // wire toggle handlers
+  if (toggle) {
+    toggle.addEventListener('click', () => setState(!visible));
+    toggle.addEventListener('keydown', (e) => {
+      if (e.key === ' ' || e.key === 'Enter') {
+        e.preventDefault();
+        setState(!visible);
+      }
+    });
+  }
+
+  // initialize UI based on stored visibility
+  setState(visible);
+
+  // If other code modifies the global userBalance variable directly (older approach),
+  // call updateBalanceDisplay() afterwards or use window.setUserBalance(newAmount).
+})();
+
 
   // --- RECENT TRANSACTIONS ---
   // --- RECENT TRANSACTIONS ---
@@ -8969,7 +9107,7 @@ document.addEventListener('DOMContentLoaded', () => {
    Inactivity logic (Mobile + Desktop)
    ----------------------- */
 let idleTimeout = null;
-const IDLE_TIME = 15 * 1000; // 10 min in prod
+const IDLE_TIME = 10 * 10 * 1000; // 10 min in prod
 const PROMPT_TIMEOUT = 5000;
 const PROMPT_AUTO_CLOSE = true;
 let lastActive = Date.now();
