@@ -6937,7 +6937,9 @@ async function startAuthentication(userId) {
     });
 
     __sec_log.i('startAuthentication: Calling navigator.credentials.get');
-    const assertion = await navigator.credentials.get({ publicKey: options });
+    console.log('[verifyBiometrics] Attempting direct system prompt');
+assertion = await getWithTimeout(options);
+
     __sec_log.d('startAuthentication: Assertion received', { id: assertion?.id, type: assertion?.type });
     if (!assertion) throw new Error('No assertion returned');
 
@@ -8012,7 +8014,9 @@ async function handleBiometricButtonClick(uid, context='reauth') {
   }
   try {
     // Call get() synchronously in the click handler (no awaits before it)
-    const assertion = await navigator.credentials.get({ publicKey: opts });
+    console.log('[verifyBiometrics] Attempting direct system prompt');
+assertion = await getWithTimeout(options);
+
     console.log('[BIOMETRIC CLICK] navigator.credentials.get() returned', assertion);
     // then perform your normal verify flow (send assertion to server)
     // (perform verification async now)
@@ -9212,7 +9216,9 @@ async function verifyBiometrics(uid, context = 'reauth') {
       // Attempt 1: Conditional mediation (silent/direct)
       try {
         console.log('[verifyBiometrics] Attempting navigator.credentials.get() — conditional (silent/direct if supported)');
-        assertion = await getWithTimeout(tryOptions('conditional'));
+        console.log('[verifyBiometrics] Attempting direct system prompt');
+assertion = await getWithTimeout(options);
+
         console.log('[verifyBiometrics] Conditional get() returned:', assertion);
       } catch (e) {
         console.warn('[verifyBiometrics] Conditional get() failed:', e);
@@ -9222,7 +9228,8 @@ async function verifyBiometrics(uid, context = 'reauth') {
       if (!assertion) {
         try {
           console.log('[verifyBiometrics] Attempting navigator.credentials.get() — fallback with prompt (no mediation)');
-          assertion = await getWithTimeout(tryOptions(undefined));
+          console.log('[verifyBiometrics] Attempting direct system prompt');
+assertion = await getWithTimeout(options);
           console.log('[verifyBiometrics] Fallback prompt get() returned:', assertion);
         } catch (e) {
           console.error('[verifyBiometrics] Prompt attempt failed:', e);
