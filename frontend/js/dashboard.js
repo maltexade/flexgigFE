@@ -9268,11 +9268,11 @@ async function verifyBiometrics(uid, context = 'reauth') {
       }
       console.log('[verifyBiometrics] credentialId raw read:', stored, 'origin:', location.origin, 'time:', new Date().toISOString());
 
-      let usedEndpoint = '/webauthn/auth/options/discover';
+      let usedEndpoint = '/webauthn/auth/options';
       let body = JSON.stringify({ userId: uid, context });
       if (!stored) {
         console.warn('[verifyBiometrics] No stored credentialId — using discover endpoint');
-        usedEndpoint = '/webauthn/auth/options/discover';
+        usedEndpoint = '/webauthn/auth/options';
         body = JSON.stringify({ userId: uid, context });
       }
 
@@ -9284,7 +9284,7 @@ async function verifyBiometrics(uid, context = 'reauth') {
       // retry discover on 404 if we tried specific
       if (!optRes.ok && stored) {
         console.warn('[verifyBiometrics] specific options failed; retrying discover...');
-        usedEndpoint = '/webauthn/auth/options/discover';
+        usedEndpoint = '/webauthn/auth/options';
         body = JSON.stringify({ userId: uid, context });
         optRes = await fetch(`${apiBase}${usedEndpoint}`, {
           method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body
