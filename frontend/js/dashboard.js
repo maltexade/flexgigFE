@@ -6759,6 +6759,15 @@ async function startRegistration(userId, username, displayName) {
     __sec_log.i('startRegistration: Calling navigator.credentials.create');
     const cred = await navigator.credentials.create({ publicKey: options });
     __sec_log.d('startRegistration: Credential created', { id: cred?.id, type: cred?.type });
+    console.log('[REG] credential created id:', cred.id);
+    try {
+      const transports = cred.response.getTransports ? cred.response.getTransports() : null;
+      console.log('[REG] transports:', transports);
+    } catch(e) {
+      console.warn('[REG] getTransports threw', e);
+    }
+    console.log('[REG] rawId hex:', (function bufToHex(b){ const u=new Uint8Array(b); return Array.from(u).map(x=>x.toString(16).padStart(2,'0')).join(''); })(cred.rawId));
+
     if (!cred) throw new Error('No credential returned');
 
     // Build prepared credential for server
@@ -7959,6 +7968,29 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
       console.log('Fresh user data populated and cached');
     }
 
+
+    // bind this directly to the biometric button
+async function handleBiometricButtonClick(uid, context='reauth') {
+  console.log('[BIOMETRIC CLICK] handler invoked', { uid, time: new Date().toISOString(), visible: document.visibilityState });
+  // MUST be immediate in user gesture: use cached options
+  const opts = window.__cachedAuthOptions;
+  if (!opts) {
+    console.warn('[BIOMETRIC CLICK] No cached auth options — consider prefetchAuthOptionsFor() when showing modal');
+    // Optionally: fall back to fetching then call get() (may fail due to lost gesture)
+    return;
+  }
+  try {
+    // Call get() synchronously in the click handler (no awaits before it)
+    const assertion = await navigator.credentials.get({ publicKey: opts });
+    console.log('[BIOMETRIC CLICK] navigator.credentials.get() returned', assertion);
+    // then perform your normal verify flow (send assertion to server)
+    // (perform verification async now)
+    // --- example: process and send to /webauthn/auth/verify ---
+  } catch (e) {
+    console.error('[BIOMETRIC CLICK] navigator.credentials.get() error', e);
+  }
+}
+
 // 🔹 Biometric button in PIN view (reauth)
 setTimeout(() => {
   const bioBtn = document.getElementById('pinBiometricBtn');
@@ -8988,6 +9020,63 @@ async function setupInactivity() {
   });
 
   resetIdleTimer(); // start timer immediately
+}
+
+// global cache
+window.__cachedAuthOptions = null;
+
+async function prefetchAuthOptionsFor(uid, context = 'reauth') {
+  try {
+    const apiBase = window.__SEC_API_BASE || '';
+    const credentialId = localStorage.getItem('credentialId') || null;
+    const endpoint = credentialId ? '/webauthn/auth/options' : '/webauthn/auth/options/discover';
+    const body = credentialId ? { userId: uid, credentialId, context } : { userId: uid, context };
+
+    const res = await fetch(`${apiBase}${endpoint}`, {
+      method: 'POST', credentials: 'include', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
+    });
+    if (!res.ok) throw new Error(`Options fetch failed ${res.status}`);
+
+    const opts = await res.json();
+
+    // convert challenge
+    opts.challenge = (function base64ToBuf(s){
+      let b = s.replace(/-/g,'+').replace(/_/g,'/');
+      const pad = b.length % 4; if (pad) b += '='.repeat(4-pad);
+      const str = atob(b);
+      const arr = new Uint8Array(str.length);
+      for(let i=0;i<str.length;i++) arr[i]=str.charCodeAt(i);
+      return arr.buffer;
+    })(opts.challenge);
+
+    // convert allowCredentials if present
+    if (Array.isArray(opts.allowCredentials) && opts.allowCredentials.length) {
+      opts.allowCredentials = opts.allowCredentials.map(c => ({ ...c, id: (function base64ToBuf(s){
+        let b = s.replace(/-/g,'+').replace(/_/g,'/');
+        const pad = b.length % 4; if (pad) b += '='.repeat(4-pad);
+        const str = atob(b);
+        const arr = new Uint8Array(str.length);
+        for(let i=0;i<str.length;i++) arr[i]=str.charCodeAt(i);
+        return arr.buffer;
+      })(c.id) }));
+    } else {
+      delete opts.allowCredentials; // ensure discoverable behavior
+    }
+
+    opts.userVerification = opts.userVerification || 'required';
+    opts.timeout = opts.timeout || 60000;
+
+    // store ready-to-use options
+    window.__cachedAuthOptions = opts;
+    console.log('[PREFETCH] cached auth options ready', {
+      rpId: opts.rpId, allowCount: opts.allowCredentials ? opts.allowCredentials.length : 'omitted', time: new Date().toISOString()
+    });
+    return opts;
+  } catch (e) {
+    console.error('[PREFETCH] failed to fetch auth options', e);
+    window.__cachedAuthOptions = null;
+    throw e;
+  }
 }
 
 
