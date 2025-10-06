@@ -8002,7 +8002,7 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
     }
 
 
-    // bind this directly to the biometric button
+// bind this directly to the biometric button
 async function handleBiometricButtonClick(uid, context='reauth') {
   console.log('[BIOMETRIC CLICK] handler invoked', { uid, time: new Date().toISOString(), visible: document.visibilityState });
   // MUST be immediate in user gesture: use cached options
@@ -8015,14 +8015,44 @@ async function handleBiometricButtonClick(uid, context='reauth') {
   try {
     // Call get() synchronously in the click handler (no awaits before it)
     console.log('[verifyBiometrics] Attempting direct system prompt');
-assertion = await getWithTimeout(options);
+    const assertion = await getWithTimeout(() => navigator.credentials.get(opts));
 
     console.log('[BIOMETRIC CLICK] navigator.credentials.get() returned', assertion);
+    
+    // Now get UID if not provided (after get() to preserve gesture)
+    let userId = uid;
+    if (!userId) {
+      const session = await safeCall(getSession);
+      userId = session?.user?.uid || session?.user?.id;
+      if (!userId) {
+        throw new Error('No valid user ID for biometric reauth.');
+      }
+    }
+    
     // then perform your normal verify flow (send assertion to server)
     // (perform verification async now)
     // --- example: process and send to /webauthn/auth/verify ---
+    const verifyResult = await fetch('/webauthn/auth/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assertion, userId, context })
+    }).then(r => r.json());
+    
+    if (verifyResult?.success) {
+      console.log('[BIOMETRIC CLICK] Verification successful');
+      if (typeof hideReauthModal === 'function') hideReauthModal();
+      if (typeof onSuccessfulReauth === 'function') onSuccessfulReauth();
+    } else {
+      console.warn('[BIOMETRIC CLICK] Verification failed', verifyResult);
+      if (typeof safeCall === 'function' && typeof notify === 'function') {
+        safeCall(notify, 'Biometric verification failed', 'error');
+      }
+    }
   } catch (e) {
     console.error('[BIOMETRIC CLICK] navigator.credentials.get() error', e);
+    if (typeof safeCall === 'function' && typeof notify === 'function') {
+      safeCall(notify, 'Biometric verification failed', 'error');
+    }
   }
 }
 
@@ -8046,7 +8076,7 @@ setTimeout(() => {
   console.log(`[reauth] Biometric button visibility: ${bioLoginEnabled ? 'shown' : 'hidden'}`);
 
   if (bioBtn.__bound) return; // prevent double-binding
-  bioBtn.addEventListener('click', async () => {
+  bioBtn.addEventListener('click', () => {
     console.log('[reauth] Biometric button clicked (PIN modal)');
 
     if (!bioLoginEnabled) {
@@ -8059,37 +8089,8 @@ setTimeout(() => {
       return;
     }
 
-    const session = await safeCall(getSession);
-    const uid = session?.user?.uid || session?.user?.id;
-    if (!uid) {
-      console.error('[reauth] No valid user ID for biometric reauth.');
-      if (typeof safeCall === 'function' && typeof notify === 'function') {
-        safeCall(notify, 'Session expired - please log in again', 'error');
-      } else {
-        console.error('Session expired - please log in again');
-      }
-      return;
-    }
-
-    try {
-      console.log('[reauth] Starting biometric verification for reauth...');
-      const result = await verifyBiometrics(uid, 'reauth');
-      if (result?.success) {
-        console.log('[reauth] Biometric verified successfully');
-        if (typeof hideReauthModal === 'function') hideReauthModal();
-        if (typeof onSuccessfulReauth === 'function') onSuccessfulReauth();
-      } else {
-        console.warn('[reauth] Biometric verification failed or cancelled', result);
-        if (typeof safeCall === 'function' && typeof notify === 'function') {
-          safeCall(notify, 'Biometric verification failed', 'error');
-        }
-      }
-    } catch (err) {
-      console.error('[reauth] Biometric verification error:', err);
-      if (typeof safeCall === 'function' && typeof notify === 'function') {
-        safeCall(notify, 'Biometric verification failed', 'error');
-      }
-    }
+    // Call handle immediately (no awaits before — UID fetched after get() inside handle)
+    handleBiometricButtonClick(undefined, 'reauth');
   });
   bioBtn.__bound = true;
   console.log('[reauth] pinBiometricBtn bound successfully');
