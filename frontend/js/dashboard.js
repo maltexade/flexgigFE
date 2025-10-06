@@ -8002,6 +8002,23 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
     }
 
 
+// Prefetch function (assuming it exists or implement as below)
+async function prefetchAuthOptionsFor(uid, context = 'reauth') {
+  try {
+    // Fetch options from server
+    const response = await fetch(`/webauthn/auth/options?uid=${uid}&context=${context}`);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: Failed to fetch auth options`);
+    }
+    const opts = await response.json();
+    window.__cachedAuthOptions = opts;
+    console.log(`[PREFETCH] Cached auth options for uid ${uid}`);
+  } catch (e) {
+    console.error(`[PREFETCH] Failed to cache auth options for uid ${uid}:`, e);
+    window.__cachedAuthOptions = null; // Clear if failed
+  }
+}
+
 // bind this directly to the biometric button
 async function handleBiometricButtonClick(uid, context='reauth') {
   console.log('[BIOMETRIC CLICK] handler invoked', { uid, time: new Date().toISOString(), visible: document.visibilityState });
@@ -8057,7 +8074,7 @@ async function handleBiometricButtonClick(uid, context='reauth') {
 }
 
 // 🔹 Biometric button in PIN view (reauth)
-setTimeout(() => {
+setTimeout(async () => {
   const bioBtn = document.getElementById('pinBiometricBtn');
   if (!bioBtn) return;
 
@@ -8070,12 +8087,36 @@ setTimeout(() => {
   ).toLowerCase()
 );
 
-
   // Hide button if biometric not enabled
   bioBtn.style.display = bioLoginEnabled ? 'inline-flex' : 'none';
   console.log(`[reauth] Biometric button visibility: ${bioLoginEnabled ? 'shown' : 'hidden'}`);
 
   if (bioBtn.__bound) return; // prevent double-binding
+
+  // Fetch session and prefetch options early (before binding, while modal is visible)
+  let uid;
+  try {
+    const session = await safeCall(getSession);
+    uid = session?.user?.uid || session?.user?.id;
+    if (!uid) {
+      console.error('[reauth] No valid user ID for biometric reauth during prefetch.');
+      if (typeof safeCall === 'function' && typeof notify === 'function') {
+        safeCall(notify, 'Session expired - please log in again', 'error');
+      } else {
+        console.error('Session expired - please log in again');
+      }
+      return;
+    }
+    // Prefetch options now (runs early, before click)
+    await prefetchAuthOptionsFor(uid, 'reauth');
+  } catch (err) {
+    console.error('[reauth] Failed to prefetch for biometric reauth:', err);
+    if (typeof safeCall === 'function' && typeof notify === 'function') {
+      safeCall(notify, 'Failed to prepare biometric verification', 'error');
+    }
+    return;
+  }
+
   bioBtn.addEventListener('click', () => {
     console.log('[reauth] Biometric button clicked (PIN modal)');
 
@@ -8089,8 +8130,8 @@ setTimeout(() => {
       return;
     }
 
-    // Call handle immediately (no awaits before — UID fetched after get() inside handle)
-    handleBiometricButtonClick(undefined, 'reauth');
+    // Call handle immediately (no awaits before — UID already prefetched)
+    handleBiometricButtonClick(uid, 'reauth');
   });
   bioBtn.__bound = true;
   console.log('[reauth] pinBiometricBtn bound successfully');
