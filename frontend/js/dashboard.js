@@ -9196,7 +9196,7 @@ async function verifyBiometrics(uid, context = 'reauth') {
         allowCredentials: options.allowCredentials ? options.allowCredentials.length : 'omitted',
         userVerification: options.userVerification,
         rpId: options.rpId,
-        mediation: 'conditional (first attempt)',
+
       });
 
       let assertion = null;
