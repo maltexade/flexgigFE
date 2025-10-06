@@ -61,6 +61,37 @@ async function withLoader(task) {
   }
 }
 
+// Global helper: Robustly read credentialId from multiple stores
+function readCredentialId() {
+  let id = null;
+  try {
+    id = localStorage.getItem('credentialId');
+    console.log('[CRED READ] localStorage:', id);
+  } catch (e) {
+    console.warn('[CRED READ] localStorage read error:', e);
+  }
+  if (!id) {
+    try {
+      id = sessionStorage.getItem('credentialId');
+      console.log('[CRED READ] sessionStorage:', id);
+    } catch (e) {
+      console.warn('[CRED READ] sessionStorage read error:', e);
+    }
+  }
+  if (!id) {
+    try {
+      id = (document.cookie.match(/(?:^|;\s*)fg_credentialId=([^;]+)/) || [])[1] || null;
+      console.log('[CRED READ] cookie:', id);
+    } catch (e) {
+      console.warn('[CRED READ] cookie read error:', e);
+    }
+  }
+  console.log('[CRED READ] robust read final:', id);
+  return id;
+}
+
+// Expose to window for easy access (e.g., window.readCredentialId() in console)
+window.readCredentialId = readCredentialId;
 
 // ---------- STORAGE INSTRUMENTATION (paste once near top of script) ----------
 (function instrumentStorage() {
