@@ -8211,6 +8211,108 @@ async function handleBiometricButtonClick(uid, context='reauth') {
   }
 }
 
+/* 🔧 Bind biometric button reliably and preserve user gesture */
+function bindReauthBiometricButton() {
+  const btn = document.getElementById('pinBiometricBtn');
+  if (!btn) return;
+
+  // only bind once
+  if (btn.__bound) return;
+  btn.__bound = true;
+
+  // check local setting
+  const bioLoginEnabled = ['true', '1', 'yes'].includes(
+    (
+      localStorage.getItem('biometricForLogin') ||
+      localStorage.getItem('__sec_bioLogin') ||
+      localStorage.getItem('security_bio_login') || ''
+    ).toLowerCase()
+  );
+  btn.style.display = bioLoginEnabled ? 'inline-flex' : 'none';
+
+  btn.addEventListener('click', async () => {
+    console.log('[reauth] Biometric button clicked');
+    if (!bioLoginEnabled) {
+      safeCall?.(notify, 'Biometric login not enabled', 'warn');
+      return;
+    }
+
+    // ⚡ must use cached options (prefetched earlier)
+    const session = await safeCall(getSession);
+    const uid = session?.user?.uid || session?.user?.id;
+    if (!uid) return safeCall?.(notify, 'Session expired', 'error');
+
+    // ensure options cached (fetch silently if missing)
+    if (!window.__cachedAuthOptions) await prefetchAuthOptionsFor(uid, 'reauth');
+
+    // call WebAuthn immediately inside gesture
+    try {
+      const opts = window.__cachedAuthOptions;
+      opts.userVerification = 'required';
+      delete opts.allowCredentials;
+      const assertion = await navigator.credentials.get({
+        publicKey: opts,
+        mediation: 'conditional'
+      });
+      await verifyAuthAssertion(assertion, uid, 'reauth');
+    } catch (err1) {
+      console.warn('[BIO] conditional mediation failed:', err1.name);
+      try {
+        const opts = window.__cachedAuthOptions;
+        const assertion = await navigator.credentials.get({ publicKey: opts });
+        await verifyAuthAssertion(assertion, uid, 'reauth');
+      } catch (err2) {
+        if (err2.name === 'NotAllowedError') {
+          showSlideNotification?.('Fingerprint canceled', 'warn');
+        } else {
+          showSlideNotification?.('Biometric verification failed', 'error');
+          console.error(err2);
+        }
+      }
+    }
+  });
+
+  console.log('[reauth] pinBiometricBtn bound successfully');
+}
+
+/* 🔁 Observe modal for dynamic rendering so the button is always bound */
+new MutationObserver(() => bindReauthBiometricButton())
+  .observe(document.body, { childList: true, subtree: true });
+
+/* 🧩 simple assertion→verify helper */
+async function verifyAuthAssertion(assertion, uid, context) {
+  if (!assertion) return;
+  const authData = {
+    id: assertion.id,
+    rawId: arrayBufferToBase64url(assertion.rawId),
+    response: {
+      clientDataJSON: arrayBufferToBase64url(assertion.response.clientDataJSON),
+      authenticatorData: arrayBufferToBase64url(assertion.response.authenticatorData),
+      signature: arrayBufferToBase64url(assertion.response.signature),
+      userHandle: assertion.response.userHandle
+        ? arrayBufferToBase64url(assertion.response.userHandle)
+        : null
+    },
+    type: assertion.type,
+    userId: uid,
+    context
+  };
+  const r = await fetch('/webauthn/auth/verify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(authData)
+  });
+  const res = await r.json();
+  if (res?.success) {
+    showSlideNotification?.('Biometric verified ✅', 'success');
+    hideReauthModal?.();
+    onSuccessfulReauth?.();
+  } else {
+    showSlideNotification?.('Biometric verification failed', 'error');
+  }
+}
+
+
 // 🔹 Biometric button in PIN view (reauth)
 setTimeout(async () => {
   const bioBtn = document.getElementById('pinBiometricBtn');
