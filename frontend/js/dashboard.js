@@ -6690,7 +6690,7 @@ function uuidToArrayBuffer(uuid) {
   return buffer.buffer;
 }
 
-/* ---- Registration flow ---- */
+/* ---- Registration flow (instrumented + persists to localStorage immediately) ---- */
 async function startRegistration(userId, username, displayName) {
   __sec_log.d('startRegistration entry', { userId, username, displayName });
   try {
@@ -6704,12 +6704,14 @@ async function startRegistration(userId, username, displayName) {
     const apiBase = window.__SEC_API_BASE || "https://api.flexgig.com.ng";
     const optUrl = `${apiBase}/webauthn/register/options`;
     __sec_log.d('startRegistration: Fetching options from', optUrl);
+
     const optRes = await fetch(optUrl, {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId, username, displayName }),
     });
+
     const optRaw = await optRes.text();
     __sec_log.d('startRegistration: Options response', { status: optRes.status, ok: optRes.ok, raw: optRaw });
     if (!optRes.ok) throw new Error(`Options failed: ${optRaw}`);
@@ -6759,6 +6761,7 @@ async function startRegistration(userId, username, displayName) {
     __sec_log.d('startRegistration: Credential created', { id: cred?.id, type: cred?.type });
     if (!cred) throw new Error('No credential returned');
 
+    // Build prepared credential for server
     const credential = {
       id: cred.id,
       rawId: arrayBufferToBase64url(cred.rawId),
@@ -6771,6 +6774,22 @@ async function startRegistration(userId, username, displayName) {
     };
     __sec_log.d('startRegistration: Prepared credential for verify', { id: credential.id, rawIdLength: credential.rawId.length });
 
+    // --- IMMEDIATE LOCAL PERSIST (pre-verify fallback) ---
+    try {
+      // Save the rawId fallback immediately so reloads/unloads won't lose it
+      localStorage.setItem('credentialId', credential.rawId);
+      localStorage.setItem('credentialSavedAt', new Date().toISOString());
+      console.log('[CRED DEBUG] pre-verify setItem credentialId ->', localStorage.getItem('credentialId'));
+      console.log('[CRED DEBUG] origin/domain:', location.origin, document.domain);
+      console.trace('[CRED DEBUG] pre-verify write trace');
+      // sanity assert
+      console.assert(localStorage.getItem('credentialId') === credential.rawId, 'Pre-verify credentialId not persisted!');
+      __sec_log.d('startRegistration: Pre-verify credentialId saved to localStorage', { rawIdLen: credential.rawId.length });
+    } catch (e) {
+      __sec_log.e('startRegistration: Failed to persist pre-verify credentialId to localStorage', { error: (e && e.message) || e });
+    }
+
+    // Send to server for canonical verify
     const verifyUrl = `${apiBase}/webauthn/register/verify`;
     __sec_log.d('startRegistration: Verifying at', verifyUrl);
     const verifyRes = await fetch(verifyUrl, {
@@ -6779,12 +6798,35 @@ async function startRegistration(userId, username, displayName) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId, credential }),
     });
+
     const verifyRaw = await verifyRes.text();
     __sec_log.d('startRegistration: Verify response', { status: verifyRes.status, ok: verifyRes.ok, raw: verifyRaw });
-    if (!verifyRes.ok) throw new Error(`Verify failed: ${verifyRaw}`);
+    if (!verifyRes.ok) {
+      // If server verify fails, keep the pre-verify fallback in storage for debugging
+      __sec_log.e('startRegistration: Verify failed — pre-verify value retained for inspection', { preverify: localStorage.getItem('credentialId') });
+      throw new Error(`Verify failed: ${verifyRaw}`);
+    }
 
     const verifyResult = JSON.parse(verifyRaw);
     __sec_log.i('startRegistration: Verify success', verifyResult);
+
+    // Overwrite local storage with canonical server credentialId if present
+    try {
+      const serverId = verifyResult?.credentialId;
+      if (serverId) {
+        localStorage.setItem('credentialId', serverId);
+        localStorage.setItem('credentialSavedAt', new Date().toISOString());
+        console.log('[CRED DEBUG] post-verify setItem credentialId ->', localStorage.getItem('credentialId'));
+        console.trace('[CRED DEBUG] post-verify write trace');
+        console.assert(localStorage.getItem('credentialId') === serverId, 'Post-verify credentialId not persisted!');
+        __sec_log.d('startRegistration: Server credentialId saved to localStorage', { serverId });
+      } else {
+        __sec_log.w('startRegistration: Server did not return credentialId — keeping pre-verify fallback', { fallback: localStorage.getItem('credentialId') });
+      }
+    } catch (e) {
+      __sec_log.e('startRegistration: Failed to write server credentialId to localStorage', { error: (e && e.message) || e });
+    }
+
     return verifyResult;
   } catch (err) {
     __sec_log.e('startRegistration error', {
@@ -6793,9 +6835,17 @@ async function startRegistration(userId, username, displayName) {
       userId,
       username
     });
+    // Ensure we still surface the pre-verify fallback for debugging
+    try {
+      const fallback = localStorage.getItem('credentialId');
+      __sec_log.d('startRegistration: fallback credentialId (from localStorage) after error', { fallback });
+    } catch (e) {
+      __sec_log.e('startRegistration: reading fallback failed', { err: (e && e.message) || e });
+    }
     throw err;
+  } finally {
+    __sec_log.d('startRegistration exit');
   }
-  __sec_log.d('startRegistration exit');
 }
 
 /* ---- Authentication flow ---- */
