@@ -9282,9 +9282,11 @@ async function verifyBiometrics(uid, context = 'reauth') {
 
       console.log('[verifyBiometrics] credentialId raw read:', stored, 'origin:', location.origin);
 
-      // Prepare endpoint and payload
       let usedEndpoint = '/webauthn/auth/options';
-      let body = JSON.stringify({ userId: uid, context });
+      // if we have a stored credential id, send it so server will return allowCredentials
+      let body = stored
+        ? JSON.stringify({ userId: uid, credentialId: stored, context })
+        : JSON.stringify({ userId: uid, context });
 
       console.log('[verifyBiometrics] Fetching options from:', `${apiBase}${usedEndpoint}`, 'body:', JSON.parse(body));
       const optRes = await fetch(`${apiBase}${usedEndpoint}`, {
