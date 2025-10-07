@@ -9338,20 +9338,22 @@ async function verifyBiometrics(uid, context = 'reauth') {
 
       // --- Try get() ---
       let assertion = null;
-      try {
-        console.log('[verifyBiometrics] Attempting navigator.credentials.get() (conditional)');
-        assertion = await navigator.credentials.get({ publicKey: opts });
+try {
+  const canUseConditional = await PublicKeyCredential.isConditionalMediationAvailable?.();
+  if (canUseConditional) {
+    console.log('[verifyBiometrics] Conditional mediation supported — trying silent auth');
+    assertion = await navigator.credentials.get({ publicKey: opts, mediation: 'conditional' });
+  } else {
+    console.log('[verifyBiometrics] Conditional mediation not available — showing prompt');
+    assertion = await navigator.credentials.get({ publicKey: opts });
+  }
+} catch (e) {
+  console.warn('[verifyBiometrics] Conditional check failed or user canceled:', e);
+  if (!assertion) {
+    assertion = await navigator.credentials.get({ publicKey: opts });
+  }
+}
 
-      } catch (e) {
-        console.warn('[verifyBiometrics] conditional get() failed:', e);
-      }
-
-      if (!assertion) {
-        console.log('[verifyBiometrics] Fallback to user-prompted get()');
-        assertion = await navigator.credentials.get({ publicKey: opts });
-      }
-
-      if (!assertion) throw new Error('No assertion returned');
 
       // --- Prepare verification payload ---
       const credential = {
