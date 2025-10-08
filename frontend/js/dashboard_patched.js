@@ -8111,24 +8111,98 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
 
 
     // bind this directly to the biometric button
-async function handleBiometricButtonClick(uid, context='reauth') {
-  console.log('[BIOMETRIC CLICK] handler invoked', { uid, time: new Date().toISOString(), visible: document.visibilityState });
-  // MUST be immediate in user gesture: use cached options
-  const opts = window.__cachedAuthOptions;
-  if (!opts) {
-    console.warn('[BIOMETRIC CLICK] No cached auth options — consider prefetchAuthOptionsFor() when showing modal');
-    // Optionally: fall back to fetching then call get() (may fail due to lost gesture)
-    return;
-  }
+// ----------------------
+// Immediate click handler
+// MUST be called directly from user gesture (click)
+// ----------------------
+async function handleBiometricButtonClick(uid, context = 'reauth') {
+  // This must NOT await network before calling get(); ensure options are already cached.
   try {
-    // Call get() synchronously in the click handler (no awaits before it)
-    const assertion = await navigator.credentials.get({ publicKey: opts });
-    console.log('[BIOMETRIC CLICK] navigator.credentials.get() returned', assertion);
-    // then perform your normal verify flow (send assertion to server)
-    // (perform verification async now)
-    // --- example: process and send to /webauthn/auth/verify ---
-  } catch (e) {
-    console.error('[BIOMETRIC CLICK] navigator.credentials.get() error', e);
+    if (!('PublicKeyCredential' in window)) throw new Error('WebAuthn not supported');
+    if (!uid) throw new Error('No user id');
+
+    const publicKey = window.__cachedAuthPublicKey;
+    if (!publicKey) {
+      console.warn('[BIOMETRIC CLICK] No cached publicKey; call prefetchAuthOptions(uid) when modal opens.');
+      // For reliability, you could attempt a network fetch here but it may lose the gesture -> NotAllowedError
+      return { success: false, error: 'No cached auth options' };
+    }
+
+    // Defensive sanity checks (must be ArrayBuffers)
+    if (publicKey.challenge == null || !(publicKey.challenge instanceof ArrayBuffer)) {
+      console.warn('[BIOMETRIC CLICK] publicKey.challenge not ArrayBuffer; aborting.');
+      return { success: false, error: 'Invalid cached challenge' };
+    }
+    if (publicKey.allowCredentials && publicKey.allowCredentials.length) {
+      const bad = publicKey.allowCredentials.find(c => !(c.id instanceof ArrayBuffer));
+      if (bad) {
+        console.warn('[BIOMETRIC CLICK] allowCredentials contains non-ArrayBuffer id; aborting.');
+        return { success: false, error: 'Invalid cached allowCredentials' };
+      }
+    }
+
+    // Synchronous call inside click handler:
+    let assertion = null;
+    try {
+      // Prefer conditional if available (fast), but calling get() is the gestureful action.
+      // Do not put network awaits before this line in this function.
+      assertion = await navigator.credentials.get({ publicKey });
+      // If assertion is null, treat as cancelled/no result
+      if (!assertion) return { success: false, error: 'No assertion returned' };
+    } catch (e) {
+      console.error('[BIOMETRIC CLICK] navigator.credentials.get() error', e);
+      return { success: false, error: e.name || e.message || String(e) };
+    }
+
+    // Now that we have an assertion, hand off to server verification asynchronously
+    try {
+      // Build the payload (base64url)
+      function abToBase64Url(buf) {
+        const bytes = new Uint8Array(buf);
+        let s = '';
+        for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+        const b64 = btoa(s);
+        return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      }
+
+      const credential = {
+        id: assertion.id,
+        rawId: abToBase64Url(assertion.rawId),
+        type: assertion.type,
+        response: {
+          clientDataJSON: abToBase64Url(assertion.response.clientDataJSON),
+          authenticatorData: abToBase64Url(assertion.response.authenticatorData),
+          signature: abToBase64Url(assertion.response.signature),
+          userHandle: assertion.response.userHandle ? abToBase64Url(assertion.response.userHandle) : null
+        }
+      };
+
+      // send to server verify endpoint
+      const apiBase = window.__SEC_API_BASE || '';
+      const verifyRes = await fetch(`${apiBase}/webauthn/auth/verify`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: uid, credential, context })
+      });
+
+      if (!verifyRes.ok) {
+        const txt = await verifyRes.text().catch(() => String(verifyRes.status));
+        console.error('[BIOMETRIC CLICK] server verify failed', verifyRes.status, txt);
+        return { success: false, error: `Server verify failed ${verifyRes.status}` };
+      }
+      const json = await verifyRes.json();
+      // persist server-returned credential id if present
+      if (json && json.credentialId) {
+        try { persistCredentialId(json.credentialId); } catch(e) { console.warn('persistCredentialId failed', e); }
+      }
+      return { success: true, result: json };
+    } catch (err) {
+      console.error('[BIOMETRIC CLICK] verify error', err);
+      return { success: false, error: err.message || String(err) };
+    }
+  } catch (ex) {
+    console.error('[BIOMETRIC CLICK] fatal', ex);
+    return { success: false, error: ex.message || String(ex) };
   }
 }
 
@@ -8151,55 +8225,51 @@ setTimeout(() => {
   bioBtn.style.display = bioLoginEnabled ? 'inline-flex' : 'none';
   console.log(`[reauth] Biometric button visibility: ${bioLoginEnabled ? 'shown' : 'hidden'}`);
 
-  if (bioBtn.__bound) return; // prevent double-binding
-  bioBtn.addEventListener('click', async () => {
-    console.log('[reauth] Biometric button clicked (PIN modal)');
+if (bioBtn.__bound) return; // prevent double-binding
+bioBtn.addEventListener('click', async (ev) => {
+  ev.preventDefault();
+  console.log('[reauth] Biometric button clicked (PIN modal)');
 
-    if (!bioLoginEnabled) {
-      console.warn('[reauth] Biometric login not enabled locally.');
-      if (typeof safeCall === 'function' && typeof notify === 'function') {
-        safeCall(notify, 'Biometric login not enabled', 'warn');
-      } else {
-        console.warn('Biometric login not enabled');
-      }
-      return;
+  if (!bioLoginEnabled) {
+    console.warn('[reauth] Biometric login not enabled locally.');
+    if (typeof safeCall === 'function' && typeof notify === 'function') {
+      safeCall(notify, 'Biometric login not enabled', 'warn');
+    } else {
+      console.warn('Biometric login not enabled');
     }
+    return;
+  }
 
-    const session = await safeCall(getSession);
-    const uid = session?.user?.uid || session?.user?.id;
-    if (!uid) {
-      console.error('[reauth] No valid user ID for biometric reauth.');
-      if (typeof safeCall === 'function' && typeof notify === 'function') {
-        safeCall(notify, 'Session expired - please log in again', 'error');
-      } else {
-        console.error('Session expired - please log in again');
-      }
-      return;
+  const session = await safeCall(getSession);
+  const uid = session?.user?.uid || session?.user?.id;
+  if (!uid) {
+    console.error('[reauth] No valid user ID for biometric reauth.');
+    if (typeof safeCall === 'function' && typeof notify === 'function') {
+      safeCall(notify, 'Session expired - please log in again', 'error');
+    } else {
+      console.error('Session expired - please log in again');
     }
+    return;
+  }
 
-    try {
-      console.log('[reauth] Starting biometric verification for reauth...');
-      const result = await verifyBiometrics(uid, 'reauth');
-      if (result?.success) {
-        console.log('[reauth] Biometric verified successfully');
-        if (typeof hideReauthModal === 'function') hideReauthModal();
-        if (typeof onSuccessfulReauth === 'function') onSuccessfulReauth();
-      } else {
-        console.warn('[reauth] Biometric verification failed or cancelled', result);
-        if (typeof safeCall === 'function' && typeof notify === 'function') {
-          safeCall(notify, 'Biometric verification failed', 'error');
-        }
-      }
-    } catch (err) {
-      console.error('[reauth] Biometric verification error:', err);
-      if (typeof safeCall === 'function' && typeof notify === 'function') {
-        safeCall(notify, 'Biometric verification failed', 'error');
-      }
+  // ⚡ Call immediate local biometric handler (fast prompt)
+  const res = await handleBiometricButtonClick(uid, 'reauth');
+
+  if (res?.success) {
+    console.log('[reauth] Biometric verified successfully (instant handler)');
+    if (typeof hideReauthModal === 'function') hideReauthModal();
+    if (typeof onSuccessfulReauth === 'function') onSuccessfulReauth();
+  } else {
+    console.warn('[reauth] Biometric verification failed or cancelled', res);
+    if (typeof safeCall === 'function' && typeof notify === 'function') {
+      safeCall(notify, 'Biometric verification failed', 'error');
     }
-  });
-  bioBtn.__bound = true;
-  console.log('[reauth] pinBiometricBtn bound successfully');
+  }
+});
+bioBtn.__bound = true;
+console.log('[reauth] pinBiometricBtn bound successfully');
 }, 300);
+
 
 
 
@@ -8438,6 +8508,21 @@ setTimeout(() => {
   } catch (e) {
     console.error('Error calling initReauthKeypad:', e);
   }
+
+    // Prefetch biometric options early if modal is about to be shown
+  if (show && typeof prefetchAuthOptions === 'function') {
+    try {
+      const session = await safeCall(__sec_getCurrentUser) || {};
+      const uid = session.user ? (session.user.uid || session.user.id) : null;
+      if (uid) {
+        console.log('[prefetchAuthOptions] Prefetching auth options for user', uid);
+        prefetchAuthOptions(uid, context).catch(e => console.warn('[prefetchAuthOptions] failed', e));
+      }
+    } catch (e) {
+      console.warn('[prefetchAuthOptions] could not prefetch options', e);
+    }
+  }
+
 
   // Modal visibility and auto-biometric attempt (instant sync from localStorage)
   try {
@@ -9166,57 +9251,74 @@ async function setupInactivity() {
 // global cache
 window.__cachedAuthOptions = null;
 
-async function prefetchAuthOptionsFor(uid, context = 'reauth') {
+// ----------------------
+// PREFETCH auth options
+// ----------------------
+async function prefetchAuthOptions(uid, context = 'reauth') {
+  if (!uid) throw new Error('prefetchAuthOptions: missing uid');
   try {
     const apiBase = window.__SEC_API_BASE || '';
+    // Prefer specific endpoint (server will return allowCredentials if it has credential)
     const credentialId = localStorage.getItem('credentialId') || null;
     const endpoint = credentialId ? '/webauthn/auth/options' : '/webauthn/auth/options/discover';
     const body = credentialId ? { userId: uid, credentialId, context } : { userId: uid, context };
 
     const res = await fetch(`${apiBase}${endpoint}`, {
-      method: 'POST', credentials: 'include', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
     });
-    if (!res.ok) throw new Error(`Options fetch failed ${res.status}`);
+    if (!res.ok) throw new Error(`prefetchAuthOptions: server returned ${res.status}`);
 
     const opts = await res.json();
 
-    // convert challenge
-    opts.challenge = (function base64ToBuf(s){
-      let b = s.replace(/-/g,'+').replace(/_/g,'/');
-      const pad = b.length % 4; if (pad) b += '='.repeat(4-pad);
-      const str = atob(b);
-      const arr = new Uint8Array(str.length);
-      for(let i=0;i<str.length;i++) arr[i]=str.charCodeAt(i);
+    // Convert challenge -> ArrayBuffer
+    function b64ToArrayBuffer(base64url) {
+      if (!base64url) return null;
+      const pad = '='.repeat((4 - (base64url.length % 4)) % 4);
+      const b64 = base64url.replace(/-/g, '+').replace(/_/g, '/') + pad;
+      const bin = atob(b64);
+      const arr = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
       return arr.buffer;
-    })(opts.challenge);
-
-    // convert allowCredentials if present
-    if (Array.isArray(opts.allowCredentials) && opts.allowCredentials.length) {
-      opts.allowCredentials = opts.allowCredentials.map(c => ({ ...c, id: (function base64ToBuf(s){
-        let b = s.replace(/-/g,'+').replace(/_/g,'/');
-        const pad = b.length % 4; if (pad) b += '='.repeat(4-pad);
-        const str = atob(b);
-        const arr = new Uint8Array(str.length);
-        for(let i=0;i<str.length;i++) arr[i]=str.charCodeAt(i);
-        return arr.buffer;
-      })(c.id) }));
-    } else {
-      delete opts.allowCredentials; // ensure discoverable behavior
     }
 
-    opts.userVerification = opts.userVerification || 'required';
-    opts.timeout = opts.timeout || 60000;
+    const cached = Object.assign({}, opts);
+    cached.challenge = b64ToArrayBuffer(opts.challenge);
 
-    // store ready-to-use options
-    window.__cachedAuthOptions = opts;
-    console.log('[PREFETCH] cached auth options ready', {
-      rpId: opts.rpId, allowCount: opts.allowCredentials ? opts.allowCredentials.length : 'omitted', time: new Date().toISOString()
+    if (Array.isArray(opts.allowCredentials) && opts.allowCredentials.length) {
+      cached.allowCredentials = opts.allowCredentials.map(c => {
+        return {
+          ...c,
+          // IMPORTANT: id must be ArrayBuffer for navigator.credentials.get()
+          id: b64ToArrayBuffer(c.id)
+        };
+      });
+      // persist server-provided credential id string if not present
+      try {
+        if (!localStorage.getItem('credentialId') && opts.allowCredentials[0] && opts.allowCredentials[0].id) {
+          localStorage.setItem('credentialId', opts.allowCredentials[0].id);
+        }
+      } catch (e) {}
+    } else {
+      // no allowCredentials => discoverable flow (only works if credential is resident)
+      delete cached.allowCredentials;
+    }
+
+    cached.userVerification = cached.userVerification || 'required';
+    cached.timeout = cached.timeout || 60000;
+
+    // Store ready-to-use publicKey for immediate get()
+    window.__cachedAuthPublicKey = cached;
+    window.__cachedAuthPublicKeyFetchedAt = Date.now();
+    console.log('[PREFETCH] ready auth publicKey', {
+      rpId: opts.rpId, allowCount: (cached.allowCredentials || []).length
     });
-    return opts;
-  } catch (e) {
-    console.error('[PREFETCH] failed to fetch auth options', e);
-    window.__cachedAuthOptions = null;
-    throw e;
+    return cached;
+  } catch (err) {
+    console.error('[PREFETCH] error', err);
+    window.__cachedAuthPublicKey = null;
+    return null;
   }
 }
 
