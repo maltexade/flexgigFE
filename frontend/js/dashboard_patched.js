@@ -8082,16 +8082,54 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
   console.log('initReauthModal called', { show, context });
   cacheDomRefs();
 
+  // 🔹 Prefetch helper for local WebAuthn challenge
+  async function prefetchAuthOptions(uid) {
+    try {
+      if (!uid) return console.warn('[prefetchAuthOptions] missing uid');
+      const apiBase = window.__SEC_API_BASE || 'https://api.flexgig.com.ng';
+      const res = await fetch(`${apiBase}/webauthn/auth/options`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: uid, context })
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const options = await res.json();
+      if (!options.challenge) throw new Error('missing challenge');
+
+      // Convert challenge + IDs from base64url → ArrayBuffer
+      const b64ToBuf = (b64) => {
+        const pad = '='.repeat((4 - (b64.length % 4)) % 4);
+        const base64 = (b64 + pad).replace(/-/g, '+').replace(/_/g, '/');
+        const str = atob(base64);
+        const bytes = new Uint8Array(str.length);
+        for (let i = 0; i < str.length; i++) bytes[i] = str.charCodeAt(i);
+        return bytes.buffer;
+      };
+
+      const publicKey = {
+        ...options,
+        challenge: b64ToBuf(options.challenge),
+        allowCredentials: (options.allowCredentials || []).map(c => ({
+          ...c,
+          id: b64ToBuf(c.id)
+        }))
+      };
+
+      window.__cachedAuthPublicKey = publicKey;
+      console.log('[prefetchAuthOptions] cached WebAuthn options for user', uid);
+    } catch (err) {
+      console.error('[prefetchAuthOptions] could not prefetch options', err);
+    }
+  }
+
   // Populate user info
   let user = null;
   try {
     const cachedUserData = localStorage.getItem('userData');
     if (cachedUserData) {
-      try {
-        user = JSON.parse(cachedUserData);
-      } catch (e) {
-        console.warn('Could not parse cached userData:', e);
-      }
+      try { user = JSON.parse(cachedUserData); }
+      catch (e) { console.warn('Could not parse cached userData:', e); }
     }
 
     if (!user) {
@@ -8105,170 +8143,134 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
         hasPin: !!(sUser.hasPin || sUser.pin || localStorage.getItem('hasPin')?.toLowerCase() === 'true'),
         cachedAt: Date.now()
       };
-      try { localStorage.setItem('userData', JSON.stringify(user)); } catch (e) { console.warn('Could not cache userData:', e); }
+      try { localStorage.setItem('userData', JSON.stringify(user)); }
+      catch (e) { console.warn('Could not cache userData:', e); }
       console.log('Fresh user data populated and cached');
     }
 
+    // ⚡ Prefetch biometric options immediately
+    if (user?.id) prefetchAuthOptions(user.id);
 
-    // bind this directly to the biometric button
-// ----------------------
-// Immediate click handler
-// MUST be called directly from user gesture (click)
-// ----------------------
-async function handleBiometricButtonClick(uid, context = 'reauth') {
-  // This must NOT await network before calling get(); ensure options are already cached.
-  try {
-    if (!('PublicKeyCredential' in window)) throw new Error('WebAuthn not supported');
-    if (!uid) throw new Error('No user id');
+    // Biometric click handler stays the same
+    async function handleBiometricButtonClick(uid, context = 'reauth') {
+      try {
+        if (!('PublicKeyCredential' in window)) throw new Error('WebAuthn not supported');
+        if (!uid) throw new Error('No user id');
 
-    const publicKey = window.__cachedAuthPublicKey;
-    if (!publicKey) {
-      console.warn('[BIOMETRIC CLICK] No cached publicKey; call prefetchAuthOptions(uid) when modal opens.');
-      // For reliability, you could attempt a network fetch here but it may lose the gesture -> NotAllowedError
-      return { success: false, error: 'No cached auth options' };
-    }
-
-    // Defensive sanity checks (must be ArrayBuffers)
-    if (publicKey.challenge == null || !(publicKey.challenge instanceof ArrayBuffer)) {
-      console.warn('[BIOMETRIC CLICK] publicKey.challenge not ArrayBuffer; aborting.');
-      return { success: false, error: 'Invalid cached challenge' };
-    }
-    if (publicKey.allowCredentials && publicKey.allowCredentials.length) {
-      const bad = publicKey.allowCredentials.find(c => !(c.id instanceof ArrayBuffer));
-      if (bad) {
-        console.warn('[BIOMETRIC CLICK] allowCredentials contains non-ArrayBuffer id; aborting.');
-        return { success: false, error: 'Invalid cached allowCredentials' };
-      }
-    }
-
-    // Synchronous call inside click handler:
-    let assertion = null;
-    try {
-      // Prefer conditional if available (fast), but calling get() is the gestureful action.
-      // Do not put network awaits before this line in this function.
-      assertion = await navigator.credentials.get({ publicKey });
-      // If assertion is null, treat as cancelled/no result
-      if (!assertion) return { success: false, error: 'No assertion returned' };
-    } catch (e) {
-      console.error('[BIOMETRIC CLICK] navigator.credentials.get() error', e);
-      return { success: false, error: e.name || e.message || String(e) };
-    }
-
-    // Now that we have an assertion, hand off to server verification asynchronously
-    try {
-      // Build the payload (base64url)
-      function abToBase64Url(buf) {
-        const bytes = new Uint8Array(buf);
-        let s = '';
-        for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
-        const b64 = btoa(s);
-        return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-      }
-
-      const credential = {
-        id: assertion.id,
-        rawId: abToBase64Url(assertion.rawId),
-        type: assertion.type,
-        response: {
-          clientDataJSON: abToBase64Url(assertion.response.clientDataJSON),
-          authenticatorData: abToBase64Url(assertion.response.authenticatorData),
-          signature: abToBase64Url(assertion.response.signature),
-          userHandle: assertion.response.userHandle ? abToBase64Url(assertion.response.userHandle) : null
+        const publicKey = window.__cachedAuthPublicKey;
+        if (!publicKey) {
+          console.warn('[BIOMETRIC CLICK] No cached publicKey; prefetchAuthOptions(uid) should run when modal opens.');
+          return { success: false, error: 'No cached auth options' };
         }
-      };
 
-      // send to server verify endpoint
-      const apiBase = window.__SEC_API_BASE || '';
-      const verifyRes = await fetch(`${apiBase}/webauthn/auth/verify`, {
-        method: 'POST', credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: uid, credential, context })
+        // Sanity validation
+        if (!(publicKey.challenge instanceof ArrayBuffer))
+          return { success: false, error: 'Invalid cached challenge' };
+
+        const bad = (publicKey.allowCredentials || []).find(c => !(c.id instanceof ArrayBuffer));
+        if (bad)
+          return { success: false, error: 'Invalid cached allowCredentials' };
+
+        // 👆 Must be synchronous gesture
+        let assertion;
+        try {
+          assertion = await navigator.credentials.get({ publicKey });
+          if (!assertion) return { success: false, error: 'No assertion returned' };
+        } catch (e) {
+          console.error('[BIOMETRIC CLICK] navigator.credentials.get() error', e);
+          return { success: false, error: e.name || e.message };
+        }
+
+        // Convert to base64url + send to verify
+        const abToB64 = (buf) => {
+          const bytes = new Uint8Array(buf);
+          let s = ''; for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+          return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        };
+
+        const credential = {
+          id: assertion.id,
+          rawId: abToB64(assertion.rawId),
+          type: assertion.type,
+          response: {
+            clientDataJSON: abToB64(assertion.response.clientDataJSON),
+            authenticatorData: abToB64(assertion.response.authenticatorData),
+            signature: abToB64(assertion.response.signature),
+            userHandle: assertion.response.userHandle ? abToB64(assertion.response.userHandle) : null
+          }
+        };
+
+        const apiBase = window.__SEC_API_BASE || '';
+        const verifyRes = await fetch(`${apiBase}/webauthn/auth/verify`, {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: uid, credential, context })
+        });
+
+        if (!verifyRes.ok) {
+          const txt = await verifyRes.text().catch(() => String(verifyRes.status));
+          console.error('[BIOMETRIC CLICK] server verify failed', verifyRes.status, txt);
+          return { success: false, error: `Server verify failed ${verifyRes.status}` };
+        }
+
+        const json = await verifyRes.json();
+        if (json?.credentialId) try { persistCredentialId(json.credentialId); } catch (e) { console.warn('persistCredentialId failed', e); }
+        return { success: true, result: json };
+      } catch (ex) {
+        console.error('[BIOMETRIC CLICK] fatal', ex);
+        return { success: false, error: ex.message };
+      }
+    }
+
+    // 🔹 Biometric button in PIN view
+    setTimeout(() => {
+      const bioBtn = document.getElementById('pinBiometricBtn');
+      if (!bioBtn) return;
+
+      const bioLoginEnabled = ['true', '1', 'yes'].includes(
+        (
+          localStorage.getItem('biometricForLogin') ||
+          localStorage.getItem('__sec_bioLogin') ||
+          localStorage.getItem('security_bio_login') || ''
+        ).toLowerCase()
+      );
+
+      bioBtn.style.display = bioLoginEnabled ? 'inline-flex' : 'none';
+      console.log(`[reauth] Biometric button visibility: ${bioLoginEnabled ? 'shown' : 'hidden'}`);
+
+      if (bioBtn.__bound) return;
+      bioBtn.addEventListener('click', async (ev) => {
+        ev.preventDefault();
+        console.log('[reauth] Biometric button clicked (PIN modal)');
+
+        if (!bioLoginEnabled) {
+          safeCall(notify, 'Biometric login not enabled', 'warn');
+          return;
+        }
+
+        const session = await safeCall(getSession);
+        const uid = session?.user?.uid || session?.user?.id;
+        if (!uid) {
+          safeCall(notify, 'Session expired - please log in again', 'error');
+          return;
+        }
+
+        const res = await handleBiometricButtonClick(uid, 'reauth');
+        if (res?.success) {
+          console.log('[reauth] Biometric verified successfully');
+          hideReauthModal?.();
+          onSuccessfulReauth?.();
+        } else {
+          console.warn('[reauth] Biometric verification failed', res);
+          safeCall(notify, 'Biometric verification failed', 'error');
+        }
       });
+      bioBtn.__bound = true;
+      console.log('[reauth] pinBiometricBtn bound successfully');
+    }, 300);
 
-      if (!verifyRes.ok) {
-        const txt = await verifyRes.text().catch(() => String(verifyRes.status));
-        console.error('[BIOMETRIC CLICK] server verify failed', verifyRes.status, txt);
-        return { success: false, error: `Server verify failed ${verifyRes.status}` };
-      }
-      const json = await verifyRes.json();
-      // persist server-returned credential id if present
-      if (json && json.credentialId) {
-        try { persistCredentialId(json.credentialId); } catch(e) { console.warn('persistCredentialId failed', e); }
-      }
-      return { success: true, result: json };
-    } catch (err) {
-      console.error('[BIOMETRIC CLICK] verify error', err);
-      return { success: false, error: err.message || String(err) };
-    }
-  } catch (ex) {
-    console.error('[BIOMETRIC CLICK] fatal', ex);
-    return { success: false, error: ex.message || String(ex) };
-  }
-}
+    // ... rest of your modal logic continues unchanged ...
 
-// 🔹 Biometric button in PIN view (reauth)
-setTimeout(() => {
-  const bioBtn = document.getElementById('pinBiometricBtn');
-  if (!bioBtn) return;
-
-  // 🔸 Determine if biometrics enabled for login (client-side only)
-  const bioLoginEnabled = ['true', '1', 'yes'].includes(
-  (
-    localStorage.getItem('biometricForLogin') ||
-    localStorage.getItem('__sec_bioLogin') ||
-    localStorage.getItem('security_bio_login') || ''
-  ).toLowerCase()
-);
-
-
-  // Hide button if biometric not enabled
-  bioBtn.style.display = bioLoginEnabled ? 'inline-flex' : 'none';
-  console.log(`[reauth] Biometric button visibility: ${bioLoginEnabled ? 'shown' : 'hidden'}`);
-
-if (bioBtn.__bound) return; // prevent double-binding
-bioBtn.addEventListener('click', async (ev) => {
-  ev.preventDefault();
-  console.log('[reauth] Biometric button clicked (PIN modal)');
-
-  if (!bioLoginEnabled) {
-    console.warn('[reauth] Biometric login not enabled locally.');
-    if (typeof safeCall === 'function' && typeof notify === 'function') {
-      safeCall(notify, 'Biometric login not enabled', 'warn');
-    } else {
-      console.warn('Biometric login not enabled');
-    }
-    return;
-  }
-
-  const session = await safeCall(getSession);
-  const uid = session?.user?.uid || session?.user?.id;
-  if (!uid) {
-    console.error('[reauth] No valid user ID for biometric reauth.');
-    if (typeof safeCall === 'function' && typeof notify === 'function') {
-      safeCall(notify, 'Session expired - please log in again', 'error');
-    } else {
-      console.error('Session expired - please log in again');
-    }
-    return;
-  }
-
-  // ⚡ Call immediate local biometric handler (fast prompt)
-  const res = await handleBiometricButtonClick(uid, 'reauth');
-
-  if (res?.success) {
-    console.log('[reauth] Biometric verified successfully (instant handler)');
-    if (typeof hideReauthModal === 'function') hideReauthModal();
-    if (typeof onSuccessfulReauth === 'function') onSuccessfulReauth();
-  } else {
-    console.warn('[reauth] Biometric verification failed or cancelled', res);
-    if (typeof safeCall === 'function' && typeof notify === 'function') {
-      safeCall(notify, 'Biometric verification failed', 'error');
-    }
-  }
-});
-bioBtn.__bound = true;
-console.log('[reauth] pinBiometricBtn bound successfully');
-}, 300);
 
 
 

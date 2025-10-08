@@ -9251,268 +9251,157 @@ async function prefetchAuthOptionsFor(uid, context = 'reauth') {
    Verify Biometrics (debug)
    ----------------------- */
 // ---- verifyBiometrics ----
-// -------------------- Fixed verifyBiometrics (paste/replace) --------------------
 async function verifyBiometrics(uid, context = 'reauth') {
-  console.log('%c[verifyBiometrics] START', 'color:#0ff;font-weight:bold', { uid, context, time: new Date().toISOString() });
+  console.log('%c[verifyBiometrics] CALLED', 'color:#0ff;font-weight:bold', { uid, context, origin: location.origin, time: new Date().toISOString() });
 
-  // prefer your withLoader wrapper if present
-  const run = (typeof withLoader === 'function') ? withLoader : (fn) => fn();
-
-  // helpers: robust base64url <-> ArrayBuffer conversions (use existing ones if you have them)
-  const _base64UrlToBuffer = (typeof base64UrlToBuffer === 'function') ? base64UrlToBuffer : (s = '') => {
-    const pad = '='.repeat((4 - (s.length % 4)) % 4);
-    const b64 = s.replace(/-/g, '+').replace(/_/g, '/') + pad;
-    const bin = atob(b64);
-    const arr = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-    return arr.buffer;
-  };
-  const _bufferToBase64Url = (typeof bufferToBase64Url === 'function') ? bufferToBase64Url : (buffer) => {
-    const bytes = new Uint8Array(buffer);
-    let str = '';
-    for (let i = 0; i < bytes.length; i++) str += String.fromCharCode(bytes[i]);
-    let b64 = btoa(str);
-    return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-  };
-
-  // robust coercer: many possible shapes -> ArrayBuffer
-  function toArrayBuffer(val) {
-    if (!val && val !== 0) return null;
-    // ArrayBuffer already
-    if (val instanceof ArrayBuffer) return val;
-    // TypedArray / DataView -> underlying buffer (copy to avoid sharing offset issues)
-    if (ArrayBuffer.isView(val)) {
-      const view = new Uint8Array(val.buffer, val.byteOffset || 0, val.byteLength || val.length);
-      return view.slice().buffer;
-    }
-    // Node Buffer-like object { type: 'Buffer', data: [...] }
-    if (val && typeof val === 'object' && (Array.isArray(val.data) || ArrayBuffer.isView(val.data))) {
-      const arr = new Uint8Array(val.data);
-      return arr.buffer;
-    }
-    // If string -> assume base64url string
-    if (typeof val === 'string') {
-      try {
-        return _base64UrlToBuffer(val);
-      } catch (e) {
-        // try base64 fallback (plus/minus)
-        try {
-          const b64 = val.replace(/-/g, '+').replace(/_/g, '/');
-          return _base64UrlToBuffer(b64);
-        } catch (e2) {
-          throw new Error('toArrayBuffer: string could not be parsed as base64url');
-        }
-      }
-    }
-    throw new Error('toArrayBuffer: Unsupported id type');
+  // --- Helper: base64url → ArrayBuffer ---
+  function base64urlToArrayBuffer(base64url) {
+    const padding = '='.repeat((4 - (base64url.length % 4)) % 4);
+    const base64 = (base64url + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const binary = atob(base64);
+    const len = binary.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes.buffer;
   }
 
-  // wrapper: navigator.credentials.get with promise timeout
-  async function getWithTimeout(publicKeyOpts, timeoutMs = 15000) {
-    return new Promise(async (resolve, reject) => {
-      let finished = false;
-      const timer = setTimeout(() => {
-        if (!finished) {
-          finished = true;
-          reject(new Error(`navigator.credentials.get() timed out after ${timeoutMs}ms`));
-        }
-      }, timeoutMs);
-
-      try {
-        const credential = await navigator.credentials.get({ publicKey: publicKeyOpts });
-        if (!finished) {
-          finished = true;
-          clearTimeout(timer);
-          resolve(credential);
-        }
-      } catch (err) {
-        if (!finished) {
-          finished = true;
-          clearTimeout(timer);
-          reject(err);
-        }
-      }
-    });
-  }
-
-  // pick cached option containers you use in your app
-  const getCached = () => window.__cachedAuthPublicKey || window.__cachedAuthOptions || window.__cachedAuthPublicKey || null;
-
-  return run(async () => {
+  return withLoader(async () => {
     try {
-      if (!('PublicKeyCredential' in window)) return { success: false, error: 'WebAuthn not supported' };
-      if (!uid) return { success: false, error: 'Missing user id' };
+      if (!('PublicKeyCredential' in window)) throw new Error('WebAuthn not supported');
+      if (!uid) throw new Error('No user ID');
 
       const apiBase = window.__SEC_API_BASE || '';
 
-      // get cached options (prefetchAuthOptions should have been called when modal opened)
-      let publicKey = getCached();
-      if (!publicKey) {
-        // fallback fetch (risky outside gesture) - still try for resilience
-        try {
-          const credentialId = (() => { try { return localStorage.getItem('credentialId'); } catch (e) { return null; } })();
-          const endpoint = credentialId ? '/webauthn/auth/options' : '/webauthn/auth/options/discover';
-          const body = credentialId ? { userId: uid, credentialId, context } : { userId: uid, context };
-          const res = await fetch(`${apiBase}${endpoint}`, {
-            method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body)
-          });
-          if (!res.ok) {
-            const txt = await res.text().catch(() => String(res.status));
-            throw new Error(`Options fetch failed: ${res.status} ${txt}`);
-          }
-          publicKey = await res.json();
-        } catch (fetchErr) {
-          console.error('[verifyBiometrics] options fetch failed', fetchErr);
-          return { success: false, error: 'Could not prepare auth options' };
-        }
-      }
-
-      // Normalize challenge -> ArrayBuffer
+      // Retrieve stored credentialId if any
+      let stored = null;
       try {
-        if (publicKey.challenge && !(publicKey.challenge instanceof ArrayBuffer)) {
-          publicKey.challenge = toArrayBuffer(publicKey.challenge);
-        }
+        stored = localStorage.getItem('credentialId');
       } catch (e) {
-        console.warn('[verifyBiometrics] challenge coercion failed, will try base64url conversion', e);
-        try { publicKey.challenge = _base64UrlToBuffer(String(publicKey.challenge)); } catch (e2) { /* fallthrough */ }
+        console.warn('[verifyBiometrics] localStorage read error', e);
       }
 
-      // Normalize allowCredentials ids -> ArrayBuffer (if present)
-      if (Array.isArray(publicKey.allowCredentials) && publicKey.allowCredentials.length) {
-        publicKey.allowCredentials = publicKey.allowCredentials.map(c => {
-          const copy = { type: c.type || 'public-key' };
-          try {
-            copy.id = toArrayBuffer(c.id);
-          } catch (e) {
-            // if we can't coerce, try any nested .id string form
-            if (typeof c.id === 'string') copy.id = _base64UrlToBuffer(c.id);
-            else throw e;
-          }
-          // include transports if present
-          if (c.transports) copy.transports = c.transports;
-          return copy;
-        });
-      } else {
-        // ensure discoverable behavior if server omitted allowCredentials
-        delete publicKey.allowCredentials;
-      }
+      console.log('[verifyBiometrics] credentialId raw read:', stored, 'origin:', location.origin);
 
-      // default safety
-      publicKey.userVerification = publicKey.userVerification || 'required';
-      publicKey.timeout = publicKey.timeout || 60000;
+      let usedEndpoint = '/webauthn/auth/options';
+      // if we have a stored credential id, send it so server will return allowCredentials
+      let body = stored
+        ? JSON.stringify({ userId: uid, credentialId: stored, context })
+        : JSON.stringify({ userId: uid, context });
 
-      console.log('[verifyBiometrics] publicKey prepared', {
-        rpId: publicKey.rpId, allowCount: (publicKey.allowCredentials || []).length, challengeLen: publicKey.challenge ? publicKey.challenge.byteLength : undefined
+      console.log('[verifyBiometrics] Fetching options from:', `${apiBase}${usedEndpoint}`, 'body:', JSON.parse(body));
+      const optRes = await fetch(`${apiBase}${usedEndpoint}`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body
       });
 
-      // conditional mediation check
-      let conditionalAvailable = false;
-      if (typeof PublicKeyCredential !== 'undefined' && typeof PublicKeyCredential.isConditionalMediationAvailable === 'function') {
-        try { conditionalAvailable = !!(await PublicKeyCredential.isConditionalMediationAvailable()); } catch (e) { conditionalAvailable = false; }
+      if (!optRes.ok) {
+        const txt = await optRes.text();
+        throw new Error(`Options request failed: ${optRes.status} ${txt}`);
       }
 
-      // try conditional (fast)
+      let options = await optRes.json();
+      console.log('[verifyBiometrics] RAW server options:', options);
+
+      // --- Transform to correct types ---
+      const opts = structuredClone(options); // safe copy
+      if (typeof opts.challenge === 'string') {
+        opts.challenge = base64urlToArrayBuffer(opts.challenge);
+      }
+
+      if (Array.isArray(opts.allowCredentials) && opts.allowCredentials.length > 0) {
+        opts.allowCredentials = opts.allowCredentials.map(c => ({
+          id: base64urlToArrayBuffer(c.id),
+          type: c.type,
+          transports: c.transports || ['internal'],
+        }));
+        console.log('[verifyBiometrics] Transformed allowCredentials:', opts.allowCredentials.map(a => ({ idLen: a.id.byteLength, type: a.type })));
+      } else {
+        console.warn('[verifyBiometrics] No allowCredentials (discoverable path)');
+        delete opts.allowCredentials;
+      }
+
+      opts.userVerification = 'required';
+      opts.timeout = opts.timeout || 60000;
+
+      // Log transformation summary
+      console.log('[verifyBiometrics] Final publicKey options summary:', {
+        challengeLen: opts.challenge.byteLength,
+        allowCredentials: opts.allowCredentials ? opts.allowCredentials.length : 'none',
+        rpId: opts.rpId,
+        userVerification: opts.userVerification,
+      });
+
+      // Confirm type conversion
+      if (opts.allowCredentials && opts.allowCredentials.length) {
+        console.log('[verifyBiometrics] ID type check (should be true):', opts.allowCredentials[0].id instanceof ArrayBuffer);
+      }
+
+      // --- Try get() ---
       let assertion = null;
-      if (conditionalAvailable) {
-        try {
-          assertion = await getWithTimeout(publicKey, 7000);
-          console.log('[verifyBiometrics] conditional get returned', !!assertion);
-        } catch (condErr) {
-          console.warn('[verifyBiometrics] conditional failed/timeout', condErr && (condErr.name || condErr.message) || condErr);
-          assertion = null;
-        }
-      }
+try {
+  const canUseConditional = await PublicKeyCredential.isConditionalMediationAvailable?.();
+  if (canUseConditional) {
+    console.log('[verifyBiometrics] Conditional mediation supported — trying silent auth');
+    assertion = await navigator.credentials.get({ publicKey: opts, mediation: 'conditional' });
+  } else {
+    console.log('[verifyBiometrics] Conditional mediation not available — showing prompt');
+    assertion = await navigator.credentials.get({ publicKey: opts });
+  }
+} catch (e) {
+  console.warn('[verifyBiometrics] Conditional check failed or user canceled:', e);
+  if (!assertion) {
+    assertion = await navigator.credentials.get({ publicKey: opts });
+  }
+}
 
-      // fallback: interactive with retries
-      if (!assertion) {
-        const maxRetries = 3;
-        let attempts = 0;
-        let lastErr = null;
-        while (attempts < maxRetries && !assertion) {
-          attempts++;
-          try {
-            assertion = await getWithTimeout(publicKey, 60000);
-            console.log('[verifyBiometrics] interactive get success on attempt', attempts);
-            break;
-          } catch (err) {
-            lastErr = err;
-            const m = err && (err.name || err.message) || String(err);
-            console.warn(`[verifyBiometrics] interactive attempt ${attempts} failed:`, m);
 
-            if (m.includes('already pending') || m.includes('already in progress')) {
-              await new Promise(r => setTimeout(r, 700));
-              continue;
-            }
-            if (err && (err.name === 'NotAllowedError' || err.name === 'AbortError' || err.name === 'OperationError')) {
-              // user canceled or browser privacy prevented: graceful return so UI falls back to PIN
-              return { success: false, error: err.name || 'User cancelled' };
-            }
-            await new Promise(r => setTimeout(r, 300));
-          }
-        }
-        if (!assertion) {
-          const reason = lastErr ? (lastErr.name || lastErr.message || String(lastErr)) : 'No assertion';
-          console.error('[verifyBiometrics] interactive exhausted', reason);
-          return { success: false, error: reason };
-        }
-      }
-
-      // build server payload
+      // --- Prepare verification payload ---
       const credential = {
         id: assertion.id,
-        rawId: _bufferToBase64Url(assertion.rawId),
+        rawId: bufferToBase64Url(assertion.rawId),
         type: assertion.type,
         response: {
-          clientDataJSON: _bufferToBase64Url(assertion.response.clientDataJSON),
-          authenticatorData: _bufferToBase64Url(assertion.response.authenticatorData),
-          signature: _bufferToBase64Url(assertion.response.signature),
-          userHandle: assertion.response.userHandle ? _bufferToBase64Url(assertion.response.userHandle) : null
+          clientDataJSON: bufferToBase64Url(assertion.response.clientDataJSON),
+          authenticatorData: bufferToBase64Url(assertion.response.authenticatorData),
+          signature: bufferToBase64Url(assertion.response.signature),
+          userHandle: assertion.response.userHandle ? bufferToBase64Url(assertion.response.userHandle) : null,
         }
       };
 
-      console.log('[verifyBiometrics] assertion ready ->', { id: credential.id, rawIdLen: credential.rawId.length });
+      console.log('[verifyBiometrics] Processed assertion:', credential);
 
-      // send to server verify endpoint
-      try {
-        const verifyRes = await fetch(`${apiBase}/webauthn/auth/verify`, {
-          method: 'POST', credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId: uid, credential, context })
-        });
+      // --- Verify with server ---
+      const verifyRes = await fetch(`${apiBase}/webauthn/auth/verify`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: uid, credential, context })
+      });
 
-        if (!verifyRes.ok) {
-          const txt = await verifyRes.text().catch(() => String(verifyRes.status));
-          console.error('[verifyBiometrics] server verify failed:', verifyRes.status, txt);
-          return { success: false, error: `Server verify failed (${verifyRes.status})` };
-        }
-
-        const json = await verifyRes.json().catch(() => null);
-        console.log('[verifyBiometrics] server verify OK', json);
-
-        // persist credential id (server canonical id preferred)
-        try {
-          const persisted = (json && json.credentialId) ? json.credentialId : credential.rawId;
-          if (typeof persistCredentialId === 'function') persistCredentialId(persisted);
-          else localStorage.setItem('credentialId', persisted);
-        } catch (e) { console.warn('[verifyBiometrics] persist failed', e); }
-
-        try { if (typeof showSlideNotification === 'function') showSlideNotification('Biometric authentication successful!', 'success'); } catch (e) {}
-        try { if (typeof onSuccessfulReauth === 'function') onSuccessfulReauth(json); } catch (e) {}
-
-        return { success: true, result: json || { credential } };
-      } catch (netErr) {
-        console.error('[verifyBiometrics] verify network error', netErr);
-        return { success: false, error: 'Network error during verify' };
+      console.log('[verifyBiometrics] Server verify status:', verifyRes.status);
+      if (!verifyRes.ok) {
+        const txt = await verifyRes.text();
+        throw new Error(`Server verify failed: ${verifyRes.status} ${txt}`);
       }
+
+      const result = await verifyRes.json();
+      console.log('[verifyBiometrics] Verification success:', result);
+      showSlideNotification(notify, 'Biometric authentication successful!', 'success');
+      return { success: true, result };
+
     } catch (err) {
-      console.error('[verifyBiometrics] FATAL', err);
-      if (err && (err.name === 'NotAllowedError' || err.name === 'AbortError')) return { success: false, error: err.name || 'User cancelled' };
-      return { success: false, error: err.message || String(err) };
+      console.error('[verifyBiometrics] ERROR:', err);
+      const message = err.message || 'Verification failed';
+      if (err.name === 'NotAllowedError' || err.name === 'AbortError') {
+        return { success: false, error: message };
+      }
+      showSlideNotification(notify, `Verification failed: ${message}`, 'error');
+      return { success: false, error: message };
     }
   });
 }
-
 
 
 // Expose small debugging helpers to console
