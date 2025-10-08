@@ -9251,14 +9251,14 @@ async function prefetchAuthOptionsFor(uid, context = 'reauth') {
    Verify Biometrics (debug)
    ----------------------- */
 // ---- verifyBiometrics ----
-// -------------------- verifyBiometrics (drop-in) --------------------
+// -------------------- Fixed verifyBiometrics (paste/replace) --------------------
 async function verifyBiometrics(uid, context = 'reauth') {
   console.log('%c[verifyBiometrics] START', 'color:#0ff;font-weight:bold', { uid, context, time: new Date().toISOString() });
 
-  // Use withLoader wrapper if available so caller doesn't need to change
+  // prefer your withLoader wrapper if present
   const run = (typeof withLoader === 'function') ? withLoader : (fn) => fn();
 
-  // small internal helpers (use existing ones if present)
+  // helpers: robust base64url <-> ArrayBuffer conversions (use existing ones if you have them)
   const _base64UrlToBuffer = (typeof base64UrlToBuffer === 'function') ? base64UrlToBuffer : (s = '') => {
     const pad = '='.repeat((4 - (s.length % 4)) % 4);
     const b64 = s.replace(/-/g, '+').replace(/_/g, '/') + pad;
@@ -9275,36 +9275,39 @@ async function verifyBiometrics(uid, context = 'reauth') {
     return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   };
 
-  // unify cached option names (your file uses multiple names in different places)
-  const getCachedPublicKey = () => {
-    return window.__cachedAuthPublicKey || window.__cachedAuthOptions || window.__cachedAuthPublicKey || null;
-  };
-
-  // Ensure challenge and allowCredentials[].id are ArrayBuffers (accept either ArrayBuffer or base64url string)
-  function normalizePublicKeyOptions(pk) {
-    if (!pk) return null;
-    const out = JSON.parse(JSON.stringify(pk)); // shallow clone (primitives + arrays)
-    // challenge
-    if (out.challenge && !(out.challenge instanceof ArrayBuffer)) {
-      try { out.challenge = _base64UrlToBuffer(out.challenge); } catch (e) { /* leave as-is */ }
+  // robust coercer: many possible shapes -> ArrayBuffer
+  function toArrayBuffer(val) {
+    if (!val && val !== 0) return null;
+    // ArrayBuffer already
+    if (val instanceof ArrayBuffer) return val;
+    // TypedArray / DataView -> underlying buffer (copy to avoid sharing offset issues)
+    if (ArrayBuffer.isView(val)) {
+      const view = new Uint8Array(val.buffer, val.byteOffset || 0, val.byteLength || val.length);
+      return view.slice().buffer;
     }
-    // allowCredentials
-    if (Array.isArray(out.allowCredentials) && out.allowCredentials.length) {
-      out.allowCredentials = out.allowCredentials.map(c => {
-        const copy = { ...c };
-        if (copy.id && !(copy.id instanceof ArrayBuffer)) {
-          try { copy.id = _base64UrlToBuffer(copy.id); } catch (e) { /* leave as-is */ }
+    // Node Buffer-like object { type: 'Buffer', data: [...] }
+    if (val && typeof val === 'object' && (Array.isArray(val.data) || ArrayBuffer.isView(val.data))) {
+      const arr = new Uint8Array(val.data);
+      return arr.buffer;
+    }
+    // If string -> assume base64url string
+    if (typeof val === 'string') {
+      try {
+        return _base64UrlToBuffer(val);
+      } catch (e) {
+        // try base64 fallback (plus/minus)
+        try {
+          const b64 = val.replace(/-/g, '+').replace(/_/g, '/');
+          return _base64UrlToBuffer(b64);
+        } catch (e2) {
+          throw new Error('toArrayBuffer: string could not be parsed as base64url');
         }
-        return copy;
-      });
+      }
     }
-    // userVerification & timeout defaults
-    out.userVerification = out.userVerification || 'required';
-    out.timeout = out.timeout || 60000;
-    return out;
+    throw new Error('toArrayBuffer: Unsupported id type');
   }
 
-  // wrapper to call navigator.credentials.get() with a promise timeout
+  // wrapper: navigator.credentials.get with promise timeout
   async function getWithTimeout(publicKeyOpts, timeoutMs = 15000) {
     return new Promise(async (resolve, reject) => {
       let finished = false;
@@ -9332,142 +9335,130 @@ async function verifyBiometrics(uid, context = 'reauth') {
     });
   }
 
+  // pick cached option containers you use in your app
+  const getCached = () => window.__cachedAuthPublicKey || window.__cachedAuthOptions || window.__cachedAuthPublicKey || null;
+
   return run(async () => {
     try {
-      if (!('PublicKeyCredential' in window)) {
-        console.error('[verifyBiometrics] WebAuthn not available in this browser');
-        return { success: false, error: 'WebAuthn not supported' };
-      }
-      if (!uid) {
-        console.error('[verifyBiometrics] missing uid');
-        return { success: false, error: 'Missing user id' };
-      }
+      if (!('PublicKeyCredential' in window)) return { success: false, error: 'WebAuthn not supported' };
+      if (!uid) return { success: false, error: 'Missing user id' };
 
       const apiBase = window.__SEC_API_BASE || '';
 
-      // Grab cached prepared options (prefetchAuthOptions should populate one of these)
-      let publicKey = getCachedPublicKey();
+      // get cached options (prefetchAuthOptions should have been called when modal opened)
+      let publicKey = getCached();
       if (!publicKey) {
-        // Try to fetch fallback (this risks losing the user gesture if awaited outside click,
-        // but we attempt to be resilient if caller invoked this directly from a click).
+        // fallback fetch (risky outside gesture) - still try for resilience
         try {
-          console.warn('[verifyBiometrics] No cached options found, fetching one-time (may lose gesture)');
-          // Prefer your prefetchAuthOptions or prefetchAuthOptionsFor if available
-          if (typeof prefetchAuthOptions === 'function') {
-            publicKey = await prefetchAuthOptions(uid, context);
-          } else if (typeof prefetchAuthOptionsFor === 'function') {
-            publicKey = await prefetchAuthOptionsFor(uid, context);
-          } else {
-            // direct server fetch fallback
-            const credentialId = (() => { try { return localStorage.getItem('credentialId'); } catch (e) { return null; } })();
-            const endpoint = credentialId ? '/webauthn/auth/options' : '/webauthn/auth/options/discover';
-            const body = credentialId ? { userId: uid, credentialId, context } : { userId: uid, context };
-            const res = await fetch(`${apiBase}${endpoint}`, {
-              method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(body)
-            });
-            if (!res.ok) {
-              const txt = await res.text().catch(() => String(res.status));
-              throw new Error(`Options fetch failed: ${res.status} ${txt}`);
-            }
-            publicKey = await res.json();
+          const credentialId = (() => { try { return localStorage.getItem('credentialId'); } catch (e) { return null; } })();
+          const endpoint = credentialId ? '/webauthn/auth/options' : '/webauthn/auth/options/discover';
+          const body = credentialId ? { userId: uid, credentialId, context } : { userId: uid, context };
+          const res = await fetch(`${apiBase}${endpoint}`, {
+            method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+          });
+          if (!res.ok) {
+            const txt = await res.text().catch(() => String(res.status));
+            throw new Error(`Options fetch failed: ${res.status} ${txt}`);
           }
+          publicKey = await res.json();
         } catch (fetchErr) {
-          console.error('[verifyBiometrics] Failed to fetch options fallback:', fetchErr);
-          return { success: false, error: 'Could not prepare authentication options' };
+          console.error('[verifyBiometrics] options fetch failed', fetchErr);
+          return { success: false, error: 'Could not prepare auth options' };
         }
       }
 
-      // Normalize (challenge -> ArrayBuffer, allowCredentials[].id -> ArrayBuffer)
-      publicKey = normalizePublicKeyOptions(publicKey);
-      if (!publicKey || !publicKey.challenge) {
-        console.error('[verifyBiometrics] Invalid publicKey options after normalization', publicKey);
-        return { success: false, error: 'Invalid auth options' };
-      }
-
-      // Persist suggested credential id (string) if server included allowCredentials with id strings
+      // Normalize challenge -> ArrayBuffer
       try {
-        if (!localStorage.getItem('credentialId') && Array.isArray(publicKey.allowCredentials) && publicKey.allowCredentials.length) {
-          const candidate = publicKey.allowCredentials[0].id;
-          // if candidate is ArrayBuffer -> convert to base64url
-          let candidateStr = null;
-          if (candidate instanceof ArrayBuffer) candidateStr = _bufferToBase64Url(candidate);
-          else if (typeof candidate === 'string') candidateStr = candidate;
-          if (candidateStr) {
-            try { localStorage.setItem('credentialId', candidateStr); } catch (e) { /* ignore */ }
-          }
+        if (publicKey.challenge && !(publicKey.challenge instanceof ArrayBuffer)) {
+          publicKey.challenge = toArrayBuffer(publicKey.challenge);
         }
-      } catch (e) { /* ignore */ }
+      } catch (e) {
+        console.warn('[verifyBiometrics] challenge coercion failed, will try base64url conversion', e);
+        try { publicKey.challenge = _base64UrlToBuffer(String(publicKey.challenge)); } catch (e2) { /* fallthrough */ }
+      }
 
-      console.log('[verifyBiometrics] publicKey summary', {
-        rpId: publicKey.rpId, allowCount: (publicKey.allowCredentials || []).length, challengeLen: publicKey.challenge.byteLength
+      // Normalize allowCredentials ids -> ArrayBuffer (if present)
+      if (Array.isArray(publicKey.allowCredentials) && publicKey.allowCredentials.length) {
+        publicKey.allowCredentials = publicKey.allowCredentials.map(c => {
+          const copy = { type: c.type || 'public-key' };
+          try {
+            copy.id = toArrayBuffer(c.id);
+          } catch (e) {
+            // if we can't coerce, try any nested .id string form
+            if (typeof c.id === 'string') copy.id = _base64UrlToBuffer(c.id);
+            else throw e;
+          }
+          // include transports if present
+          if (c.transports) copy.transports = c.transports;
+          return copy;
+        });
+      } else {
+        // ensure discoverable behavior if server omitted allowCredentials
+        delete publicKey.allowCredentials;
+      }
+
+      // default safety
+      publicKey.userVerification = publicKey.userVerification || 'required';
+      publicKey.timeout = publicKey.timeout || 60000;
+
+      console.log('[verifyBiometrics] publicKey prepared', {
+        rpId: publicKey.rpId, allowCount: (publicKey.allowCredentials || []).length, challengeLen: publicKey.challenge ? publicKey.challenge.byteLength : undefined
       });
 
-      // Conditional mediation availability check (may be undefined in some engines)
+      // conditional mediation check
       let conditionalAvailable = false;
       if (typeof PublicKeyCredential !== 'undefined' && typeof PublicKeyCredential.isConditionalMediationAvailable === 'function') {
         try { conditionalAvailable = !!(await PublicKeyCredential.isConditionalMediationAvailable()); } catch (e) { conditionalAvailable = false; }
       }
 
-      // Try conditional (fast, short timeout)
+      // try conditional (fast)
       let assertion = null;
       if (conditionalAvailable) {
         try {
-          console.log('[verifyBiometrics] attempting conditional (silent/direct) get with short timeout');
-          // Some browsers ignore mediation when allowCredentials is present; that's OK.
-          // Use short timeout so we don't hang the UI if conditional isn't available.
           assertion = await getWithTimeout(publicKey, 7000);
-          console.log('[verifyBiometrics] conditional get result', !!assertion);
+          console.log('[verifyBiometrics] conditional get returned', !!assertion);
         } catch (condErr) {
-          // conditional can throw NotAllowedError / timeout / AbortError - proceed to interactive
-          console.warn('[verifyBiometrics] conditional get failed or timed out:', condErr && (condErr.name || condErr.message) || condErr);
+          console.warn('[verifyBiometrics] conditional failed/timeout', condErr && (condErr.name || condErr.message) || condErr);
           assertion = null;
         }
-      } else {
-        console.log('[verifyBiometrics] conditional mediation not available');
       }
 
-      // If conditional didn't return an assertion, fall back to interactive prompt (longer timeout & retries)
+      // fallback: interactive with retries
       if (!assertion) {
-        console.log('[verifyBiometrics] falling back to interactive get() (prompt)');
         const maxRetries = 3;
         let attempts = 0;
         let lastErr = null;
         while (attempts < maxRetries && !assertion) {
           attempts++;
           try {
-            assertion = await getWithTimeout(publicKey, 60000); // interactive prompt (up to 60s)
+            assertion = await getWithTimeout(publicKey, 60000);
             console.log('[verifyBiometrics] interactive get success on attempt', attempts);
             break;
           } catch (err) {
             lastErr = err;
-            const msg = (err && err.name) ? `${err.name}: ${err.message}` : String(err);
-            console.warn(`[verifyBiometrics] interactive attempt ${attempts} failed:`, msg);
+            const m = err && (err.name || err.message) || String(err);
+            console.warn(`[verifyBiometrics] interactive attempt ${attempts} failed:`, m);
 
-            // Race: "A request is already pending" → wait & retry
-            if (msg.includes('already pending') || msg.includes('already in progress')) {
+            if (m.includes('already pending') || m.includes('already in progress')) {
               await new Promise(r => setTimeout(r, 700));
               continue;
             }
-
-            // If user cancels or the operation is blocked, return cleanly so UI can fallback to PIN
             if (err && (err.name === 'NotAllowedError' || err.name === 'AbortError' || err.name === 'OperationError')) {
-              console.warn('[verifyBiometrics] user cancelled or blocked prompt:', err.name);
+              // user canceled or browser privacy prevented: graceful return so UI falls back to PIN
               return { success: false, error: err.name || 'User cancelled' };
             }
-
-            // Small backoff before next retry
             await new Promise(r => setTimeout(r, 300));
           }
         }
         if (!assertion) {
-          const reason = lastErr ? (lastErr.name || lastErr.message || String(lastErr)) : 'No assertion returned';
-          console.error('[verifyBiometrics] interactive attempts exhausted:', reason);
+          const reason = lastErr ? (lastErr.name || lastErr.message || String(lastErr)) : 'No assertion';
+          console.error('[verifyBiometrics] interactive exhausted', reason);
           return { success: false, error: reason };
         }
       }
 
-      // build the payload expected by server
+      // build server payload
       const credential = {
         id: assertion.id,
         rawId: _bufferToBase64Url(assertion.rawId),
@@ -9480,50 +9471,43 @@ async function verifyBiometrics(uid, context = 'reauth') {
         }
       };
 
-      console.log('[verifyBiometrics] got assertion ->', { id: credential.id, rawIdLen: credential.rawId.length });
+      console.log('[verifyBiometrics] assertion ready ->', { id: credential.id, rawIdLen: credential.rawId.length });
 
-      // POST to server verify endpoint
+      // send to server verify endpoint
       try {
         const verifyRes = await fetch(`${apiBase}/webauthn/auth/verify`, {
-          method: 'POST',
-          credentials: 'include',
+          method: 'POST', credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ userId: uid, credential, context })
         });
 
         if (!verifyRes.ok) {
           const txt = await verifyRes.text().catch(() => String(verifyRes.status));
-          console.error('[verifyBiometrics] server verify failed', verifyRes.status, txt);
-          // Let UI fallback to PIN; do not throw.
+          console.error('[verifyBiometrics] server verify failed:', verifyRes.status, txt);
           return { success: false, error: `Server verify failed (${verifyRes.status})` };
         }
 
         const json = await verifyRes.json().catch(() => null);
         console.log('[verifyBiometrics] server verify OK', json);
 
-        // persist credential id (server might return a canonical id, prefer that)
+        // persist credential id (server canonical id preferred)
         try {
-          const persistedId = (json && json.credentialId) ? json.credentialId : credential.rawId;
-          persistCredentialId && typeof persistCredentialId === 'function' ? persistCredentialId(persistedId) : localStorage.setItem('credentialId', persistedId);
-        } catch (e) { console.warn('[verifyBiometrics] persist credential id failed', e); }
+          const persisted = (json && json.credentialId) ? json.credentialId : credential.rawId;
+          if (typeof persistCredentialId === 'function') persistCredentialId(persisted);
+          else localStorage.setItem('credentialId', persisted);
+        } catch (e) { console.warn('[verifyBiometrics] persist failed', e); }
 
-        // success notifications/hooks
         try { if (typeof showSlideNotification === 'function') showSlideNotification('Biometric authentication successful!', 'success'); } catch (e) {}
-        try { if (typeof onSuccessfulReauth === 'function') onSuccessfulReauth(json); } catch (e) { console.warn('onSuccessfulReauth hook threw', e); }
+        try { if (typeof onSuccessfulReauth === 'function') onSuccessfulReauth(json); } catch (e) {}
 
         return { success: true, result: json || { credential } };
-
       } catch (netErr) {
         console.error('[verifyBiometrics] verify network error', netErr);
         return { success: false, error: 'Network error during verify' };
       }
-
     } catch (err) {
       console.error('[verifyBiometrics] FATAL', err);
-      // return structured failure for UI to decide fallback to PIN
-      if (err && (err.name === 'NotAllowedError' || err.name === 'AbortError')) {
-        return { success: false, error: err.name || 'User cancelled' };
-      }
+      if (err && (err.name === 'NotAllowedError' || err.name === 'AbortError')) return { success: false, error: err.name || 'User cancelled' };
       return { success: false, error: err.message || String(err) };
     }
   });
