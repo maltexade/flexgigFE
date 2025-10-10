@@ -1,29 +1,29 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>FlexGig — Biometric Auth</title>
-  <style>
-    body { font-family: system-ui, -apple-system, Roboto, Arial; max-width: 720px; margin: 32px auto; padding: 0 16px; color: #111; }
-    button { padding: 10px 14px; border-radius: 8px; border: 1px solid #ddd; background: #fff; cursor: pointer; margin-right: 8px; }
-    pre { background:#f7f7f8; padding:12px; border-radius:6px; overflow:auto; }
-    .ok { color: green; }
-    .err { color: #b00020; }
-    .row { margin-bottom: 12px; }
-  </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>FlexGig — Biometric Auth Hex Debug</title>
+<style>
+  body { font-family: system-ui, -apple-system, Roboto, Arial; max-width: 720px; margin: 32px auto; padding: 0 16px; color: #111; }
+  button { padding: 10px 14px; border-radius: 8px; border: 1px solid #ddd; background: #fff; cursor: pointer; margin-right: 8px; }
+  pre { background:#f7f7f8; padding:12px; border-radius:6px; overflow:auto; }
+  .ok { color: green; }
+  .err { color: #b00020; }
+  .row { margin-bottom: 12px; }
+</style>
 </head>
 <body>
-  <h2>FlexGig — Instant Biometric Login</h2>
-  <div class="row">
-    <button id="checkBtn">Check Biometric Availability</button>
-    <button id="registerBtn">Register Biometric</button>
-    <button id="authBtn">Authenticate</button>
-    <button id="removeBtn">Clear Local Data</button>
-  </div>
-  <div class="row"><strong>Status:</strong> <span id="status">idle</span></div>
-  <div class="row"><strong>Output:</strong></div>
-  <pre id="out">No credential yet.</pre>
+<h2>FlexGig — Biometric Debug Hex Login</h2>
+<div class="row">
+  <button id="checkBtn">Check Biometric Availability</button>
+  <button id="registerBtn">Register Biometric</button>
+  <button id="authBtn">Authenticate</button>
+  <button id="removeBtn">Clear Local Data</button>
+</div>
+<div class="row"><strong>Status:</strong> <span id="status">idle</span></div>
+<div class="row"><strong>Output:</strong></div>
+<pre id="out">No credential yet.</pre>
 
 <script>
 const API_BASE = 'https://api.flexgig.com.ng';
@@ -32,7 +32,7 @@ const API_BASE = 'https://api.flexgig.com.ng';
 function toBase64Url(buffer) {
   const bytes = new Uint8Array(buffer);
   let str = '';
-  for (let i = 0; i < bytes.byteLength; i++) str += String.fromCharCode(bytes[i]);
+  for (let i = 0; i < bytes.length; i++) str += String.fromCharCode(bytes[i]);
   return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
@@ -45,14 +45,21 @@ function fromBase64Url(b64url) {
   return arr.buffer;
 }
 
-function logStatus(msg, err = false) {
+function bufferToHex(buffer) {
+  const bytes = new Uint8Array(buffer);
+  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join(' ');
+}
+
+function logStatus(msg, err=false) {
   const s = document.getElementById('status');
   s.textContent = msg;
   s.className = err ? 'err' : 'ok';
+  console.log('[STATUS]', msg);
 }
 
 function showOutput(obj) {
   document.getElementById('out').textContent = JSON.stringify(obj, null, 2);
+  console.log('[OUTPUT]', obj);
 }
 
 /* ---------- Check Biometric Availability ---------- */
@@ -71,18 +78,26 @@ document.getElementById('registerBtn').addEventListener('click', async () => {
   logStatus('Requesting registration options...');
   try {
     const userId = 'demo-user-' + Math.floor(Math.random() * 10000);
+
+    console.log('[DEBUG] Sending /register/options request with userId:', userId);
     const optRes = await fetch(`${API_BASE}/webauthn/register/options`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId, username: 'demo@example.com', displayName: 'Demo User' })
     });
+
     const publicKey = await optRes.json();
+    console.log('[DEBUG] Received registration options:', publicKey);
 
     publicKey.challenge = fromBase64Url(publicKey.challenge);
     publicKey.user.id = fromBase64Url(publicKey.user.id);
 
     const cred = await navigator.credentials.create({ publicKey });
     if (!cred) throw new Error('No credential returned');
+    console.log('[DEBUG] Credential created:', cred);
+    console.log('[DEBUG] Credential rawId (hex):', bufferToHex(cred.rawId));
+    console.log('[DEBUG] AttestationObject (hex):', bufferToHex(cred.response.attestationObject));
+    console.log('[DEBUG] clientDataJSON (hex):', bufferToHex(cred.response.clientDataJSON));
 
     const payload = {
       id: toBase64Url(cred.rawId),
@@ -94,19 +109,24 @@ document.getElementById('registerBtn').addEventListener('click', async () => {
       },
     };
 
+    console.log('[DEBUG] Sending /register/verify payload:', payload);
     const verifyRes = await fetch(`${API_BASE}/webauthn/register/verify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
+
     const verifyData = await verifyRes.json();
+    console.log('[DEBUG] Verification response:', verifyData);
+
     if (!verifyRes.ok) throw new Error(verifyData.error || 'Server verification failed');
 
     localStorage.setItem('webauthn-cred-id', payload.rawId);
     logStatus('Registration successful ✅');
     showOutput(verifyData);
+
   } catch (err) {
-    console.error(err);
+    console.error('[ERROR] Registration failed:', err);
     logStatus('Registration error: ' + err.message, true);
   }
 });
@@ -118,8 +138,10 @@ document.getElementById('authBtn').addEventListener('click', async () => {
     const storedId = localStorage.getItem('webauthn-cred-id');
     if (!storedId) throw new Error('No credential stored');
 
+    console.log('[DEBUG] Sending /auth/options request with storedId:', storedId);
     const optRes = await fetch(`${API_BASE}/webauthn/auth/options`, { method: 'POST' });
     const publicKey = await optRes.json();
+    console.log('[DEBUG] Received auth options:', publicKey);
 
     publicKey.challenge = fromBase64Url(publicKey.challenge);
     publicKey.allowCredentials = [{
@@ -130,31 +152,40 @@ document.getElementById('authBtn').addEventListener('click', async () => {
 
     const assertion = await navigator.credentials.get({ publicKey });
     if (!assertion) throw new Error('No assertion returned');
+    console.log('[DEBUG] Assertion received:', assertion);
+    console.log('[DEBUG] Assertion rawId (hex):', bufferToHex(assertion.rawId));
+    console.log('[DEBUG] AuthenticatorData (hex):', bufferToHex(assertion.response.authenticatorData));
+    console.log('[DEBUG] Signature (hex):', bufferToHex(assertion.response.signature));
+    console.log('[DEBUG] clientDataJSON (hex):', bufferToHex(assertion.response.clientDataJSON));
+    if (assertion.response.userHandle) console.log('[DEBUG] userHandle (hex):', bufferToHex(assertion.response.userHandle));
 
     const payload = {
       id: assertion.id,
-      rawId: toBase64Url(assertion.rawId), // ensure same Base64URL as stored
+      rawId: toBase64Url(assertion.rawId),
       type: assertion.type,
       response: {
         authenticatorData: toBase64Url(assertion.response.authenticatorData),
         clientDataJSON: toBase64Url(assertion.response.clientDataJSON),
         signature: toBase64Url(assertion.response.signature),
-        userHandle: assertion.response.userHandle
-          ? toBase64Url(assertion.response.userHandle)
-          : null,
+        userHandle: assertion.response.userHandle ? toBase64Url(assertion.response.userHandle) : null,
       },
     };
 
+    console.log('[DEBUG] Sending /auth/verify payload:', payload);
     const verifyRes = await fetch(`${API_BASE}/webauthn/auth/verify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
+
     const verifyData = await verifyRes.json();
+    console.log('[DEBUG] Verification response:', verifyData);
+
     logStatus(verifyData.verified ? 'Authentication successful ✅' : 'Authentication failed ❌');
     showOutput(verifyData);
+
   } catch (err) {
-    console.error(err);
+    console.error('[ERROR] Authentication failed:', err);
     logStatus('Auth error: ' + err.message, true);
   }
 });
