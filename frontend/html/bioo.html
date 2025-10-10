@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>WebAuthn Biometric Registration — Minimal Demo</title>
+  <title>WebAuthn Biometric — Backend Connected</title>
   <style>
     body { font-family: system-ui, -apple-system, Roboto, Arial; max-width: 720px; margin: 32px auto; padding: 0 16px; color: #111; }
     button { padding: 10px 14px; border-radius: 8px; border: 1px solid #ddd; background: #fff; cursor: pointer; margin-right: 8px; }
@@ -14,42 +14,35 @@
   </style>
 </head>
 <body>
-  <h2>WebAuthn — Biometric Registration (minimal)</h2>
+  <h2>WebAuthn — Full Flow (with backend)</h2>
   <div class="row">
-    <button id="checkBtn">Check platform authenticator</button>
-    <button id="registerBtn">Register Biometric (create)</button>
-    <button id="showBtn">Show Stored Credential</button>
-    <button id="authBtn">Authenticate (verify)</button>
-    <button id="removeBtn">Remove Stored Credential</button>
+    <button id="checkBtn">Check Biometric Availability</button>
+    <button id="registerBtn">Register Biometric</button>
+    <button id="authBtn">Authenticate Biometric</button>
+    <button id="removeBtn">Clear Local Data</button>
   </div>
 
   <div class="row"><strong>Status:</strong> <span id="status">idle</span></div>
-  <div class="row"><strong>Stored credential (localStorage):</strong></div>
+  <div class="row"><strong>Output:</strong></div>
   <pre id="out">No credential yet.</pre>
 
 <script>
-/* ----- helpers ----- */
+/* ---------- Helpers ---------- */
 function toBase64Url(buffer) {
   const bytes = new Uint8Array(buffer);
   let str = '';
-  for (let i=0;i<bytes.byteLength;i++){
-    str += String.fromCharCode(bytes[i]);
-  }
-  // base64
-  let b64 = btoa(str);
-  // base64url
-  return b64.replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+  for (let i = 0; i < bytes.byteLength; i++) str += String.fromCharCode(bytes[i]);
+  return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 function fromBase64Url(b64url) {
-  b64url = b64url.replace(/-/g,'+').replace(/_/g,'/');
-  // pad
-  while(b64url.length % 4) b64url += '=';
+  b64url = b64url.replace(/-/g, '+').replace(/_/g, '/');
+  while (b64url.length % 4) b64url += '=';
   const str = atob(b64url);
   const arr = new Uint8Array(str.length);
-  for (let i=0;i<str.length;i++) arr[i] = str.charCodeAt(i);
+  for (let i = 0; i < str.length; i++) arr[i] = str.charCodeAt(i);
   return arr.buffer;
 }
-function logStatus(msg, isErr=false) {
+function logStatus(msg, isErr = false) {
   const s = document.getElementById('status');
   s.textContent = msg;
   s.className = isErr ? 'err' : 'ok';
@@ -58,155 +51,134 @@ function showOutput(obj) {
   document.getElementById('out').textContent = JSON.stringify(obj, null, 2);
 }
 
-/* ----- UI handlers ----- */
+/* ---------- Check device ---------- */
 document.getElementById('checkBtn').addEventListener('click', async () => {
-  logStatus('checking platform authenticator availability...');
+  logStatus('Checking biometric availability...');
   try {
-    if (!window.PublicKeyCredential) {
-      logStatus('WebAuthn (PublicKeyCredential) not available in this browser', true);
-      return;
-    }
+    if (!window.PublicKeyCredential) throw new Error('WebAuthn not supported');
     const available = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
     logStatus('Platform authenticator available: ' + available);
   } catch (e) {
-    console.error(e);
-    logStatus('Error checking availability: ' + e.message, true);
+    logStatus('Error checking: ' + e.message, true);
   }
 });
 
+/* ---------- Registration ---------- */
 document.getElementById('registerBtn').addEventListener('click', async () => {
-  logStatus('starting registration...');
+  logStatus('Requesting registration options from server...');
   try {
-    if (!window.PublicKeyCredential) throw new Error('WebAuthn not supported');
+    const userId = 'demo-user-' + Math.floor(Math.random() * 10000);
 
-    // Minimal options for client-side testing (NOT secure for production)
-    const challenge = crypto.getRandomValues(new Uint8Array(32));
-    const userId = crypto.getRandomValues(new Uint8Array(16)); // sample user id
+    // 1️⃣ Request options from backend
+    const optRes = await fetch('/webauthn/register/options', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, username: 'demo@example.com', displayName: 'Demo User' })
+    });
+    const publicKey = await optRes.json();
 
-    const publicKey = {
-      challenge: challenge.buffer,
-      rp: { name: "Demo (local)" },
-      user: {
-        id: userId.buffer,
-        name: "demo@example.com",
-        displayName: "Demo User"
-      },
-      pubKeyCredParams: [
-        { type: "public-key", alg: -7 },   // "ES256"
-        { type: "public-key", alg: -257 }  // "RS256"
-      ],
-      timeout: 60000,
-      attestation: "direct", // for demo; won't be validated here
-      authenticatorSelection: {
-        // prefer a platform authenticator (face/fingerprint on device)
-        authenticatorAttachment: "platform",
-        requireResidentKey: false,
-        userVerification: "preferred"
+    // Convert challenge/user.id to ArrayBuffers
+    publicKey.challenge = fromBase64Url(publicKey.challenge);
+    publicKey.user.id = fromBase64Url(publicKey.user.id);
+
+    // 2️⃣ Trigger biometric
+    logStatus('Prompting device biometric...');
+    const cred = await navigator.credentials.create({ publicKey });
+    if (!cred) throw new Error('No credential returned');
+
+    // 3️⃣ Send result to backend for verification
+    const payload = {
+      id: cred.id,
+      rawId: toBase64Url(cred.rawId),
+      type: cred.type,
+      response: {
+        attestationObject: toBase64Url(cred.response.attestationObject),
+        clientDataJSON: toBase64Url(cred.response.clientDataJSON)
       }
     };
 
-    // navigator.credentials.create will prompt the biometric / authenticator UI
-    const cred = await navigator.credentials.create({ publicKey });
+    const verifyRes = await fetch('/webauthn/register/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const verifyData = await verifyRes.json();
+    if (!verifyRes.ok) throw new Error(verifyData.error || 'Server verification failed');
 
-    if (!cred) throw new Error('No credential returned');
-
-    // Extract useful fields and store as base64url
-    const rawIdB64 = toBase64Url(cred.rawId);
-    const attObj = cred.response && cred.response.attestationObject ? toBase64Url(cred.response.attestationObject) : null;
-    const clientData = cred.response && cred.response.clientDataJSON ? toBase64Url(cred.response.clientDataJSON) : null;
-
-    const stored = {
-      id: cred.id,
-      rawId: rawIdB64,
-      type: cred.type,
-      attestationObject: attObj,
-      clientDataJSON: clientData,
-      createdAt: new Date().toISOString()
-    };
-
-    // Save locally (for demo). Real app: send to server for verification & storage.
-    localStorage.setItem('webauthn-demo-cred', JSON.stringify(stored));
-    logStatus('Registration successful — credential stored locally');
-    showOutput(stored);
+    localStorage.setItem('webauthn-cred-id', payload.rawId);
+    logStatus('Registration successful ✅');
+    showOutput(verifyData);
   } catch (err) {
-    console.error('register error', err);
-    logStatus('Registration error: ' + (err && err.message ? err.message : String(err)), true);
+    console.error(err);
+    logStatus('Registration error: ' + err.message, true);
   }
 });
 
+/* ---------- Authentication ---------- */
 document.getElementById('authBtn').addEventListener('click', async () => {
-  logStatus('starting authentication...');
+  logStatus('Requesting authentication options...');
   try {
-    if (!window.PublicKeyCredential) throw new Error('WebAuthn not supported');
-    const stored = JSON.parse(localStorage.getItem('webauthn-demo-cred') || 'null');
-    if (!stored) throw new Error('No stored credential found — register first');
+    const storedRawId = localStorage.getItem('webauthn-cred-id');
+    if (!storedRawId) throw new Error('No stored credential. Register first.');
 
-    // Build minimal allowCredentials list
-    const allowCredentials = [{
-      id: fromBase64Url(stored.rawId),
-      type: 'public-key',
-      transports: ['internal']  // "internal" = fingerprint/face ID on device
-    }];
+    // 1️⃣ Get challenge/options from server
+    const optRes = await fetch('/webauthn/auth/options', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: 'demo-user' })
+    });
+    const publicKey = await optRes.json();
 
-    const challenge = crypto.getRandomValues(new Uint8Array(32));
+    publicKey.challenge = fromBase64Url(publicKey.challenge);
+    if (publicKey.allowCredentials) {
+      publicKey.allowCredentials = publicKey.allowCredentials.map(c => ({
+        ...c,
+        id: fromBase64Url(c.id)
+      }));
+    }
 
-    const publicKey = {
-      challenge: challenge.buffer,
-      timeout: 60000,
-      allowCredentials,
-      userVerification: 'preferred'
-    };
-
-    // navigator.credentials.get triggers biometric prompt
+    // 2️⃣ Trigger biometric prompt
+    logStatus('Prompting biometric for authentication...');
     const assertion = await navigator.credentials.get({ publicKey });
-
     if (!assertion) throw new Error('No assertion returned');
 
-    // Extract data for display (real app: send to server to verify)
-    const authResult = {
+    // 3️⃣ Send result to backend for verification
+    const payload = {
       id: assertion.id,
       rawId: toBase64Url(assertion.rawId),
       type: assertion.type,
-      authenticatorData: toBase64Url(assertion.response.authenticatorData),
-      clientDataJSON: toBase64Url(assertion.response.clientDataJSON),
-      signature: toBase64Url(assertion.response.signature),
-      userHandle: assertion.response.userHandle
-        ? toBase64Url(assertion.response.userHandle)
-        : null,
-      verifiedAt: new Date().toISOString()
+      response: {
+        authenticatorData: toBase64Url(assertion.response.authenticatorData),
+        clientDataJSON: toBase64Url(assertion.response.clientDataJSON),
+        signature: toBase64Url(assertion.response.signature),
+        userHandle: assertion.response.userHandle
+          ? toBase64Url(assertion.response.userHandle)
+          : null
+      }
     };
 
-    logStatus('Authentication successful (client-side only)');
-    showOutput(authResult);
+    const verifyRes = await fetch('/webauthn/auth/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const verifyData = await verifyRes.json();
+    if (!verifyRes.ok) throw new Error(verifyData.error || 'Server verification failed');
+
+    logStatus(verifyData.verified ? 'Authentication successful ✅' : 'Authentication failed ❌');
+    showOutput(verifyData);
   } catch (err) {
-    console.error('auth error', err);
-    logStatus('Authentication error: ' + (err && err.message ? err.message : String(err)), true);
+    console.error(err);
+    logStatus('Authentication error: ' + err.message, true);
   }
 });
 
-
-document.getElementById('showBtn').addEventListener('click', () => {
-  const val = localStorage.getItem('webauthn-demo-cred');
-  if (!val) {
-    showOutput({ msg: 'No credential saved in localStorage.' });
-    logStatus('no stored credential');
-  } else {
-    showOutput(JSON.parse(val));
-    logStatus('displaying stored credential');
-  }
-});
-
+/* ---------- Clear ---------- */
 document.getElementById('removeBtn').addEventListener('click', () => {
-  localStorage.removeItem('webauthn-demo-cred');
-  showOutput({ msg: 'Removed stored credential.' });
-  logStatus('removed stored credential');
+  localStorage.removeItem('webauthn-cred-id');
+  showOutput({ msg: 'Removed stored credential ID.' });
+  logStatus('Cleared local data');
 });
-
-/* show existing on load */
-const onLoadStored = localStorage.getItem('webauthn-demo-cred');
-if (onLoadStored) {
-  try { showOutput(JSON.parse(onLoadStored)); } catch (e) { showOutput({err:e.message}); }
-}
 </script>
 </body>
 </html>
