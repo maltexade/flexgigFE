@@ -138,11 +138,10 @@ document.getElementById('authBtn').addEventListener('click', async () => {
     const storedId = localStorage.getItem('webauthn-cred-id');
     if (!storedId) throw new Error('No credential stored');
 
-    console.log('[DEBUG] Sending /auth/options request with storedId:', storedId);
     const optRes = await fetch(`${API_BASE}/webauthn/auth/options`, { method: 'POST' });
     const publicKey = await optRes.json();
-    console.log('[DEBUG] Received auth options:', publicKey);
 
+    // Convert challenge to ArrayBuffer
     publicKey.challenge = fromBase64Url(publicKey.challenge);
     publicKey.allowCredentials = [{
       type: 'public-key',
@@ -150,28 +149,38 @@ document.getElementById('authBtn').addEventListener('click', async () => {
       transports: ['internal'],
     }];
 
+    console.log('--- PUBLICKEY OPTIONS SENT TO NAVIGATOR ---');
+    console.log(publicKey);
+
     const assertion = await navigator.credentials.get({ publicKey });
     if (!assertion) throw new Error('No assertion returned');
-    console.log('[DEBUG] Assertion received:', assertion);
-    console.log('[DEBUG] Assertion rawId (hex):', bufferToHex(assertion.rawId));
-    console.log('[DEBUG] AuthenticatorData (hex):', bufferToHex(assertion.response.authenticatorData));
-    console.log('[DEBUG] Signature (hex):', bufferToHex(assertion.response.signature));
-    console.log('[DEBUG] clientDataJSON (hex):', bufferToHex(assertion.response.clientDataJSON));
-    if (assertion.response.userHandle) console.log('[DEBUG] userHandle (hex):', bufferToHex(assertion.response.userHandle));
+
+    console.log('--- RAW ASSERTION RETURNED BY WINDOWS HELLO ---');
+    console.log(assertion);
+
+    // Convert ArrayBuffers to Base64URL safely
+    function bufferToBase64url(buf) {
+      return btoa(String.fromCharCode(...new Uint8Array(buf)))
+        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    }
 
     const payload = {
       id: assertion.id,
-      rawId: toBase64Url(assertion.rawId),
+      rawId: bufferToBase64url(assertion.rawId),
       type: assertion.type,
       response: {
-        authenticatorData: toBase64Url(assertion.response.authenticatorData),
-        clientDataJSON: toBase64Url(assertion.response.clientDataJSON),
-        signature: toBase64Url(assertion.response.signature),
-        userHandle: assertion.response.userHandle ? toBase64Url(assertion.response.userHandle) : null,
+        authenticatorData: bufferToBase64url(assertion.response.authenticatorData),
+        clientDataJSON: bufferToBase64url(assertion.response.clientDataJSON),
+        signature: bufferToBase64url(assertion.response.signature),
+        userHandle: assertion.response.userHandle
+          ? bufferToBase64url(assertion.response.userHandle)
+          : null,
       },
     };
 
-    console.log('[DEBUG] Sending /auth/verify payload:', payload);
+    console.log('--- FINAL PAYLOAD SENT TO SERVER ---');
+    console.log(payload);
+
     const verifyRes = await fetch(`${API_BASE}/webauthn/auth/verify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -179,16 +188,17 @@ document.getElementById('authBtn').addEventListener('click', async () => {
     });
 
     const verifyData = await verifyRes.json();
-    console.log('[DEBUG] Verification response:', verifyData);
+    console.log('--- SERVER RESPONSE ---');
+    console.log(verifyData);
 
     logStatus(verifyData.verified ? 'Authentication successful ✅' : 'Authentication failed ❌');
     showOutput(verifyData);
-
   } catch (err) {
-    console.error('[ERROR] Authentication failed:', err);
+    console.error(err);
     logStatus('Auth error: ' + err.message, true);
   }
 });
+
 
 /* ---------- Clear Local Data ---------- */
 document.getElementById('removeBtn').addEventListener('click', () => {
