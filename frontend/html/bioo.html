@@ -106,7 +106,7 @@ document.getElementById('registerBtn').addEventListener('click', async () => {
     // 3️⃣ Send result to backend for verification
     // 3️⃣ Send result to backend for verification
 const payload = {
-  id: cred.id,
+  id: toBase64Url(cred.rawId),          // ✅ use encoded rawId for id too
   rawId: toBase64Url(cred.rawId),
   type: cred.type,
   response: {
@@ -178,7 +178,7 @@ document.getElementById('authBtn').addEventListener('click', async () => {
 
     // 3️⃣ Send result to backend for verification
     const payload = {
-      id: assertion.id,
+      id: toBase64Url(assertion.rawId),    // ✅ encode for id too
       rawId: toBase64Url(assertion.rawId),
       type: assertion.type,
       response: {
