@@ -31,11 +31,15 @@ const API_BASE = 'https://api.flexgig.com.ng';
 
 /* ---------- Helpers ---------- */
 function toBase64Url(buffer) {
-  const bytes = new Uint8Array(buffer);
+  if (!buffer) return null; // handle undefined/null safely
+  if (buffer instanceof ArrayBuffer === false && !(buffer.buffer instanceof ArrayBuffer))
+    throw new TypeError('Expected ArrayBuffer or TypedArray');
+  const bytes = new Uint8Array(buffer instanceof ArrayBuffer ? buffer : buffer.buffer);
   let str = '';
   for (let i = 0; i < bytes.byteLength; i++) str += String.fromCharCode(bytes[i]);
   return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
+
 function fromBase64Url(b64url) {
   b64url = b64url.replace(/-/g, '+').replace(/_/g, '/');
   while (b64url.length % 4) b64url += '=';
@@ -100,15 +104,17 @@ document.getElementById('registerBtn').addEventListener('click', async () => {
     if (!cred) throw new Error('No credential returned');
 
     // 3️⃣ Send result to backend for verification
-    const payload = {
-      id: cred.id,
-      rawId: toBase64Url(cred.rawId),
-      type: cred.type,
-      response: {
-        attestationObject: toBase64Url(cred.response.attestationObject),
-        clientDataJSON: toBase64Url(cred.response.clientDataJSON),
-      },
-    };
+    // 3️⃣ Send result to backend for verification
+const payload = {
+  id: cred.id,
+  rawId: toBase64Url(cred.rawId),
+  type: cred.type,
+  response: {
+    attestationObject: toBase64Url(cred.response?.attestationObject),
+    clientDataJSON: toBase64Url(cred.response?.clientDataJSON),
+  },
+};
+
 
     const verifyRes = await fetch(`${API_BASE}/webauthn/register/verify`, {
       method: 'POST',
