@@ -111,6 +111,7 @@ document.getElementById('registerBtn').addEventListener('click', async () => {
 });
 
 /* ---------- Authenticate ---------- */
+/* ---------- Authenticate ---------- */
 document.getElementById('authBtn').addEventListener('click', async () => {
   logStatus('Authenticating...');
   try {
@@ -119,6 +120,7 @@ document.getElementById('authBtn').addEventListener('click', async () => {
 
     const optRes = await fetch(`${API_BASE}/webauthn/auth/options`, { method: 'POST' });
     const publicKey = await optRes.json();
+
     publicKey.challenge = fromBase64Url(publicKey.challenge);
     publicKey.allowCredentials = [{
       type: 'public-key',
@@ -129,15 +131,23 @@ document.getElementById('authBtn').addEventListener('click', async () => {
     const assertion = await navigator.credentials.get({ publicKey });
     if (!assertion) throw new Error('No assertion returned');
 
+    // Convert ArrayBuffers to Base64URL safely
+    function bufferToBase64url(buf) {
+      return btoa(String.fromCharCode(...new Uint8Array(buf)))
+        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    }
+
     const payload = {
-      id: toBase64Url(assertion.rawId),
-      rawId: toBase64Url(assertion.rawId),
+      id: assertion.id,
+      rawId: bufferToBase64url(assertion.rawId),
       type: assertion.type,
       response: {
-        authenticatorData: toBase64Url(assertion.response.authenticatorData),
-        clientDataJSON: toBase64Url(assertion.response.clientDataJSON),
-        signature: toBase64Url(assertion.response.signature),
-        userHandle: assertion.response.userHandle ? toBase64Url(assertion.response.userHandle) : null,
+        authenticatorData: bufferToBase64url(assertion.response.authenticatorData),
+        clientDataJSON: bufferToBase64url(assertion.response.clientDataJSON),
+        signature: bufferToBase64url(assertion.response.signature),
+        userHandle: assertion.response.userHandle
+          ? bufferToBase64url(assertion.response.userHandle)
+          : null,
       },
     };
 
@@ -146,6 +156,7 @@ document.getElementById('authBtn').addEventListener('click', async () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
+
     const verifyData = await verifyRes.json();
 
     logStatus(verifyData.verified ? 'Authentication successful ✅' : 'Authentication failed ❌');
@@ -155,6 +166,7 @@ document.getElementById('authBtn').addEventListener('click', async () => {
     logStatus('Auth error: ' + err.message, true);
   }
 });
+
 
 /* ---------- Clear ---------- */
 document.getElementById('removeBtn').addEventListener('click', () => {
