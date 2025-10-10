@@ -8137,6 +8137,11 @@ setTimeout(() => {
   const bioBtn = document.getElementById('pinBiometricBtn');
   if (!bioBtn) return;
 
+const storedCred = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id') || localStorage.getItem('webauthn_cred');
+const flag = (localStorage.getItem('biometricForLogin') ||
+              localStorage.getItem('__sec_bioLogin') ||
+              localStorage.getItem('security_bio_login') || '').toLowerCase();
+
   // 🔸 Determine if biometrics enabled for login (client-side only)
   const bioLoginEnabled = ['true', '1', 'yes'].includes(
   (
