@@ -105,15 +105,17 @@ document.getElementById('registerBtn').addEventListener('click', async () => {
 
     // 3️⃣ Send result to backend for verification
     // 3️⃣ Send result to backend for verification
+const encodedRawId = toBase64Url(cred.rawId);
 const payload = {
-  id: toBase64Url(cred.rawId),          // ✅ use encoded rawId for id too
-  rawId: toBase64Url(cred.rawId),
+  id: encodedRawId,                 // ✅ use encoded version for both
+  rawId: encodedRawId,
   type: cred.type,
   response: {
     attestationObject: toBase64Url(cred.response?.attestationObject),
     clientDataJSON: toBase64Url(cred.response?.clientDataJSON),
   },
 };
+
 
 
     const verifyRes = await fetch(`${API_BASE}/webauthn/register/verify`, {
@@ -177,19 +179,21 @@ document.getElementById('authBtn').addEventListener('click', async () => {
     if (!assertion) throw new Error('No assertion returned');
 
     // 3️⃣ Send result to backend for verification
-    const payload = {
-      id: toBase64Url(assertion.rawId),    // ✅ encode for id too
-      rawId: toBase64Url(assertion.rawId),
-      type: assertion.type,
-      response: {
-        authenticatorData: toBase64Url(assertion.response.authenticatorData),
-        clientDataJSON: toBase64Url(assertion.response.clientDataJSON),
-        signature: toBase64Url(assertion.response.signature),
-        userHandle: assertion.response.userHandle
-          ? toBase64Url(assertion.response.userHandle)
-          : null,
-      },
-    };
+    const encodedRawId = toBase64Url(assertion.rawId);
+const payload = {
+  id: encodedRawId,                 // ✅ same encoding fix
+  rawId: encodedRawId,
+  type: assertion.type,
+  response: {
+    authenticatorData: toBase64Url(assertion.response.authenticatorData),
+    clientDataJSON: toBase64Url(assertion.response.clientDataJSON),
+    signature: toBase64Url(assertion.response.signature),
+    userHandle: assertion.response.userHandle
+      ? toBase64Url(assertion.response.userHandle)
+      : null,
+  },
+};
+
 
     const verifyRes = await fetch(`${API_BASE}/webauthn/auth/verify`, {
       method: 'POST',
