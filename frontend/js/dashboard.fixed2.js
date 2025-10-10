@@ -8492,6 +8492,45 @@ setTimeout(() => {
             try { if (switchToPin) switchToPin.click(); else switchViews(false); } catch (e) { console.error(e); }
           }
         })();
+
+
+// Immediate biometric click handler: show UI immediately, then trigger verify in background.
+// Replaces older handler that awaited server before showing UI.
+function __immediateBiometricClickHandler(e) {
+  try {
+    // Open PIN/modal or UI immediately if function exists
+    if (typeof openPinModal === 'function') {
+      try { openPinModal(); } catch (ignore) {}
+    } else if (typeof showBiometricPanel === 'function') {
+      try { showBiometricPanel(); } catch (ignore) {}
+    }
+  } catch (err) {
+    console.warn('Opening biometric UI failed', err);
+  }
+
+  // Start prefetch early (if not started)
+  try { window.prefetchAuthOptions && window.prefetchAuthOptions(); } catch(e) {}
+
+  // Trigger verification but don't block UI (user gesture is still active)
+  // We call verifyBiometrics and handle result asynchronously.
+  (async function() {
+    try {
+      const res = await verifyBiometrics();
+      // optional: handle result (e.g., close modal on success)
+      if (res && res.success) {
+        try { if (typeof closePinModal === 'function') closePinModal(); } catch(e) {}
+      } else {
+        // show error inside modal if available
+        try { safeCall(notify, 'Biometric auth failed', 'error'); } catch(e) {}
+      }
+    } catch (err) {
+      console.warn('verifyBiometrics error', err);
+    }
+  })();
+}
+
+
+
       } else {
         // Direct fallback to PIN if no biometric
         if (biometricView) biometricView.style.display = 'none';
@@ -8757,7 +8796,7 @@ async function disableBiometrics() {
     localStorage.setItem('biometricForLogin', 'false');
 
     try {
-      const bioBtn = document.getElementById('bioBtn') || document.querySelector('.biometric-button');
+      var bioBtn = document.getElementById('bioBtn') || document.querySelector('.biometric-button');
       if (bioBtn) bioBtn.style.display = 'none';
     } catch (e) { /* ignore UI errors */ }
 
@@ -8766,18 +8805,18 @@ async function disableBiometrics() {
     console.warn('Local clear failed', e);
   }
 
-  (async () => {
+  (async function(){
     try {
-      const session = await safeCall(getSession);
-      const uid = session?.user?.id || session?.user?.uid;
+      var session = await safeCall(getSession);
+      var uid = session && (session.user && (session.user.id || session.user.uid));
       if (!uid) {
         safeCall(notify, 'Could not revoke on server: missing session', 'error');
         return;
       }
 
-      const apiBase = window.__SEC_API_BASE || API_BASE || '';
+      var apiBase = window.__SEC_API_BASE || API_BASE || '';
 
-      const res = await fetch(`${apiBase}/webauthn/authenticators/${uid}/revoke`, {
+      var res = await fetch(apiBase + '/webauthn/authenticators/' + encodeURIComponent(uid) + '/revoke', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -8785,13 +8824,13 @@ async function disableBiometrics() {
       });
 
       if (!res.ok) {
-        const txt = await res.text();
+        var txt = await res.text();
         console.error('[disableBiometrics] revoke failed', txt);
         safeCall(notify, 'Server revoke failed: ' + (txt || res.statusText), 'error');
         return;
       }
 
-      const data = await res.json();
+      var data = await res.json();
       safeCall(notify, 'Biometric revoked on server', 'success');
       console.log('[disableBiometrics] revoke response', data);
     } catch (err) {
@@ -8890,7 +8929,7 @@ function bindBiometricSettings({
             safeCall(notify, res?.cancelled ? 'Setup cancelled' : 'Setup failed', 'info');
           }
         } else {
-          const res = await disableBiometrics();  // Server revoke only here
+          const res = disableBiometrics();  // Server revoke only here
           writeFlag('biometricsEnabled', false);
           writeFlag('biometricForLogin', false);  // Auto-disable children flags
           writeFlag('biometricForTx', false);
@@ -9260,86 +9299,88 @@ async function prefetchAuthOptionsFor(uid, context = 'reauth') {
    ----------------------- */
 // ---- verifyBiometrics ----
 
-/* ---------- Fixed client-side WebAuthn / reauth snippet ---------- */
 
 // ===== Prefetch helpers & safe base64 helpers for biometric flow =====
-window.fromBase64Url = window.fromBase64Url || function (b64url) {
-  if (!b64url) return new ArrayBuffer(0);
-  b64url = b64url.replace(/-/g, '+').replace(/_/g, '/');
-  while (b64url.length % 4) b64url += '=';
-  const str = atob(b64url);
-  const arr = new Uint8Array(str.length);
-  for (let i = 0; i < str.length; i++) arr[i] = str.charCodeAt(i);
-  return arr.buffer;
-};
-
-window.toBase64Url = window.toBase64Url || function (buffer) {
-  const bytes = new Uint8Array(buffer);
-  let str = '';
-  for (let i = 0; i < bytes.length; i++) str += String.fromCharCode(bytes[i]);
-  return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-};
-
-// Prefetch authentication options so the prompt can appear immediately on click
-async function prefetchAuthOptions() {
-  try {
-    if (window.__prefetchInFlight) return;
-    window.__prefetchInFlight = true;
-
-    const storedId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
-    if (!storedId) {
-      window.__prefetchInFlight = false;
-      return;
-    }
-
-    const res = await fetch(`${API_BASE}/webauthn/auth/options`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ credentialId: storedId })
-    });
-
-    if (!res.ok) {
-      console.warn('[prefetchAuthOptions] options fetch not ok', await res.text());
-      window.__prefetchInFlight = false;
-      return;
-    }
-
-    const publicKey = await res.json();
-
-    try {
-      if (publicKey.challenge) publicKey.challenge = fromBase64Url(publicKey.challenge);
-      if (Array.isArray(publicKey.allowCredentials)) {
-        publicKey.allowCredentials = publicKey.allowCredentials.map(c => ({
-          type: c.type || 'public-key',
-          transports: c.transports || ['internal'],
-          id: fromBase64Url(c.id)
-        }));
-      }
-    } catch (e) {
-      console.warn('[prefetchAuthOptions] conversion error', e);
-    }
-
-    window.__cachedAuthOptions = publicKey;
-    window.__cachedAuthOptionsFetchedAt = Date.now();
-    console.log('[prefetchAuthOptions] cached auth options ready');
-  } catch (err) {
-    console.warn('[prefetchAuthOptions] failed', err);
-  } finally {
-    window.__prefetchInFlight = false;
+(function(){
+  if (!window.fromBase64Url) {
+    window.fromBase64Url = function (b64url) {
+      if (!b64url) return new ArrayBuffer(0);
+      b64url = b64url.replace(/-/g, '+').replace(/_/g, '/');
+      while (b64url.length % 4) b64url += '=';
+      const str = atob(b64url);
+      const arr = new Uint8Array(str.length);
+      for (let i = 0; i < str.length; i++) arr[i] = str.charCodeAt(i);
+      return arr.buffer;
+    };
   }
-}
+  if (!window.toBase64Url) {
+    window.toBase64Url = function (buffer) {
+      const bytes = new Uint8Array(buffer);
+      let str = '';
+      for (let i = 0; i < bytes.length; i++) str += String.fromCharCode(bytes[i]);
+      return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    };
+  }
 
-// Auto-bind prefetch to biometric button if present
-(function bindPrefetchToBioBtn() {
+  window.prefetchAuthOptions = window.prefetchAuthOptions || (async function prefetchAuthOptions() {
+    try {
+      if (window.__prefetchInFlight) return;
+      window.__prefetchInFlight = true;
+
+      const storedId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
+      if (!storedId) {
+        window.__prefetchInFlight = false;
+        return;
+      }
+
+      const res = await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/options', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ credentialId: storedId })
+      });
+
+      if (!res.ok) {
+        console.warn('[prefetchAuthOptions] options fetch not ok', await res.text());
+        window.__prefetchInFlight = false;
+        return;
+      }
+
+      const publicKey = await res.json();
+
+      try {
+        if (publicKey.challenge) publicKey.challenge = window.fromBase64Url(publicKey.challenge);
+        if (Array.isArray(publicKey.allowCredentials)) {
+          publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){
+            return {
+              type: c.type || 'public-key',
+              transports: c.transports || ['internal'],
+              id: window.fromBase64Url(c.id)
+            };
+          });
+        }
+      } catch (e) {
+        console.warn('[prefetchAuthOptions] conversion error', e);
+      }
+
+      window.__cachedAuthOptions = publicKey;
+      window.__cachedAuthOptionsFetchedAt = Date.now();
+      console.log('[prefetchAuthOptions] cached auth options ready');
+    } catch (err) {
+      console.warn('[prefetchAuthOptions] failed', err);
+    } finally {
+      window.__prefetchInFlight = false;
+    }
+  });
+
   try {
-    const bioBtnEl = document.getElementById('bioBtn') || document.querySelector('.biometric-button') || document.querySelector('[data-bio-button]');
-    if (!bioBtnEl) return;
-    bioBtnEl.addEventListener('pointerdown', () => prefetchAuthOptions());
-    bioBtnEl.addEventListener('mouseenter', () => prefetchAuthOptions());
-    // prefetch on load if credential present
+    var bioBtnEl = document.getElementById('bioBtn') || document.querySelector('.biometric-button') || document.querySelector('[data-bio-button]');
+    if (bioBtnEl) {
+      bioBtnEl.addEventListener('pointerdown', function(){ window.prefetchAuthOptions(); });
+      bioBtnEl.addEventListener('mouseenter', function(){ window.prefetchAuthOptions(); });
+    }
     if (localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id')) {
-      setTimeout(() => prefetchAuthOptions(), 200);
+      setTimeout(function(){ window.prefetchAuthOptions(); }, 200);
     }
   } catch (e) {
     console.warn('bindPrefetchToBioBtn error', e);
@@ -9347,46 +9388,46 @@ async function prefetchAuthOptions() {
 })();
 
 
-// ===== verifyBiometrics: fixed and complete =====
-async function verifyBiometrics(uid, context = 'reauth') {
+async function verifyBiometrics(uid, context) {
+  if (context === undefined) context = 'reauth';
   console.log('%c[verifyBiometrics] CALLED (cached-optimize)', 'color:#0ff;font-weight:bold');
-  return withLoader(async () => {
+  return withLoader(async function(){
     try {
-      let userId = uid;
+      var userId = uid;
       if (!userId) {
-        const session = await safeCall(getSession);
-        userId = session?.user?.id || session?.user?.uid;
+        var session = await safeCall(getSession);
+        userId = session && (session.user && (session.user.id || session.user.uid));
       }
       if (!userId) throw new Error('No user id available');
 
-      let publicKey = window.__cachedAuthOptions;
-      const maxCacheMs = 30 * 1000; // 30 seconds
-      if (publicKey && window.__cachedAuthOptionsFetchedAt && (Date.now() - window.__cachedAuthOptionsFetchedAt) > maxCacheMs) {
+      var publicKey = window.__cachedAuthOptions;
+      var maxCacheMs = 30 * 1000;
+      if (publicKey && window.__cachedAuthOptionsFetchedAt && ((Date.now() - window.__cachedAuthOptionsFetchedAt) > maxCacheMs)) {
         publicKey = null;
       }
 
       if (!publicKey) {
         console.log('[verifyBiometrics] no cached options - fetching from server');
-        const storedId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
-        const optRes = await fetch(`${API_BASE}/webauthn/auth/options`, {
+        var storedId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
+        var optRes = await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/options', {
           method: 'POST',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId, credentialId: storedId })
+          body: JSON.stringify({ userId: userId, credentialId: storedId })
         });
         if (!optRes.ok) {
-          const txt = await optRes.text();
+          var txt = await optRes.text();
           throw new Error('Auth options fetch failed: ' + txt);
         }
         publicKey = await optRes.json();
-        if (publicKey.challenge) publicKey.challenge = fromBase64Url(publicKey.challenge);
+        if (publicKey.challenge) publicKey.challenge = window.fromBase64Url(publicKey.challenge);
         if (Array.isArray(publicKey.allowCredentials)) {
-          publicKey.allowCredentials = publicKey.allowCredentials.map(c => ({ ...c, id: fromBase64Url(c.id) }));
+          publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){ return Object.assign({}, c, { id: window.fromBase64Url(c.id) }); });
         } else {
-          const storedId2 = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
+          var storedId2 = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
           publicKey.allowCredentials = [{
             type: 'public-key',
-            id: fromBase64Url(storedId2),
+            id: window.fromBase64Url(storedId2),
             transports: ['internal']
           }];
         }
@@ -9394,14 +9435,14 @@ async function verifyBiometrics(uid, context = 'reauth') {
         console.log('[verifyBiometrics] using cached options for immediate prompt');
       }
 
-      const assertion = await navigator.credentials.get({ publicKey });
+      var assertion = await navigator.credentials.get({ publicKey: publicKey });
       if (!assertion) throw new Error('No assertion returned from authenticator');
 
       function bufferToBase64url(buf) {
-        return toBase64Url(buf);
+        return window.toBase64Url(buf);
       }
 
-      const payload = {
+      var payload = {
         id: assertion.id,
         rawId: bufferToBase64url(assertion.rawId),
         type: assertion.type,
@@ -9409,58 +9450,48 @@ async function verifyBiometrics(uid, context = 'reauth') {
           authenticatorData: bufferToBase64url(assertion.response.authenticatorData),
           clientDataJSON: bufferToBase64url(assertion.response.clientDataJSON),
           signature: bufferToBase64url(assertion.response.signature),
-          userHandle: assertion.response.userHandle ? bufferToBase64url(assertion.response.userHandle) : null,
-        },
+          userHandle: assertion.response.userHandle ? bufferToBase64url(assertion.response.userHandle) : null
+        }
       };
 
       console.log('[verifyBiometrics] sending assertion payload to server');
-      const verifyRes = await fetch(`${API_BASE}/webauthn/auth/verify`, {
+      var verifyRes = await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/verify', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        // server expects either the assertion at top-level or an 'assertion' field; your server previously accepted body or credential
-        body: JSON.stringify({ userId, assertion: payload })
+        body: JSON.stringify({ userId: userId, assertion: payload })
       });
 
-      let verifyData;
-      try {
-        verifyData = await verifyRes.json();
-      } catch (e) {
-        verifyData = { error: 'Invalid JSON response', rawText: await verifyRes.text() };
-      }
+      var verifyData = await verifyRes.json();
 
       if (!verifyRes.ok) {
         safeCall(notify, 'Authentication failed', 'error');
         console.error('[verifyBiometrics] server verify failed', verifyData);
-        return { success: false, verifyData };
+        return { success: false, verifyData: verifyData };
       }
 
       safeCall(notify, verifyData.verified ? 'Authentication successful' : 'Authentication failed', verifyData.verified ? 'success' : 'error');
       console.log('[verifyBiometrics] verifyData:', verifyData);
-      return { success: !!verifyData.verified, verifyData };
+      return { success: !!verifyData.verified, verifyData: verifyData };
     } catch (err) {
       console.error('[verifyBiometrics] error', err);
-      safeCall(notify, 'Biometric auth error: ' + (err.message || err), 'error');
-      return { success: false, error: err.message || String(err) };
+      safeCall(notify, 'Biometric auth error: ' + (err && err.message ? err.message : err), 'error');
+      return { success: false, error: (err && err.message) ? err.message : String(err) };
     }
   });
 }
 
 
-// Expose small debugging helpers to console (defensive: only assign if defined)
-try {
-  if (typeof dumpCredentialStorage !== 'undefined') window.dumpCredentialStorage = dumpCredentialStorage;
-} catch (e) { /* ignore */ }
-try {
-  if (typeof persistCredentialId !== 'undefined') window.persistCredentialId = persistCredentialId;
-} catch (e) { /* ignore */ }
+
+// Expose small debugging helpers to console
+window.dumpCredentialStorage = dumpCredentialStorage;
+window.persistCredentialId = persistCredentialId;
 
 
-// ===== Inactivity / reauth flow functions (kept your logic) =====
 
-async function setupInactivity() {
+  async function setupInactivity() {
   console.log('setupInactivity called');
-  if (typeof __inactivitySetupDone !== 'undefined' && __inactivitySetupDone) {
+  if (__inactivitySetupDone) {
     console.log('Inactivity already setup');
     return;
   }
@@ -9472,7 +9503,7 @@ async function setupInactivity() {
   }
 
   // Only set flag and proceed if reauth is needed
-  window.__inactivitySetupDone = true;
+  __inactivitySetupDone = true;
 
   const events = ['mousemove', 'keydown', 'touchstart', 'touchend', 'click', 'scroll'];
   events.forEach(evt => {
@@ -9483,13 +9514,13 @@ async function setupInactivity() {
   let lastVisibilityChange = 0;
   document.addEventListener('visibilitychange', () => {
     const now = Date.now();
-    if (now - lastVisibilityChange < (typeof RESET_DEBOUNCE_MS !== 'undefined' ? RESET_DEBOUNCE_MS : 300)) return;
+    if (now - lastVisibilityChange < RESET_DEBOUNCE_MS) return;
     lastVisibilityChange = now;
 
     console.log('Visibility changed to:', document.visibilityState);
     if (document.visibilityState === 'visible') {
       const last = Number(localStorage.getItem('lastActive') || 0);
-      if (Date.now() - last > (typeof IDLE_TIME !== 'undefined' ? IDLE_TIME : 5 * 60 * 1000) && !window.__reauthModalOpen) { // Don't trigger if modal open
+      if (Date.now() - last > IDLE_TIME && !reauthModalOpen) { // Don't trigger if modal open
         console.log('Idle on visible, showing prompt');
         showInactivityPrompt().catch(() => {});
       } else {
@@ -9508,42 +9539,39 @@ async function setupInactivity() {
   console.log('setupInactivity completed');
 }
 
+  function resetIdleTimer() {
+    const now = Date.now();
+    if (now - lastResetCall < RESET_DEBOUNCE_MS) {
+      console.log('Reset debounced');
+      return;
+    }
+    lastResetCall = now;
+    console.log('resetIdleTimer called');
 
-function resetIdleTimer() {
-  const now = Date.now();
-  const RESET_DEBOUNCE_MS = typeof RESET_DEBOUNCE_MS !== 'undefined' ? RESET_DEBOUNCE_MS : 500;
-  if (now - lastResetCall < RESET_DEBOUNCE_MS) {
-    console.log('Reset debounced');
-    return;
-  }
-  lastResetCall = now;
-  console.log('resetIdleTimer called');
+    if (idleTimeout) {
+      clearTimeout(idleTimeout);
+      idleTimeout = null;
+    }
+    lastActive = now;
+    try {
+      localStorage.setItem('lastActive', String(lastActive));
+    } catch (e) {
+      console.error('Error setting lastActive:', e);
+    }
 
-  if (idleTimeout) {
-    clearTimeout(idleTimeout);
-    idleTimeout = null;
-  }
-  lastActive = now;
-  try {
-    localStorage.setItem('lastActive', String(lastActive));
-  } catch (e) {
-    console.error('Error setting lastActive:', e);
+    if (!reauthModalOpen) { // Only restart if no modal open
+      idleTimeout = setTimeout(() => {
+        console.log('Idle timeout fired');
+        showInactivityPrompt().catch(() => {});
+      }, IDLE_TIME);
+    }
   }
 
-  const IDLE_TIME = typeof IDLE_TIME !== 'undefined' ? IDLE_TIME : (5 * 60 * 1000); // default 5m
-  if (!window.__reauthModalOpen) { // Only restart if no modal open
-    idleTimeout = setTimeout(() => {
-      console.log('Idle timeout fired');
-      showInactivityPrompt().catch(() => {});
-    }, IDLE_TIME);
-  }
-}
-
-// Full showReauthModal (explicit called flow)
+  // Full showReauthModal (explicit called flow)
 async function showReauthModal(context = 'reauth') {
   console.log('showReauthModal called', { context });
-  if (typeof cacheDomRefs === 'function') cacheDomRefs();
-  if (!window.__reauthModal) {
+  cacheDomRefs();
+  if (!reauthModal) {
     console.error('showReauthModal: reauthModal missing');
     return;
   }
@@ -9590,160 +9618,148 @@ async function showReauthModal(context = 'reauth') {
 }
 
 
-async function showInactivityPrompt() {
-  console.log('showInactivityPrompt called');
-  if (window.__reauthModalOpen) {
-    console.log('Inactivity prompt skipped: reauth modal active');
-    return;
-  }
-  if (!(await shouldReauth())) {
-    console.log('No reauth for prompt');
-    return;
-  }
-  if (typeof cacheDomRefs === 'function') cacheDomRefs();
-  const promptModal = window.__promptModal;
-  const yesBtn = window.__yesBtn;
-  if (!promptModal || !yesBtn) {
-    console.log('No promptModal or yesBtn, showing reauth');
-    await showReauthModal();
-    return;
-  }
-  if (!promptModal.classList.contains('hidden')) {
-    console.log('Prompt already shown');
-    return;
-  }
-
-  promptModal.classList.remove('hidden');
-  promptModal.setAttribute('aria-modal', 'true');
-  promptModal.setAttribute('role', 'dialog');
-  yesBtn.focus();
-  if (typeof trapFocus === 'function') trapFocus(promptModal); // Focus trap
-  console.log('Prompt shown');
-
-  let promptTimeout = null;
-  const yesHandler = () => {
-    console.log('Yes handler called');
-    try {
-      promptModal.classList.add('hidden');
-      if (promptTimeout) clearTimeout(promptTimeout);
-      try { yesBtn.removeEventListener('click', yesHandler); } catch (e) {}
-      resetIdleTimer();
-    } catch (e) {
-      console.error('Error in yesHandler:', e);
+  async function showInactivityPrompt() {
+    console.log('showInactivityPrompt called');
+    if (reauthModalOpen) {
+      console.log('Inactivity prompt skipped: reauth modal active');
+      return;
     }
-  };
-
-  try {
-    yesBtn.addEventListener('click', yesHandler, { once: true });
-  } catch (e) {
-    console.error('Error adding yes click:', e);
-  }
-
-  // Escape key closes prompt (UX)
-  const escHandler = (ev) => {
-    if (ev.key === 'Escape') {
-      console.log('Escape pressed in prompt');
-      yesHandler();
+    if (!(await shouldReauth())) {
+      console.log('No reauth for prompt');
+      return;
     }
-  };
-  document.addEventListener('keydown', escHandler, { once: true });
+    cacheDomRefs();
+    if (!promptModal || !yesBtn) {
+      console.log('No promptModal or yesBtn, showing reauth');
+      await showReauthModal();
+      return;
+    }
+    if (!promptModal.classList.contains('hidden')) {
+      console.log('Prompt already shown');
+      return;
+    }
 
-  const PROMPT_AUTO_CLOSE = typeof PROMPT_AUTO_CLOSE !== 'undefined' ? PROMPT_AUTO_CLOSE : true;
-  const PROMPT_TIMEOUT = typeof PROMPT_TIMEOUT !== 'undefined' ? PROMPT_TIMEOUT : (15 * 1000);
-  if (PROMPT_AUTO_CLOSE) {
-    promptTimeout = setTimeout(async () => {
-      console.log('Prompt auto-close timeout');
-      if (!promptModal.classList.contains('hidden')) {
+    promptModal.classList.remove('hidden');
+    promptModal.setAttribute('aria-modal', 'true');
+    promptModal.setAttribute('role', 'dialog');
+    yesBtn.focus();
+    trapFocus(promptModal); // Focus trap
+    console.log('Prompt shown');
+
+    let promptTimeout = null;
+    const yesHandler = () => {
+      console.log('Yes handler called');
+      try {
         promptModal.classList.add('hidden');
-        try { yesBtn.removeEventListener('click', yesHandler); } catch (e) {}
-        document.removeEventListener('keydown', escHandler);
-        await showReauthModal();
+        if (promptTimeout) clearTimeout(promptTimeout);
+        try {
+          yesBtn.removeEventListener('click', yesHandler);
+        } catch (e) {}
+        resetIdleTimer();
+      } catch (e) {
+        console.error('Error in yesHandler:', e);
       }
-    }, PROMPT_TIMEOUT);
-  }
-}
+    };
 
-async function forceInactivityCheck() {
-  console.log('forceInactivityCheck called');
-  if (idleTimeout) {
-    clearTimeout(idleTimeout);
-    idleTimeout = null;
-  }
-  await showInactivityPrompt();
-}
-
-function onSuccessfulReauth() {
-  console.log('Reauth modal closed: inactivity resumed');
-  console.log('onSuccessfulReauth called');
-  window.__reauthModalOpen = false; // Resume idle
-  try { localStorage.removeItem('reauthPending'); } catch(e) {}
-  try {
-    if (typeof cacheDomRefs === 'function') cacheDomRefs();
-    if (window.__reauthModal) window.__reauthModal.classList.add('hidden');
-    if (window.__promptModal) window.__promptModal.classList.add('hidden');
-  } catch (e) {
-    console.error('Error hiding modals on success:', e);
-  }
-  resetIdleTimer(); // Restart idle timer
-}
-
-/* -----------------------
-   Boot sequence
-   ----------------------- */
-(async function initFlow() {
-  console.log('initFlow started');
-  try {
-    await initReauthModal({ show: false });
-  } catch (e) {
-    console.error('Error in initReauthModal boot:', e);
-  }
-  try {
-    await setupInactivity();
-  } catch (e) {
-    console.error('Error in setupInactivity boot:', e);
-  }
-  console.log('initFlow completed');
-})();
-
-
-// Expose to global scope (defensive)
-window.__reauth = window.__reauth || {};
-(function attachReauthExports() {
-  const exports = {};
-  const names = [
-    'initReauthModal',
-    'setupInactivity',
-    'forceInactivityCheck',
-    'onSuccessfulReauth',
-    'showReauthModal',
-    'registerBiometrics',
-    'disableBiometrics',
-    'verifyBiometrics',
-    'triggerCheckoutReauth',
-    'shouldReauth'
-  ];
-  names.forEach(name => {
     try {
-      if (typeof window[name] === 'function') exports[name] = window[name];
-      else if (typeof eval(name) === 'function') exports[name] = eval(name);
+      yesBtn.addEventListener('click', yesHandler, { once: true });
     } catch (e) {
-      // ignore missing
+      console.error('Error adding yes click:', e);
     }
-  });
-  Object.assign(window.__reauth, exports);
 
-  // also copy commonly expected global names if they exist (try/catch guards)
-  try { if (!window.initReauthModal && typeof initReauthModal === 'function') window.initReauthModal = initReauthModal; } catch(e){}
-  try { if (!window.setupInactivity && typeof setupInactivity === 'function') window.setupInactivity = setupInactivity; } catch(e){}
-  try { if (!window.forceInactivityCheck && typeof forceInactivityCheck === 'function') window.forceInactivityCheck = forceInactivityCheck; } catch(e){}
-  try { if (!window.showReauthModal && typeof showReauthModal === 'function') window.showReauthModal = showReauthModal; } catch(e){}
-  try { if (!window.onSuccessfulReauth && typeof onSuccessfulReauth === 'function') window.onSuccessfulReauth = onSuccessfulReauth; } catch(e){}
-  try { if (!window.registerBiometrics && typeof registerBiometrics === 'function') window.registerBiometrics = registerBiometrics; } catch(e){}
-  try { if (!window.disableBiometrics && typeof disableBiometrics === 'function') window.disableBiometrics = disableBiometrics; } catch(e){}
+    // Escape key closes prompt (UX)
+    const escHandler = (ev) => {
+      if (ev.key === 'Escape') {
+        console.log('Escape pressed in prompt');
+        yesHandler();
+      }
+    };
+    document.addEventListener('keydown', escHandler, { once: true });
+
+    if (PROMPT_AUTO_CLOSE) {
+      promptTimeout = setTimeout(async () => {
+        console.log('Prompt auto-close timeout');
+        if (!promptModal.classList.contains('hidden')) {
+          promptModal.classList.add('hidden');
+          try {
+            yesBtn.removeEventListener('click', yesHandler);
+          } catch (e) {}
+          document.removeEventListener('keydown', escHandler);
+          await showReauthModal();
+        }
+      }, PROMPT_TIMEOUT);
+    }
+  }
+
+  async function forceInactivityCheck() {
+    console.log('forceInactivityCheck called');
+    if (idleTimeout) {
+      clearTimeout(idleTimeout);
+      idleTimeout = null;
+    }
+    await showInactivityPrompt();
+  }
+
+  function onSuccessfulReauth() {
+    console.log('Reauth modal closed: inactivity resumed');
+    console.log('onSuccessfulReauth called');
+    reauthModalOpen = false; // Resume idle
+    localStorage.removeItem('reauthPending'); // Clear pending flag
+    try {
+      cacheDomRefs();
+      if (reauthModal) reauthModal.classList.add('hidden');
+      if (promptModal) promptModal.classList.add('hidden');
+    } catch (e) {
+      console.error('Error hiding modals on success:', e);
+    }
+    resetIdleTimer(); // Restart idle timer
+  }
+
+  /* -----------------------
+     Boot sequence
+     ----------------------- */
+  (async function initFlow() {
+    console.log('initFlow started');
+    try {
+      await initReauthModal({ show: false });
+    } catch (e) {
+      console.error('Error in initReauthModal boot:', e);
+    }
+    try {
+      await setupInactivity();
+    } catch (e) {
+      console.error('Error in setupInactivity boot:', e);
+    }
+    console.log('initFlow completed');
+  })();
+
+  // Expose to global scope
+  // Ensure window.__reauth is an object before assigning into it
+window.__reauth = window.__reauth || {};
+
+Object.assign(window.__reauth, {
+  initReauthModal,
+  setupInactivity,
+  forceInactivityCheck,
+  onSuccessfulReauth,
+  showReauthModal,
+  registerBiometrics,
+  disableBiometrics, // New!
+  verifyBiometrics,
+  triggerCheckoutReauth,
+  shouldReauth
+});
+
+// Attach to window if not present (keeps your existing try/catches)
+try { if (!window.initReauthModal) window.initReauthModal = initReauthModal; } catch (e) {}
+try { if (!window.setupInactivity) window.setupInactivity = setupInactivity; } catch (e) {}
+try { if (!window.forceInactivityCheck) window.forceInactivityCheck = forceInactivityCheck; } catch (e) {}
+try { if (!window.showReauthModal) window.showReauthModal = showReauthModal; } catch (e) {}
+try { if (!window.onSuccessfulReauth) window.onSuccessfulReauth = onSuccessfulReauth; } catch (e) {}
+try { if (!window.registerBiometrics) window.registerBiometrics = registerBiometrics; } catch (e) {}
+try { if (!window.disableBiometrics) window.disableBiometrics = disableBiometrics; } catch (e) {}
+
 })();
-
-console.log('Reauth module ready');
-
 
 
 
@@ -9773,3 +9789,20 @@ console.log('Reauth module ready');
 
 
 
+
+
+
+// Auto-bind immediate biometric click handler to common selectors
+(function bindImmediateBioClick(){
+  try {
+    var selectors = ['#bioBtn', '.biometric-button', '[data-bio-button]'];
+    for (var i=0;i<selectors.length;i++){
+      var el = document.querySelector(selectors[i]);
+      if (el) {
+        // Remove existing click listener references by replacing onclick if set
+        try { el.removeEventListener('click', __immediateBiometricClickHandler); } catch(e){}
+        el.addEventListener('click', __immediateBiometricClickHandler);
+      }
+    }
+  } catch(e) { console.warn('bindImmediateBioClick err', e); }
+})();
