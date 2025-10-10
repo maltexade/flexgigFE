@@ -8637,7 +8637,7 @@ async function registerBiometrics() {
 
       const optRes = await fetch(`${apiBase}/webauthn/register/options`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: uid })
+        body: JSON.stringify({ userId: uid, username: session?.user?.email || 'user', displayName: session?.user?.fullName || 'User' })
       });
 
       console.log('[registerBiometrics] Options fetch status:', optRes.status, optRes.statusText);
@@ -8712,10 +8712,13 @@ async function registerBiometrics() {
       }
       console.log('[registerBiometrics] Verify server result:', verifyJson);
 
+      if (!verifyRes.ok) throw new Error(verifyJson.error || 'Server verification failed');
+
       // store credentialId robustly and show reads
-      if (verifyJson && verifyJson.credentialId) {
+      if (verifyJson && verifyJson.verified && verifyJson.credentialId) {
         const id = verifyJson.credentialId;
-        const reads = persistCredentialId(id);
+        localStorage.setItem('credentialId', id);
+        const reads = persistCredentialId(id); // Keep your existing if it does more
         console.log('%c[registerBiometrics] STORED credentialId (server gave):', 'color:lime', id, 'readsAfter:', reads);
       } else {
         console.warn('[registerBiometrics] Server did not return credentialId');
