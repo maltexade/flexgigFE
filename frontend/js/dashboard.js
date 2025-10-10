@@ -8138,17 +8138,17 @@ setTimeout(() => {
   if (!bioBtn) return;
 
   // 🔸 Determine if biometrics enabled for login (client-side only)
-  const bioLoginEnabled = ['true', '1', 'yes'].includes(
-  (
-    localStorage.getItem('biometricForLogin') ||
-    localStorage.getItem('__sec_bioLogin') ||
-    localStorage.getItem('security_bio_login') || ''
-  ).toLowerCase()
-);
+ // enable biometric login if any known credential key is present OR explicit flag is true
+const storedCred = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id') || localStorage.getItem('webauthn_cred');
+const flag = (localStorage.getItem('biometricForLogin') ||
+              localStorage.getItem('__sec_bioLogin') ||
+              localStorage.getItem('security_bio_login') || '').toLowerCase();
 
+const bioLoginEnabled = !!storedCred || ['true', '1', 'yes'].includes(flag);
 
-  // Hide button if biometric not enabled
-  bioBtn.style.display = bioLoginEnabled ? 'inline-flex' : 'none';
+// Hide button if biometric not enabled
+bioBtn.style.display = bioLoginEnabled ? 'inline-flex' : 'none';
+
   console.log(`[reauth] Biometric button visibility: ${bioLoginEnabled ? 'shown' : 'hidden'}`);
 
   if (bioBtn.__bound) return; // prevent double-binding
