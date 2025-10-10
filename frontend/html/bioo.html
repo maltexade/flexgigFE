@@ -28,7 +28,7 @@
 const API_BASE = 'https://api.flexgig.com.ng';
 /* ---------- Helpers ---------- */
 function toBase64Url(buffer) {
-  if (!buffer) return null; // handle undefined/null safely
+  if (!buffer) return null;
   if (buffer instanceof ArrayBuffer === false && !(buffer.buffer instanceof ArrayBuffer))
     throw new TypeError('Expected ArrayBuffer or TypedArray');
   const bytes = new Uint8Array(buffer instanceof ArrayBuffer ? buffer : buffer.buffer);
@@ -68,23 +68,20 @@ document.getElementById('registerBtn').addEventListener('click', async () => {
   logStatus('Requesting registration options from server...');
   try {
     const userId = 'demo-user-' + Math.floor(Math.random() * 10000);
-    // Request options from backend
     const optRes = await fetch(`${API_BASE}/webauthn/register/options`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId, username: 'demo@example.com', displayName: 'Demo User' })
     });
     const publicKey = await optRes.json();
-    // Convert challenge/user.id to ArrayBuffers
     publicKey.challenge = fromBase64Url(publicKey.challenge);
     publicKey.user.id = fromBase64Url(publicKey.user.id);
-    // Trigger biometric (force platform only)
     logStatus('Prompting device biometric...');
     const cred = await navigator.credentials.create({
       publicKey: {
         ...publicKey,
         authenticatorSelection: {
-          authenticatorAttachment: 'platform', // only device biometric
+          authenticatorAttachment: 'platform',
           residentKey: 'preferred',
           userVerification: 'required',
         },
@@ -93,19 +90,28 @@ document.getElementById('registerBtn').addEventListener('click', async () => {
       },
     });
     if (!cred) throw new Error('No credential returned');
-    // Send result to backend for verification
-    const encodedRawId = cred.id;  // Use browser-provided base64url string instead of manual encoding
-    const encodedAttObj = toBase64Url(cred.response.attestationObject);  // Renamed function for consistency
+    // Use native cred.id (base64url) for both id and rawId to ensure exact match
+    const encodedId = cred.id;
+    const encodedAttObj = toBase64Url(cred.response.attestationObject);
     const encodedClientData = toBase64Url(cred.response.clientDataJSON);
     const payload = {
-      id: encodedRawId,
-      rawId: encodedRawId,
+      id: encodedId,
+      rawId: encodedId,  // Must be identical to id
       type: cred.type,
       response: {
         attestationObject: encodedAttObj,
         clientDataJSON: encodedClientData,
+        // Include userHandle if present (base64url-encoded)
+        userHandle: cred.response.userHandle ? toBase64Url(cred.response.userHandle) : null,
       },
     };
+    // Debug: Check if id and rawId match
+    console.log('Reg Payload ID:', payload.id);
+    console.log('Reg Payload rawId:', payload.rawId);
+    console.log('Reg Match?', payload.id === payload.rawId);
+    if (payload.id !== payload.rawId) {
+      throw new Error('ID/rawId mismatch in payload - check encoding');
+    }
     const verifyRes = await fetch(`${API_BASE}/webauthn/register/verify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -113,22 +119,20 @@ document.getElementById('registerBtn').addEventListener('click', async () => {
     });
     const verifyData = await verifyRes.json();
     if (!verifyRes.ok) throw new Error(verifyData.error || 'Server verification failed');
-    localStorage.setItem('webauthn-cred-id', encodedRawId);
-    logStatus('Registration successful ');
+    localStorage.setItem('webauthn-cred-id', encodedId);
+    logStatus('Registration successful');
     showOutput(verifyData);
   } catch (err) {
     console.error(err);
     logStatus('Registration error: ' + err.message, true);
   }
 });
-
 /* ---------- Authentication ---------- */
 document.getElementById('authBtn').addEventListener('click', async () => {
   logStatus('Requesting authentication options...');
   try {
-    const storedRawId = localStorage.getItem('webauthn-cred-id');
-    if (!storedRawId) throw new Error('No stored credential. Register first.');
-    // Get challenge/options from server
+    const storedId = localStorage.getItem('webauthn-cred-id');  // Now stored as base64url id
+    if (!storedId) throw new Error('No stored credential. Register first.');
     const optRes = await fetch(`${API_BASE}/webauthn/auth/options`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -142,7 +146,6 @@ document.getElementById('authBtn').addEventListener('click', async () => {
         id: fromBase64Url(c.id),
       }));
     }
-    // Trigger direct biometric prompt (no passkey chooser)
     logStatus('Prompting biometric for authentication...');
     await navigator.credentials.preventSilentAccess();
     const assertion = await navigator.credentials.get({
@@ -154,18 +157,18 @@ document.getElementById('authBtn').addEventListener('click', async () => {
         allowCredentials: [
           {
             type: 'public-key',
-            id: fromBase64Url(storedRawId),
-            transports: ['internal'], // force fingerprint/face only
+            id: fromBase64Url(storedId),  // Decode stored base64url id
+            transports: ['internal'],
           },
         ],
       },
     });
     if (!assertion) throw new Error('No assertion returned');
-    // Send result to backend for verification
-    const encodedRawId = assertion.id;  // Use browser-provided base64url string instead of manual encoding
+    // Use native assertion.id (base64url) for both id and rawId
+    const encodedId = assertion.id;
     const payload = {
-      id: encodedRawId,
-      rawId: encodedRawId,
+      id: encodedId,
+      rawId: encodedId,  // Must be identical to id
       type: assertion.type,
       response: {
         authenticatorData: toBase64Url(assertion.response.authenticatorData),
@@ -176,6 +179,13 @@ document.getElementById('authBtn').addEventListener('click', async () => {
           : null,
       },
     };
+    // Debug: Check if id and rawId match
+    console.log('Auth Payload ID:', payload.id);
+    console.log('Auth Payload rawId:', payload.rawId);
+    console.log('Auth Match?', payload.id === payload.rawId);
+    if (payload.id !== payload.rawId) {
+      throw new Error('ID/rawId mismatch in payload - check encoding');
+    }
     const verifyRes = await fetch(`${API_BASE}/webauthn/auth/verify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -183,7 +193,7 @@ document.getElementById('authBtn').addEventListener('click', async () => {
     });
     const verifyData = await verifyRes.json();
     if (!verifyRes.ok) throw new Error(verifyData.error || 'Server verification failed');
-    logStatus(verifyData.verified ? 'Authentication successful ' : 'Authentication failed ');
+    logStatus(verifyData.verified ? 'Authentication successful' : 'Authentication failed');
     showOutput(verifyData);
   } catch (err) {
     console.error(err);
