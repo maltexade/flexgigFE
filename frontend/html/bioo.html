@@ -104,19 +104,28 @@ document.getElementById('registerBtn').addEventListener('click', async () => {
     if (!cred) throw new Error('No credential returned');
 
     // 3️⃣ Send result to backend for verification
-    // 3️⃣ Send result to backend for verification
-const encodedRawId = toBase64Url(cred.rawId);
-const payload = {
-  id: encodedRawId,                 // ✅ use encoded version for both
-  rawId: encodedRawId,
-  type: cred.type,
-  response: {
-    attestationObject: toBase64Url(cred.response?.attestationObject),
-    clientDataJSON: toBase64Url(cred.response?.clientDataJSON),
-  },
-};
+    function bufferToBase64UrlSafe(buffer) {
+      const bytes = new Uint8Array(buffer);
+      let str = "";
+      for (let i = 0; i < bytes.length; i++) {
+        str += String.fromCharCode(bytes[i]);
+      }
+      return btoa(str).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    }
 
+    const encodedRawId = bufferToBase64UrlSafe(cred.rawId);
+    const encodedAttObj = bufferToBase64UrlSafe(cred.response.attestationObject);
+    const encodedClientData = bufferToBase64UrlSafe(cred.response.clientDataJSON);
 
+    const payload = {
+      id: encodedRawId,
+      rawId: encodedRawId,
+      type: cred.type,
+      response: {
+        attestationObject: encodedAttObj,
+        clientDataJSON: encodedClientData,
+      },
+    };
 
     const verifyRes = await fetch(`${API_BASE}/webauthn/register/verify`, {
       method: 'POST',
@@ -134,6 +143,7 @@ const payload = {
     logStatus('Registration error: ' + err.message, true);
   }
 });
+
 
 /* ---------- Authentication ---------- */
 document.getElementById('authBtn').addEventListener('click', async () => {
