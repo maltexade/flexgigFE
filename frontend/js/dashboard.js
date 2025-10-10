@@ -6832,10 +6832,11 @@ function uuidToArrayBuffer(uuid) {
 }
 
 /* ---- Registration flow (instrumented + persists to localStorage immediately) ---- */
+/* ---- Registration flow (instrumented + persists to localStorage immediately) ---- */
 async function startRegistration(userId, username, displayName) {
   __sec_log.d('startRegistration entry', { userId, username, displayName });
   try {
-    // Get user for UID (no token needed)
+    // Ensure session / user
     const currentUser = await __sec_getCurrentUser();
     __sec_log.d('startRegistration: Retrieved currentUser', { hasUser: !!currentUser?.user });
     if (!currentUser || !currentUser.user || !currentUser.user.uid) {
@@ -6858,36 +6859,33 @@ async function startRegistration(userId, username, displayName) {
     if (!optRes.ok) throw new Error(`Options failed: ${optRaw}`);
 
     const options = JSON.parse(optRaw);
-    __sec_log.d('startRegistration: Parsed options', options);
+    __sec_log.d('startRegistration: Parsed options (server)', options);
 
-    // Convert challenge
+    // Convert challenge (base64url -> Uint8Array)
     __sec_log.d('startRegistration: Converting challenge');
     options.challenge = new Uint8Array(base64urlToArrayBuffer(options.challenge));
     __sec_log.d('startRegistration: Challenge converted', { challengeLength: options.challenge.length });
 
-    // Convert user.id (server might send uuid or base64url)
+    // Convert user.id (server may send base64url or uuid); prefer base64url then fallback to uuid
     if (options.user?.id) {
       __sec_log.d('startRegistration: Converting user.id');
       try {
         options.user.id = new Uint8Array(base64urlToArrayBuffer(options.user.id));
         __sec_log.d('startRegistration: user.id base64url converted', { idLength: options.user.id.length });
       } catch (convErr) {
-        __sec_log.w('startRegistration: base64url failed, trying uuid');
+        __sec_log.w('startRegistration: user.id base64url decode failed, trying uuid => arrayBuffer', convErr?.message);
         options.user.id = new Uint8Array(uuidToArrayBuffer(userId));
         __sec_log.d('startRegistration: user.id uuid converted', { idLength: options.user.id.length });
       }
     }
 
-    if (options.excludeCredentials) {
+    // Convert excludeCredentials (if any)
+    if (options.excludeCredentials && Array.isArray(options.excludeCredentials)) {
       __sec_log.d('startRegistration: Converting excludeCredentials', { count: options.excludeCredentials.length });
-      options.excludeCredentials = options.excludeCredentials.map(c => {
-        const converted = {
-          ...c,
-          id: new Uint8Array(base64urlToArrayBuffer(c.id))
-        };
-        __sec_log.d('startRegistration: Converted excludeCredential', { idLength: converted.id.length });
-        return converted;
-      });
+      options.excludeCredentials = options.excludeCredentials.map(c => ({
+        ...c,
+        id: new Uint8Array(base64urlToArrayBuffer(c.id))
+      }));
     }
 
     __sec_log.d('startRegistration: Final publicKey options before create', {
@@ -6896,22 +6894,33 @@ async function startRegistration(userId, username, displayName) {
       excludeCount: options.excludeCredentials?.length || 0
     });
 
-    // Create credential
+    // Call the authenticator
     __sec_log.i('startRegistration: Calling navigator.credentials.create');
     const cred = await navigator.credentials.create({ publicKey: options });
-    __sec_log.d('startRegistration: Credential created', { id: cred?.id, type: cred?.type });
-    console.log('[REG] credential created id:', cred.id);
-    try {
-      const transports = cred.response.getTransports ? cred.response.getTransports() : null;
-      console.log('[REG] transports:', transports);
-    } catch(e) {
-      console.warn('[REG] getTransports threw', e);
-    }
-    console.log('[REG] rawId hex:', (function bufToHex(b){ const u=new Uint8Array(b); return Array.from(u).map(x=>x.toString(16).padStart(2,'0')).join(''); })(cred.rawId));
+    __sec_log.d('startRegistration: Credential created (raw object)', cred);
 
     if (!cred) throw new Error('No credential returned');
 
-    // Build prepared credential for server
+    // Debug: show rawId hex + clientData/attestation hex (useful for Windows Hello debugging)
+    try {
+      const bufToHex = (b) => {
+        const u = new Uint8Array(b);
+        return Array.from(u).map(x => x.toString(16).padStart(2, '0')).join(' ');
+      };
+      __sec_log.d('startRegistration: rawId hex', bufToHex(cred.rawId));
+      __sec_log.d('startRegistration: attestationObject hex', bufToHex(cred.response.attestationObject));
+      __sec_log.d('startRegistration: clientDataJSON hex', bufToHex(cred.response.clientDataJSON));
+      try {
+        const transports = cred.response.getTransports ? cred.response.getTransports() : null;
+        __sec_log.d('startRegistration: transports', transports);
+      } catch (tErr) {
+        __sec_log.w('startRegistration: getTransports threw', tErr);
+      }
+    } catch (dbgErr) {
+      __sec_log.w('startRegistration: debug hex logging failed', dbgErr);
+    }
+
+    // Build the payload for server (base64url-encoded fields)
     const credential = {
       id: cred.id,
       rawId: arrayBufferToBase64url(cred.rawId),
@@ -6926,17 +6935,15 @@ async function startRegistration(userId, username, displayName) {
 
     // --- IMMEDIATE LOCAL PERSIST (pre-verify fallback) ---
     try {
-      // Save the rawId fallback immediately so reloads/unloads won't lose it
       localStorage.setItem('credentialId', credential.rawId);
       localStorage.setItem('credentialSavedAt', new Date().toISOString());
-      console.log('[CRED DEBUG] pre-verify setItem credentialId ->', localStorage.getItem('credentialId'));
-      console.log('[CRED DEBUG] origin/domain:', location.origin, document.domain);
-      console.trace('[CRED DEBUG] pre-verify write trace');
-      // sanity assert
-      console.assert(localStorage.getItem('credentialId') === credential.rawId, 'Pre-verify credentialId not persisted!');
-      __sec_log.d('startRegistration: Pre-verify credentialId saved to localStorage', { rawIdLen: credential.rawId.length });
+      __sec_log.d('startRegistration: pre-verify credentialId saved to localStorage', { preverify: credential.rawId.length });
+      // assertion that write succeeded (for debugging)
+      if (localStorage.getItem('credentialId') !== credential.rawId) {
+        __sec_log.w('startRegistration: localStorage readback mismatch after write');
+      }
     } catch (e) {
-      __sec_log.e('startRegistration: Failed to persist pre-verify credentialId to localStorage', { error: (e && e.message) || e });
+      __sec_log.e('startRegistration: Failed to persist pre-verify credentialId to localStorage', e);
     }
 
     // Send to server for canonical verify
@@ -6952,45 +6959,40 @@ async function startRegistration(userId, username, displayName) {
     const verifyRaw = await verifyRes.text();
     __sec_log.d('startRegistration: Verify response', { status: verifyRes.status, ok: verifyRes.ok, raw: verifyRaw });
     if (!verifyRes.ok) {
-      // If server verify fails, keep the pre-verify fallback in storage for debugging
-      __sec_log.e('startRegistration: Verify failed — pre-verify value retained for inspection', { preverify: localStorage.getItem('credentialId') });
+      __sec_log.e('startRegistration: Verify failed — pre-verify value retained', { preverify: localStorage.getItem('credentialId') });
       throw new Error(`Verify failed: ${verifyRaw}`);
     }
 
     const verifyResult = JSON.parse(verifyRaw);
     __sec_log.i('startRegistration: Verify success', verifyResult);
 
-    // Overwrite local storage with canonical server credentialId if present
+    // Overwrite local storage with canonical server credentialId if available
     try {
       const serverId = verifyResult?.credentialId;
       if (serverId) {
         localStorage.setItem('credentialId', serverId);
         localStorage.setItem('credentialSavedAt', new Date().toISOString());
-        console.log('[CRED DEBUG] post-verify setItem credentialId ->', localStorage.getItem('credentialId'));
-        console.trace('[CRED DEBUG] post-verify write trace');
-        console.assert(localStorage.getItem('credentialId') === serverId, 'Post-verify credentialId not persisted!');
-        __sec_log.d('startRegistration: Server credentialId saved to localStorage', { serverId });
+        __sec_log.d('startRegistration: Server credentialId saved to localStorage', { serverIdLength: serverId.length });
       } else {
-        __sec_log.w('startRegistration: Server did not return credentialId — keeping pre-verify fallback', { fallback: localStorage.getItem('credentialId') });
+        __sec_log.w('startRegistration: Server did not return credentialId — keeping pre-verify fallback');
       }
     } catch (e) {
-      __sec_log.e('startRegistration: Failed to write server credentialId to localStorage', { error: (e && e.message) || e });
+      __sec_log.e('startRegistration: Failed to write server credentialId to localStorage', e);
     }
 
     return verifyResult;
   } catch (err) {
     __sec_log.e('startRegistration error', {
-      message: err.message,
-      stack: err.stack,
+      message: err?.message,
+      stack: err?.stack,
       userId,
       username
     });
-    // Ensure we still surface the pre-verify fallback for debugging
+    // show fallback for debugging
     try {
-      const fallback = localStorage.getItem('credentialId');
-      __sec_log.d('startRegistration: fallback credentialId (from localStorage) after error', { fallback });
+      __sec_log.d('startRegistration: fallback credentialId (from localStorage) after error', { fallback: localStorage.getItem('credentialId') });
     } catch (e) {
-      __sec_log.e('startRegistration: reading fallback failed', { err: (e && e.message) || e });
+      __sec_log.e('startRegistration: reading fallback failed', e);
     }
     throw err;
   } finally {
@@ -6998,11 +7000,13 @@ async function startRegistration(userId, username, displayName) {
   }
 }
 
+
 /* ---- Authentication flow ---- */
+/* ---- Authentication flow (discover / allowCredentials) ---- */
 async function startAuthentication(userId) {
   __sec_log.d('startAuthentication entry', { userId });
   try {
-    // Get user for UID (no token needed)
+    // Ensure session / user
     const currentUser = await __sec_getCurrentUser();
     __sec_log.d('startAuthentication: Retrieved currentUser', { hasUser: !!currentUser?.user });
     if (!currentUser || !currentUser.user || !currentUser.user.uid) {
@@ -7010,35 +7014,36 @@ async function startAuthentication(userId) {
     }
 
     const apiBase = window.__SEC_API_BASE || "https://api.flexgig.com.ng";
+    // using discover endpoint (works for discoverable passkeys — or you can use /auth/options with allowCredentials)
     const optUrl = `${apiBase}/webauthn/auth/options/discover`;
     __sec_log.d('startAuthentication: Fetching options from', optUrl);
+
     const optRes = await fetch(optUrl, {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId }),
     });
+
     const optRaw = await optRes.text();
     __sec_log.d('startAuthentication: Options response', { status: optRes.status, ok: optRes.ok, raw: optRaw });
     if (!optRes.ok) throw new Error(`Auth options failed: ${optRaw}`);
 
     const options = JSON.parse(optRaw);
-    __sec_log.d('startAuthentication: Parsed options', options);
+    __sec_log.d('startAuthentication: Parsed options (server)', options);
 
+    // Convert challenge
     __sec_log.d('startAuthentication: Converting challenge');
     options.challenge = new Uint8Array(base64urlToArrayBuffer(options.challenge));
     __sec_log.d('startAuthentication: Challenge converted', { challengeLength: options.challenge.length });
 
-    if (options.allowCredentials) {
+    // Convert allowCredentials ids -> Uint8Array if present
+    if (options.allowCredentials && Array.isArray(options.allowCredentials)) {
       __sec_log.d('startAuthentication: Converting allowCredentials', { count: options.allowCredentials.length });
-      options.allowCredentials = options.allowCredentials.map(c => {
-        const converted = {
-          ...c,
-          id: new Uint8Array(base64urlToArrayBuffer(c.id))
-        };
-        __sec_log.d('startAuthentication: Converted allowCredential', { idLength: converted.id.length });
-        return converted;
-      });
+      options.allowCredentials = options.allowCredentials.map(c => ({
+        ...c,
+        id: new Uint8Array(base64urlToArrayBuffer(c.id))
+      }));
     }
 
     __sec_log.d('startAuthentication: Final publicKey options before get', {
@@ -7046,11 +7051,29 @@ async function startAuthentication(userId) {
       allowCount: options.allowCredentials?.length || 0
     });
 
+    // Call authenticator
     __sec_log.i('startAuthentication: Calling navigator.credentials.get');
     const assertion = await navigator.credentials.get({ publicKey: options });
-    __sec_log.d('startAuthentication: Assertion received', { id: assertion?.id, type: assertion?.type });
+    __sec_log.d('startAuthentication: Assertion received (raw)', assertion);
     if (!assertion) throw new Error('No assertion returned');
 
+    // Debug: parse incoming authenticatorData counter (32 bytes rpIdHash + flags + counter)
+    try {
+      const authDataBuf = new Uint8Array(assertion.response.authenticatorData);
+      if (authDataBuf.length >= 37) {
+        const counterOffset = 33;
+        // big-endian (network)
+        const dv = new DataView(authDataBuf.buffer, authDataBuf.byteOffset + counterOffset, 4);
+        const incomingCounter = dv.getUint32(0, false);
+        __sec_log.d('startAuthentication: parsed incoming counter from authenticatorData', { incomingCounter, authDataLen: authDataBuf.length });
+      } else {
+        __sec_log.w('startAuthentication: authenticatorData too short to parse counter', { length: authDataBuf.length });
+      }
+    } catch (parseErr) {
+      __sec_log.w('startAuthentication: failed to parse incoming counter', parseErr);
+    }
+
+    // Build payload (base64url-encoded)
     const credential = {
       id: assertion.id,
       rawId: arrayBufferToBase64url(assertion.rawId),
@@ -7064,6 +7087,7 @@ async function startAuthentication(userId) {
     };
     __sec_log.d('startAuthentication: Prepared credential for verify', { id: credential.id, rawIdLength: credential.rawId.length });
 
+    // Send to server for verification
     const verifyUrl = `${apiBase}/webauthn/auth/verify`;
     __sec_log.d('startAuthentication: Verifying at', verifyUrl);
     const verifyRes = await fetch(verifyUrl, {
@@ -7072,23 +7096,30 @@ async function startAuthentication(userId) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId, credential }),
     });
+
     const verifyRaw = await verifyRes.text();
     __sec_log.d('startAuthentication: Verify response', { status: verifyRes.status, ok: verifyRes.ok, raw: verifyRaw });
-    if (!verifyRes.ok) throw new Error(`Auth verify failed: ${verifyRaw}`);
+    if (!verifyRes.ok) {
+      // helpful debug: leave credentialId in localStorage for post-mortem if needed
+      __sec_log.e('startAuthentication: Verify failed', { raw: verifyRaw, storedCredentialId: localStorage.getItem('credentialId') });
+      throw new Error(`Auth verify failed: ${verifyRaw}`);
+    }
 
     const verifyResult = JSON.parse(verifyRaw);
     __sec_log.i('startAuthentication: Verify success', verifyResult);
     return verifyResult;
   } catch (err) {
     __sec_log.e('startAuthentication error', {
-      message: err.message,
-      stack: err.stack,
+      message: err?.message,
+      stack: err?.stack,
       userId
     });
     throw err;
+  } finally {
+    __sec_log.d('startAuthentication exit');
   }
-  __sec_log.d('startAuthentication exit');
 }
+
 
 /* ---- WebAuthn helper calls to server (list/revoke) ---- */
 async function __sec_listAuthenticators(userId) {
@@ -8637,7 +8668,7 @@ async function registerBiometrics() {
 
       const optRes = await fetch(`${apiBase}/webauthn/register/options`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: uid, username: session?.user?.email || 'user', displayName: session?.user?.fullName || 'User' })
+        body: JSON.stringify({ userId: uid })
       });
 
       console.log('[registerBiometrics] Options fetch status:', optRes.status, optRes.statusText);
@@ -8712,13 +8743,10 @@ async function registerBiometrics() {
       }
       console.log('[registerBiometrics] Verify server result:', verifyJson);
 
-      if (!verifyRes.ok) throw new Error(verifyJson.error || 'Server verification failed');
-
       // store credentialId robustly and show reads
-      if (verifyJson && verifyJson.verified && verifyJson.credentialId) {
+      if (verifyJson && verifyJson.credentialId) {
         const id = verifyJson.credentialId;
-        localStorage.setItem('credentialId', id);
-        const reads = persistCredentialId(id); // Keep your existing if it does more
+        const reads = persistCredentialId(id);
         console.log('%c[registerBiometrics] STORED credentialId (server gave):', 'color:lime', id, 'readsAfter:', reads);
       } else {
         console.warn('[registerBiometrics] Server did not return credentialId');
