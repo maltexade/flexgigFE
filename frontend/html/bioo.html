@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>WebAuthn Biometric — Backend Connected</title>
+  <title>WebAuthn Biometric — Instant Fingerprint</title>
   <style>
     body { font-family: system-ui, -apple-system, Roboto, Arial; max-width: 720px; margin: 32px auto; padding: 0 16px; color: #111; }
     button { padding: 10px 14px; border-radius: 8px; border: 1px solid #ddd; background: #fff; cursor: pointer; margin-right: 8px; }
@@ -14,7 +14,7 @@
   </style>
 </head>
 <body>
-  <h2>WebAuthn — Full Flow (with backend)</h2>
+  <h2>WebAuthn — Instant Biometric Prompt</h2>
   <div class="row">
     <button id="checkBtn">Check Biometric Availability</button>
     <button id="registerBtn">Register Biometric</button>
@@ -27,8 +27,7 @@
   <pre id="out">No credential yet.</pre>
 
 <script>
-
-    const API_BASE = 'https://api.flexgig.com.ng';
+const API_BASE = 'https://api.flexgig.com.ng';
 
 /* ---------- Helpers ---------- */
 function toBase64Url(buffer) {
@@ -84,9 +83,20 @@ document.getElementById('registerBtn').addEventListener('click', async () => {
     publicKey.challenge = fromBase64Url(publicKey.challenge);
     publicKey.user.id = fromBase64Url(publicKey.user.id);
 
-    // 2️⃣ Trigger biometric
+    // 2️⃣ Trigger biometric (force platform only)
     logStatus('Prompting device biometric...');
-    const cred = await navigator.credentials.create({ publicKey });
+    const cred = await navigator.credentials.create({
+      publicKey: {
+        ...publicKey,
+        authenticatorSelection: {
+          authenticatorAttachment: 'platform', // only device biometric
+          residentKey: 'preferred',
+          userVerification: 'required',
+        },
+        excludeCredentials: [],
+        attestation: 'none',
+      },
+    });
     if (!cred) throw new Error('No credential returned');
 
     // 3️⃣ Send result to backend for verification
@@ -96,14 +106,14 @@ document.getElementById('registerBtn').addEventListener('click', async () => {
       type: cred.type,
       response: {
         attestationObject: toBase64Url(cred.response.attestationObject),
-        clientDataJSON: toBase64Url(cred.response.clientDataJSON)
-      }
+        clientDataJSON: toBase64Url(cred.response.clientDataJSON),
+      },
     };
 
     const verifyRes = await fetch(`${API_BASE}/webauthn/register/verify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
     });
     const verifyData = await verifyRes.json();
     if (!verifyRes.ok) throw new Error(verifyData.error || 'Server verification failed');
@@ -125,10 +135,10 @@ document.getElementById('authBtn').addEventListener('click', async () => {
     if (!storedRawId) throw new Error('No stored credential. Register first.');
 
     // 1️⃣ Get challenge/options from server
-const optRes = await fetch(`${API_BASE}/webauthn/auth/options`, {
+    const optRes = await fetch(`${API_BASE}/webauthn/auth/options`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: 'demo-user' })
+      body: JSON.stringify({ userId: 'demo-user' }),
     });
     const publicKey = await optRes.json();
 
@@ -136,13 +146,28 @@ const optRes = await fetch(`${API_BASE}/webauthn/auth/options`, {
     if (publicKey.allowCredentials) {
       publicKey.allowCredentials = publicKey.allowCredentials.map(c => ({
         ...c,
-        id: fromBase64Url(c.id)
+        id: fromBase64Url(c.id),
       }));
     }
 
-    // 2️⃣ Trigger biometric prompt
+    // 2️⃣ Trigger direct biometric prompt (no passkey chooser)
     logStatus('Prompting biometric for authentication...');
-    const assertion = await navigator.credentials.get({ publicKey });
+    await navigator.credentials.preventSilentAccess();
+    const assertion = await navigator.credentials.get({
+      mediation: 'required',
+      publicKey: {
+        ...publicKey,
+        timeout: 60000,
+        userVerification: 'required',
+        allowCredentials: [
+          {
+            type: 'public-key',
+            id: fromBase64Url(storedRawId),
+            transports: ['internal'], // force fingerprint/face only
+          },
+        ],
+      },
+    });
     if (!assertion) throw new Error('No assertion returned');
 
     // 3️⃣ Send result to backend for verification
@@ -156,14 +181,14 @@ const optRes = await fetch(`${API_BASE}/webauthn/auth/options`, {
         signature: toBase64Url(assertion.response.signature),
         userHandle: assertion.response.userHandle
           ? toBase64Url(assertion.response.userHandle)
-          : null
-      }
+          : null,
+      },
     };
 
     const verifyRes = await fetch(`${API_BASE}/webauthn/auth/verify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
     });
     const verifyData = await verifyRes.json();
     if (!verifyRes.ok) throw new Error(verifyData.error || 'Server verification failed');
