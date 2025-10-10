@@ -138,18 +138,19 @@ document.getElementById('authBtn').addEventListener('click', async () => {
     }
 
     const payload = {
-      id: assertion.id,
-      rawId: bufferToBase64url(assertion.rawId),
-      type: assertion.type,
-      response: {
-        authenticatorData: bufferToBase64url(assertion.response.authenticatorData),
-        clientDataJSON: bufferToBase64url(assertion.response.clientDataJSON),
-        signature: bufferToBase64url(assertion.response.signature),
-        userHandle: assertion.response.userHandle
-          ? bufferToBase64url(assertion.response.userHandle)
-          : null,
-      },
-    };
+  id: assertion.id,
+  rawId: toBase64Url(assertion.rawId), // use same toBase64Url helper
+  type: assertion.type,
+  response: {
+    authenticatorData: toBase64Url(assertion.response.authenticatorData),
+    clientDataJSON: toBase64Url(assertion.response.clientDataJSON),
+    signature: toBase64Url(assertion.response.signature),
+    userHandle: assertion.response.userHandle
+      ? toBase64Url(assertion.response.userHandle)
+      : null,
+  },
+};
+
 
     const verifyRes = await fetch(`${API_BASE}/webauthn/auth/verify`, {
       method: 'POST',
