@@ -19,6 +19,7 @@
     <button id="checkBtn">Check platform authenticator</button>
     <button id="registerBtn">Register Biometric (create)</button>
     <button id="showBtn">Show Stored Credential</button>
+    <button id="authBtn">Authenticate (verify)</button>
     <button id="removeBtn">Remove Stored Credential</button>
   </div>
 
@@ -132,6 +133,57 @@ document.getElementById('registerBtn').addEventListener('click', async () => {
     logStatus('Registration error: ' + (err && err.message ? err.message : String(err)), true);
   }
 });
+
+document.getElementById('authBtn').addEventListener('click', async () => {
+  logStatus('starting authentication...');
+  try {
+    if (!window.PublicKeyCredential) throw new Error('WebAuthn not supported');
+    const stored = JSON.parse(localStorage.getItem('webauthn-demo-cred') || 'null');
+    if (!stored) throw new Error('No stored credential found — register first');
+
+    // Build minimal allowCredentials list
+    const allowCredentials = [{
+      id: fromBase64Url(stored.rawId),
+      type: 'public-key',
+      transports: ['internal']  // "internal" = fingerprint/face ID on device
+    }];
+
+    const challenge = crypto.getRandomValues(new Uint8Array(32));
+
+    const publicKey = {
+      challenge: challenge.buffer,
+      timeout: 60000,
+      allowCredentials,
+      userVerification: 'preferred'
+    };
+
+    // navigator.credentials.get triggers biometric prompt
+    const assertion = await navigator.credentials.get({ publicKey });
+
+    if (!assertion) throw new Error('No assertion returned');
+
+    // Extract data for display (real app: send to server to verify)
+    const authResult = {
+      id: assertion.id,
+      rawId: toBase64Url(assertion.rawId),
+      type: assertion.type,
+      authenticatorData: toBase64Url(assertion.response.authenticatorData),
+      clientDataJSON: toBase64Url(assertion.response.clientDataJSON),
+      signature: toBase64Url(assertion.response.signature),
+      userHandle: assertion.response.userHandle
+        ? toBase64Url(assertion.response.userHandle)
+        : null,
+      verifiedAt: new Date().toISOString()
+    };
+
+    logStatus('Authentication successful (client-side only)');
+    showOutput(authResult);
+  } catch (err) {
+    console.error('auth error', err);
+    logStatus('Authentication error: ' + (err && err.message ? err.message : String(err)), true);
+  }
+});
+
 
 document.getElementById('showBtn').addEventListener('click', () => {
   const val = localStorage.getItem('webauthn-demo-cred');
