@@ -27,6 +27,9 @@
   <pre id="out">No credential yet.</pre>
 
 <script>
+
+    const API_BASE = 'https://api.flexgig.com.ng';
+
 /* ---------- Helpers ---------- */
 function toBase64Url(buffer) {
   const bytes = new Uint8Array(buffer);
@@ -70,7 +73,7 @@ document.getElementById('registerBtn').addEventListener('click', async () => {
     const userId = 'demo-user-' + Math.floor(Math.random() * 10000);
 
     // 1️⃣ Request options from backend
-    const optRes = await fetch('/webauthn/register/options', {
+    const optRes = await fetch(`${API_BASE}/webauthn/register/options`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId, username: 'demo@example.com', displayName: 'Demo User' })
@@ -97,7 +100,7 @@ document.getElementById('registerBtn').addEventListener('click', async () => {
       }
     };
 
-    const verifyRes = await fetch('/webauthn/register/verify', {
+    const verifyRes = await fetch(`${API_BASE}/webauthn/register/verify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -122,7 +125,7 @@ document.getElementById('authBtn').addEventListener('click', async () => {
     if (!storedRawId) throw new Error('No stored credential. Register first.');
 
     // 1️⃣ Get challenge/options from server
-    const optRes = await fetch('/webauthn/auth/options', {
+const optRes = await fetch(`${API_BASE}/webauthn/auth/options`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId: 'demo-user' })
@@ -157,7 +160,7 @@ document.getElementById('authBtn').addEventListener('click', async () => {
       }
     };
 
-    const verifyRes = await fetch('/webauthn/auth/verify', {
+    const verifyRes = await fetch(`${API_BASE}/webauthn/auth/verify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
