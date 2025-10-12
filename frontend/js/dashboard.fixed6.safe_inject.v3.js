@@ -60,7 +60,7 @@
     console.warn('[webauthn-agg-prefetch] init error', err);
   }
 })();
-\n\nimport { mtnAwoofPlans, mtnGiftingPlans, airtelAwoofPlans, airtelCgPlans, gloCgPlans, gloGiftingPlans, ninemobilePlans } from './dataPlans.js';
+import { mtnAwoofPlans, mtnGiftingPlans, airtelAwoofPlans, airtelCgPlans, gloCgPlans, gloGiftingPlans, ninemobilePlans } from './dataPlans.js';
 
 window.__SEC_API_BASE = 'https://api.flexgig.com.ng'
 
