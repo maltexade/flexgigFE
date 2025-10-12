@@ -958,127 +958,6 @@ const svgShapes = {
   receive: `<svg class="bank-icon" width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M4 9v9h16V9l-8-5-8 5zm4 4h8v2H8v-2zm0 4h4v2H8v-2z" fill="#00cc00" stroke="#fff" stroke-width="1"/></svg>`
 };
 
-// ---- Stable non-destructive live phone formatter (safe to place anywhere) ----
-(function attachStablePhoneFormatter_Last(){
-  // do not mark global attached until we've actually attached
-  if (window.__phoneLiveFormatterInstalled) {
-    // already installed (but not necessarily attached to element)
-    return;
-  }
-  // mark installer so we don't run this setup twice
-  window.__phoneLiveFormatterInstalled = true;
-
-  function formatProgressiveNG(digits){
-    if (digits.length <= 4) return digits;
-    if (digits.length <= 7) return digits.replace(/(\d{4})(\d+)/, '$1 $2');
-    return digits.replace(/(\d{4})(\d{3})(\d+)/, '$1 $2 $3');
-  }
-
-  function getPhoneEl() {
-    return document.getElementById('phone-input');
-  }
-
-  function attachTo(el){
-    if (!el) return false;
-    // avoid re-attaching to the same element
-    if (el.__stableFormatterAttached) return true;
-    el.__stableFormatterAttached = true;
-
-    // now that we actually attached, set the global "attached" flag
-    try { window.__phoneLiveFormatterAttached = true; } catch(e){}
-    console.log('%c📱 Phone Formatter Active', 'color: lime; font-weight: bold;');
-
-    var composing = false;
-
-    el.addEventListener('compositionstart', function(){ composing = true; }, false);
-    el.addEventListener('compositionend', function(){ composing = false; scheduleFormat(); }, false);
-
-    var scheduled = null;
-    function scheduleFormat(){
-      if (composing) return;
-      if (scheduled) return;
-      scheduled = setTimeout(function(){
-        scheduled = null;
-        try { applyFormatting(el); } catch(err){ console.error('phone format err', err); }
-      }, 0);
-    }
-
-    function applyFormatting(inputEl){
-      var selStart = inputEl.selectionStart || 0;
-      var rawBefore = (inputEl.value.slice(0, selStart).match(/\d/g) || []).join('');
-      var allDigits = (inputEl.value.match(/\d/g) || []).join('');
-      var formatted = formatProgressiveNG(allDigits);
-
-      if (formatted === inputEl.value){
-        try{ inputEl.dataset.raw = allDigits; }catch(e){}
-        return;
-      }
-
-      inputEl.value = formatted;
-      try{ inputEl.dataset.raw = allDigits; }catch(e){}
-
-      var dcount = 0, newPos = 0;
-      if (rawBefore.length === 0) newPos = 0;
-      else {
-        for (var i=0;i<formatted.length;i++){
-          if (/\d/.test(formatted[i])) dcount++;
-          newPos = i + 1;
-          if (dcount >= rawBefore.length) break;
-        }
-      }
-      if (newPos > formatted.length) newPos = formatted.length;
-      try { inputEl.setSelectionRange(newPos, newPos); } catch(e){}
-    }
-
-    el.addEventListener('input', scheduleFormat, false);
-    el.addEventListener('blur', function(){ if(!composing) applyFormatting(el); }, false);
-
-    var watch = null;
-    el.addEventListener('focus', function(){
-      scheduleFormat();
-      if (watch) clearInterval(watch);
-      watch = setInterval(function(){
-        try {
-          var digits = (el.value.match(/\d/g) || []).join('');
-          var expected = formatProgressiveNG(digits);
-          if (expected !== el.value) applyFormatting(el);
-        } catch(e){}
-      }, 180);
-    }, false);
-
-    el.addEventListener('blur', function(){
-      if (watch){ clearInterval(watch); watch = null; }
-    }, false);
-
-    // If input element is replaced later, reattach to new one
-    var mo = new MutationObserver(function(muts){
-      muts.forEach(function(m){
-        m.addedNodes && Array.prototype.forEach.call(m.addedNodes, function(node){
-          if (node && node.id === 'phone-input' && node !== el){
-            try { attachTo(node); } catch(e){}
-          }
-        });
-      });
-    });
-    mo.observe(document.documentElement || document.body, { childList: true, subtree: true });
-
-    return true;
-  }
-
-  // Try attach immediately or wait a bit (safe on early script execution)
-  (function tryAttach(count){
-    var el = getPhoneEl();
-    if (el) { attachTo(el); return; }
-    if (count > 60) {
-      console.warn('Phone formatter: element #phone-input not found, giving up after attempts');
-      return;
-    }
-    setTimeout(function(){ tryAttach(count+1); }, 200);
-  })(0);
-
-})();
-
-
 // --- MAIN EVENT LISTENERS ---
 document.addEventListener('DOMContentLoaded', () => {
   const providerClasses = ['mtn', 'airtel', 'glo', 'ninemobile'];
@@ -1129,38 +1008,35 @@ document.addEventListener('DOMContentLoaded', () => {
 function formatNigeriaNumber(phone, isInitialDigit = false, isPaste = false) {
   try {
     if (!phone) {
-      console.warn('[WARN] formatNigeriaNumber: Empty phone input');
       return { value: '', cursorOffset: 0, valid: false };
     }
-    let cleaned = phone.replace(/[\s-]/g, '');
+    let cleaned = String(phone).replace(/[\s-]/g, '');
     let cursorOffset = 0;
-    if (isInitialDigit && ['7', '8', '9'].includes(cleaned[0])) {
+
+    if (isInitialDigit && ['7','8','9'].includes(cleaned[0])) {
       cleaned = '0' + cleaned;
       cursorOffset = 1;
     }
     if (cleaned.startsWith('234') || cleaned.startsWith('+234')) {
       cleaned = '0' + cleaned.slice(3);
     }
-    if (cleaned.length > 11) {
-      cleaned = cleaned.slice(0, 11);
-    }
+    if (cleaned.length > 11) cleaned = cleaned.slice(0, 11);
+
+    // ALWAYS produce progressive formatting
+    let formatted;
+    if (cleaned.length <= 4) formatted = cleaned;
+    else if (cleaned.length <= 7) formatted = `${cleaned.slice(0,4)} ${cleaned.slice(4)}`;
+    else formatted = `${cleaned.slice(0,4)} ${cleaned.slice(4,7)} ${cleaned.slice(7)}`;
+
     const isValid = cleaned.length === 11 && /^0[789][01]\d{8}$/.test(cleaned);
-    if (!isValid) {
-      console.warn('[WARN] formatNigeriaNumber: Invalid phone number:', cleaned);
-      return { value: cleaned, cursorOffset, valid: false };
-    }
-    if (cleaned.length >= 4) {
-      if (cleaned.length <= 7) {
-        return { value: `${cleaned.slice(0, 4)} ${cleaned.slice(4)}`, cursorOffset, valid: true };
-      }
-      return { value: `${cleaned.slice(0, 4)} ${cleaned.slice(4, 7)} ${cleaned.slice(7)}`, cursorOffset, valid: true };
-    }
-    return { value: cleaned, cursorOffset, valid: cleaned.length === 11 };
+
+    return { value: formatted, cursorOffset, valid: !!isValid };
   } catch (error) {
-    console.error('[ERROR] formatNigeriaNumber:', error.message);
+    console.error('[ERROR] formatNigeriaNumber:', error);
     return { value: '', cursorOffset: 0, valid: false };
   }
 }
+
 
   // --- VALIDATION HELPERS ---
   function isNigeriaMobile(val) {
@@ -10012,50 +9888,125 @@ try { if (!window.disableBiometrics) window.disableBiometrics = disableBiometric
 
 })();
 
+  // ---- Stable non-destructive live phone formatter (safe to place anywhere) ----
+(function attachStablePhoneFormatter_Last(){
+  // do not mark global attached until we've actually attached
+  if (window.__phoneLiveFormatterInstalled) {
+    // already installed (but not necessarily attached to element)
+    return;
+  }
+  // mark installer so we don't run this setup twice
+  window.__phoneLiveFormatterInstalled = true;
 
+  function formatProgressiveNG(digits){
+    if (digits.length <= 4) return digits;
+    if (digits.length <= 7) return digits.replace(/(\d{4})(\d+)/, '$1 $2');
+    return digits.replace(/(\d{4})(\d{3})(\d+)/, '$1 $2 $3');
+  }
 
+  function getPhoneEl() {
+    return document.getElementById('phone-input');
+  }
 
+  function attachTo(el){
+    if (!el) return false;
+    // avoid re-attaching to the same element
+    if (el.__stableFormatterAttached) return true;
+    el.__stableFormatterAttached = true;
 
+    // now that we actually attached, set the global "attached" flag
+    try { window.__phoneLiveFormatterAttached = true; } catch(e){}
+    console.log('%c📱 Phone Formatter Active', 'color: lime; font-weight: bold;');
 
+    var composing = false;
 
+    el.addEventListener('compositionstart', function(){ composing = true; }, false);
+    el.addEventListener('compositionend', function(){ composing = false; scheduleFormat(); }, false);
 
-
-
-  
-
-
-
-    
-
-
-
-
-
-
-
-
-
-
-  // Watch your steps
-});
-
-
-
-
-
-
-
-// Auto-bind immediate biometric click handler to common selectors
-(function bindImmediateBioClick(){
-  try {
-    var selectors = ['#bioBtn', '#pinBiometricBtn', '.biometric-button', '[data-bio-button]'];
-    for (var i=0;i<selectors.length;i++){
-      var el = document.querySelector(selectors[i]);
-      if (el) {
-        // Remove existing click listener references by replacing onclick if set
-        try { el.removeEventListener('click', __immediateBiometricClickHandler); } catch(e){}
-        el.addEventListener('click', __immediateBiometricClickHandler);
-      }
+    var scheduled = null;
+    function scheduleFormat(){
+      if (composing) return;
+      if (scheduled) return;
+      scheduled = setTimeout(function(){
+        scheduled = null;
+        try { applyFormatting(el); } catch(err){ console.error('phone format err', err); }
+      }, 0);
     }
-  } catch(e) { console.warn('bindImmediateBioClick err', e); }
+
+    function applyFormatting(inputEl){
+      var selStart = inputEl.selectionStart || 0;
+      var rawBefore = (inputEl.value.slice(0, selStart).match(/\d/g) || []).join('');
+      var allDigits = (inputEl.value.match(/\d/g) || []).join('');
+      var formatted = formatProgressiveNG(allDigits);
+
+      if (formatted === inputEl.value){
+        try{ inputEl.dataset.raw = allDigits; }catch(e){}
+        return;
+      }
+
+      inputEl.value = formatted;
+      try{ inputEl.dataset.raw = allDigits; }catch(e){}
+
+      var dcount = 0, newPos = 0;
+      if (rawBefore.length === 0) newPos = 0;
+      else {
+        for (var i=0;i<formatted.length;i++){
+          if (/\d/.test(formatted[i])) dcount++;
+          newPos = i + 1;
+          if (dcount >= rawBefore.length) break;
+        }
+      }
+      if (newPos > formatted.length) newPos = formatted.length;
+      try { inputEl.setSelectionRange(newPos, newPos); } catch(e){}
+    }
+
+    el.addEventListener('input', scheduleFormat, false);
+    el.addEventListener('blur', function(){ if(!composing) applyFormatting(el); }, false);
+
+    var watch = null;
+    el.addEventListener('focus', function(){
+      scheduleFormat();
+      if (watch) clearInterval(watch);
+      watch = setInterval(function(){
+        try {
+          var digits = (el.value.match(/\d/g) || []).join('');
+          var expected = formatProgressiveNG(digits);
+          if (expected !== el.value) applyFormatting(el);
+        } catch(e){}
+      }, 180);
+    }, false);
+
+    el.addEventListener('blur', function(){
+      if (watch){ clearInterval(watch); watch = null; }
+    }, false);
+
+    // If input element is replaced later, reattach to new one
+    var mo = new MutationObserver(function(muts){
+      muts.forEach(function(m){
+        m.addedNodes && Array.prototype.forEach.call(m.addedNodes, function(node){
+          if (node && node.id === 'phone-input' && node !== el){
+            try { attachTo(node); } catch(e){}
+          }
+        });
+      });
+    });
+    mo.observe(document.documentElement || document.body, { childList: true, subtree: true });
+
+    return true;
+  }
+
+  // Try attach immediately or wait a bit (safe on early script execution)
+  (function tryAttach(count){
+    var el = getPhoneEl();
+    if (el) { attachTo(el); return; }
+    if (count > 60) {
+      console.warn('Phone formatter: element #phone-input not found, giving up after attempts');
+      return;
+    }
+    setTimeout(function(){ tryAttach(count+1); }, 200);
+  })(0);
+
+})();
+
+
 })();
