@@ -2412,6 +2412,105 @@ payBtn.addEventListener('click', () => {
 
 
 /* --- BALANCE MANAGEMENT (keep original globals intact) --- */
+
+// ---- Added: Reauth modal state guard and phone-input protection ----
+window.reauthModalState = window.reauthModalState || 'closed';
+(function(){
+  var _pendingTimer = null;
+  function disablePhoneInput(){ try{ var el=document.getElementById('phone-input'); if(el) el.disabled=true; }catch(e){} }
+  function enablePhoneInput(){ try{ var el=document.getElementById('phone-input'); if(el) el.disabled=false; }catch(e){} }
+  window.setReauthState = function(state){
+    if(state === 'pending'){
+      window.reauthModalState = 'pending';
+      document.body.classList.add('reauth-active');
+      disablePhoneInput();
+      return;
+    }
+    if(state === 'open'){
+      clearTimeout(_pendingTimer);
+      _pendingTimer = setTimeout(function(){
+        window.reauthModalState = 'open';
+      }, 120);
+      document.body.classList.add('reauth-active');
+      disablePhoneInput();
+      return;
+    }
+    // closed
+    clearTimeout(_pendingTimer);
+    window.reauthModalState = 'closed';
+    document.body.classList.remove('reauth-active');
+    enablePhoneInput();
+  };
+
+  // Blur focused phone input helper
+  window.blurPhoneIfFocused = function(){
+    try {
+      var phoneInputEl = document.getElementById('phone-input');
+      if (phoneInputEl && document.activeElement === phoneInputEl) phoneInputEl.blur();
+      else if (document.activeElement && typeof document.activeElement.blur === 'function') document.activeElement.blur();
+    } catch (e) { console && console.warn && console.warn('blur fallback failed', e); }
+  };
+
+  // Capture and prevent interactions on the phone input while reauth pending/open.
+  function blockIfReauth(e){
+    try {
+      if(window.reauthModalState === 'closed') return;
+      var ae = document.activeElement;
+      if(ae && ae.id === 'phone-input'){
+        e && e.stopImmediatePropagation && e.stopImmediatePropagation();
+        e && e.preventDefault && e.preventDefault();
+      }
+    } catch(err){}
+  }
+  // use capture=true to intercept before other handlers
+  document.addEventListener('keydown', blockIfReauth, true);
+  document.addEventListener('keypress', blockIfReauth, true);
+  document.addEventListener('keyup', blockIfReauth, true);
+  document.addEventListener('input', blockIfReauth, true);
+  document.addEventListener('paste', blockIfReauth, true);
+  document.addEventListener('click', function(e){
+    try{
+      if(window.reauthModalState !== 'closed'){
+        var t = e.target || e.srcElement;
+        // if clicking on phone input or wrapper, stop it
+        if(t && (t.id === 'phone-input' || (t.closest && t.closest('.phone-input-wrapper')) ) ){
+          e.stopImmediatePropagation && e.stopImmediatePropagation();
+          e.preventDefault && e.preventDefault();
+        }
+      }
+    }catch(err){}
+  }, true);
+
+  // Watch for a modal with id 'pinModal' or class '.reauth-modal' to set open/closed state.
+  function checkModalVisibility(){
+    try{
+      var modal = document.getElementById('pinModal') || document.querySelector('.reauth-modal') || document.querySelector('#reauthModal');
+      if(modal){
+        var visible = !!(modal.offsetParent !== null || (modal.style && modal.style.display && modal.style.display !== 'none') || modal.classList.contains('open'));
+        if(visible && window.reauthModalState !== 'open'){
+          window.setReauthState('open');
+          // ensure focus on first input
+          setTimeout(function(){
+            var firstPin = modal.querySelector && modal.querySelector('.pin-inputs input, input.pin, input[type="password"]');
+            if(firstPin && typeof firstPin.focus === 'function') firstPin.focus();
+          }, 30);
+        } else if(!visible && window.reauthModalState !== 'closed'){
+          window.setReauthState('closed');
+        }
+      } else {
+        // no modal element found -> ensure closed
+        if(window.reauthModalState !== 'closed') window.setReauthState('closed');
+      }
+    }catch(e){}
+  }
+  // run check periodically and on DOM mutations
+  var _iv = setInterval(checkModalVisibility, 200);
+  if(window.MutationObserver){
+    var mo = new MutationObserver(checkModalVisibility);
+    mo.observe(document.documentElement || document.body, { childList: true, subtree: true, attributes: true });
+  }
+})();
+ // ---- end added block ----
 // keep same global names so other functions still work
 let userBalance = parseFloat(localStorage.getItem('userBalance')) || 50000; // Initialize to ₦50,000
 const balanceEl = document.querySelector('.balance p'); // same selector you used before
@@ -9699,6 +9798,9 @@ window.persistCredentialId = persistCredentialId;
 
   // Full showReauthModal (explicit called flow)
 async function showReauthModal(context = 'reauth') {
+  // set pending immediately to guard phone input
+  try{ window.setReauthState && window.setReauthState('pending'); window.blurPhoneIfFocused && window.blurPhoneIfFocused(); }catch(e){}
+
   console.log('showReauthModal called', { context });
   cacheDomRefs();
   if (!reauthModal) {
@@ -9728,6 +9830,8 @@ async function showReauthModal(context = 'reauth') {
         }
         console.log('showReauthModal: biometric failed -> fallback to PIN modal');
         await initReauthModal({ show: true, context });
+  try{ window.setReauthState && window.setReauthState('open'); }catch(e){}
+
         return;
       } else {
         console.warn('showReauthModal: no session uid for biometric -> open PIN modal');
@@ -9935,265 +10039,4 @@ try { if (!window.disableBiometrics) window.disableBiometrics = disableBiometric
       }
     }
   } catch(e) { console.warn('bindImmediateBioClick err', e); }
-})();
-
-
-
-/* -----------------------------
-  Robust Reauth Enhancements (appended)
-  - Persistent modal lock across tabs + reloads (localStorage + BroadcastChannel)
-  - Wrapped showReauthModal / onSuccessfulReauth to set/clear lock
-  - verifyBiometricsRobust: retries once on challenge-mismatch and visually fills 4-pin inputs + shows loader while finalizing
-  - Binds biometric buttons to robust handler to better catch first-clicks
-  - Non-destructive: appends behavior, avoids touching existing functions where possible
------------------------------ */
-(function(){
-  const BC_NAME = 'fg-reauth';
-  const LOCK_KEY = 'fg_reauth_lock_v1';
-  const bc = (typeof BroadcastChannel !== 'undefined') ? new BroadcastChannel(BC_NAME) : null;
-  const RETRY_ON_CHALLENGE_MISMATCH = true;
-
-  function setReauthLock(enabled){
-    try {
-      if (enabled) {
-        localStorage.setItem(LOCK_KEY, String(Date.now()));
-        if (bc) bc.postMessage({ lock: true, ts: Date.now() });
-      } else {
-        localStorage.removeItem(LOCK_KEY);
-        if (bc) bc.postMessage({ lock: false, ts: Date.now() });
-      }
-    } catch (e) {
-      console.warn('setReauthLock error', e);
-    }
-  }
-
-  // Wrap showReauthModal to set lock when modal shown (idempotent)
-  try {
-    if (typeof window.showReauthModal === 'function' && !window.__wrapped_showReauthModal_v1) {
-      window.__orig_showReauthModal_v1 = window.showReauthModal;
-      window.showReauthModal = async function(context){
-        setReauthLock(true);
-        try {
-          return await window.__orig_showReauthModal_v1(context);
-        } catch (e) {
-          console.error('Wrapped showReauthModal error', e);
-          throw e;
-        }
-      };
-      window.__wrapped_showReauthModal_v1 = true;
-      console.log('[reauth-patch] showReauthModal wrapped to enforce lock');
-    }
-  } catch(e){ console.warn('wrap showReauthModal failed', e); }
-
-  // Wrap onSuccessfulReauth to clear lock once real handler finishes
-  try {
-    if (typeof window.onSuccessfulReauth === 'function' && !window.__wrapped_onSuccessfulReauth_v1) {
-      window.__orig_onSuccessfulReauth_v1 = window.onSuccessfulReauth;
-      window.onSuccessfulReauth = async function(...args){
-        try {
-          const res = await window.__orig_onSuccessfulReauth_v1(...args);
-          return res;
-        } finally {
-          try { setReauthLock(false); } catch(e) {}
-        }
-      };
-      window.__wrapped_onSuccessfulReauth_v1 = true;
-      console.log('[reauth-patch] onSuccessfulReauth wrapped to clear lock after success');
-    }
-  } catch(e){ console.warn('wrap onSuccessfulReauth failed', e); }
-
-  // React to lock changes from other tabs (storage + BroadcastChannel)
-  window.addEventListener('storage', function(ev){
-    try {
-      if (ev.key === LOCK_KEY) {
-        const newVal = ev.newValue;
-        if (newVal) {
-          // show modal if not already open
-          if (!window.reauthModalOpen) {
-            if (typeof window.initReauthModal === 'function') {
-              window.initReauthModal({ show: true, context: 'reauth' }).catch(()=>{});
-            }
-          }
-          // Optionally lock UI: add overlay or disable interactions (left to existing modal)
-        } else {
-          // clear modal if present and closed via other tab
-          if (window.reauthModalOpen && typeof window.hideReauthModal === 'function') {
-            try { window.hideReauthModal(); } catch(e) {}
-          }
-        }
-      }
-    } catch(e){ console.warn('storage handler error', e); }
-  });
-
-  if (bc) {
-    bc.onmessage = function(m){
-      try {
-        const d = m.data || {};
-        if (d.lock) {
-          if (!window.reauthModalOpen && typeof window.initReauthModal === 'function') {
-            window.initReauthModal({ show: true, context: 'reauth' }).catch(()=>{});
-          }
-        } else {
-          if (window.reauthModalOpen && typeof window.hideReauthModal === 'function') {
-            try { window.hideReauthModal(); } catch(e) {}
-          }
-        }
-      } catch(e){ console.warn('bc message handler error', e); }
-    };
-  }
-
-  // On load, if lock present, force show modal
-  try {
-    if (localStorage.getItem(LOCK_KEY)) {
-      if (!window.reauthModalOpen && typeof window.initReauthModal === 'function') {
-        window.initReauthModal({ show: true, context: 'reauth' }).catch(()=>{});
-      }
-    }
-  } catch(e){}
-
-  // Helper: visual-fill the 4 input boxes (non-destructive)
-  function visualFillPinInputs(maskChar = '•') {
-    try {
-      if (typeof getReauthInputs === 'function') {
-        const inputs = getReauthInputs();
-        if (inputs && inputs.length) {
-          inputs.forEach(i=>{
-            try { i.value = maskChar; i.classList.add('filled'); i.disabled = true; } catch(e){}
-          });
-        }
-      }
-    } catch(e){ console.warn('visualFillPinInputs', e); }
-  }
-
-  // Helper: clear visual fill and re-enable
-  function visualClearPinInputs() {
-    try {
-      if (typeof getReauthInputs === 'function') {
-        const inputs = getReauthInputs();
-        if (inputs && inputs.length) {
-          inputs.forEach(i=>{
-            try { i.value = ''; i.classList.remove('filled'); i.disabled = false; } catch(e){}
-          });
-        }
-      }
-    } catch(e){ console.warn('visualClearPinInputs', e); }
-  }
-
-  // Enhanced verify that retries once on challenge mismatch and shows loader + fills inputs while finalizing
-  async function verifyBiometricsRobust(uid, context) {
-    context = context || 'reauth';
-    // If original verifyBiometrics exists, prefer to call it and inspect results
-    const orig = (typeof verifyBiometrics === 'function') ? verifyBiometrics : null;
-
-    // Try to call original verifyBiometrics first (it uses withLoader). We'll intercept results.
-    try {
-      const res = orig ? await orig(uid, context) : await (window.__verifyBiometrics ? window.__verifyBiometrics(uid,context) : Promise.reject(new Error('No verifyBiometrics present')));
-      if (res && res.success) {
-        // show processing state: fill inputs and lock UI
-        try { visualFillPinInputs(); showLoader && showLoader(); } catch(e){}
-        // call onSuccessfulReauth to finish session processing (wrapped will clear lock)
-        try { if (typeof onSuccessfulReauth === 'function') await onSuccessfulReauth(res); } catch(e){ console.warn('onSuccessfulReauth after biometric success failed', e); }
-        // hide loader and modal if available
-        try { hideLoader && hideLoader(); if (reauthModal) reauthModal.classList.add('hidden'); } catch(e){}
-        // ensure lock cleared (wrapped onSuccessfulReauth should clear it)
-        try { setReauthLock(false); } catch(e){}
-        // done
-        return { success: true, res };
-      } else {
-        // If server returned a verifyData with an error about challenge mismatch, attempt one retry after clearing cached options
-        const errText = (res && (res.error || (res.verifyData && (res.verifyData.error || res.verifyData.message)))) || '';
-        if (RETRY_ON_CHALLENGE_MISMATCH && /unexpected authentication response challenge|challenge mismatch/i.test(errText)) {
-          console.warn('[reauth-patch] challenge mismatch detected, retrying once with fresh options');
-          try { window.__cachedAuthOptions = null; window.__cachedAuthOptionsFetchedAt = 0; } catch(e){}
-          // small delay to allow fresh prefetch on pointerdown next
-          try { await (window.prefetchAuthOptions ? window.prefetchAuthOptions() : Promise.resolve()); } catch(e){}
-          try {
-            const res2 = orig ? await orig(uid, context) : await Promise.reject(new Error('No verifyBiometrics present'));
-            if (res2 && res2.success) {
-              try { visualFillPinInputs(); showLoader && showLoader(); } catch(e){}
-              try { if (typeof onSuccessfulReauth === 'function') await onSuccessfulReauth(res2); } catch(e){}
-              try { hideLoader && hideLoader(); if (reauthModal) reauthModal.classList.add('hidden'); } catch(e){}
-              try { setReauthLock(false); } catch(e){}
-              return { success: true, res: res2 };
-            }
-            return res2 || { success:false };
-          } catch (e) {
-            return { success:false, error: String(e) };
-          }
-        }
-        return res || { success:false };
-      }
-    } catch (err) {
-      const msg = err && err.message ? err.message : String(err);
-      // handle challenge mismatch in thrown error
-      if (RETRY_ON_CHALLENGE_MISMATCH && /unexpected authentication response challenge|challenge mismatch/i.test(msg)) {
-        try { window.__cachedAuthOptions = null; window.__cachedAuthOptionsFetchedAt = 0; } catch(e){}
-        try { await (window.prefetchAuthOptions ? window.prefetchAuthOptions() : Promise.resolve()); } catch(e){}
-        try {
-          const res2 = orig ? await orig(uid, context) : await Promise.reject(new Error('No verifyBiometrics present'));
-          if (res2 && res2.success) {
-            try { visualFillPinInputs(); showLoader && showLoader(); } catch(e){}
-            try { if (typeof onSuccessfulReauth === 'function') await onSuccessfulReauth(res2); } catch(e){}
-            try { hideLoader && hideLoader(); if (reauthModal) reauthModal.classList.add('hidden'); } catch(e){}
-            try { setReauthLock(false); } catch(e){}
-            return { success: true, res: res2 };
-          }
-          return res2 || { success:false, error: msg };
-        } catch (e2) {
-          return { success:false, error: String(e2) };
-        }
-      }
-      return { success:false, error: msg };
-    } finally {
-      // after attempt, ensure inputs are enabled if not processing
-      setTimeout(() => { try { visualClearPinInputs(); } catch(e){} }, 800);
-    }
-  }
-
-  // Expose robust verifier
-  window.verifyBiometricsRobust = verifyBiometricsRobust;
-
-  // Bind biometric buttons to robust handler to better catch first clicks
-  function bindRobustBioButtons() {
-    try {
-      const selectors = ['#pinBiometricBtn', '#bioBtn', '.biometric-button', '[data-bio-button]'];
-      const els = selectors.flatMap(s => Array.from(document.querySelectorAll(s)));
-      const uniq = Array.from(new Set(els));
-      uniq.forEach(btn => {
-        if (!btn || btn.__fg_robustBound) return;
-        // on pointerdown we prefetch options (fastest possible)
-        btn.addEventListener('pointerdown', function(){ try { window.prefetchAuthOptions && window.prefetchAuthOptions(); } catch(e){} }, { passive:true });
-        btn.addEventListener('mouseenter', function(){ try { window.prefetchAuthOptions && window.prefetchAuthOptions(); } catch(e){} }, { passive:true });
-        // click handler must be not passive to allow calling credentials.get inside user gesture
-        btn.addEventListener('click', async function(ev){
-          ev.preventDefault();
-          try {
-            // Ensure lock is set immediately
-            setReauthLock(true);
-            const session = await (typeof getSession === 'function' ? safeCall(getSession) : Promise.resolve({}));
-            const uid = session && session.user && (session.user.uid || session.user.id);
-            // call robust verifier which will handle cache/fetch/retry
-            const result = await verifyBiometricsRobust(uid, 'reauth');
-            if (result && result.success) {
-              // success handled inside robust function (onSuccessfulReauth called)
-            } else {
-              // fallback: reveal PIN view if available
-              try { if (typeof switchViews === 'function') switchViews(false); } catch(e){}
-            }
-          } catch (e) {
-            console.error('Robust bio button error', e);
-            try { if (typeof switchViews === 'function') switchViews(false); } catch(e){}
-          }
-        }, { passive:false });
-        btn.__fg_robustBound = true;
-      });
-    } catch (e) { console.warn('bindRobustBioButtons error', e); }
-  }
-
-  // Try binding initially and also when DOM changes
-  try { bindRobustBioButtons(); } catch(e){}
-  const mo = new MutationObserver(() => { try { bindRobustBioButtons(); } catch(e){} });
-  mo.observe(document.body, { childList: true, subtree: true });
-
-  console.log('[reauth-patch] Robust reauth enhancements appended');
 })();
