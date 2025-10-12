@@ -988,7 +988,14 @@ const svgShapes = {
   window.getAuthOptionsWithCache = window.getAuthOptionsWithCache || (async function(opts={}){
     if (_conv && (Date.now()-_ts) <= AUTH_OPTIONS_TTL) return _conv;
     const apiBase = (window.__SEC_API_BASE || (typeof API_BASE!=='undefined' ? API_BASE : ''));
-    const res = await window.getAuthOptionsWithCache({});
+    const fetchImpl = (window.__origFetch || window.fetch).bind(window);
+    const res = await fetchImpl(apiBase + '/webauthn/auth/options', {
+      method: 'POST',
+      credentials: 'include',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(opts || {})
+    });
+
     if (!res.ok) throw new Error('Auth options fetch failed');
     _raw = await res.json();
     _conv = convertOptionsFromServer(_raw);
