@@ -1073,7 +1073,7 @@ const svgShapes = {
   });
 
 })(); // end helpers
-\n\ngetAuthOptionsWithCache (minimal safe helper) ---
+// getAuthOptionsWithCache (minimal safe helper) ---
 (function(){
   const AUTH_OPTIONS_TTL = 30 * 1000; // 30s
   function fromBase64UrlToBuffer(b64url){
