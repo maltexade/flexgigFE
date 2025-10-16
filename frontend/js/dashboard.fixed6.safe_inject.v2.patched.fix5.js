@@ -1073,48 +1073,6 @@ const svgShapes = {
   });
 
 })(); // end helpers
-// getAuthOptionsWithCache (minimal safe helper) ---
-(function(){
-  const AUTH_OPTIONS_TTL = 30 * 1000; // 30s
-  function fromBase64UrlToBuffer(b64url){
-    let b = b64url.replace(/-/g,'+').replace(/_/g,'/');
-    while (b.length % 4) b += '=';
-    const str = atob(b);
-    const arr = new Uint8Array(str.length);
-    for (let i=0;i<str.length;i++) arr[i] = str.charCodeAt(i);
-    return arr.buffer;
-  }
-  function convertOptionsFromServer(publicKey) {
-    try {
-      if (!publicKey) return publicKey;
-      const clone = JSON.parse(JSON.stringify(publicKey));
-      if (clone.challenge && typeof clone.challenge === 'string') clone.challenge = fromBase64UrlToBuffer(clone.challenge);
-      if (Array.isArray(clone.allowCredentials)) {
-        clone.allowCredentials = clone.allowCredentials.map(function(c){
-          try { return Object.assign({}, c, { id: fromBase64UrlToBuffer(c.id) }); } catch(e){ return c; }
-        });
-      }
-      return clone;
-    } catch(e){ console.warn('[webauthn] convertOptionsFromServer', e); return publicKey; }
-  }
-  let _raw=null, _conv=null, _ts=0;
-  window.getAuthOptionsWithCache = window.getAuthOptionsWithCache || (async function(opts={}){
-    if (_conv && (Date.now()-_ts) <= AUTH_OPTIONS_TTL) return _conv;
-    const apiBase = (window.__SEC_API_BASE || (typeof API_BASE!=='undefined' ? API_BASE : ''));
-    const res = await fetch(`${apiBase}/webauthn/auth/options`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({})
-    });
-    if (!res.ok) throw new Error('Auth options fetch failed');
-    _raw = await res.json();
-    _conv = convertOptionsFromServer(_raw);
-    _ts = Date.now();
-    return _conv;
-  });
-  window.invalidateAuthOptionsCache = function(){ _raw=_conv=null; _ts=0; };
-})();
 
 // --- WebAuthn: centralized TTL-backed fetch for /webauthn/auth/options ---
 (function(){
@@ -1153,8 +1111,10 @@ const svgShapes = {
   if (window.__webauthnFetchWrapped) return;
   window.__webauthnFetchWrapped = true;
   if (typeof window.fetch === 'function') {
-    window.__origFetch = window.fetch.bind(window);
-    window.fetch = async function(input, init){
+    window.__origFetch = window.__origFetch || window.fetch.bind(window);
+    (function(){
+      const origFetch = window.__origFetch;
+      window.fetch = async function(input, init){
       try {
         const url = (typeof input === 'string') ? input : (input && input.url) || '';
         if (url && url.indexOf('/webauthn/auth/options') !== -1) {
@@ -1168,7 +1128,7 @@ const svgShapes = {
           return new Response(JSON.stringify(opts), { status: 200, headers: { 'Content-Type': 'application/json' } });
         }
       } catch(e){ console.warn('[webauthn] fetch wrapper error', e); }
-      return window.__origFetch(input, init);
+      return origFetch(input, init);
     };
   }
 })();
