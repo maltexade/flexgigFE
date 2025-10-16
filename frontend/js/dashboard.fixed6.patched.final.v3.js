@@ -6503,10 +6503,27 @@ function __sec_setBiometrics(parentOn, animate = true) {
       __sec_setChecked(__sec_bioTx, true);
       try { localStorage.setItem(__sec_KEYS.bioTx, '1'); localStorage.setItem('biometricForTx', 'true'); } catch(e){ __sec_log.e('setBiometrics: bioTx storage', e); }
     }
-    if (__sec_bioOptions) { 
-      __sec_revealChildrenNoAnimate();
-      setOptionsVisible(true);
-    }
+    if (__sec_bioOptions) {
+  // Reveal child rows and ensure options container visible (no external dependency)
+  __sec_revealChildrenNoAnimate();
+
+  try {
+    __sec_bioOptions.classList.add('show');
+    __sec_bioOptions.hidden = false;
+    // If original implementation used inline display style:
+    __sec_bioOptions.style.display = '';
+    // Make children rows visible similarly to reveal function (defensive)
+    const rows = Array.from(__sec_bioOptions.querySelectorAll('.setting-row'));
+    rows.forEach(r => {
+      r.classList.add('visible');
+      // clear any stray transition delays when toggling programmatically
+      r.style.transitionDelay = '';
+    });
+  } catch (e) {
+    __sec_log.w('setBiometrics: enable options UI failed', e);
+  }
+}
+
     __sec_log.i('biom ON', { animate });
   } else {
     // Turn children off too
@@ -7287,7 +7304,7 @@ async function startAuthentication(userId) {
     }
 
     const apiBase = window.__SEC_API_BASE || "https://api.flexgig.com.ng";
-    const optUrl = `${apiBase}/webauthn/auth/options/discover`;
+    const optUrl = `${apiBase}/webauthn/auth/options`;
     __sec_log.d('startAuthentication: Fetching options from', optUrl);
     const optRes = await fetch(optUrl, {
       method: 'POST',
@@ -7295,6 +7312,24 @@ async function startAuthentication(userId) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId }),
     });
+    if (!optRes.ok) {
+  const txt = await optRes.text().catch(()=>'');
+  __sec_log.w('verifyBiometrics: auth/options returned non-ok', { status: optRes.status, txtSample: (txt||'').slice(0,300) });
+  if (optRes.status === 404 || /no authenticators found/i.test(txt || '')) {
+    // clear local flags (mirror reconcile logic)
+    localStorage.setItem(__sec_KEYS.biom, '0');
+    localStorage.setItem('biometricsEnabled', 'false');
+    localStorage.setItem(__sec_KEYS.bioLogin, '0');
+    localStorage.setItem(__sec_KEYS.bioTx, '0');
+    localStorage.setItem('biometricForLogin', 'false');
+    localStorage.setItem('biometricForTx', 'false');
+    // set UI off
+    if (__sec_parentSwitch) __sec_setChecked(__sec_parentSwitch, false);
+    if (__sec_bioOptions) { __sec_bioOptions.classList.remove('show'); __sec_bioOptions.hidden = true; }
+  }
+  throw new Error('Auth options fetch failed: ' + txt);
+}
+
     const optRaw = await optRes.text();
     __sec_log.d('startAuthentication: Options response', { status: optRes.status, ok: optRes.ok, raw: optRaw });
     if (!optRes.ok) throw new Error(`Auth options failed: ${optRaw}`);
@@ -8489,6 +8524,24 @@ bioBtn.addEventListener('click', async () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ credentialId: storedId, userId: (window.__webauthn_userId || null) })
         });
+        if (!optRes.ok) {
+  const txt = await optRes.text().catch(()=>'');
+  __sec_log.w('verifyBiometrics: auth/options returned non-ok', { status: optRes.status, txtSample: (txt||'').slice(0,300) });
+  if (optRes.status === 404 || /no authenticators found/i.test(txt || '')) {
+    // clear local flags (mirror reconcile logic)
+    localStorage.setItem(__sec_KEYS.biom, '0');
+    localStorage.setItem('biometricsEnabled', 'false');
+    localStorage.setItem(__sec_KEYS.bioLogin, '0');
+    localStorage.setItem(__sec_KEYS.bioTx, '0');
+    localStorage.setItem('biometricForLogin', 'false');
+    localStorage.setItem('biometricForTx', 'false');
+    // set UI off
+    if (__sec_parentSwitch) __sec_setChecked(__sec_parentSwitch, false);
+    if (__sec_bioOptions) { __sec_bioOptions.classList.remove('show'); __sec_bioOptions.hidden = true; }
+  }
+  throw new Error('Auth options fetch failed: ' + txt);
+}
+
         if (!optRes.ok) {
           var txt = await optRes.text();
           throw new Error('Auth options fetch failed: ' + txt);
