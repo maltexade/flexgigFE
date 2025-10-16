@@ -461,10 +461,6 @@ async function getSession() {
 window.getSession = getSession;
 
 
-// Make globally accessible
-window.getSession = getSession;
-
-
 
 // --- Safe wrapper with retries ---
 function safeGetSession(retries = 5) {
@@ -961,61 +957,241 @@ const svgShapes = {
 // --- MAIN EVENT LISTENERS ---
 
 // --- WebAuthn: centralized TTL-backed fetch for /webauthn/auth/options ---
+// --- WebAuthn: centralized TTL-backed fetch for /webauthn/auth/options (robust + verbose logging) ---
 (function(){
   const AUTH_OPTIONS_TTL = 30 * 1000; // 30s
-  function cacheAuthOptions(opts) { try { window.__cachedAuthOptions = opts || null; window.__cachedAuthOptionsFetchedAt = opts ? Date.now() : 0; } catch(e){} }
-  function cachedOptionsFresh() { try { return !!(window.__cachedAuthOptions && window.__cachedAuthOptionsFetchedAt && (Date.now() - window.__cachedAuthOptionsFetchedAt) <= AUTH_OPTIONS_TTL); } catch(e){ return false; } }
-  function fromBase64Url(b64url){ let b = b64url.replace(/-/g,'+').replace(/_/g,'/'); while (b.length % 4) b += '='; const str = atob(b); const arr = new Uint8Array(str.length); for (let i=0;i<str.length;i++) arr[i] = str.charCodeAt(i); return arr.buffer; }
+
+  // Simple structured logger for raw traces
+  function mkLog(prefix) {
+    return {
+      d: (...args) => console.debug(`[${prefix}] ${new Date().toISOString()}`, ...args),
+      i: (...args) => console.info(`[${prefix}] ${new Date().toISOString()}`, ...args),
+      w: (...args) => console.warn(`[${prefix}] ${new Date().toISOString()}`, ...args),
+      e: (...args) => console.error(`[${prefix}] ${new Date().toISOString()}`, ...args)
+    };
+  }
+  const __webauthn_log = mkLog('webauthn');
+
+  function cacheAuthOptions(opts) {
+    try {
+      window.__cachedAuthOptions = opts || null;
+      window.__cachedAuthOptionsFetchedAt = opts ? Date.now() : 0;
+      __webauthn_log.d('cacheAuthOptions set', { fresh: !!opts, ts: window.__cachedAuthOptionsFetchedAt });
+    } catch (e) {
+      __webauthn_log.e('cacheAuthOptions error', e);
+    }
+  }
+
+  function cachedOptionsFresh() {
+    try {
+      return !!(window.__cachedAuthOptions && window.__cachedAuthOptionsFetchedAt && (Date.now() - window.__cachedAuthOptionsFetchedAt) <= AUTH_OPTIONS_TTL);
+    } catch(e){
+      return false;
+    }
+  }
+
+  function fromBase64Url(b64url){
+    let b = b64url.replace(/-/g,'+').replace(/_/g,'/');
+    while (b.length % 4) b += '=';
+    const str = atob(b);
+    const arr = new Uint8Array(str.length);
+    for (let i=0;i<str.length;i++) arr[i] = str.charCodeAt(i);
+    return arr.buffer;
+  }
+
   function convertOptionsFromServer(publicKey) {
     try {
       if (!publicKey) return publicKey;
       if (publicKey.challenge && typeof publicKey.challenge === 'string') publicKey.challenge = fromBase64Url(publicKey.challenge);
       if (Array.isArray(publicKey.allowCredentials)) {
-        publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){ try { return Object.assign({}, c, { id: fromBase64Url(c.id) }); } catch(e){ return c; } });
+        publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){ 
+          try { return Object.assign({}, c, { id: fromBase64Url(c.id) }); } catch(e){ return c; }
+        });
       }
       return publicKey;
-    } catch (e) { console.warn('[webauthn] convertOptionsFromServer error', e); return publicKey; }
+    } catch (e) {
+      __webauthn_log.w('convertOptionsFromServer error', e);
+      return publicKey;
+    }
   }
-  window.getAuthOptionsWithCache = window.getAuthOptionsWithCache || (async function({ credentialId=null, userId=null }={}){
-    if (cachedOptionsFresh()) { try { return JSON.parse(JSON.stringify(window.__cachedAuthOptions)); } catch(e){ return window.__cachedAuthOptions; } }
+
+  // small helper: try parse cached user from localStorage
+  function deriveUserIdFromLocalStorage() {
+    try {
+      const ud = localStorage.getItem('userData') || localStorage.getItem('user');
+      if (!ud) return null;
+      const parsed = JSON.parse(ud);
+      return parsed?.id || parsed?.uid || parsed?.userId || null;
+    } catch (e) {
+      __webauthn_log.w('deriveUserIdFromLocalStorage parse failed', e);
+      return null;
+    }
+  }
+
+  // helper: await getSession but timeout quickly (non-blocking friendly)
+  async function tryGetSessionUserId(timeoutMs = 600) {
+    if (typeof getSession !== 'function') return null;
+    let resolved = null;
+    try {
+      const p = (async () => {
+        try {
+          const s = await getSession();
+          return s?.user?.id || s?.user?.uid || null;
+        } catch (e) {
+          return null;
+        }
+      })();
+      const t = new Promise(r => setTimeout(() => r(null), timeoutMs));
+      resolved = await Promise.race([p, t]);
+      return resolved;
+    } catch (e) {
+      __webauthn_log.w('tryGetSessionUserId failed', e);
+      return null;
+    }
+  }
+
+  // Core: getAuthOptionsWithCache
+  window.getAuthOptionsWithCache = window.getAuthOptionsWithCache || (async function({ credentialId=null, userId=null }={}) {
+    __webauthn_log.d('getAuthOptionsWithCache entry', { credentialId, userId, cachedFresh: cachedOptionsFresh() });
+    if (cachedOptionsFresh()) {
+      try {
+        __webauthn_log.d('Returning fresh cached options (fast-path)');
+        return JSON.parse(JSON.stringify(window.__cachedAuthOptions));
+      } catch(e){
+        __webauthn_log.w('Cache deep-copy failed, returning raw');
+        return window.__cachedAuthOptions;
+      }
+    }
+
     const apiBase = (window.__SEC_API_BASE || (typeof API_BASE!=='undefined' ? API_BASE : ''));
-    const url = `${apiBase}/webauthn/auth/options`;
-    const body = { credentialId: credentialId || (localStorage.getItem('credentialId') || null), userId: userId || (window.__webauthn_userId || null) };
-    const res = await (typeof window.__origFetch !== 'undefined' ? window.__origFetch(url, { method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }) : fetch(url, { method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }));
-    if (!res.ok) { const txt = await res.text().catch(()=> ''); throw new Error('Auth options fetch failed: '+(txt||res.status)); }
-    const opts = await res.json();
-    const converted = convertOptionsFromServer(opts);
-    cacheAuthOptions(converted);
-    try { return JSON.parse(JSON.stringify(converted)); } catch(e){ return converted; }
+    // derive credentialId if not supplied
+    const resolvedCred = credentialId || localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id') || null;
+
+    // derive userId via multiple fallbacks (explicit arg > cached global > localStorage userData > try getSession)
+    let resolvedUser = userId || window.__webauthn_userId || deriveUserIdFromLocalStorage();
+    if (!resolvedUser) {
+      __webauthn_log.d('No userId yet, attempting short getSession wait');
+      resolvedUser = await tryGetSessionUserId(600); // wait up to 600ms for session
+    }
+    __webauthn_log.d('Resolved identity', { userId: !!resolvedUser, credentialId: !!resolvedCred });
+
+    // Choose endpoint: prefer options endpoint when we have userId, otherwise try discover endpoint
+    let triedDiscoverFallback = false;
+    const tryFetch = async (endpoint, body) => {
+      const url = `${apiBase}${endpoint}`;
+      const start = Date.now();
+      __webauthn_log.d('POST ->', url, 'body:', body);
+      const rawRes = await (typeof window.__origFetch !== 'undefined' ? window.__origFetch(url, { method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }) : fetch(url, { method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }));
+      const duration = Date.now() - start;
+      let text = '';
+      try { text = await rawRes.text(); } catch(e){ text = '(no body)'; }
+      __webauthn_log.d('Fetch result', { url, status: rawRes.status, ok: rawRes.ok, durationMs: duration, rawTextSample: text && text.slice ? text.slice(0,300) : text });
+      return { rawRes, text, duration };
+    };
+
+    // function that handles response parsing + conversion + cache
+    const handleSuccess = (opts) => {
+      const converted = convertOptionsFromServer(opts);
+      cacheAuthOptions(converted);
+      try { return JSON.parse(JSON.stringify(converted)); } catch(e){ return converted; }
+    };
+
+    // Primary attempt: if we have userId use '/webauthn/auth/options'
+    try {
+      if (resolvedUser) {
+        const body = { credentialId: resolvedCred, userId: resolvedUser };
+        const { rawRes, text } = await tryFetch('/webauthn/auth/options', body);
+        if (!rawRes.ok) {
+          // If server explicitly indicates missing userId or 400 and we have no cred or discover fallback available, attempt discover fallback
+          __webauthn_log.w('Primary options endpoint returned non-ok, will inspect for fallback', { status: rawRes.status, text });
+          if ((rawRes.status === 400 && /missing.*user/i.test(text || '')) || !resolvedUser) {
+            __webauthn_log.i('Primary failed due to missing userId; will try discover fallback');
+            triedDiscoverFallback = true;
+            const { rawRes: dRes, text: dText } = await tryFetch('/webauthn/auth/options/discover', { credentialId: resolvedCred });
+            if (!dRes.ok) {
+              __webauthn_log.e('Discover fallback failed', { status: dRes.status, text: dText });
+              throw new Error(`Auth options discover failed: ${dText || dRes.status}`);
+            }
+            const opts = JSON.parse(dText || '{}');
+            __webauthn_log.i('Discover fallback succeeded', { allowCount: opts.allowCredentials ? opts.allowCredentials.length : 0 });
+            return handleSuccess(opts);
+          }
+          throw new Error(text || `HTTP ${rawRes.status}`);
+        }
+        const opts = JSON.parse(text || '{}');
+        __webauthn_log.i('Primary options fetch successful', { allowCount: opts.allowCredentials ? opts.allowCredentials.length : 0 });
+        return handleSuccess(opts);
+      } else {
+        // No userId: prefer discover endpoint (server supports discover)
+        __webauthn_log.i('No userId resolved; calling discover endpoint to avoid Missing userId');
+        const { rawRes, text } = await tryFetch('/webauthn/auth/options/discover', { credentialId: resolvedCred });
+        if (!rawRes.ok) {
+          __webauthn_log.e('Discover endpoint failed', { status: rawRes.status, text });
+          throw new Error(text || `HTTP ${rawRes.status}`);
+        }
+        const opts = JSON.parse(text || '{}');
+        __webauthn_log.i('Discover options fetch successful', { allowCount: opts.allowCredentials ? opts.allowCredentials.length : 0 });
+        return handleSuccess(opts);
+      }
+    } catch (err) {
+      __webauthn_log.e('getAuthOptionsWithCache error', err);
+      // clear cache on error to avoid stale partial states
+      cacheAuthOptions(null);
+      throw err;
+    }
   });
-  window.invalidateAuthOptionsCache = window.invalidateAuthOptionsCache || function(){ cacheAuthOptions(null); };
-  if (!window.prefetchAuthOptions) window.prefetchAuthOptions = async function(){ try { if (cachedOptionsFresh()) return; await window.getAuthOptionsWithCache({}); console.log('[webauthn] prefetchAuthOptions: cached'); } catch(e){ console.warn('[webauthn] prefetchAuthOptions failed', e); } };
+
+  // Invalidate helper
+  window.invalidateAuthOptionsCache = window.invalidateAuthOptionsCache || function(){ cacheAuthOptions(null); __webauthn_log.d('invalidateAuthOptionsCache called'); };
+
+  // Prefetch helper used by UI (non-blocking)
+  if (!window.prefetchAuthOptions) window.prefetchAuthOptions = async function prefetchAuthOptions() {
+    __webauthn_log.d('prefetchAuthOptions called (UI trigger)');
+    try {
+      if (cachedOptionsFresh()) {
+        __webauthn_log.d('prefetchAuthOptions: already fresh, skipping');
+        return;
+      }
+      // Best-effort: don't throw UI errors, just log raw outcomes
+      try {
+        await window.getAuthOptionsWithCache({});
+        __webauthn_log.i('prefetchAuthOptions: cached options ready');
+      } catch(inner) {
+        __webauthn_log.w('prefetchAuthOptions: getAuthOptionsWithCache failed (non-fatal)', inner && inner.message ? inner.message : inner);
+      }
+    } catch (e) {
+      __webauthn_log.e('prefetchAuthOptions top-level error', e);
+    }
+  };
+
+  // Wrap existing fetch interception (keeps prior behavior but adds logs)
+  if (!window.__webauthnFetchWrapped) {
+    window.__webauthnFetchWrapped = true;
+    if (typeof window.fetch === 'function') {
+      window.__origFetch = window.fetch.bind(window);
+      window.fetch = async function(input, init){
+        try {
+          const url = (typeof input === 'string') ? input : (input && input.url) || '';
+          if (url && url.indexOf('/webauthn/auth/options') !== -1) {
+            __webauthn_log.d('fetch wrapper intercept', { url, initBody: init && init.body ? init.body.toString().slice(0,400) : null });
+            // try to parse credentialId/userId from body if present
+            let credentialId = null, userId = null;
+            try {
+              const b = init && init.body ? JSON.parse(init.body) : null;
+              if (b && typeof b === 'object') { credentialId = b.credentialId || null; userId = b.userId || null; }
+            } catch(e){ __webauthn_log.w('fetch wrapper parse body failed', e); }
+            const opts = await window.getAuthOptionsWithCache({ credentialId, userId });
+            __webauthn_log.d('fetch wrapper returning cached options', { cached: !!opts });
+            return new Response(JSON.stringify(opts), { status: 200, headers: { 'Content-Type': 'application/json' } });
+          }
+        } catch(e){ __webauthn_log.w('fetch wrapper error', e); }
+        return window.__origFetch(input, init);
+      };
+    }
+  }
+
 })();
 
-// --- Fetch wrapper: intercept direct fetch() calls to /webauthn/auth/options and return cached options ---
-(function(){
-  if (window.__webauthnFetchWrapped) return;
-  window.__webauthnFetchWrapped = true;
-  if (typeof window.fetch === 'function') {
-    window.__origFetch = window.fetch.bind(window);
-    window.fetch = async function(input, init){
-      try {
-        const url = (typeof input === 'string') ? input : (input && input.url) || '';
-        if (url && url.indexOf('/webauthn/auth/options') !== -1) {
-          // try to parse credentialId/userId from body if present
-          let credentialId = null, userId = null;
-          try {
-            const b = init && init.body ? JSON.parse(init.body) : null;
-            if (b && typeof b === 'object') { credentialId = b.credentialId || null; userId = b.userId || null; }
-          } catch(e){}
-          const opts = await window.getAuthOptionsWithCache({ credentialId, userId });
-          return new Response(JSON.stringify(opts), { status: 200, headers: { 'Content-Type': 'application/json' } });
-        }
-      } catch(e){ console.warn('[webauthn] fetch wrapper error', e); }
-      return window.__origFetch(input, init);
-    };
-  }
-})();
 document.addEventListener('DOMContentLoaded', () => {
   const providerClasses = ['mtn', 'airtel', 'glo', 'ninemobile'];
   const serviceItems = document.querySelectorAll('.short-item');
