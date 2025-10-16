@@ -139,6 +139,24 @@ document.getElementById('authBtn').addEventListener('click', async () => {
     if (!storedId) throw new Error('No credential stored');
 
     const optRes = await fetch(`${API_BASE}/webauthn/auth/options`, { method: 'POST' });
+    if (!optRes.ok) {
+  const txt = await optRes.text().catch(()=>'');
+  __sec_log.w('verifyBiometrics: auth/options returned non-ok', { status: optRes.status, txtSample: (txt||'').slice(0,300) });
+  if (optRes.status === 404 || /no authenticators found/i.test(txt || '')) {
+    // clear local flags (mirror reconcile logic)
+    localStorage.setItem(__sec_KEYS.biom, '0');
+    localStorage.setItem('biometricsEnabled', 'false');
+    localStorage.setItem(__sec_KEYS.bioLogin, '0');
+    localStorage.setItem(__sec_KEYS.bioTx, '0');
+    localStorage.setItem('biometricForLogin', 'false');
+    localStorage.setItem('biometricForTx', 'false');
+    // set UI off
+    if (__sec_parentSwitch) __sec_setChecked(__sec_parentSwitch, false);
+    if (__sec_bioOptions) { __sec_bioOptions.classList.remove('show'); __sec_bioOptions.hidden = true; }
+  }
+  throw new Error('Auth options fetch failed: ' + txt);
+}
+
     const publicKey = await optRes.json();
 
     // Convert challenge to ArrayBuffer

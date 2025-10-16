@@ -6478,76 +6478,58 @@ function __sec_setBiometrics(parentOn, animate = true) {
     __sec_log.w('setBiometrics: parent switch element missing'); 
     return; 
   }
+
+  // Update UI
   __sec_setChecked(__sec_parentSwitch, parentOn);
-  try { 
-    localStorage.setItem(__sec_KEYS.biom, parentOn ? '1' : '0'); 
-    __sec_log.d('setBiometrics: stored biom', parentOn ? '1' : '0');
-  } catch (e) { 
+
+  // Persist to both key namespaces (new secure keys + legacy keys used elsewhere)
+  try {
+    // new namespaced keys (existing)
+    localStorage.setItem(__sec_KEYS.biom, parentOn ? '1' : '0');
+    // legacy boolean flags (used by other code paths)
+    localStorage.setItem('biometricsEnabled', parentOn ? 'true' : 'false');
+    __sec_log.d('setBiometrics: stored keys', { [__sec_KEYS.biom]: parentOn ? '1' : '0', biometricsEnabled: parentOn ? 'true' : 'false' });
+  } catch (e) {
     __sec_log.e('setBiometrics: storage error', e);
   }
 
+  // Force children when parent activated
   if (parentOn) {
-    __sec_log.d('setBiometrics: parentOn true, revealing children');
-    if (animate) {
-      __sec_revealChildrenAnimated();
-    } else {
-      __sec_revealChildrenNoAnimate();
-    }
-
-    // Always force both children on when parent is activated
     if (__sec_bioLogin) {
       __sec_setChecked(__sec_bioLogin, true);
-      try { 
-        localStorage.setItem(__sec_KEYS.bioLogin, '1'); 
-        __sec_log.d('setBiometrics: stored bioLogin 1');
-      } catch (e) { 
-        __sec_log.e('setBiometrics: bioLogin storage error', e);
-      }
+      try { localStorage.setItem(__sec_KEYS.bioLogin, '1'); localStorage.setItem('biometricForLogin', 'true'); } catch(e){ __sec_log.e('setBiometrics: bioLogin storage', e); }
     }
     if (__sec_bioTx) {
       __sec_setChecked(__sec_bioTx, true);
-      try { 
-        localStorage.setItem(__sec_KEYS.bioTx, '1'); 
-        __sec_log.d('setBiometrics: stored bioTx 1');
-      } catch (e) { 
-        __sec_log.e('setBiometrics: bioTx storage error', e);
-      }
+      try { localStorage.setItem(__sec_KEYS.bioTx, '1'); localStorage.setItem('biometricForTx', 'true'); } catch(e){ __sec_log.e('setBiometrics: bioTx storage', e); }
+    }
+    if (__sec_bioOptions) { 
+      __sec_revealChildrenNoAnimate();
+      setOptionsVisible(true);
     }
     __sec_log.i('biom ON', { animate });
   } else {
-    __sec_log.d('setBiometrics: parentOn false, hiding children');
-    try {
-      localStorage.setItem(__sec_KEYS.bioLogin, '0');
-      localStorage.setItem(__sec_KEYS.bioTx, '0');
-      __sec_log.d('setBiometrics: stored bioLogin/bioTx 0');
-    } catch (e) { 
-      __sec_log.e('setBiometrics: children storage error', e);
+    // Turn children off too
+    if (__sec_bioLogin) {
+      __sec_setChecked(__sec_bioLogin, false);
+      try { localStorage.setItem(__sec_KEYS.bioLogin, '0'); localStorage.setItem('biometricForLogin', 'false'); } catch(e){ __sec_log.e('setBiometrics: bioLogin storage', e); }
     }
-    if (__sec_bioLogin) { 
-      __sec_setChecked(__sec_bioLogin, false); 
+    if (__sec_bioTx) {
+      __sec_setChecked(__sec_bioTx, false);
+      try { localStorage.setItem(__sec_KEYS.bioTx, '0'); localStorage.setItem('biometricForTx', 'false'); } catch(e){ __sec_log.e('setBiometrics: bioTx storage', e); }
     }
-    if (__sec_bioTx) { 
-      __sec_setChecked(__sec_bioTx, false); 
-    }
-    if (animate) { 
-      __sec_hideChildrenAnimated(); 
-    }
-    else {
-      if (__sec_bioOptions) {
-        __sec_log.d('setBiometrics: no animate hide');
-        __sec_bioOptions.classList.remove('show');
-        __sec_bioOptions.hidden = true;
-        const rows = Array.from(__sec_bioOptions.querySelectorAll('.setting-row'));
-        rows.forEach(r => { 
-          r.classList.remove('visible'); 
-          r.style.transitionDelay = ''; 
-        });
-      }
+    if (__sec_bioOptions) {
+      __sec_bioOptions.classList.remove('show');
+      __sec_bioOptions.hidden = true;
+      const rows = Array.from(__sec_bioOptions.querySelectorAll('.setting-row'));
+      rows.forEach(r => { r.classList.remove('visible'); r.style.transitionDelay = ''; });
     }
     __sec_log.i('biom OFF', { animate });
   }
+
   __sec_log.d('setBiometrics exit');
 }
+
 
 /* If both child switches are off, turn the parent off */
 function __sec_maybeDisableParentIfChildrenOff() {
@@ -6576,62 +6558,127 @@ function __sec_maybeDisableParentIfChildrenOff() {
   __sec_log.d('maybeDisableParentIfChildrenOff exit');
 }
 
+async function reconcileBiometricState() {
+  __sec_log.d('reconcileBiometricState entry');
+
+  // find a credentialId if present (several possible keys)
+  const cred = (
+    localStorage.getItem('credentialId') ||
+    localStorage.getItem('webauthn-cred-id') ||
+    localStorage.getItem('webauthn_cred') ||
+    localStorage.getItem('__sec_credentialId') ||
+    ''
+  );
+
+  // Quick local-only rule: if no local credential at all, treat as NOT available.
+  if (!cred) {
+    __sec_log.i('reconcile: no local credential found — clearing biometric flags');
+    try {
+      localStorage.setItem(__sec_KEYS.biom, '0');
+      localStorage.setItem('biometricsEnabled', 'false');
+      localStorage.setItem(__sec_KEYS.bioLogin, '0');
+      localStorage.setItem(__sec_KEYS.bioTx, '0');
+      localStorage.setItem('biometricForLogin', 'false');
+      localStorage.setItem('biometricForTx', 'false');
+    } catch (e) { __sec_log.e('reconcile: local clear failed', e); }
+    // Update UI to off
+    if (__sec_parentSwitch) __sec_setChecked(__sec_parentSwitch, false);
+    if (__sec_bioOptions) { __sec_bioOptions.classList.remove('show'); __sec_bioOptions.hidden = true; }
+    return;
+  }
+
+  // If we have a local credential, confirm server still recognizes it
+  try {
+    __sec_log.d('reconcile: have local cred, checking server discover endpoint', { credentialIdSample: (cred && cred.slice ? cred.slice(0,20) : cred) });
+    const apiBase = (window.__SEC_API_BASE || (typeof API_BASE !== 'undefined' ? API_BASE : ''));
+    const res = await (typeof window.__origFetch !== 'undefined' ? window.__origFetch : fetch)(apiBase + '/webauthn/auth/options/discover', {
+      method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ credentialId: cred })
+    });
+    const text = await res.text().catch(()=> '');
+    if (!res.ok) {
+      __sec_log.w('reconcile: server discover returned non-ok — clearing flags', { status: res.status, textSample: (text||'').slice(0,300) });
+      // clear
+      localStorage.setItem(__sec_KEYS.biom, '0');
+      localStorage.setItem('biometricsEnabled', 'false');
+      localStorage.setItem(__sec_KEYS.bioLogin, '0');
+      localStorage.setItem(__sec_KEYS.bioTx, '0');
+      localStorage.setItem('biometricForLogin', 'false');
+      localStorage.setItem('biometricForTx', 'false');
+      if (__sec_parentSwitch) __sec_setChecked(__sec_parentSwitch, false);
+      if (__sec_bioOptions) { __sec_bioOptions.classList.remove('show'); __sec_bioOptions.hidden = true; }
+      throw new Error(text || `HTTP ${res.status}`);
+    }
+    // success -> mark enabled
+    const opts = text ? JSON.parse(text) : {};
+    __sec_log.i('reconcile: server discover successful', { allowCount: opts.allowCredentials ? opts.allowCredentials.length : 0 });
+    localStorage.setItem(__sec_KEYS.biom, '1');
+    localStorage.setItem('biometricsEnabled', 'true');
+    // child flags default true if server confirms an authenticator
+    localStorage.setItem(__sec_KEYS.bioLogin, '1'); localStorage.setItem('biometricForLogin','true');
+    localStorage.setItem(__sec_KEYS.bioTx, '1'); localStorage.setItem('biometricForTx','true');
+    // UI reflect it
+    if (__sec_parentSwitch) __sec_setChecked(__sec_parentSwitch, true);
+    if (__sec_bioOptions) {
+      __sec_revealChildrenNoAnimate();
+      if (__sec_bioLogin) __sec_setChecked(__sec_bioLogin, true);
+      if (__sec_bioTx) __sec_setChecked(__sec_bioTx, true);
+    }
+  } catch (err) {
+    __sec_log.w('reconcileBiometricState error', err);
+    // note: we already cleared above on non-ok
+  }
+}
+
 
 /* Initialize from storage */
-function __sec_initFromStorage() {
-  __sec_log.d('initFromStorage entry');
+async function __sec_initFromStorage() {
+  __sec_log.d('initFromStorage entry (reconciled)');
   try {
+    // read both key namespaces
     const rawBiom = localStorage.getItem(__sec_KEYS.biom); // '1' | '0' | null
     const rawLogin = localStorage.getItem(__sec_KEYS.bioLogin);
     const rawTx = localStorage.getItem(__sec_KEYS.bioTx);
-    const rawBalance = localStorage.getItem(__sec_KEYS.balance); // '1' | '0' | null
 
-    const biomStored = rawBiom === '1';
-    const loginStored = rawLogin === '1';
-    const txStored = rawTx === '1';
-    const balanceStored = rawBalance === null ? true : (rawBalance === '1');
+    const legacyBiom = localStorage.getItem('biometricsEnabled');
+    const legacyLogin = localStorage.getItem('biometricForLogin');
+    const legacyTx = localStorage.getItem('biometricForTx');
 
-    __sec_log.d('initFromStorage raw values:', { rawBiom, rawLogin, rawTx, rawBalance });
-    __sec_log.d('initFromStorage parsed:', { biomStored, loginStored, txStored, balanceStored });
+    // Normalize - prefer explicit '1' or 'true' where present
+    const biomStored = (rawBiom === '1') || (legacyBiom === 'true');
+    const loginStored = (rawLogin === '1') || (legacyLogin === 'true');
+    const txStored = (rawTx === '1') || (legacyTx === 'true');
 
-    if (__sec_parentSwitch) { 
-      __sec_setChecked(__sec_parentSwitch, biomStored); 
-    }
+    __sec_log.d('initFromStorage parsed:', { rawBiom, legacyBiom, rawLogin, legacyLogin, rawTx, legacyTx });
 
+    // Apply UI per local preferred state (we will reconcile with server next)
+    if (__sec_parentSwitch) { __sec_setChecked(__sec_parentSwitch, !!biomStored); }
     if (__sec_bioOptions) {
       if (biomStored) {
-        __sec_log.d('initFromStorage: biomStored true, revealing');
         __sec_revealChildrenNoAnimate();
-        if (__sec_bioLogin) { 
-          __sec_setChecked(__sec_bioLogin, loginStored); 
-        }
-        if (__sec_bioTx) { 
-          __sec_setChecked(__sec_bioTx, txStored); 
-        }
-        __sec_maybeDisableParentIfChildrenOff();  // Add: handle inconsistent states
+        if (__sec_bioLogin) __sec_setChecked(__sec_bioLogin, !!loginStored);
+        if (__sec_bioTx) __sec_setChecked(__sec_bioTx, !!txStored);
       } else {
-        __sec_log.d('initFromStorage: biomStored false, hiding');
-        __sec_bioOptions.hidden = true;
+        if (__sec_bioLogin) __sec_setChecked(__sec_bioLogin, false);
+        if (__sec_bioTx) __sec_setChecked(__sec_bioTx, false);
         __sec_bioOptions.classList.remove('show');
-        if (__sec_bioLogin) { 
-          __sec_setChecked(__sec_bioLogin, false); 
-        }
-        if (__sec_bioTx) { 
-          __sec_setChecked(__sec_bioTx, false); 
-        }
+        __sec_bioOptions.hidden = true;
       }
     }
 
-    if (__sec_balanceSwitch) { 
-      __sec_setChecked(__sec_balanceSwitch, balanceStored); 
+    // Reconcile with server / local credential id to avoid stale mismatch
+    try {
+      await reconcileBiometricState(); // defined next — updates both key namespaces and UI
+    } catch (re) {
+      __sec_log.w('reconcileBiometricState failed (non-fatal)', re);
     }
 
-    __sec_log.d('initFromStorage complete', { rawBiom, rawLogin, rawTx, rawBalance, biomStored, loginStored, txStored, balanceStored });
+    __sec_log.d('initFromStorage complete', { biomStored, loginStored, txStored });
   } catch (err) {
     __sec_log.e('initFromStorage error', err);
   }
-  __sec_log.d('initFromStorage exit');
 }
+
 
 __sec_log.d('Adding beforeunload listener');
 window.addEventListener('beforeunload', () => {
@@ -9223,17 +9270,42 @@ function bindBiometricSettings({
   }
 
   function syncFromStorage() {
-    const enabled = readFlag('biometricsEnabled');
-    setSwitch(parent, enabled);
-    setOptionsVisible(enabled);
-    if (enabled) {
-      setSwitch(childLogin, readFlag('biometricForLogin'));
-      setSwitch(childTx, readFlag('biometricForTx'));
-    } else {
-      setSwitch(childLogin, false);
-      setSwitch(childTx, false);
-    }
+  // Merge both key namespaces: if any indicates enabled, treat as enabled
+  const secureBiom = localStorage.getItem(__sec_KEYS && __sec_KEYS.biom ? __sec_KEYS.biom : '') === '1';
+  const legacyBiom = readFlag('biometricsEnabled');
+  const enabled = secureBiom || legacyBiom;
+
+  // Ensure both namespaces reflect the merged truth
+  try {
+    localStorage.setItem(__sec_KEYS.biom, enabled ? '1' : '0');
+    localStorage.setItem('biometricsEnabled', enabled ? 'true' : 'false');
+  } catch (e) {
+    console.warn('syncFromStorage: storage write failed', e);
   }
+
+  setSwitch(parent, enabled);
+  setOptionsVisible(enabled);
+
+  if (enabled) {
+    const secureLogin = localStorage.getItem(__sec_KEYS.bioLogin) === '1';
+    const secureTx = localStorage.getItem(__sec_KEYS.bioTx) === '1';
+    const login = secureLogin || readFlag('biometricForLogin');
+    const tx = secureTx || readFlag('biometricForTx');
+    setSwitch(childLogin, login);
+    setSwitch(childTx, tx);
+    // persist merged children flags into both namespaces
+    try {
+      localStorage.setItem(__sec_KEYS.bioLogin, login ? '1' : '0');
+      localStorage.setItem(__sec_KEYS.bioTx, tx ? '1' : '0');
+      localStorage.setItem('biometricForLogin', login ? 'true' : 'false');
+      localStorage.setItem('biometricForTx', tx ? 'true' : 'false');
+    } catch(e) { __sec_log.e('syncFromStorage child persist failed', e); }
+  } else {
+    setSwitch(childLogin, false);
+    setSwitch(childTx, false);
+  }
+}
+
 
   // Parent handler: Enabler (server register/revoke, auto-sets child flags)
   async function handleParentToggle(wantOn) {
