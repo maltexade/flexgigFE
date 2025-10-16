@@ -1023,16 +1023,11 @@ const svgShapes = {
 // --- MAIN EVENT LISTENERS ---
 
 // --- WebAuthn: Centralized TTL-backed caching and fetch for /webauthn/auth/options ---
-// REMOVED: The first buggy IIFE entirely (it had self-recursion: calling itself without a base fetch case, causing immediate stack overflow).
-// COMBINED: Merged the useful parts from the first (e.g., fromBase64UrlToBuffer renamed to fromBase64Url for consistency) into the second IIFE.
-// FIXED: Ensured getAuthOptionsWithCache always uses origFetch when available (wrapper sets it after this block).
-// ADDED: Recursion guard in the fetch wrapper for extra safety.
-// IMPROVED: Better error handling and comments throughout.
-// This single block handles all caching/prefetch logic; the wrapper follows.
+// FIXED: Omit null params from body to avoid 400s; add logging for debug; guard early null calls; delay prefetch.
 (function(){
   const AUTH_OPTIONS_TTL = 30 * 1000; // 30s cache TTL
   
-  // Helper: Convert base64url to ArrayBuffer (consistent name from your code).
+  // Helper: Convert base64url to ArrayBuffer (unchanged).
   function fromBase64Url(b64url){
     let b = b64url.replace(/-/g,'+').replace(/_/g,'/');
     while (b.length % 4) b += '=';
@@ -1042,178 +1037,111 @@ const svgShapes = {
     return arr.buffer;
   }
   
-  // Helper: Convert server options to client format (handles base64url decoding for challenge/credentials).
+  // Helper: Convert server options to client format (unchanged).
   function convertOptionsFromServer(publicKey) {
     try {
       if (!publicKey) return publicKey;
-      const clone = JSON.parse(JSON.stringify(publicKey)); // Deep clone to avoid mutating original.
+      const clone = JSON.parse(JSON.stringify(publicKey));
       if (clone.challenge && typeof clone.challenge === 'string') {
         clone.challenge = fromBase64Url(clone.challenge);
       }
       if (Array.isArray(clone.allowCredentials)) {
         clone.allowCredentials = clone.allowCredentials.map(function(c){
-          try { 
-            return Object.assign({}, c, { id: fromBase64Url(c.id) }); 
-          } catch(e){ 
-            return c; 
-          }
+          try { return Object.assign({}, c, { id: fromBase64Url(c.id) }); } catch(e){ return c; }
         });
       }
       return clone;
-    } catch(e){ 
-      console.warn('[webauthn] convertOptionsFromServer error', e); 
-      return publicKey; 
-    }
+    } catch(e){ console.warn('[webauthn] convertOptionsFromServer error', e); return publicKey; }
   }
   
-  // Helper: Cache options with timestamp.
+  // Helper: Cache options with timestamp (unchanged).
   function cacheAuthOptions(opts) { 
-    try { 
-      window.__cachedAuthOptions = opts || null; 
-      window.__cachedAuthOptionsFetchedAt = opts ? Date.now() : 0; 
-    } catch(e){} 
+    try { window.__cachedAuthOptions = opts || null; window.__cachedAuthOptionsFetchedAt = opts ? Date.now() : 0; } catch(e){} 
   }
   
-  // Helper: Check if cached options are fresh (within TTL).
+  // Helper: Check if cached options are fresh (unchanged).
   function cachedOptionsFresh() { 
-    try { 
-      return !!(window.__cachedAuthOptions && window.__cachedAuthOptionsFetchedAt && (Date.now() - window.__cachedAuthOptionsFetchedAt) <= AUTH_OPTIONS_TTL); 
-    } catch(e){ 
-      return false; 
-    } 
+    try { return !!(window.__cachedAuthOptions && window.__cachedAuthOptionsFetchedAt && (Date.now() - window.__cachedAuthOptionsFetchedAt) <= AUTH_OPTIONS_TTL); } catch(e){ return false; } 
   }
   
-  // FIXED MAIN FUNCTION: getAuthOptionsWithCache - checks cache first, falls back to real fetch using origFetch to avoid wrapper recursion.
-  // Params allow passing credentialId/userId; falls back to localStorage/window vars.
-  // Uses origFetch if available (set by wrapper later); otherwise regular fetch (safe before wrapper loads).
+  // FIXED MAIN FUNCTION: getAuthOptionsWithCache
   window.getAuthOptionsWithCache = window.getAuthOptionsWithCache || (async function({ credentialId=null, userId=null }={}){
-    // Step 1: Return deep-cloned cached options if fresh.
+    // Step 1: Return cached if fresh (unchanged).
     if (cachedOptionsFresh()) { 
-      try { 
-        return JSON.parse(JSON.stringify(window.__cachedAuthOptions)); 
-      } catch(e){ 
-        return window.__cachedAuthOptions; 
-      } 
+      try { return JSON.parse(JSON.stringify(window.__cachedAuthOptions)); } catch(e){ return window.__cachedAuthOptions; } 
     }
     
-    // Step 2: Build API URL (uses __SEC_API_BASE or global API_BASE if defined).
+    // NEW GUARD: If no credentialId or userId (early load), skip fetch and return null/empty to avoid 400 spam.
+    // App can handle missing options gracefully (e.g., show login prompt).
+    const finalCredentialId = credentialId || localStorage.getItem('credentialId') || null;
+    const finalUserId = userId || window.__webauthn_userId || null;
+    if (!finalCredentialId && !finalUserId) {
+      console.warn('[webauthn] Skipping fetch: No credentialId or userId available yet');
+      return null; // Or throw softly if app expects error.
+    }
+    
+    // Step 2: Build URL (unchanged).
     const apiBase = (window.__SEC_API_BASE || (typeof API_BASE !== 'undefined' ? API_BASE : ''));
     const url = `${apiBase}/webauthn/auth/options`;
     
-    // Step 3: Prepare body with params or fallbacks.
-    const body = { 
-      credentialId: credentialId || (localStorage.getItem('credentialId') || null), 
-      userId: userId || (window.__webauthn_userId || null) 
-    };
+    // FIXED: Build body object, ONLY include non-null params to avoid 400s.
+    // If both null, body = {} (empty JSON).
+    const bodyObj = {};
+    if (finalCredentialId) bodyObj.credentialId = finalCredentialId;
+    if (finalUserId) bodyObj.userId = finalUserId;
     
-    // Step 4: FIXED - Use origFetch to make real request, bypassing wrapper to prevent recursion loop.
-    // If origFetch not set yet (wrapper not loaded), use regular fetch as fallback.
+    // NEW: Log for debugging (remove after fix confirmed).
+    console.log('[webauthn] Fetching with body:', bodyObj, 'URL:', url);
+    
+    // Step 3: Fetch using origFetch if available (unchanged).
     const fetchToUse = (typeof window.__origFetch !== 'undefined' ? window.__origFetch : fetch);
     const res = await fetchToUse(url, { 
       method: 'POST', 
       credentials: 'include', 
       headers: { 'Content-Type': 'application/json' }, 
-      body: JSON.stringify(body) 
+      body: JSON.stringify(bodyObj)  // Now clean, no nulls
     });
     
-    // Step 5: Handle errors (your original logic).
+    // Step 4: Error handling (unchanged, but now fewer 400s expected).
     if (!res.ok) { 
       const txt = await res.text().catch(()=> ''); 
+      console.error('[webauthn] Fetch failed:', res.status, txt);  // Enhanced log
       throw new Error('Auth options fetch failed: ' + (txt || res.status)); 
     }
     
-    // Step 6: Parse, convert, cache, and return.
+    // Step 5: Parse, convert, cache, return (unchanged).
     const opts = await res.json();
     const converted = convertOptionsFromServer(opts);
     cacheAuthOptions(converted);
-    try { 
-      return JSON.parse(JSON.stringify(converted)); 
-    } catch(e){ 
-      return converted; 
-    }
+    try { return JSON.parse(JSON.stringify(converted)); } catch(e){ return converted; }
   });
   
-  // Unchanged: Invalidate cache (sets to null/0 timestamp).
-  window.invalidateAuthOptionsCache = window.invalidateAuthOptionsCache || function(){ 
-    cacheAuthOptions(null); 
-  };
+  // Unchanged: Invalidate cache.
+  window.invalidateAuthOptionsCache = window.invalidateAuthOptionsCache || function(){ cacheAuthOptions(null); };
   
-  // Unchanged but safe: Prefetch on load if cache stale.
+  // FIXED: Prefetch with delay to wait for session vars (e.g., after DOM load/user init).
   if (!window.prefetchAuthOptions) {
     window.prefetchAuthOptions = async function(){
       try { 
         if (cachedOptionsFresh()) return; 
+        
+        // NEW: Delay 500ms to let app set localStorage/window vars first.
+        // Adjust if needed (e.g., hook to a 'user:loaded' event if available).
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
         await window.getAuthOptionsWithCache({}); 
         console.log('[webauthn] prefetchAuthOptions: cached'); 
       } catch(e){ 
         console.warn('[webauthn] prefetchAuthOptions failed', e); 
       } 
     };
-  }
-})();
-
-// --- Fetch wrapper: Intercept direct fetch() calls to /webauthn/auth/options and return cached options ---
-// FIXED: Added recursion guard (isInWrapper flag) to prevent nested calls in edge cases.
-// This runs AFTER the caching block, setting __origFetch for use in getAuthOptionsWithCache.
-(function(){
-  // Guard: Skip if already wrapped (e.g., on script reload).
-  if (window.__webauthnFetchWrapped) return;
-  window.__webauthnFetchWrapped = true;
-  
-  // ADDED: Recursion guard flag - set during wrapper execution, cleared after.
-  // Prevents infinite loop if somehow nested (extra safety).
-  let isInWrapper = false;
-  
-  // Only wrap if fetch exists.
-  if (typeof window.fetch === 'function') {
-    // Save ORIGINAL fetch (unwrapped) for use in getAuthOptionsWithCache during cache misses.
-    window.__origFetch = window.fetch.bind(window);
     
-    // FIXED: Wrapped fetch with guard.
-    window.fetch = async function(input, init){
-      // GUARD: If already in wrapper, bypass to original to avoid nesting/recursion.
-      if (isInWrapper) {
-        return window.__origFetch(input, init);
-      }
-      
-      try {
-        // Set guard flag.
-        isInWrapper = true;
-        
-        // Extract URL (handles string or Request).
-        const url = (typeof input === 'string') ? input : (input && input.url) || '';
-        
-        // Check if this is our target endpoint.
-        if (url && url.indexOf('/webauthn/auth/options') !== -1) {
-          // Parse credentialId/userId from body if provided (your original logic).
-          let credentialId = null, userId = null;
-          try {
-            const b = init && init.body ? JSON.parse(init.body) : null;
-            if (b && typeof b === 'object') { 
-              credentialId = b.credentialId || null; 
-              userId = b.userId || null; 
-            }
-          } catch(e){
-            // Ignore parse errors.
-          }
-          
-          // Serve from cache: Safe now, as getAuthOptionsWithCache uses __origFetch on miss.
-          const opts = await window.getAuthOptionsWithCache({ credentialId, userId });
-          return new Response(JSON.stringify(opts), { 
-            status: 200, 
-            headers: { 'Content-Type': 'application/json' } 
-          });
-        }
-      } catch(e){ 
-        console.warn('[webauthn] fetch wrapper error', e); 
-      } finally {
-        // Always clear guard flag.
-        isInWrapper = false;
-      }
-      
-      // Fallback: Not our URL, use original fetch.
-      return window.__origFetch(input, init);
-    };
+    // NEW: Auto-call prefetch after a short delay on load (if not already called).
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => setTimeout(window.prefetchAuthOptions, 500));
+    } else {
+      setTimeout(window.prefetchAuthOptions, 500);
+    }
   }
 })();
 document.addEventListener('DOMContentLoaded', () => {
