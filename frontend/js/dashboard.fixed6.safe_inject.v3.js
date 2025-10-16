@@ -508,9 +508,25 @@ async function getSession() {
       }
     }
 
-    console.log('[DEBUG] getSession: Completed (loadId=' + loadId + ')');
+        console.log('[DEBUG] getSession: Completed (loadId=' + loadId + ')');
+
+    // ---- NEW: cache webauthn userId for prefetch & direct calls ----
+    try {
+      // Normalize possible uid fields returned by session.user
+      const uid = (user && (user.uid || user.id)) || (user && user.user && (user.user.uid || user.user.id));
+      if (uid) {
+        window.__webauthn_userId = uid;
+        // trigger one conservative prefetch now that we have a uid
+        try { if (typeof window.prefetchAuthOptions === 'function') { window.prefetchAuthOptions().catch(e => console.warn('[webauthn] prefetch after session failed', e)); } } catch(e){}
+      }
+    } catch (e) {
+      console.warn('[webauthn] set __webauthn_userId failed', e);
+    }
+    // ---------------------------------------------------------------
+
     window.__sessionLoading = false;
     return { user /* DO NOT return access token for client storage */ };
+
   } catch (err) {
     console.error('[ERROR] getSession: Failed to fetch session', err);
     if (cachedUser) applySessionToDOM(cachedUser, derivedFirstName);
@@ -1141,37 +1157,60 @@ const svgShapes = {
   })();
 
   // Fetch wrapper: intercept direct fetch() calls to /webauthn/auth/options and return cached options
-  (function installFetchWrapper(){
-    if (window.__webauthnFetchWrapped) return;
-    window.__webauthnFetchWrapped = true;
-    if (typeof window.fetch === 'function') {
-      window.__origFetch = window.fetch.bind(window);
-      window.fetch = async function(input, init){
-        try {
-          const url = (typeof input === 'string') ? input : (input && input.url) || '';
-          if (url && url.indexOf('/webauthn/auth/options') !== -1) {
-            // try to parse credentialId/userId from body if present
-            let credentialId = null, userId = null;
+(function installFetchWrapper(){
+  if (window.__webauthnFetchWrapped) return;
+  window.__webauthnFetchWrapped = true;
+
+  if (typeof window.fetch === 'function') {
+    // preserve original fetch
+    window.__origFetch = window.fetch.bind(window);
+
+    window.fetch = async function(input, init){
+      try {
+        const url = (typeof input === 'string') ? input : (input && input.url) || '';
+        if (url && url.indexOf('/webauthn/auth/options') !== -1) {
+          // try to parse credentialId/userId from body if present
+          let credentialId = null, userId = null;
+          try {
+            const b = init && init.body ? JSON.parse(init.body) : null;
+            if (b && typeof b === 'object') {
+              credentialId = b.credentialId || null;
+              userId = b.userId || null;
+            }
+          } catch(e){
+            // ignore parse errors; we'll handle missing data below
+          }
+
+          // Use the active getAuthOptionsWithCache (which will be the central impl once installed).
+          if (typeof window.getAuthOptionsWithCache === 'function') {
             try {
-              const b = init && init.body ? JSON.parse(init.body) : null;
-              if (b && typeof b === 'object') { credentialId = b.credentialId || null; userId = b.userId || null; }
-            } catch(e){}
-            // Use the active getAuthOptionsWithCache (which will be the central impl once installed).
-            if (typeof window.getAuthOptionsWithCache === 'function') {
+              const opts = await window.getAuthOptionsWithCache({ credentialId, userId });
+              return new Response(JSON.stringify(opts), { status: 200, headers: { 'Content-Type': 'application/json' } });
+            } catch (e) {
+              // Inspect error message; if it's a missing-user/credential situation, short-circuit locally.
               try {
-                const opts = await window.getAuthOptionsWithCache({ credentialId, userId });
-                return new Response(JSON.stringify(opts), { status: 200, headers: { 'Content-Type': 'application/json' } });
-              } catch (e) {
-                // If fetching cached options failed due to missing data, fall through to real network fetch
-                console.warn('[webauthn] fetch wrapper getAuthOptionsWithCache error', e);
-              }
+                const msg = String(e && (e.message || e)).toLowerCase();
+                if (msg.indexOf('missing user') !== -1 || msg.indexOf('missing userid') !== -1 || msg.indexOf('missing credential') !== -1) {
+                  console.warn('[webauthn] fetch wrapper short-circuit (missing user/cred)', msg);
+                  return new Response(JSON.stringify({ error: 'Missing userId' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+                }
+              } catch(inner) { /* ignore */ }
+
+              // Not a simple missing-user error — log and fall through to network fetch
+              console.warn('[webauthn] fetch wrapper getAuthOptionsWithCache error (falling through to network)', e);
             }
           }
-        } catch(e){ console.warn('[webauthn] fetch wrapper error', e); }
-        return window.__origFetch(input, init);
-      };
-    }
-  })();
+        }
+      } catch(e){
+        console.warn('[webauthn] fetch wrapper error', e);
+      }
+
+      // Default: forward to original fetch
+      return window.__origFetch(input, init);
+    };
+  }
+})();
+
 
 })();
 
