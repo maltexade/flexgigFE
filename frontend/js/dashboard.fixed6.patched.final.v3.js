@@ -526,6 +526,34 @@ function observeForElements() {
   }
 }
 
+async function handleBioToggle(e) {
+  e.preventDefault();
+  const mainSwitch = e.target;
+  const currentlyEnabled = mainSwitch.getAttribute('aria-checked') === 'true';
+  
+  if (currentlyEnabled) {
+    // Disable: Revoke credential, update DB/local
+    await disableBiometrics();  // Your disable func (clear local, call revoke endpoint)
+    mainSwitch.setAttribute('aria-checked', 'false');
+    mainSwitch.classList.remove('active');
+    mainSwitch.classList.add('inactive');
+    const subgroup = document.getElementById('biometricsOptions');
+    if (subgroup) subgroup.hidden = true;
+    notify('Biometrics disabled', 'info');
+  } else {
+    // Enable: Register if no credential, update
+    const { success } = await registerBiometrics();  // Your register func
+    if (success) {
+      mainSwitch.setAttribute('aria-checked', 'true');
+      mainSwitch.classList.add('active');
+      mainSwitch.classList.remove('inactive');
+      const subgroup = document.getElementById('biometricsOptions');
+      if (subgroup) subgroup.hidden = false;
+      notify('Biometrics enabled', 'success');
+    }
+  }
+}
+
 // After getSession succeeds
 // After getSession succeeds (now cache-first)
 async function onDashboardLoad() {
