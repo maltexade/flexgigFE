@@ -1117,6 +1117,7 @@ publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){
   }
 });
 
+
     }
 
     return publicKey;
@@ -10290,11 +10291,13 @@ async function showReauthModal(context = 'reauth') {
       return;
     }
     cacheDomRefs();
-    if (!promptModal || !yesBtn) {
-      console.log('No promptModal or yesBtn, showing reauth');
-      await showReauthModal();
-      return;
-    }
+      if (!promptModal || !yesBtn) {
+        console.log('No promptModal or yesBtn, opening PIN reauth modal (inactivity)');
+        // Use initReauthModal to force PIN view (do not auto-invoke biometrics)
+        await initReauthModal({ show: true, context: 'reauth' });
+        return;
+      }
+
     if (!promptModal.classList.contains('hidden')) {
       console.log('Prompt already shown');
       return;
@@ -10338,7 +10341,7 @@ async function showReauthModal(context = 'reauth') {
     document.addEventListener('keydown', escHandler, { once: true });
 
     if (PROMPT_AUTO_CLOSE) {
-      promptTimeout = setTimeout(async () => {
+            promptTimeout = setTimeout(async () => {
         console.log('Prompt auto-close timeout');
         if (!promptModal.classList.contains('hidden')) {
           promptModal.classList.add('hidden');
@@ -10346,9 +10349,11 @@ async function showReauthModal(context = 'reauth') {
             yesBtn.removeEventListener('click', yesHandler);
           } catch (e) {}
           document.removeEventListener('keydown', escHandler);
-          await showReauthModal();
+          // Open PIN modal on inactivity auto-close (prevent immediate biometric)
+          await initReauthModal({ show: true, context: 'reauth' });
         }
       }, PROMPT_TIMEOUT);
+
     }
   }
 
