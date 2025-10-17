@@ -7459,6 +7459,10 @@ async function startAuthentication(userId) {
   __sec_log.d('startAuthentication exit');
 }
 
+// expose for other modules that call startAuthentication()
+window.startAuthentication = window.startAuthentication || startAuthentication;
+
+
 /* ---- WebAuthn helper calls to server (list/revoke) ---- */
 async function __sec_listAuthenticators(userId) {
   __sec_log.d('listAuthenticators entry', { userId });
@@ -7831,6 +7835,7 @@ window.__secModalController = {
   })
 };
 })(supabaseClient);
+
 
 
 /* ---------------------------
