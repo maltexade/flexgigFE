@@ -9870,77 +9870,94 @@ async function showReauthModal(context = 'reauth') {
 
 
   async function showInactivityPrompt() {
-    console.log('showInactivityPrompt called');
-    if (reauthModalOpen) {
-      console.log('Inactivity prompt skipped: reauth modal active');
-      return;
-    }
-    if (!(await shouldReauth())) {
-      console.log('No reauth for prompt');
-      return;
-    }
-    cacheDomRefs();
-    if (!promptModal || !yesBtn) {
-      console.log('No promptModal or yesBtn, showing reauth');
-      await showReauthModal();
-      return;
-    }
-    if (!promptModal.classList.contains('hidden')) {
-      console.log('Prompt already shown');
-      return;
-    }
+  console.log('showInactivityPrompt called');
 
-    promptModal.classList.remove('hidden');
-    promptModal.setAttribute('aria-modal', 'true');
-    promptModal.setAttribute('role', 'dialog');
-    yesBtn.focus();
-    trapFocus(promptModal); // Focus trap
-    console.log('Prompt shown');
+  // 🔹 1. Skip prompt if user already in reauth
+  if (reauthModalOpen) {
+    console.log('Inactivity prompt skipped: reauth modal active');
+    return;
+  }
 
-    let promptTimeout = null;
-    const yesHandler = () => {
-      console.log('Yes handler called');
+  // 🔹 2. Check if user has PIN or biometrics enabled at all
+  const hasPin = localStorage.getItem('hasPin') === 'true';
+  const biometricsEnabled = localStorage.getItem('biometricsEnabled') === 'true';
+  if (!hasPin && !biometricsEnabled) {
+    console.log('Inactivity prompt skipped: no PIN or biometrics set');
+    return;
+  }
+
+  // 🔹 3. Ask shouldReauth() — only proceed if it returns true
+  const reauthCheck = await shouldReauth();
+  if (!reauthCheck || !reauthCheck.needsReauth) {
+    console.log('Inactivity prompt skipped: shouldReauth() returned false');
+    return;
+  }
+
+  // 🔹 4. Proceed with normal prompt logic
+  cacheDomRefs();
+  if (!promptModal || !yesBtn) {
+    console.log('No promptModal or yesBtn, showing reauth directly');
+    await showReauthModal();
+    return;
+  }
+  if (!promptModal.classList.contains('hidden')) {
+    console.log('Prompt already shown');
+    return;
+  }
+
+  promptModal.classList.remove('hidden');
+  promptModal.setAttribute('aria-modal', 'true');
+  promptModal.setAttribute('role', 'dialog');
+  yesBtn.focus();
+  trapFocus(promptModal);
+  console.log('Prompt shown');
+
+  let promptTimeout = null;
+
+  const yesHandler = () => {
+    console.log('Yes handler called');
+    try {
+      promptModal.classList.add('hidden');
+      if (promptTimeout) clearTimeout(promptTimeout);
       try {
+        yesBtn.removeEventListener('click', yesHandler);
+      } catch (e) {}
+      resetIdleTimer();
+    } catch (e) {
+      console.error('Error in yesHandler:', e);
+    }
+  };
+
+  try {
+    yesBtn.addEventListener('click', yesHandler, { once: true });
+  } catch (e) {
+    console.error('Error adding yes click:', e);
+  }
+
+  // Escape key closes prompt
+  const escHandler = (ev) => {
+    if (ev.key === 'Escape') {
+      console.log('Escape pressed in prompt');
+      yesHandler();
+    }
+  };
+  document.addEventListener('keydown', escHandler, { once: true });
+
+  // Auto-close timer → then open reauth modal
+  if (PROMPT_AUTO_CLOSE) {
+    promptTimeout = setTimeout(async () => {
+      console.log('Prompt auto-close timeout');
+      if (!promptModal.classList.contains('hidden')) {
         promptModal.classList.add('hidden');
-        if (promptTimeout) clearTimeout(promptTimeout);
         try {
           yesBtn.removeEventListener('click', yesHandler);
         } catch (e) {}
-        resetIdleTimer();
-      } catch (e) {
-        console.error('Error in yesHandler:', e);
+        document.removeEventListener('keydown', escHandler);
+        await showReauthModal();
       }
-    };
-
-    try {
-      yesBtn.addEventListener('click', yesHandler, { once: true });
-    } catch (e) {
-      console.error('Error adding yes click:', e);
-    }
-
-    // Escape key closes prompt (UX)
-    const escHandler = (ev) => {
-      if (ev.key === 'Escape') {
-        console.log('Escape pressed in prompt');
-        yesHandler();
-      }
-    };
-    document.addEventListener('keydown', escHandler, { once: true });
-
-    if (PROMPT_AUTO_CLOSE) {
-      promptTimeout = setTimeout(async () => {
-        console.log('Prompt auto-close timeout');
-        if (!promptModal.classList.contains('hidden')) {
-          promptModal.classList.add('hidden');
-          try {
-            yesBtn.removeEventListener('click', yesHandler);
-          } catch (e) {}
-          document.removeEventListener('keydown', escHandler);
-          await showReauthModal();
-        }
-      }, PROMPT_TIMEOUT);
-    }
+    }, PROMPT_TIMEOUT);
   }
+}
 
   async function forceInactivityCheck() {
     console.log('forceInactivityCheck called');

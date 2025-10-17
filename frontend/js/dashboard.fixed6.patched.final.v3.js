@@ -674,6 +674,12 @@ window.addEventListener('offline', () => showBanner('You are offline. Working wi
     }
   }
 
+  // Post-login re-sync
+if (localStorage.getItem('justLoggedIn') === 'true') {
+  localStorage.removeItem('justLoggedIn');
+  setupInactivity();
+}
+
   // Version check (fetches manifest to detect deploy)
   async function checkForUpdates() {
     try {
@@ -9466,70 +9472,119 @@ function bindBiometricSettings({
 
 
   // Parent handler: Enabler (server register/revoke, auto-sets child flags)
-  async function handleParentToggle(wantOn) {
-    if (parent.__bioProcessing) return;
-    parent.__bioProcessing = true;
+async function handleParentToggle(wantOn) {
+  if (parent.__bioProcessing) return;
+  parent.__bioProcessing = true;
+  try {
     setSwitch(parent, wantOn);
     parent.disabled = true;
 
-    try {
-      await withLoader(async () => {
-        if (wantOn) {
-          const hasPin = localStorage.getItem('hasPin') === 'true';
-          if (!hasPin) {
-            notify('Please set a PIN first before enabling biometrics.', 'info');
-            setSwitch(parent, false); // Revert toggle
-            parent.__bioProcessing = false;
-            parent.disabled = false;
-            return; // Abort
+    await withLoader(async () => {
+      if (wantOn) {
+        // 1) PIN must exist
+        const hasPin = localStorage.getItem('hasPin') === 'true';
+        if (!hasPin) {
+          notify && notify('Please set a PIN first before enabling biometrics.', 'info');
+          setSwitch(parent, false);
+          return;
+        }
+
+        // 2) Call server registration flow (await it)
+        let res;
+        try {
+          res = await registerBiometrics(); // ensure this returns { success, credentialId?, cancelled?, error? }
+        } catch (err) {
+          console.error('registerBiometrics threw', err);
+          writeFlag && writeFlag('biometricsEnabled', false);
+          setSwitch(parent, false);
+          setOptionsVisible && setOptionsVisible(false);
+          safeCall(notify, 'Biometric setup failed (network/server error)', 'error');
+          return;
+        }
+
+        // 3) Handle server response
+        if (res && res.success) {
+          // Write canonical flags first (atomic-ish)
+          writeFlag && writeFlag('biometricsEnabled', true);
+          writeFlag && writeFlag('biometricForLogin', true);
+          writeFlag && writeFlag('biometricForTx', true);
+
+          // If server returned credentialId, store it BEFORE prefetch
+          if (res.credentialId) {
+            try { localStorage.setItem('credentialId', String(res.credentialId)); } catch (e) { console.warn('storing credentialId failed', e); }
           }
-          const res = await registerBiometrics();  // Server call only here
-          if (res && res.success) {
-            writeFlag('biometricsEnabled', true);
-            writeFlag('biometricForLogin', true);  // Auto-enable children flags
-            prefetchAuthOptions();
-            writeFlag('biometricForTx', true);
-            if (res.credentialId) {
-              localStorage.setItem('credentialId', res.credentialId);
-            }
-            setSwitch(childLogin, true);
-            setSwitch(childTx, true);
-            setOptionsVisible(true);
-            safeCall(notify, 'Biometrics enabled', 'success');
-            prefetchAuthOptions();
-          } else {
-            writeFlag('biometricsEnabled', false);
-            setSwitch(parent, false);
-            setOptionsVisible(false);
-            safeCall(notify, res?.cancelled ? 'Setup cancelled' : 'Setup failed', 'info');
-          }
+
+          // Prefetch auth options now that we have credentialId & flags set
+          try { window.prefetchAuthOptions && window.prefetchAuthOptions(); } catch (e) { console.warn('prefetchAuthOptions failed', e); }
+
+          // Update UI children
+          setSwitch(childLogin, true);
+          setSwitch(childTx, true);
+          setOptionsVisible && setOptionsVisible(true);
+
+          safeCall(notify, 'Biometrics enabled', 'success');
         } else {
-          const res = disableBiometrics();  // Server revoke only here
-          writeFlag('biometricsEnabled', false);
-          writeFlag('biometricForLogin', false);  // Auto-disable children flags
-          invalidateAuthOptionsCache();
-          writeFlag('biometricForTx', false);
-          console.log('[DEBUG] About to remove credentialId (caller: disableBiometrics or toggle) at', new Date().toISOString());
-          localStorage.removeItem('credentialId');
+          // registration failed or cancelled
+          writeFlag && writeFlag('biometricsEnabled', false);
+          writeFlag && writeFlag('biometricForLogin', false);
+          writeFlag && writeFlag('biometricForTx', false);
+
+          // revert UI
+          setSwitch(parent, false);
           setSwitch(childLogin, false);
           setSwitch(childTx, false);
-          setOptionsVisible(false);
-          safeCall(notify, 'Biometrics disabled', 'info');
-          invalidateAuthOptionsCache();
+          setOptionsVisible && setOptionsVisible(false);
+
+          const msg = res?.cancelled ? 'Biometric setup cancelled' : (res?.error || 'Biometric setup failed');
+          safeCall(notify, msg, 'info');
         }
-      });
-    } catch (err) {
-      console.error('Parent toggle error:', err);
-      writeFlag('biometricsEnabled', false);
-      setSwitch(parent, false);
-      setOptionsVisible(false);
-      safeCall(notify, `Toggle failed: ${err.message || err}`, 'error');
-    } finally {
-      parent.__bioProcessing = false;
-      parent.disabled = false;
-      syncFromStorage();  // Refresh UI
-    }
+      } else {
+        // wantOn === false -> disabling
+        try {
+          // ensure server revoke is awaited
+          const res = await disableBiometrics();
+          // Regardless of server result, clear local state to avoid stale UI
+          writeFlag && writeFlag('biometricsEnabled', false);
+          writeFlag && writeFlag('biometricForLogin', false);
+          writeFlag && writeFlag('biometricForTx', false);
+
+          // remove local credentialId and cached options
+          try { localStorage.removeItem('credentialId'); } catch (e) { console.warn('remove credentialId failed', e); }
+          try { invalidateAuthOptionsCache && invalidateAuthOptionsCache(); } catch(e){}
+
+          setSwitch(childLogin, false);
+          setSwitch(childTx, false);
+          setOptionsVisible && setOptionsVisible(false);
+
+          safeCall(notify, 'Biometrics disabled', 'info');
+        } catch (err) {
+          console.error('disableBiometrics error', err);
+          // best-effort local cleanup
+          writeFlag && writeFlag('biometricsEnabled', false);
+          writeFlag && writeFlag('biometricForLogin', false);
+          writeFlag && writeFlag('biometricForTx', false);
+          try { localStorage.removeItem('credentialId'); } catch(e){}
+          try { invalidateAuthOptionsCache && invalidateAuthOptionsCache(); } catch(e){}
+          setSwitch(parent, false);
+          setOptionsVisible && setOptionsVisible(false);
+          safeCall(notify, `Failed to disable biometrics: ${err?.message || err}`, 'error');
+        }
+      }
+    }); // end withLoader
+  } catch (err) {
+    console.error('Parent toggle error (outer):', err);
+    writeFlag && writeFlag('biometricsEnabled', false);
+    setSwitch(parent, false);
+    setOptionsVisible && setOptionsVisible(false);
+    safeCall(notify, `Toggle failed: ${err?.message || err}`, 'error');
+  } finally {
+    parent.__bioProcessing = false;
+    parent.disabled = false;
+    // Refresh UI from storage so other parts reflect canonical state
+    try { syncFromStorage && syncFromStorage(); } catch (e) { console.warn('syncFromStorage failed', e); }
   }
+}
+
 
   // 🔹 FIXED Child handler: Pure client-side flag toggle (NO server, NO verify, NO prompt)
   function bindChild(btn, key, label) {
