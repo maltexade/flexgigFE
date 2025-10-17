@@ -1287,18 +1287,45 @@ publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){
       window.fetch = async function(input, init){
         try {
           const url = (typeof input === 'string') ? input : (input && input.url) || '';
-          if (url && url.indexOf('/webauthn/auth/options') !== -1) {
-            __webauthn_log.d('fetch wrapper intercept', { url, initBody: init && init.body ? init.body.toString().slice(0,400) : null });
-            // try to parse credentialId/userId from body if present
-            let credentialId = null, userId = null;
-            try {
-              const b = init && init.body ? JSON.parse(init.body) : null;
-              if (b && typeof b === 'object') { credentialId = b.credentialId || null; userId = b.userId || null; }
-            } catch(e){ __webauthn_log.w('fetch wrapper parse body failed', e); }
-            const opts = await window.getAuthOptionsWithCache({ credentialId, userId });
-            __webauthn_log.d('fetch wrapper returning cached options', { cached: !!opts });
-            return new Response(JSON.stringify(opts), { status: 200, headers: { 'Content-Type': 'application/json' } });
-          }
+          // Replace wrapper block with this (keeps same logging + safe header handling)
+if (url && url.indexOf('/webauthn/auth/options') !== -1) {
+  __webauthn_log.d('fetch wrapper intercept', { url, initBody: init && init.body ? (typeof init.body === 'string' ? init.body.slice(0,400) : '[non-string body]') : null });
+
+  // Helper: robust header check (Headers instance / object / array)
+  const headerHasBypass = (h) => {
+    if (!h) return false;
+    try {
+      if (typeof h.get === 'function') {
+        return !!(h.get('X-Bypass-AuthCache') || h.get('x-bypass-authcache'));
+      }
+      if (Array.isArray(h)) {
+        for (const pair of h) {
+          if (Array.isArray(pair) && String(pair[0]).toLowerCase() === 'x-bypass-authcache') return true;
+        }
+      } else if (typeof h === 'object') {
+        for (const k of Object.keys(h)) if (k.toLowerCase() === 'x-bypass-authcache') return true;
+      }
+    } catch(e){ /* ignore */ }
+    return false;
+  };
+
+  // if caller explicitly asks to bypass the cached options -> do a real network call
+  if (init && headerHasBypass(init.headers)) {
+    __webauthn_log.i('fetch wrapper bypass header present - calling network directly');
+    return window.__origFetch(input, init);
+  }
+
+  // otherwise, parse body for credentialId/userId and return cached (fast) options
+  let credentialId = null, userId = null;
+  try {
+    const b = init && init.body ? JSON.parse(init.body) : null;
+    if (b && typeof b === 'object') { credentialId = b.credentialId || null; userId = b.userId || null; }
+  } catch(e){ __webauthn_log.w('fetch wrapper parse body failed', e); }
+  const opts = await window.getAuthOptionsWithCache({ credentialId, userId });
+  __webauthn_log.d('fetch wrapper returning cached options', { cached: !!opts });
+  return new Response(JSON.stringify(opts), { status: 200, headers: { 'Content-Type': 'application/json' } });
+}
+
         } catch(e){ __webauthn_log.w('fetch wrapper error', e); }
         return window.__origFetch(input, init);
       };
@@ -7728,58 +7755,55 @@ function __sec_wireEvents() {
           __sec_log.d('__sec_parentHandler: Proceeding with uid', uid);
 
           if (uiOn) {
-            __sec_log.i('Parent toggle ON requested — checking existing authenticators for user', uid);
-            const auths = await __sec_listAuthenticators(uid);
-            __sec_log.d('__sec_parentHandler: Authenticators', auths);
-            if (Array.isArray(auths) && auths.length > 0) {
-              __sec_log.i('Existing authenticators found — showing children without registering new one');
-              __sec_setBiometrics(true, true);
-              __sec_setBusy(__sec_parentSwitch, false);
-              return;
-            }
+  __sec_log.i('Parent toggle ON requested — will revoke existing authenticators (best-effort) then register new');
 
-            try {
-              __sec_log.i('No authenticators found — starting registration flow');
-              const regResult = await startRegistration(uid, user.email || user.username || uid, user.fullName || user.email || uid);
-              __sec_log.d('__sec_parentHandler: Registration result', regResult);
-              __sec_setBiometrics(true, true);
-              __sec_log.i('Registration successful');
-            } catch (err) {
-              __sec_log.e('Registration failed', { err, uid });
-              __sec_setChecked(__sec_parentSwitch, false);
-              __sec_setBiometrics(false, false);
-              alert('Biometric registration failed: ' + (err.message || 'unknown error'));
-            } finally {
-              __sec_setBusy(__sec_parentSwitch, false);
-            }
-          } else {
-            try {
-              __sec_log.i('Parent toggle OFF requested — revoking authenticators for user', uid);
-              const auths = await __sec_listAuthenticators(uid);
-              __sec_log.d('__sec_parentHandler: Authenticators to revoke', auths);
-              if (Array.isArray(auths) && auths.length > 0) {
-                for (const a of auths) {
-                  const credential_id = a.credential_id || a.credentialID || a.credentialId;
-                  __sec_log.d('__sec_parentHandler: Attempting revoke for', credential_id);
-                  if (!credential_id) {
-                    __sec_log.w('__sec_parentHandler: Skipping invalid credential_id', a);
-                    continue;
-                  }
-                  const ok = await __sec_revokeAuthenticator(uid, credential_id);
-                  __sec_log.d('revoke result', credential_id, ok);
-                }
-              } else {
-                __sec_log.d('No authenticators to revoke for user', uid);
-              }
-              __sec_setBiometrics(false, true);
-            } catch (err) {
-              __sec_log.e('Error revoking authenticators', { err, uid });
-              __sec_setBiometrics(false, true);
-              alert('Warning: failed to revoke authenticator(s) on server. Check console.');
-            } finally {
-              __sec_setBusy(__sec_parentSwitch, false);
-            }
-          }
+  // Try to revoke all existing authenticators for this user (best-effort)
+  try {
+    const auths = await __sec_listAuthenticators(uid);
+    __sec_log.d('__sec_parentHandler: Authenticators found before ON', auths);
+
+    if (Array.isArray(auths) && auths.length > 0) {
+      for (const a of auths) {
+        const credential_id = a.credential_id || a.credentialID || a.credentialId;
+        if (!credential_id) {
+          __sec_log.w('__sec_parentHandler: skipping invalid credential id', a);
+          continue;
+        }
+        try {
+          await __sec_revokeAuthenticator(uid, credential_id);
+          __sec_log.i('__sec_parentHandler: revoked', credential_id);
+        } catch(revokeErr) {
+          __sec_log.w('__sec_parentHandler: revoke failed for', credential_id, revokeErr);
+        }
+      }
+    } else {
+      // still call revoke endpoint (server may have stale entries) — pass null credential id to request full reset
+      try {
+        await __sec_revokeAuthenticator(uid, null);
+        __sec_log.i('__sec_parentHandler: called revoke with null to ensure server reset');
+      } catch(e){ /* ignore errors */ }
+    }
+  } catch (err) {
+    __sec_log.w('__sec_parentHandler: failed listing/revoking pre-existing authenticators (non-fatal)', err);
+  }
+
+  // Now proceed to registration flow (always attempt to register fresh)
+  try {
+    __sec_log.i('Starting fresh registration flow after revoke');
+    const regResult = await startRegistration(uid, user.email || user.username || uid, user.fullName || user.email || uid);
+    __sec_log.d('__sec_parentHandler: Registration result', regResult);
+    __sec_setBiometrics(true, true);
+    __sec_log.i('Registration successful (parent ON)');
+  } catch (err) {
+    __sec_log.e('Registration failed after revoke', { err, uid });
+    __sec_setChecked(__sec_parentSwitch, false);
+    __sec_setBiometrics(false, false);
+    alert('Biometric registration failed: ' + (err.message || 'unknown error'));
+  } finally {
+    __sec_setBusy(__sec_parentSwitch, false);
+  }
+}
+
           __sec_log.d('__sec_parentHandler: Exit');
         });
       };
@@ -8747,9 +8771,13 @@ if (!opts) {
             var optRes = await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/options', {
               method: 'POST',
               credentials: 'include',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ credentialId: storedId, userId: (window.__webauthn_userId || null) })
+              headers: { 
+                'Content-Type': 'application/json',
+                'X-Bypass-AuthCache': '1'   // FORCE fresh server options when verifying
+              },
+              body: JSON.stringify({ userId: userId, credentialId: storedId })
             });
+
             if (!optRes.ok) {
               const txt = await optRes.text().catch(()=>'');
               __sec_log && __sec_log.w && __sec_log.w('verifyBiometrics: auth/options returned non-ok', { status: optRes.status, txtSample: (txt||'').slice(0,300) });
@@ -10072,9 +10100,13 @@ async function verifyBiometrics(uid, context) {
         var optRes = await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/options', {
           method: 'POST',
           credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'X-Bypass-AuthCache': '1'   // FORCE fresh server options when verifying
+          },
           body: JSON.stringify({ userId: userId, credentialId: storedId })
         });
+
         if (!optRes.ok) {
           var txt = await optRes.text();
           throw new Error('Auth options fetch failed: ' + txt);
@@ -10356,6 +10388,7 @@ async function showReauthModal(context = 'reauth') {
 
     }
   }
+
 
   async function forceInactivityCheck() {
     console.log('forceInactivityCheck called');
