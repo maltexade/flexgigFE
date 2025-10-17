@@ -10011,7 +10011,7 @@ if (Array.isArray(publicKey.allowCredentials)) {
 async function verifyBiometrics(uid, context) {
   if (context === undefined) context = 'reauth';
   console.log('%c[verifyBiometrics] CALLED (cached-optimize)', 'color:#0ff;font-weight:bold');
-  return withLoader(async function(){
+
     try {
       var userId = uid;
       if (!userId) {
@@ -10028,48 +10028,79 @@ async function verifyBiometrics(uid, context) {
 
       // Helper: normalize various shapes -> Uint8Array or null
       function normalizeToUint8(val) {
-        try {
-          if (val == null) return null;
-          // already typed array
-          if (ArrayBuffer.isView(val)) return val;
-          // ArrayBuffer -> view
-          if (val instanceof ArrayBuffer) return new Uint8Array(val);
-          // Node Buffer-like { type: 'Buffer', data: [...] }
-          if (typeof val === 'object' && val !== null && Array.isArray(val.data)) {
-            try { return new Uint8Array(val.data); } catch (e) { return null; }
-          }
-          // string: base64url
-          if (typeof val === 'string') {
-            // prefer global helper if available
-            if (typeof window.fromBase64UrlAsUint8 === 'function') {
-              try { return window.fromBase64UrlAsUint8(val); } catch (e) { /* fallback below */ }
-            }
-            if (typeof window.fromBase64Url === 'function') {
-              try {
-                const ab = window.fromBase64Url(val);
-                if (ab) return new Uint8Array(ab);
-              } catch (e) { /* fallback below */ }
-            }
-            // fallback local decode
-            try {
-              let b64 = val.replace(/-/g,'+').replace(/_/g,'/');
-              while (b64.length % 4) b64 += '=';
-              const bin = atob(b64);
-              const arr = new Uint8Array(bin.length);
-              for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-              return arr;
-            } catch (e) {
-              console.warn('[webauthn] normalizeToUint8: base64url decode failed', e);
-              return null;
-            }
-          }
-          // unknown shape
-          return null;
-        } catch (err) {
-          console.warn('[webauthn] normalizeToUint8 error', err);
-          return null;
+  try {
+    if (val == null) return null;
+
+    // already typed array
+    if (ArrayBuffer.isView(val)) return val;
+
+    // ArrayBuffer -> view
+    if (val instanceof ArrayBuffer) return new Uint8Array(val);
+
+    // Node Buffer-like { type: 'Buffer', data: [...] }
+    if (typeof val === 'object' && val !== null && Array.isArray(val.data)) {
+      try { return new Uint8Array(val.data); } catch (e) { return null; }
+    }
+
+    // Array-like plain array (e.g., [12,34,56])
+    if (Array.isArray(val)) {
+      try { return new Uint8Array(val); } catch (e) { return null; }
+    }
+
+    // Array-like object with numeric keys: {0:...,1:..., ...}
+    if (typeof val === 'object' && val !== null) {
+      // collect numeric keys
+      const keys = Object.keys(val);
+      const numericKeys = keys.filter(k => /^\d+$/.test(k)).map(Number);
+      if (numericKeys.length > 0) {
+        const maxIndex = Math.max.apply(null, numericKeys);
+        const out = new Uint8Array(maxIndex + 1);
+        for (let i = 0; i <= maxIndex; i++) {
+          // if value missing, set 0 (or you could choose to bail)
+          const v = val[i];
+          out[i] = (typeof v === 'number') ? v & 0xFF : 0;
         }
+        return out;
       }
+    }
+
+    // string: base64url
+    if (typeof val === 'string') {
+      // prefer global helper if available
+      if (typeof window.fromBase64UrlAsUint8 === 'function') {
+        try {
+          const v = window.fromBase64UrlAsUint8(val);
+          if (v) return v;
+        } catch (e) { /* fallback */ }
+      }
+      if (typeof window.fromBase64Url === 'function') {
+        try {
+          const ab = window.fromBase64Url(val);
+          if (ab) return new Uint8Array(ab);
+        } catch (e) { /* fallback */ }
+      }
+      // fallback local decode
+      try {
+        let b64 = val.replace(/-/g,'+').replace(/_/g,'/');
+        while (b64.length % 4) b64 += '=';
+        const bin = atob(b64);
+        const arr = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+        return arr;
+      } catch (e) {
+        console.warn('[webauthn] normalizeToUint8: base64url decode failed', e);
+        return null;
+      }
+    }
+
+    // unknown shape
+    return null;
+  } catch (err) {
+    console.warn('[webauthn] normalizeToUint8 error', err);
+    return null;
+  }
+}
+
 
       // If server returned cached options, try to normalize them using global helper if present
       if (publicKey && typeof window.convertOptionsFromServer === 'function') {
@@ -10252,7 +10283,6 @@ async function verifyBiometrics(uid, context) {
       safeCall(notify, 'Biometric auth error: ' + (err && err.message ? err.message : err), 'error');
       return { success: false, error: (err && err.message) ? err.message : String(err) };
     }
-  });
 }
 
 
