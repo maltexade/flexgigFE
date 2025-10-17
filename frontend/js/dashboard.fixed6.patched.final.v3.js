@@ -749,84 +749,122 @@ async function onDashboardLoad() {
 
 // 🔹 Biometric UI Restoration (runs on load to persist state across reloads)
 // 🔹 Biometric UI Restoration (runs on load to persist state across reloads)
-async function restoreBiometricUI(retries = 3) {
-  try {
-    const biometricsEnabled = localStorage.getItem('biometricsEnabled') === 'true';
-    const credentialId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
-    const hasPin = localStorage.getItem('hasPin') === 'true';  // Optional: For fallback UX
+// 🔹 Biometric UI Restoration (targets SETTINGS toggle: #biometricsSwitch + subs)
+async function restoreBiometricUI() {
+  const biometricsEnabled = localStorage.getItem('biometricsEnabled') === 'true';
+  const credentialId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
+  const hasPin = localStorage.getItem('hasPin') === 'true';
+  const bioForLogin = localStorage.getItem('biometricForLogin') === 'true';
+  const bioForTx = localStorage.getItem('biometricForTx') === 'true';
 
-    // 🔹 DEBUG: Log inputs
-    console.log('[DEBUG-UI] restoreBiometricUI inputs:', { enabled: biometricsEnabled, hasCred: !!credentialId, hasPin });
+  // 🔹 DEBUG: Log inputs (remove after testing)
+  console.log('[DEBUG-UI] restoreBiometricUI inputs:', { 
+    enabled: biometricsEnabled, 
+    hasCred: !!credentialId, 
+    hasPin, 
+    bioForLogin, 
+    bioForTx 
+  });
 
-    // Target elements (adjust selectors if your HTML differs)
-    const bioBtn = document.getElementById('bioBtn') || document.querySelector('.biometric-button') || document.querySelector('[data-bio-button]');
-    const statusIndicator = document.querySelector('.biometric-status') || bioBtn?.querySelector('.status-icon');  // e.g., for icon/text
+  // Helper: Apply state to a switch button (aria + classes)
+  function applySwitchState(btn, checked) {
+    if (!btn) return;
+    btn.setAttribute('aria-checked', checked.toString());
+    if (checked) {
+      btn.classList.add('active');
+      btn.classList.remove('inactive');
+    } else {
+      btn.classList.add('inactive');
+      btn.classList.remove('active');
+    }
+    // Optional: Animate knob if CSS-bound (no code needed)
+  }
 
-    if (!bioBtn) {
-      if (retries > 0) {
-        console.warn('[WARN-UI] Bio button not found — retrying... (attempts left:', retries, ')');
-        await new Promise(r => setTimeout(r, 300));  // Wait 300ms
-        return restoreBiometricUI(retries - 1);  // Recursive retry
-      } else {
-        console.error('[ERROR-UI] Bio button never found after retries — check HTML selectors');
-        return;
-      }
+  // Helper: Apply full state (main toggle + subs + subgroup)
+  function applyFullState() {
+    // Main toggle: #biometricsSwitch
+    const mainSwitch = document.getElementById('biometricsSwitch');
+    if (!mainSwitch) {
+      console.warn('[WARN-UI] Main switch (#biometricsSwitch) not found');
+      return false;  // Signal failure
     }
 
-    // 🔹 DEBUG: Log found elements
-    console.log('[DEBUG-UI] Found bio elements:', { bioBtn: !!bioBtn, statusIndicator: !!statusIndicator });
+    // 🔹 DEBUG: Log found (remove after testing)
+    console.log('[DEBUG-UI] Found main switch:', mainSwitch.id);
 
     if (biometricsEnabled && credentialId) {
-      // ✅ Enabled + Credential: Show active state
-      bioBtn.classList.add('active', 'enabled');  // Add your CSS classes (e.g., green bg, check icon)
-      bioBtn.classList.remove('disabled', 'setup-needed');  // Clear opposites
-      if (statusIndicator) {
-        statusIndicator.textContent = '✓ Enabled';  // Or set innerHTML for icon: '<i class="fas fa-fingerprint"></i>'
-        statusIndicator.classList.add('success');
-      }
-      bioBtn.textContent = 'Fingerprint Enabled';  // Or append " (Active)"
-      bioBtn.disabled = false;  // Ensure interactive
-
-      // Optional: Show subtle toast/banner if just loaded
-      if (document.querySelector('.toast')) {  // Assuming you have a toast system
-        showToast('Biometrics loaded and ready!', 'success', 3000);
-      }
-
-      console.log('[DEBUG-UI] Restored active state');
+      // ✅ Enabled + Credential: Activate main, show subs, sync sub-states
+      applySwitchState(mainSwitch, true);
+      const subgroup = document.getElementById('biometricsOptions');
+      if (subgroup) subgroup.hidden = false;
+      
+      // Sub-switches (if subgroup visible)
+      applySwitchState(document.getElementById('bioLoginSwitch'), bioForLogin);
+      applySwitchState(document.getElementById('bioTxSwitch'), bioForTx);
+      
+      console.log('[DEBUG-UI] Applied ACTIVE state (with subs)');
     } else if (biometricsEnabled && !credentialId) {
-      // ⚠️ Enabled but no cred: Show warning (possible corruption—prompt re-setup)
-      bioBtn.classList.add('warning', 're-setup');
-      bioBtn.classList.remove('active');
-      if (statusIndicator) statusIndicator.textContent = '⚠ Re-setup needed';
-      bioBtn.textContent = 'Re-enable Fingerprint';
-      safeCall(notify, 'Biometrics enabled but credential missing—tap to re-setup', 'warning');
-
-      console.warn('[WARN-UI] Enabled but missing credential');
+      // ⚠️ Enabled but no cred: Warning on main (prompt re-setup), hide subs
+      applySwitchState(mainSwitch, true);  // Keep "on" but warn
+      const subgroup = document.getElementById('biometricsOptions');
+      if (subgroup) subgroup.hidden = true;
+      safeCall(notify, 'Biometrics enabled but credential missing — tap to re-setup', 'warning');
+      console.warn('[WARN-UI] Applied WARNING state (missing cred)');
     } else {
-      // ❌ Disabled/No Setup: Reset to default (prompt setup)
-      bioBtn.classList.remove('active', 'enabled');
-      bioBtn.classList.add('disabled', 'setup-needed');
-      if (statusIndicator) {
-        statusIndicator.textContent = 'Not Set Up';
-        statusIndicator.classList.add('neutral');
+      // ❌ Disabled/No Setup: Deactivate main, hide subs
+      applySwitchState(mainSwitch, false);
+      const subgroup = document.getElementById('biometricsOptions');
+      if (subgroup) subgroup.hidden = true;
+      console.log('[DEBUG-UI] Applied INACTIVE state');
+    }
+
+    // Re-attach events if needed (e.g., toggle handler on main switch)
+    if (!mainSwitch.__eventsAttached) {
+      mainSwitch.addEventListener('click', handleBioToggle);  // Your main toggle func (enable/disable + register/revoke)
+      mainSwitch.__eventsAttached = true;
+      
+      // Optional: Sub-toggle handlers (if separate)
+      const loginSwitch = document.getElementById('bioLoginSwitch');
+      const txSwitch = document.getElementById('bioTxSwitch');
+      if (loginSwitch && !loginSwitch.__eventsAttached) {
+        loginSwitch.addEventListener('click', handleBioLoginToggle);  // Your sub-handler
+        loginSwitch.__eventsAttached = true;
       }
-      bioBtn.textContent = 'Set Up Fingerprint';
-      bioBtn.disabled = hasPin ? false : true;  // Disable if no PIN fallback
-
-      console.log('[DEBUG-UI] Reset to inactive state');
+      if (txSwitch && !txSwitch.__eventsAttached) {
+        txSwitch.addEventListener('click', handleBioTxToggle);  // Your sub-handler
+        txSwitch.__eventsAttached = true;
+      }
     }
 
-    // Re-attach any event listeners if needed (e.g., for re-setup)
-    if (bioBtn && !bioBtn.__eventsAttached) {
-      bioBtn.addEventListener('click', handleBioToggle);  // Assuming you have a toggle handler
-      bioBtn.__eventsAttached = true;
-    }
+    // 🔹 DEBUG: Log final states (remove after testing)
+    console.log('[DEBUG-UI] Final main aria-checked:', mainSwitch.getAttribute('aria-checked'));
+    console.log('[DEBUG-UI] Subgroup hidden:', document.getElementById('biometricsOptions')?.hidden);
 
-    // 🔹 DEBUG: Log final button state
-    console.log('[DEBUG-UI] Final bioBtn classes:', bioBtn.className);
-  } catch (err) {
-    console.error('[ERROR-UI] restoreBiometricUI failed', err);
+    return true;  // Success
   }
+
+  // Immediate apply (if elements exist)
+  if (applyFullState()) {
+    return;  // Done!
+  }
+
+  // 🔹 Observer for dynamic load (e.g., async settings render)
+  console.log('[DEBUG-UI] Starting observer for settings buttons...');
+  const observer = new MutationObserver((mutations) => {
+    if (applyFullState()) {
+      observer.disconnect();  // Stop once applied
+    }
+  });
+
+  observer.observe(document.body, { childList: true, subtree: true });
+  
+  // Fallback timeout (5s max)
+  setTimeout(() => {
+    observer.disconnect();
+    if (!document.getElementById('biometricsSwitch')) {
+      console.error('[ERROR-UI] Settings toggle (#biometricsSwitch) never found — check dashboard.html');
+    }
+  }, 5000);
 }
 
 // 🚀 Setup broadcast subscription
