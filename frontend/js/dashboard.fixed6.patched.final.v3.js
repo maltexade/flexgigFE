@@ -3299,7 +3299,7 @@ updateBalanceDisplay();
       if (pinTitleEl) pinTitleEl.textContent = 'Create PIN';
       if (pinSubtitleEl) pinSubtitleEl.textContent = 'Create a 4-digit PIN';
       resetInputs();
-      localStorage.setItem('pinSet', 'false'); // PIN not set
+      localStorage.setItem('hasPin', 'false'); // PIN not set
       return;
     }
 
@@ -3316,7 +3316,7 @@ updateBalanceDisplay();
         if (!res.ok) throw new Error('Save PIN failed');
 
         console.log('[dashboard.js] PIN setup successfully');
-        localStorage.setItem('pinSet', 'true'); // PIN successfully set
+        localStorage.setItem('hasPin', 'true'); // PIN successfully set
 
         const dashboardPinCard = document.getElementById('dashboardPinCard');
         if (dashboardPinCard) dashboardPinCard.style.display = 'none';
@@ -3328,7 +3328,7 @@ updateBalanceDisplay();
       } catch (err) {
         console.error('[dashboard.js] PIN save error:', err);
         showToast('Failed to save PIN. Try again.', 'error', 2200);
-        localStorage.setItem('pinSet', 'false'); // PIN failed
+        localStorage.setItem('hasPin', 'false'); // PIN failed
         resetInputs();
       } finally {
         processing = false;
