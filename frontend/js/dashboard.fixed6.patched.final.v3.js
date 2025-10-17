@@ -554,6 +554,77 @@ async function handleBioToggle(e) {
   }
 }
 
+// 🔹 Sub-handler stubs (add these functions globally — simple local toggles)
+async function handleBioLoginToggle(e) {
+  e.preventDefault();
+  const switchBtn = e.currentTarget;
+  const currentlyOn = switchBtn.getAttribute('aria-checked') === 'true';
+  const newState = !currentlyOn;
+  
+  switchBtn.setAttribute('aria-checked', newState.toString());
+  if (newState) {
+    switchBtn.classList.add('active');
+    switchBtn.classList.remove('inactive');
+  } else {
+    switchBtn.classList.add('inactive');
+    switchBtn.classList.remove('active');
+  }
+  
+  localStorage.setItem('biometricForLogin', newState ? 'true' : 'false');
+  notify(newState ? 'Biometrics enabled for login' : 'Biometrics disabled for login', newState ? 'success' : 'info');
+}
+
+async function handleBioTxToggle(e) {
+  e.preventDefault();
+  const switchBtn = e.currentTarget;
+  const currentlyOn = switchBtn.getAttribute('aria-checked') === 'true';
+  const newState = !currentlyOn;
+  
+  switchBtn.setAttribute('aria-checked', newState.toString());
+  if (newState) {
+    switchBtn.classList.add('active');
+    switchBtn.classList.remove('inactive');
+  } else {
+    switchBtn.classList.add('inactive');
+    switchBtn.classList.remove('active');
+  }
+  
+  localStorage.setItem('biometricForTx', newState ? 'true' : 'false');
+  notify(newState ? 'Biometrics enabled for transactions' : 'Biometrics disabled for transactions', newState ? 'success' : 'info');
+}
+
+// 🔹 Optional: Main toggle stub (if not defined — calls register/disable)
+async function handleBioToggle(e) {
+  e.preventDefault();
+  const mainSwitch = e.currentTarget;
+  const currentlyEnabled = mainSwitch.getAttribute('aria-checked') === 'true';
+  
+  if (currentlyEnabled) {
+    // Disable: Revoke + clear
+    await disableBiometrics();  // Your disable func (if exists; else local clear)
+    mainSwitch.setAttribute('aria-checked', 'false');
+    mainSwitch.classList.remove('active');
+    mainSwitch.classList.add('inactive');
+    const subgroup = document.getElementById('biometricsOptions');
+    if (subgroup) subgroup.hidden = true;
+    notify('Biometrics disabled', 'info');
+  } else {
+    // Enable: Register
+    const { success } = await registerBiometrics();  // Your register func
+    if (success) {
+      mainSwitch.setAttribute('aria-checked', 'true');
+      mainSwitch.classList.add('active');
+      mainSwitch.classList.remove('inactive');
+      const subgroup = document.getElementById('biometricsOptions');
+      if (subgroup) subgroup.hidden = false;
+      // Default subs on (optional)
+      localStorage.setItem('biometricForLogin', 'true');
+      localStorage.setItem('biometricForTx', 'true');
+      notify('Biometrics enabled', 'success');
+    }
+  }
+}
+
 // After getSession succeeds
 // After getSession succeeds (now cache-first)
 async function onDashboardLoad() {
@@ -785,12 +856,22 @@ console.log('[DEBUG-SYNC] Sub-flags synced:', { bioForLogin, bioForTx });  // Re
 // 🔹 Biometric UI Restoration (runs on load to persist state across reloads)
 // 🔹 Biometric UI Restoration (runs on load to persist state across reloads)
 // 🔹 Biometric UI Restoration (targets SETTINGS toggle: #biometricsSwitch + subs)
+// 🔹 Biometric UI Restoration (with tighter guards + default subs on)
 async function restoreBiometricUI() {
   const biometricsEnabled = localStorage.getItem('biometricsEnabled') === 'true';
   const credentialId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
   const hasPin = localStorage.getItem('hasPin') === 'true';
-  const bioForLogin = localStorage.getItem('biometricForLogin') === 'true';
-  const bioForTx = localStorage.getItem('biometricForTx') === 'true';
+  
+  // 🔹 Default subs ON if bio enabled but unset (UX: logical default)
+  let bioForLogin = localStorage.getItem('biometricForLogin') === 'true';
+  let bioForTx = localStorage.getItem('biometricForTx') === 'true';
+  if (biometricsEnabled && (!bioForLogin || !bioForTx)) {
+    bioForLogin = true;
+    bioForTx = true;
+    localStorage.setItem('biometricForLogin', 'true');
+    localStorage.setItem('biometricForTx', 'true');
+    console.log('[DEBUG-UI] Defaulted subs to ON for enabled bio');
+  }
 
   // 🔹 DEBUG: Log inputs (remove after testing)
   console.log('[DEBUG-UI] restoreBiometricUI inputs:', { 
@@ -812,7 +893,6 @@ async function restoreBiometricUI() {
       btn.classList.add('inactive');
       btn.classList.remove('active');
     }
-    // Optional: Animate knob if CSS-bound (no code needed)
   }
 
   // Helper: Apply full state (main toggle + subs + subgroup)
@@ -837,7 +917,7 @@ async function restoreBiometricUI() {
       applySwitchState(document.getElementById('bioLoginSwitch'), bioForLogin);
       applySwitchState(document.getElementById('bioTxSwitch'), bioForTx);
       
-      console.log('[DEBUG-UI] Applied ACTIVE state (with subs)');
+      console.log('[DEBUG-UI] Applied ACTIVE state (with subs ON)');
     } else if (biometricsEnabled && !credentialId) {
       // ⚠️ Enabled but no cred: Warning on main (prompt re-setup), hide subs
       applySwitchState(mainSwitch, true);  // Keep "on" but warn
@@ -853,21 +933,30 @@ async function restoreBiometricUI() {
       console.log('[DEBUG-UI] Applied INACTIVE state');
     }
 
-    // Re-attach events if needed (e.g., toggle handler on main switch)
+    // Re-attach events if needed (tight guards: skip if not function)
     if (!mainSwitch.__eventsAttached) {
-      mainSwitch.addEventListener('click', handleBioToggle);  // Your main toggle func (enable/disable + register/revoke)
+      if (typeof handleBioToggle === 'function') {
+        mainSwitch.addEventListener('click', handleBioToggle);
+      } else {
+        console.warn('[DEBUG-UI] handleBioToggle not defined — skipping main attachment');
+      }
       mainSwitch.__eventsAttached = true;
       
-      // Optional: Sub-toggle handlers (if separate)
+      // Sub-handlers (only if defined)
       const loginSwitch = document.getElementById('bioLoginSwitch');
-      const txSwitch = document.getElementById('bioTxSwitch');
-      if (loginSwitch && !loginSwitch.__eventsAttached) {
-        loginSwitch.addEventListener('click', handleBioLoginToggle);  // Your sub-handler
+      if (loginSwitch && !loginSwitch.__eventsAttached && typeof handleBioLoginToggle === 'function') {
+        loginSwitch.addEventListener('click', handleBioLoginToggle);
         loginSwitch.__eventsAttached = true;
+      } else if (loginSwitch) {
+        console.warn('[DEBUG-UI] handleBioLoginToggle not defined — skipping login sub attachment');
       }
-      if (txSwitch && !txSwitch.__eventsAttached) {
-        txSwitch.addEventListener('click', handleBioTxToggle);  // Your sub-handler
+      
+      const txSwitch = document.getElementById('bioTxSwitch');
+      if (txSwitch && !txSwitch.__eventsAttached && typeof handleBioTxToggle === 'function') {
+        txSwitch.addEventListener('click', handleBioTxToggle);
         txSwitch.__eventsAttached = true;
+      } else if (txSwitch) {
+        console.warn('[DEBUG-UI] handleBioTxToggle not defined — skipping tx sub attachment');
       }
     }
 
@@ -883,7 +972,7 @@ async function restoreBiometricUI() {
     return;  // Done!
   }
 
-  // 🔹 Observer for dynamic load (e.g., async settings render)
+  // 🔹 Observer for dynamic load
   console.log('[DEBUG-UI] Starting observer for settings buttons...');
   const observer = new MutationObserver((mutations) => {
     if (applyFullState()) {
@@ -4625,29 +4714,49 @@ async function updateStoredPin(uid, newPin) {
   // }
 
   // Initialize on page load
-  function boot() {
-    log.d('Booting PIN and security module');
+  // 🔹 Boot sequence (updated: async + await session before PIN check)
+(async function boot(supabaseClient) {
+  log.d('Booting PIN and security module');
+  
+  try {
+    // Init modals (unchanged)
     initPinModal();
     initPinVerifyModal();
     initSecurityPinModal();
     initCheckoutPin();
+    
+    // Setup inactivity (unchanged)
     if (window.__reauth && typeof window.__reauth.setupInactivity === 'function') {
-  window.__reauth.setupInactivity();
-}
-
-    // Check PIN on page load
-    window.checkPinExists((hasPin) => {
-      if (hasPin) {
-        window.ModalManager.openModal('pinVerifyModal');
+      window.__reauth.setupInactivity();
+    }
+    
+    // 🔹 Delay + pre-sync session before PIN check (fixes "No signed-in user")
+    setTimeout(async () => {
+      try {
+        console.log('[BOOT] Starting PIN check...');
+        await getSession();  // Ensure session ready first (unblocks getUid)
+        window.checkPinExists((hasPin) => {
+          if (hasPin) {
+            window.ModalManager.openModal('pinVerifyModal');
+          }
+        }, 'load');
+        console.log('[BOOT] PIN check complete');
+      } catch (e) {
+        console.error('[BOOT] PIN check failed', e);
+        // Optional: Assume no PIN (hide setup modal if needed)
       }
-    }, 'load');
-  }
+    }, 1000);  // 1s buffer (your 4000ms was long; 1s suffices post-session)
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', boot);
-  } else {
-    setTimeout(boot, 1000);
+  } catch (bootErr) {
+    console.error('[BOOT] Overall boot error', bootErr);
   }
+})();
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', boot);
+} else {
+  setTimeout(boot, 4000);  // Keep your existing delay for non-loading state
+}
 })(supabaseClient);
 
 
