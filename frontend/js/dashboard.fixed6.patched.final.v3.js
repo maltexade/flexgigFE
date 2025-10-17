@@ -1016,78 +1016,73 @@ const svgShapes = {
     }
   }
 
-  function fromBase64Url(input){
-  // Accepts:
-  //  - base64url string -> returns ArrayBuffer
-  //  - Uint8Array -> returns its .buffer (ArrayBuffer)
-  //  - ArrayBuffer -> returns it unchanged
-  //  - null/undefined -> returns null
+  function fromBase64Url(input) {
   if (!input && input !== 0) return null;
 
-  // If already ArrayBuffer
+  // Already ArrayBuffer
   if (input instanceof ArrayBuffer) return input;
-
-  // If already a typed array, return its buffer
-  if (ArrayBuffer.isView(input)) {
-    // Uint8Array, etc.
-    return input.buffer;
-  }
-
-  // Otherwise expect a base64url string
-  if (typeof input !== 'string') {
-    // not a string — return null and let callers handle it
-    console.warn('[webauthn] fromBase64Url expected string or buffer, got', typeof input, input);
+  // Typed array
+  if (ArrayBuffer.isView(input)) return input.buffer;
+  // Handle object-likes like {0:52,1:246,...}
+  if (typeof input === 'object' && input !== null && Object.keys(input).length > 0) {
+    try {
+      const values = Object.values(input);
+      if (values.every(v => typeof v === 'number')) {
+        return new Uint8Array(values).buffer;
+      }
+    } catch (e) {
+      console.warn('[webauthn] fromBase64Url object→buffer failed', e);
+    }
     return null;
   }
-
-  let b = input.replace(/-/g,'+').replace(/_/g,'/');
-  while (b.length % 4) b += '=';
-  try {
-    const str = atob(b);
-    const arr = new Uint8Array(str.length);
-    for (let i=0;i<str.length;i++) arr[i] = str.charCodeAt(i);
-    return arr.buffer;
-  } catch (e) {
-    console.warn('[webauthn] fromBase64Url decode failed', e, input);
-    return null;
+  // Normal string decode
+  if (typeof input === 'string') {
+    let b = input.replace(/-/g, '+').replace(/_/g, '/');
+    while (b.length % 4) b += '=';
+    try {
+      const str = atob(b);
+      const arr = new Uint8Array(str.length);
+      for (let i = 0; i < str.length; i++) arr[i] = str.charCodeAt(i);
+      return arr.buffer;
+    } catch (e) {
+      console.warn('[webauthn] fromBase64Url decode failed', e);
+      return null;
+    }
   }
+
+  console.warn('[webauthn] fromBase64Url unsupported type', typeof input, input);
+  return null;
 }
 
-
-  function convertOptionsFromServer(publicKey) {
+function convertOptionsFromServer(publicKey) {
   try {
     if (!publicKey) return publicKey;
-    if (publicKey.challenge && typeof publicKey.challenge === 'string') {
+
+    if (publicKey.challenge) {
       const ch = fromBase64Url(publicKey.challenge);
       if (ch) publicKey.challenge = new Uint8Array(ch);
     }
+
     if (Array.isArray(publicKey.allowCredentials)) {
-      publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){
+      publicKey.allowCredentials = publicKey.allowCredentials.map(c => {
         try {
-          // If the id is a string -> convert it, otherwise leave it alone if it's already a buffer/typed array
-          if (typeof c.id === 'string') {
-            const idBuf = fromBase64Url(c.id);
-            return Object.assign({}, c, { id: idBuf ? new Uint8Array(idBuf) : idBuf });
-          } else if (ArrayBuffer.isView(c.id)) {
-            // already a typed array
-            return Object.assign({}, c, { id: c.id });
-          } else if (c.id instanceof ArrayBuffer) {
-            return Object.assign({}, c, { id: new Uint8Array(c.id) });
-          } else {
-            // unknown type — leave as-is (navigator may throw if bad)
-            return c;
-          }
+          let idBuf = fromBase64Url(c.id);
+          if (!idBuf) return c;
+          return { ...c, id: new Uint8Array(idBuf) };
         } catch (e) {
+          console.warn('[webauthn] allowCredentials id convert failed', e);
           return c;
         }
       });
     }
+
     return publicKey;
   } catch (e) {
-    __webauthn_log.w('convertOptionsFromServer error', e);
+    console.warn('[webauthn] convertOptionsFromServer error', e);
     return publicKey;
   }
 }
+
 
 
   // small helper: try parse cached user from localStorage
@@ -10100,6 +10095,7 @@ async function verifyBiometrics(uid, context) {
     }
   });
 }
+
 
 
 
