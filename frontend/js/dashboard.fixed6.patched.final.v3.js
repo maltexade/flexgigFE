@@ -3832,7 +3832,6 @@ function __fg_pin_clearAllInputs() {
       setTimeout(() => target.classList.add('hidden'), 3000);
     }
   }
-  window.notify = window.notify || notify;
 
   // Get user ID from Supabase
   async function getUid() {
@@ -7499,8 +7498,6 @@ async function __sec_listAuthenticators(userId) {
   __sec_log.d('listAuthenticators exit');
 }
 
-window.__sec_listAuthenticators = window.__sec_listAuthenticators || __sec_listAuthenticators;
-
 async function __sec_revokeAuthenticator(userId, credentialID) {
   __sec_log.d('revokeAuthenticator entry', { userId, credentialID });
   try {
@@ -7537,8 +7534,6 @@ async function __sec_revokeAuthenticator(userId, credentialID) {
   }
   __sec_log.d('revokeAuthenticator exit');
 }
-
-window.__sec_revokeAuthenticator = window.__sec_revokeAuthenticator || __sec_revokeAuthenticator;
 
 /* Wire events (with WebAuthn integration) */
 function __sec_wireEvents() {
