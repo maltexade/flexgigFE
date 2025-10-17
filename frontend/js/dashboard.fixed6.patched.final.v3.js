@@ -6727,6 +6727,7 @@ try {
     return; // skip server call because server requires userId
   }
 
+
   // We have a userId — call the server with both credentialId and userId
   __sec_log.d('reconcile: resolved userId, calling /webauthn/auth/options', { userIdSample: resolvedUserId && resolvedUserId.slice ? resolvedUserId.slice(0,12) : resolvedUserId });
   const apiBase = (window.__SEC_API_BASE || (typeof API_BASE !== 'undefined' ? API_BASE : ''));
@@ -8564,13 +8565,57 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
     // bind this directly to the biometric button (kept so manual biometric from PIN view still works)
     async function handleBiometricButtonClick(uid, context='reauth') {
       console.log('[BIOMETRIC CLICK] handler invoked', { uid, time: new Date().toISOString(), visible: document.visibilityState });
-      // MUST be immediate in user gesture: use cached options
-      const opts = window.__cachedAuthOptions;
-      if (!opts) {
-        console.warn('[BIOMETRIC CLICK] No cached auth options — consider prefetchAuthOptionsFor() when showing modal');
-        // Optionally: fall back to fetching then call get() (may fail due to lost gesture)
-        return;
-      }
+      // Prefer a fresh options fetch inside the user gesture to avoid challenge mismatch.
+// Try to fetch fresh options; if that fails, fall back to cached options (may still fail).
+let opts = null;
+try {
+  const storedId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id') || null;
+  const fetchRes = await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/options', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ credentialId: storedId, userId: (window.__webauthn_userId || null) })
+  });
+  if (fetchRes.ok) {
+    opts = await fetchRes.json();
+    // convert challenge and allowCredentials to proper typed arrays if needed
+    if (opts.challenge && typeof opts.challenge === 'string') {
+      const ab = window.fromBase64Url ? window.fromBase64Url(opts.challenge) : null;
+      if (ab) opts.challenge = new Uint8Array(ab);
+    }
+    if (Array.isArray(opts.allowCredentials)) {
+      opts.allowCredentials = opts.allowCredentials.map(c => {
+        try {
+          if (typeof c.id === 'string') {
+            const idab = window.fromBase64Url ? window.fromBase64Url(c.id) : null;
+            return Object.assign({}, c, { id: idab ? new Uint8Array(idab) : idab });
+          } else if (ArrayBuffer.isView(c.id)) {
+            return Object.assign({}, c, { id: c.id });
+          } else if (c.id instanceof ArrayBuffer) {
+            return Object.assign({}, c, { id: new Uint8Array(c.id) });
+          }
+        } catch(e) { /* fall through */ }
+        return c;
+      });
+    }
+    // Optionally update cache
+    window.__cachedAuthOptions = opts;
+    window.__cachedAuthOptionsFetchedAt = Date.now();
+  } else {
+    // fall back to cached if available
+    opts = window.__cachedAuthOptions || null;
+  }
+} catch (e) {
+  console.warn('[BIOMETRIC CLICK] fresh options fetch failed, falling back to cache', e);
+  opts = window.__cachedAuthOptions || null;
+}
+
+if (!opts) {
+  console.warn('[BIOMETRIC CLICK] No auth options available (fresh fetch failed and no cache)');
+  return;
+}
+
+
       try {
         // Call get() synchronously in the click handler (no awaits before it)
         const assertion = await navigator.credentials.get({ publicKey: opts });
@@ -9975,7 +10020,7 @@ async function verifyBiometrics(uid, context) {
       if (!userId) throw new Error('No user id available');
 
       var publicKey = window.__cachedAuthOptions;
-      var maxCacheMs = 30 * 1000;
+      var maxCacheMs = 5 * 1000;
       if (publicKey && window.__cachedAuthOptionsFetchedAt && ((Date.now() - window.__cachedAuthOptionsFetchedAt) > maxCacheMs)) {
         publicKey = null;
       }
