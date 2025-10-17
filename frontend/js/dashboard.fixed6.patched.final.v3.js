@@ -6712,51 +6712,20 @@ try {
 
   // Try to obtain userId (short wait). If none, do NOT call server (we avoid Missing userId).
   const resolvedUserId = await safeGetSessionUserId(900); // wait up to 900ms for session
-  // ---------- ROBUST FIX: retry a few times before clearing persisted biometric flags ----------
   if (!resolvedUserId) {
-    __sec_log.i('reconcile: no userId available after short wait — scheduling retry (no clear yet)');
-
-    // Soft UI: show toggle OFF while we wait for session resolution (do not erase persisted flags)
+    __sec_log.i('reconcile: no userId available after short wait — will clear biometric flags locally and skip server check');
     try {
-      if (__sec_parentSwitch) __sec_setChecked(__sec_parentSwitch, false);
-      if (__sec_bioOptions) { __sec_bioOptions.classList.remove('show'); __sec_bioOptions.hidden = true; }
-    } catch (e) {
-      __sec_log.e('reconcile: UI update failed', e);
-    }
-
-    // Retry logic: limited attempts stored in sessionStorage (cleared on browser close)
-    try {
-      const key = '__sec_biom_retry_count';
-      const maxAttempts = 3;
-      const count = parseInt(sessionStorage.getItem(key) || '0', 10);
-      if (count < maxAttempts) {
-        sessionStorage.setItem(key, String(count + 1));
-        const backoffMs = 250 * Math.pow(2, count); // 250ms, 500ms, 1000ms...
-        setTimeout(() => {
-          // call the same reconcile function again if available
-          try {
-            if (typeof reconcileBiometricState === 'function') {
-              reconcileBiometricState().catch && reconcileBiometricState().catch(err => __sec_log.w('reconcile retry failed', err));
-            } else {
-              __sec_log.w('reconcile retry: reconcileBiometricState not present');
-            }
-          } catch (e) {
-            __sec_log.w('reconcile retry invocation error', e);
-          }
-        }, backoffMs);
-      } else {
-        // exhausted retries — treat as no session: clear retry counter and do not clear persisted flags automatically
-        sessionStorage.removeItem(key);
-        __sec_log.i('reconcile: session not available after retry attempts — skipping server check. Persisted flags kept; will wait for user action or future session.');
-        // Optionally, you could clear persisted flags here if you want
-      }
-    } catch (e) {
-      __sec_log.e('reconcile: retry scheduling failed', e);
-    }
-
-    return;
+      localStorage.setItem(__sec_KEYS.biom, '0');
+      localStorage.setItem('biometricsEnabled', 'false');
+      localStorage.setItem(__sec_KEYS.bioLogin, '0');
+      localStorage.setItem(__sec_KEYS.bioTx, '0');
+      localStorage.setItem('biometricForLogin', 'false');
+      localStorage.setItem('biometricForTx', 'false');
+    } catch (e) { __sec_log.e('reconcile: local clear failed', e); }
+    if (__sec_parentSwitch) __sec_setChecked(__sec_parentSwitch, false);
+    if (__sec_bioOptions) { __sec_bioOptions.classList.remove('show'); __sec_bioOptions.hidden = true; }
+    return; // skip server call because server requires userId
   }
-
 
   // We have a userId — call the server with both credentialId and userId
   __sec_log.d('reconcile: resolved userId, calling /webauthn/auth/options', { userIdSample: resolvedUserId && resolvedUserId.slice ? resolvedUserId.slice(0,12) : resolvedUserId });
