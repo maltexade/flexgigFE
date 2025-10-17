@@ -564,6 +564,8 @@ try {
   if (biometricsEnabled && localStorage.getItem('credentialId')) {
     prefetchAuthOptions();
   }
+  await restoreBiometricUI();  // Persist active state on reload
+
 } catch (err) {
   console.warn('[onDashboardLoad] Flag sync error', err);
 }
@@ -699,6 +701,76 @@ if (localStorage.getItem('justLoggedIn') === 'true') {
   setInterval(pollStatus, 30000); // Every 30s
 
 
+}
+
+// 🔹 Biometric UI Restoration (runs on load to persist state across reloads)
+async function restoreBiometricUI() {
+  try {
+    const biometricsEnabled = localStorage.getItem('biometricsEnabled') === 'true';
+    const credentialId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
+    const hasPin = localStorage.getItem('hasPin') === 'true';  // Optional: For fallback UX
+
+    console.log('[DEBUG] restoreBiometricUI: Flags check', { enabled: biometricsEnabled, hasCred: !!credentialId, hasPin });
+
+    // Target elements (adjust selectors if your HTML differs)
+    const bioBtn = document.getElementById('bioBtn') || document.querySelector('.biometric-button') || document.querySelector('[data-bio-button]');
+    const statusIndicator = document.querySelector('.biometric-status') || bioBtn?.querySelector('.status-icon');  // e.g., for icon/text
+
+    if (!bioBtn) {
+      console.warn('[WARN] restoreBiometricUI: Bio button not found yet—will retry');
+      // Retry once after DOM settle (for SPA-like loads)
+      setTimeout(restoreBiometricUI, 500);
+      return;
+    }
+
+    if (biometricsEnabled && credentialId) {
+      // ✅ Enabled + Credential: Show active state
+      bioBtn.classList.add('active', 'enabled');  // Add your CSS classes (e.g., green bg, check icon)
+      bioBtn.classList.remove('disabled', 'setup-needed');  // Clear opposites
+      if (statusIndicator) {
+        statusIndicator.textContent = '✓ Enabled';  // Or set innerHTML for icon: '<i class="fas fa-fingerprint"></i>'
+        statusIndicator.classList.add('success');
+      }
+      bioBtn.textContent = 'Fingerprint Enabled';  // Or append " (Active)"
+      bioBtn.disabled = false;  // Ensure interactive
+
+      // Optional: Show subtle toast/banner if just loaded
+      if (document.querySelector('.toast')) {  // Assuming you have a toast system
+        showToast('Biometrics loaded and ready!', 'success', 3000);
+      }
+
+      console.log('[DEBUG] restoreBiometricUI: Restored active state');
+    } else if (biometricsEnabled && !credentialId) {
+      // ⚠️ Enabled but no cred: Show warning (possible corruption—prompt re-register)
+      bioBtn.classList.add('warning', 're-setup');
+      bioBtn.classList.remove('active');
+      if (statusIndicator) statusIndicator.textContent = '⚠ Re-setup needed';
+      bioBtn.textContent = 'Re-enable Fingerprint';
+      safeCall(notify, 'Biometrics enabled but credential missing—tap to re-setup', 'warning');
+
+      console.warn('[WARN] restoreBiometricUI: Enabled but missing credential');
+    } else {
+      // ❌ Disabled/No Setup: Reset to default (prompt setup)
+      bioBtn.classList.remove('active', 'enabled');
+      bioBtn.classList.add('disabled', 'setup-needed');
+      if (statusIndicator) {
+        statusIndicator.textContent = 'Not Set Up';
+        statusIndicator.classList.add('neutral');
+      }
+      bioBtn.textContent = 'Set Up Fingerprint';
+      bioBtn.disabled = hasPin ? false : true;  // Disable if no PIN fallback
+
+      console.log('[DEBUG] restoreBiometricUI: Reset to inactive state');
+    }
+
+    // Re-attach any event listeners if needed (e.g., for re-setup)
+    if (bioBtn && !bioBtn.__eventsAttached) {
+      bioBtn.addEventListener('click', handleBioToggle);  // Assuming you have a toggle handler
+      bioBtn.__eventsAttached = true;
+    }
+  } catch (err) {
+    console.error('[ERROR] restoreBiometricUI failed', err);
+  }
 }
 
 // 🚀 Setup broadcast subscription
@@ -6890,6 +6962,8 @@ try {
   try {
     localStorage.setItem(__sec_KEYS.biom, '1');
     localStorage.setItem('biometricsEnabled', 'true');
+    restoreBiometricUI();
+    safeCall(notify, 'Fingerprint set up successfully!', 'success');
     localStorage.setItem(__sec_KEYS.bioLogin, '1'); localStorage.setItem('biometricForLogin','true');
     localStorage.setItem(__sec_KEYS.bioTx, '1'); localStorage.setItem('biometricForTx','true');
   } catch (e) { __sec_log.e('reconcile: persist enabled flags failed', e); }
@@ -9446,6 +9520,8 @@ async function registerBiometrics() {
         console.warn('[registerBiometrics] Server did not return credentialId');
       }
 
+      restoreBiometricUI();
+
       safeCall(notify, 'Biometric registration successful!', 'success');
 
       // OPTIONAL: do not automatically reload in dev — comment out if causing flakiness
@@ -9518,6 +9594,7 @@ async function disableBiometrics() {
 
       var data = await res.json();
       safeCall(notify, 'Biometric revoked on server', 'success');
+      restoreBiometricUI();
       console.log('[disableBiometrics] revoke response', data);
     } catch (err) {
       console.error('[disableBiometrics] background revoke error', err);
