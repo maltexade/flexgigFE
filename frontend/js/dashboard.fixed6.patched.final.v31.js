@@ -544,29 +544,6 @@ async function onDashboardLoad() {
 
   // Then background refresh
   await getSession(); // This will update if needed
-
-  // Securely sync PIN/bio flags to storage on load
-try {
-  const session = await getSession(); // Already called above, reuse if possible
-  const hasPin = session?.user?.hasPin || localStorage.getItem('hasPin') === 'true' || false;
-  localStorage.setItem('hasPin', hasPin ? 'true' : 'false');
-  
-  const biometricsEnabled = localStorage.getItem('biometricsEnabled') === 'true' || false;
-  localStorage.setItem('biometricsEnabled', biometricsEnabled ? 'true' : 'false');
-  
-  // Children flags default to false if bio off
-  if (!biometricsEnabled) {
-    localStorage.setItem('biometricForLogin', 'false');
-    localStorage.setItem('biometricForTx', 'false');
-  }
-  
-  // If bio enabled and credentialId exists, prefetch immediately
-  if (biometricsEnabled && localStorage.getItem('credentialId')) {
-    prefetchAuthOptions();
-  }
-} catch (err) {
-  console.warn('[onDashboardLoad] Flag sync error', err);
-}
   setupBroadcastSubscription();
   if (window.__reauth && typeof window.__reauth.initReauthModal === 'function') {
   await window.__reauth.initReauthModal();
@@ -1039,118 +1016,78 @@ const svgShapes = {
     }
   }
 
-  // --- Robust fromBase64Url (replace existing definition) ---
-if (!window.fromBase64Url) {
-  window.fromBase64Url = function (input) {
-    try {
-      // null / undefined -> empty ArrayBuffer
-      if (input == null) return new ArrayBuffer(0);
+  function fromBase64Url(input){
+  // Accepts:
+  //  - base64url string -> returns ArrayBuffer
+  //  - Uint8Array -> returns its .buffer (ArrayBuffer)
+  //  - ArrayBuffer -> returns it unchanged
+  //  - null/undefined -> returns null
+  if (!input && input !== 0) return null;
 
-      // If already an ArrayBuffer -> return as-is
-      if (input instanceof ArrayBuffer) return input;
+  // If already ArrayBuffer
+  if (input instanceof ArrayBuffer) return input;
 
-      // If a TypedArray (Uint8Array, etc.) -> return its buffer
-      if (ArrayBuffer.isView(input)) return input.buffer;
+  // If already a typed array, return its buffer
+  if (ArrayBuffer.isView(input)) {
+    // Uint8Array, etc.
+    return input.buffer;
+  }
 
-      // Node Buffer-like object: { type: 'Buffer', data: [...] }
-      if (typeof input === 'object' && Array.isArray(input.data)) {
-        return new Uint8Array(input.data).buffer;
-      }
+  // Otherwise expect a base64url string
+  if (typeof input !== 'string') {
+    // not a string — return null and let callers handle it
+    console.warn('[webauthn] fromBase64Url expected string or buffer, got', typeof input, input);
+    return null;
+  }
 
-      // Plain numeric-keyed object (JSON-decoded typed array), e.g. {0:12,1:34,...}
-      if (typeof input === 'object') {
-        // Collect numeric keys in order 0..N-1 if present, else attempt Object.values
-        const keys = Object.keys(input);
-        const numericKeys = keys.filter(k => /^[0-9]+$/.test(k));
-        if (numericKeys.length) {
-          // Build values in numeric order
-          const maxIndex = Math.max(...numericKeys.map(k => parseInt(k, 10)));
-          const arr = new Uint8Array(maxIndex + 1);
-          for (let i = 0; i <= maxIndex; i++) {
-            // if key missing, set 0
-            arr[i] = typeof input[i] === 'number' ? input[i] & 0xff : 0;
-          }
-          return arr.buffer;
-        }
-        // Fallback: if it's some other object, try to take Object.values if they look numeric
-        const vals = Object.values(input);
-        if (Array.isArray(vals) && vals.length && typeof vals[0] === 'number') {
-          return new Uint8Array(vals.map(v => v & 0xff)).buffer;
-        }
-      }
-
-      // If it's a string -> treat as base64url and decode
-      if (typeof input === 'string') {
-        // normalise base64url -> base64
-        let s = input.replace(/-/g, '+').replace(/_/g, '/');
-        // pad to multiple of 4
-        while (s.length % 4) s += '=';
-        const raw = atob(s);
-        const arr = new Uint8Array(raw.length);
-        for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
-        return arr.buffer;
-      }
-
-      // Unknown type: log and return empty buffer to avoid breaking caller runtime expectations
-      console.warn('[webauthn] fromBase64Url: unknown input type', typeof input, input);
-      return new ArrayBuffer(0);
-    } catch (err) {
-      console.warn('[webauthn] fromBase64Url error', err, input);
-      return new ArrayBuffer(0);
-    }
-  };
+  let b = input.replace(/-/g,'+').replace(/_/g,'/');
+  while (b.length % 4) b += '=';
+  try {
+    const str = atob(b);
+    const arr = new Uint8Array(str.length);
+    for (let i=0;i<str.length;i++) arr[i] = str.charCodeAt(i);
+    return arr.buffer;
+  } catch (e) {
+    console.warn('[webauthn] fromBase64Url decode failed', e, input);
+    return null;
+  }
 }
 
 
-function convertOptionsFromServer(publicKey) {
+  function convertOptionsFromServer(publicKey) {
   try {
     if (!publicKey) return publicKey;
-
-    if (publicKey.challenge) {
+    if (publicKey.challenge && typeof publicKey.challenge === 'string') {
       const ch = fromBase64Url(publicKey.challenge);
       if (ch) publicKey.challenge = new Uint8Array(ch);
     }
-
     if (Array.isArray(publicKey.allowCredentials)) {
-      // inside convertOptionsFromServer, replace the mapping with this:
-publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){
-  try {
-    let idBuf = null;
-    if (typeof c.id === 'string') {
-      idBuf = fromBase64Url(c.id);
-    } else if (c instanceof ArrayBuffer) {
-      idBuf = c;
-    } else if (ArrayBuffer.isView(c.id)) {
-      idBuf = c.id.buffer;
-    } else if (typeof c.id === 'object') {
-      // object may be {type:'Buffer',data:[...]} or numeric keys
-      const maybe = fromBase64Url(c.id);
-      // fromBase64Url already handles numeric-keyed objects and node-buffers
-      idBuf = maybe && (maybe instanceof ArrayBuffer) ? maybe : null;
-      // As a last resort, try Object.values
-      if (!idBuf) {
-        const vals = Object.values(c.id || {});
-        if (vals.length && typeof vals[0] === 'number') idBuf = new Uint8Array(vals.map(v=>v&0xff)).buffer;
-      }
+      publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){
+        try {
+          // If the id is a string -> convert it, otherwise leave it alone if it's already a buffer/typed array
+          if (typeof c.id === 'string') {
+            const idBuf = fromBase64Url(c.id);
+            return Object.assign({}, c, { id: idBuf ? new Uint8Array(idBuf) : idBuf });
+          } else if (ArrayBuffer.isView(c.id)) {
+            // already a typed array
+            return Object.assign({}, c, { id: c.id });
+          } else if (c.id instanceof ArrayBuffer) {
+            return Object.assign({}, c, { id: new Uint8Array(c.id) });
+          } else {
+            // unknown type — leave as-is (navigator may throw if bad)
+            return c;
+          }
+        } catch (e) {
+          return c;
+        }
+      });
     }
-    return Object.assign({}, c, { id: idBuf ? new Uint8Array(idBuf) : idBuf });
-  } catch (e) {
-    // fallback: return original credential descriptor (navigator.get may still error but we don't break)
-    return c;
-  }
-});
-
-
-    }
-
     return publicKey;
   } catch (e) {
-    console.warn('[webauthn] convertOptionsFromServer error', e);
+    __webauthn_log.w('convertOptionsFromServer error', e);
     return publicKey;
   }
 }
-
-
 
 
   // small helper: try parse cached user from localStorage
@@ -1310,45 +1247,18 @@ publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){
       window.fetch = async function(input, init){
         try {
           const url = (typeof input === 'string') ? input : (input && input.url) || '';
-          // Replace wrapper block with this (keeps same logging + safe header handling)
-if (url && url.indexOf('/webauthn/auth/options') !== -1) {
-  __webauthn_log.d('fetch wrapper intercept', { url, initBody: init && init.body ? (typeof init.body === 'string' ? init.body.slice(0,400) : '[non-string body]') : null });
-
-  // Helper: robust header check (Headers instance / object / array)
-  const headerHasBypass = (h) => {
-    if (!h) return false;
-    try {
-      if (typeof h.get === 'function') {
-        return !!(h.get('X-Bypass-AuthCache') || h.get('x-bypass-authcache'));
-      }
-      if (Array.isArray(h)) {
-        for (const pair of h) {
-          if (Array.isArray(pair) && String(pair[0]).toLowerCase() === 'x-bypass-authcache') return true;
-        }
-      } else if (typeof h === 'object') {
-        for (const k of Object.keys(h)) if (k.toLowerCase() === 'x-bypass-authcache') return true;
-      }
-    } catch(e){ /* ignore */ }
-    return false;
-  };
-
-  // if caller explicitly asks to bypass the cached options -> do a real network call
-  if (init && headerHasBypass(init.headers)) {
-    __webauthn_log.i('fetch wrapper bypass header present - calling network directly');
-    return window.__origFetch(input, init);
-  }
-
-  // otherwise, parse body for credentialId/userId and return cached (fast) options
-  let credentialId = null, userId = null;
-  try {
-    const b = init && init.body ? JSON.parse(init.body) : null;
-    if (b && typeof b === 'object') { credentialId = b.credentialId || null; userId = b.userId || null; }
-  } catch(e){ __webauthn_log.w('fetch wrapper parse body failed', e); }
-  const opts = await window.getAuthOptionsWithCache({ credentialId, userId });
-  __webauthn_log.d('fetch wrapper returning cached options', { cached: !!opts });
-  return new Response(JSON.stringify(opts), { status: 200, headers: { 'Content-Type': 'application/json' } });
-}
-
+          if (url && url.indexOf('/webauthn/auth/options') !== -1) {
+            __webauthn_log.d('fetch wrapper intercept', { url, initBody: init && init.body ? init.body.toString().slice(0,400) : null });
+            // try to parse credentialId/userId from body if present
+            let credentialId = null, userId = null;
+            try {
+              const b = init && init.body ? JSON.parse(init.body) : null;
+              if (b && typeof b === 'object') { credentialId = b.credentialId || null; userId = b.userId || null; }
+            } catch(e){ __webauthn_log.w('fetch wrapper parse body failed', e); }
+            const opts = await window.getAuthOptionsWithCache({ credentialId, userId });
+            __webauthn_log.d('fetch wrapper returning cached options', { cached: !!opts });
+            return new Response(JSON.stringify(opts), { status: 200, headers: { 'Content-Type': 'application/json' } });
+          }
         } catch(e){ __webauthn_log.w('fetch wrapper error', e); }
         return window.__origFetch(input, init);
       };
@@ -3613,17 +3523,13 @@ function __fg_pin_clearAllInputs() {
       return { ok: false, error: error?.message || 'Failed to save PIN' };
     }
     __fg_pin_log.i('PIN updated successfully');
-
-    // --- persist hasPin locally & reinit inactivity ---
     try {
-      localStorage.setItem('hasPin', 'true');
-      if (typeof setupInactivity === 'function') setupInactivity();
-    } catch(e) {
-      console.warn('Failed to update hasPin locally', e);
-    }
-
+      localStorage.setItem('hasPin','true');
+      // trigger UI sync and prefetch so biometric button becomes ready without reload
+      try { if (typeof window.reconcileBiometricState === 'function') window.reconcileBiometricState(); } catch(e){}
+      try { if (typeof window.prefetchAuthOptions === 'function') window.prefetchAuthOptions(); } catch(e){}
+    } catch(e){}
     return { ok: true };
-
   } catch (err) {
     __fg_pin_log.e('Error updating PIN:', err);
     return { ok: false, error: err.message };
@@ -6228,15 +6134,6 @@ async function loadProfileToSettings() {
     ).toUpperCase();
     settingsAvatar.classList.add('fade-in');
   }
-  // --- sync hasPin from server ---
-  if (data.hasPin !== undefined) {
-    localStorage.setItem('hasPin', data.hasPin ? 'true' : 'false');
-    // Restart inactivity if PIN now enabled
-    if (data.hasPin && typeof setupInactivity === 'function') {
-      try { setupInactivity(); } catch (e) { console.warn('setupInactivity failed', e); }
-    }
-  }
-
 }
 
 loadProfileToSettings();
@@ -7797,55 +7694,58 @@ function __sec_wireEvents() {
           __sec_log.d('__sec_parentHandler: Proceeding with uid', uid);
 
           if (uiOn) {
-  __sec_log.i('Parent toggle ON requested — will revoke existing authenticators (best-effort) then register new');
+            __sec_log.i('Parent toggle ON requested — checking existing authenticators for user', uid);
+            const auths = await __sec_listAuthenticators(uid);
+            __sec_log.d('__sec_parentHandler: Authenticators', auths);
+            if (Array.isArray(auths) && auths.length > 0) {
+              __sec_log.i('Existing authenticators found — showing children without registering new one');
+              __sec_setBiometrics(true, true);
+              __sec_setBusy(__sec_parentSwitch, false);
+              return;
+            }
 
-  // Try to revoke all existing authenticators for this user (best-effort)
-  try {
-    const auths = await __sec_listAuthenticators(uid);
-    __sec_log.d('__sec_parentHandler: Authenticators found before ON', auths);
-
-    if (Array.isArray(auths) && auths.length > 0) {
-      for (const a of auths) {
-        const credential_id = a.credential_id || a.credentialID || a.credentialId;
-        if (!credential_id) {
-          __sec_log.w('__sec_parentHandler: skipping invalid credential id', a);
-          continue;
-        }
-        try {
-          await __sec_revokeAuthenticator(uid, credential_id);
-          __sec_log.i('__sec_parentHandler: revoked', credential_id);
-        } catch(revokeErr) {
-          __sec_log.w('__sec_parentHandler: revoke failed for', credential_id, revokeErr);
-        }
-      }
-    } else {
-      // still call revoke endpoint (server may have stale entries) — pass null credential id to request full reset
-      try {
-        await __sec_revokeAuthenticator(uid, null);
-        __sec_log.i('__sec_parentHandler: called revoke with null to ensure server reset');
-      } catch(e){ /* ignore errors */ }
-    }
-  } catch (err) {
-    __sec_log.w('__sec_parentHandler: failed listing/revoking pre-existing authenticators (non-fatal)', err);
-  }
-
-  // Now proceed to registration flow (always attempt to register fresh)
-  try {
-    __sec_log.i('Starting fresh registration flow after revoke');
-    const regResult = await startRegistration(uid, user.email || user.username || uid, user.fullName || user.email || uid);
-    __sec_log.d('__sec_parentHandler: Registration result', regResult);
-    __sec_setBiometrics(true, true);
-    __sec_log.i('Registration successful (parent ON)');
-  } catch (err) {
-    __sec_log.e('Registration failed after revoke', { err, uid });
-    __sec_setChecked(__sec_parentSwitch, false);
-    __sec_setBiometrics(false, false);
-    alert('Biometric registration failed: ' + (err.message || 'unknown error'));
-  } finally {
-    __sec_setBusy(__sec_parentSwitch, false);
-  }
-}
-
+            try {
+              __sec_log.i('No authenticators found — starting registration flow');
+              const regResult = await startRegistration(uid, user.email || user.username || uid, user.fullName || user.email || uid);
+              __sec_log.d('__sec_parentHandler: Registration result', regResult);
+              __sec_setBiometrics(true, true);
+              __sec_log.i('Registration successful');
+            } catch (err) {
+              __sec_log.e('Registration failed', { err, uid });
+              __sec_setChecked(__sec_parentSwitch, false);
+              __sec_setBiometrics(false, false);
+              alert('Biometric registration failed: ' + (err.message || 'unknown error'));
+            } finally {
+              __sec_setBusy(__sec_parentSwitch, false);
+            }
+          } else {
+            try {
+              __sec_log.i('Parent toggle OFF requested — revoking authenticators for user', uid);
+              const auths = await __sec_listAuthenticators(uid);
+              __sec_log.d('__sec_parentHandler: Authenticators to revoke', auths);
+              if (Array.isArray(auths) && auths.length > 0) {
+                for (const a of auths) {
+                  const credential_id = a.credential_id || a.credentialID || a.credentialId;
+                  __sec_log.d('__sec_parentHandler: Attempting revoke for', credential_id);
+                  if (!credential_id) {
+                    __sec_log.w('__sec_parentHandler: Skipping invalid credential_id', a);
+                    continue;
+                  }
+                  const ok = await __sec_revokeAuthenticator(uid, credential_id);
+                  __sec_log.d('revoke result', credential_id, ok);
+                }
+              } else {
+                __sec_log.d('No authenticators to revoke for user', uid);
+              }
+              __sec_setBiometrics(false, true);
+            } catch (err) {
+              __sec_log.e('Error revoking authenticators', { err, uid });
+              __sec_setBiometrics(false, true);
+              alert('Warning: failed to revoke authenticator(s) on server. Check console.');
+            } finally {
+              __sec_setBusy(__sec_parentSwitch, false);
+            }
+          }
           __sec_log.d('__sec_parentHandler: Exit');
         });
       };
@@ -8813,13 +8713,9 @@ if (!opts) {
             var optRes = await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/options', {
               method: 'POST',
               credentials: 'include',
-              headers: { 
-                'Content-Type': 'application/json',
-                'X-Bypass-AuthCache': '1'   // FORCE fresh server options when verifying
-              },
-              body: JSON.stringify({ userId: userId, credentialId: storedId })
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ credentialId: storedId, userId: (window.__webauthn_userId || null) })
             });
-
             if (!optRes.ok) {
               const txt = await optRes.text().catch(()=>'');
               __sec_log && __sec_log.w && __sec_log.w('verifyBiometrics: auth/options returned non-ok', { status: optRes.status, txtSample: (txt||'').slice(0,300) });
@@ -9580,19 +9476,10 @@ function bindBiometricSettings({
     try {
       await withLoader(async () => {
         if (wantOn) {
-          const hasPin = localStorage.getItem('hasPin') === 'true';
-          if (!hasPin) {
-            notify('Please set a PIN first before enabling biometrics.', 'info');
-            setSwitch(parent, false); // Revert toggle
-            parent.__bioProcessing = false;
-            parent.disabled = false;
-            return; // Abort
-          }
           const res = await registerBiometrics();  // Server call only here
           if (res && res.success) {
             writeFlag('biometricsEnabled', true);
             writeFlag('biometricForLogin', true);  // Auto-enable children flags
-            prefetchAuthOptions();
             writeFlag('biometricForTx', true);
             if (res.credentialId) {
               localStorage.setItem('credentialId', res.credentialId);
@@ -9601,7 +9488,6 @@ function bindBiometricSettings({
             setSwitch(childTx, true);
             setOptionsVisible(true);
             safeCall(notify, 'Biometrics enabled', 'success');
-            prefetchAuthOptions();
           } else {
             writeFlag('biometricsEnabled', false);
             setSwitch(parent, false);
@@ -9612,7 +9498,6 @@ function bindBiometricSettings({
           const res = disableBiometrics();  // Server revoke only here
           writeFlag('biometricsEnabled', false);
           writeFlag('biometricForLogin', false);  // Auto-disable children flags
-          invalidateAuthOptionsCache();
           writeFlag('biometricForTx', false);
           console.log('[DEBUG] About to remove credentialId (caller: disableBiometrics or toggle) at', new Date().toISOString());
           localStorage.removeItem('credentialId');
@@ -9620,7 +9505,6 @@ function bindBiometricSettings({
           setSwitch(childTx, false);
           setOptionsVisible(false);
           safeCall(notify, 'Biometrics disabled', 'info');
-          invalidateAuthOptionsCache();
         }
       });
     } catch (err) {
@@ -9691,16 +9575,10 @@ function bindBiometricSettings({
 
   // Sync on storage change
   window.addEventListener('storage', (e) => {
-  if (['biometricsEnabled', 'biometricForLogin', 'biometricForTx', 'credentialId', 'hasPin'].includes(e.key)) {
-    setTimeout(syncFromStorage, 50); // Existing sync
-    // Restart inactivity if flags changed
-    setupInactivity();
-    // Prefetch if bio/cred changed
-    if (['biometricsEnabled', 'credentialId'].includes(e.key) && localStorage.getItem('biometricsEnabled') === 'true') {
-      prefetchAuthOptions();
+    if (['biometricsEnabled', 'biometricForLogin', 'biometricForTx', 'credentialId'].includes(e.key)) {
+      setTimeout(syncFromStorage, 50);
     }
-  }
-});
+  });
 
   // Initial sync
   syncFromStorage();
@@ -9799,26 +9677,6 @@ function resetIdleTimer() {
 
 // Full replacement for shouldReauth (unchanged from yours)
 async function shouldReauth(context = 'reauth') {
-  // Prioritize latest storage flags for real-time updates
-  const storedHasPin = localStorage.getItem('hasPin') === 'true';
-  const storedBiometricsEnabled = localStorage.getItem('biometricsEnabled') === 'true';
-  const storedBioLogin = localStorage.getItem('biometricForLogin') === 'true';
-  const storedBioTx = localStorage.getItem('biometricForTx') === 'true';
-
-  // Then, proceed with session fetch...
-  const session = await safeCall(getSession);
-  const sessionHasPin = !!(session && session.user && (session.user.hasPin || session.user.pin));
-
-  // Merge: Use stored if fresher/no session
-  const hasPin = storedHasPin || sessionHasPin;
-  const hasBio = storedBiometricsEnabled && ('PublicKeyCredential' in window);
-  const isBioApplicable = hasBio && (
-    (context === 'login' && storedBioLogin) ||
-    (context === 'transaction' && storedBioTx) ||
-    (context === 'reauth' && (storedBioLogin || storedBioTx))
-  );
-
-// Existing logic: const needs = hasPin || isBioApplicable; ...
   console.log('shouldReauth called with context:', context);
   try {
     const session = await safeCall(getSession);
@@ -10168,25 +10026,49 @@ async function verifyBiometrics(uid, context) {
       }
       if (!userId) throw new Error('No user id available');
 
-      var publicKey = window.__cachedAuthOptions;
-      var maxCacheMs = 30 * 1000;
-      if (publicKey && window.__cachedAuthOptionsFetchedAt && ((Date.now() - window.__cachedAuthOptionsFetchedAt) > maxCacheMs)) {
-        publicKey = null;
+      // Prefer a fresh challenge for actual authentication (avoid single-use challenge reuse)
+      let publicKey = null;
+      try {
+        if (typeof window.getFreshAuthOptions === 'function') {
+          publicKey = await window.getFreshAuthOptions({});
+        } else if (typeof window.getAuthOptionsWithCache === 'function') {
+          // attempt to invalidate then fetch fresh via helper if available
+          if (typeof window.invalidateAuthOptionsCache === 'function') try { window.invalidateAuthOptionsCache(); } catch(e){}
+          publicKey = await window.getAuthOptionsWithCache({});
+        } else {
+          // fallback: use cached if present and recent
+          publicKey = window.__cachedAuthOptions || null;
+          var maxCacheMs = 30 * 1000;
+          if (publicKey && window.__cachedAuthOptionsFetchedAt && ((Date.now() - window.__cachedAuthOptionsFetchedAt) > maxCacheMs)) {
+            publicKey = null;
+          }
+          if (!publicKey) {
+            // last resort fetch directly
+            try {
+              const optRes = await (window.__origFetch || fetch)((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/options', {
+                method: 'POST',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userId: userId, credentialId: localStorage.getItem('credentialId') || null })
+              });
+              const txt = await optRes.text();
+              publicKey = txt ? JSON.parse(txt) : null;
+            } catch(e){
+              publicKey = null;
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('[verifyBiometrics] fresh options fetch failed, falling back to cache', e);
+        publicKey = window.__cachedAuthOptions || null;
       }
 
       if (!publicKey) {
-        console.log('[verifyBiometrics] no cached options - fetching from server');
-        var storedId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
-        var optRes = await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/options', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 
-            'Content-Type': 'application/json',
-            'X-Bypass-AuthCache': '1'   // FORCE fresh server options when verifying
-          },
+        throw new Error('Could not obtain WebAuthn options for authentication');
+      }
+
           body: JSON.stringify({ userId: userId, credentialId: storedId })
         });
-
         if (!optRes.ok) {
           var txt = await optRes.text();
           throw new Error('Auth options fetch failed: ' + txt);
@@ -10252,7 +10134,6 @@ async function verifyBiometrics(uid, context) {
     }
   });
 }
-
 
 
 
@@ -10403,13 +10284,11 @@ async function showReauthModal(context = 'reauth') {
       return;
     }
     cacheDomRefs();
-      if (!promptModal || !yesBtn) {
-        console.log('No promptModal or yesBtn, opening PIN reauth modal (inactivity)');
-        // Use initReauthModal to force PIN view (do not auto-invoke biometrics)
-        await initReauthModal({ show: true, context: 'reauth' });
-        return;
-      }
-
+    if (!promptModal || !yesBtn) {
+      console.log('No promptModal or yesBtn, showing reauth');
+      await showReauthModal();
+      return;
+    }
     if (!promptModal.classList.contains('hidden')) {
       console.log('Prompt already shown');
       return;
@@ -10453,7 +10332,7 @@ async function showReauthModal(context = 'reauth') {
     document.addEventListener('keydown', escHandler, { once: true });
 
     if (PROMPT_AUTO_CLOSE) {
-            promptTimeout = setTimeout(async () => {
+      promptTimeout = setTimeout(async () => {
         console.log('Prompt auto-close timeout');
         if (!promptModal.classList.contains('hidden')) {
           promptModal.classList.add('hidden');
@@ -10461,14 +10340,11 @@ async function showReauthModal(context = 'reauth') {
             yesBtn.removeEventListener('click', yesHandler);
           } catch (e) {}
           document.removeEventListener('keydown', escHandler);
-          // Open PIN modal on inactivity auto-close (prevent immediate biometric)
-          await initReauthModal({ show: true, context: 'reauth' });
+          await showReauthModal();
         }
       }, PROMPT_TIMEOUT);
-
     }
   }
-
 
   async function forceInactivityCheck() {
     console.log('forceInactivityCheck called');
@@ -10538,7 +10414,6 @@ try { if (!window.onSuccessfulReauth) window.onSuccessfulReauth = onSuccessfulRe
 try { if (!window.registerBiometrics) window.registerBiometrics = registerBiometrics; } catch (e) {}
 try { if (!window.disableBiometrics) window.disableBiometrics = disableBiometrics; } catch (e) {}
 
-})();
 
   // ---- Stable non-destructive live phone formatter (safe to place anywhere) ----
 (function attachStablePhoneFormatter_Last(){
