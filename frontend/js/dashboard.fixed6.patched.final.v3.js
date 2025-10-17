@@ -1107,7 +1107,7 @@ const svgShapes = {
           if ((rawRes.status === 400 && /missing.*user/i.test(text || '')) || !resolvedUser) {
             __webauthn_log.i('Primary failed due to missing userId; will try discover fallback');
             triedDiscoverFallback = true;
-            const { rawRes: dRes, text: dText } = await tryFetch('/webauthn/auth/options/discover', { credentialId: resolvedCred });
+            const { rawRes: dRes, text: dText } = await tryFetch('/webauthn/auth/options', { credentialId: resolvedCred });
             if (!dRes.ok) {
               __webauthn_log.e('Discover fallback failed', { status: dRes.status, text: dText });
               throw new Error(`Auth options discover failed: ${dText || dRes.status}`);
@@ -1124,7 +1124,7 @@ const svgShapes = {
       } else {
         // No userId: prefer discover endpoint (server supports discover)
         __webauthn_log.i('No userId resolved; calling discover endpoint to avoid Missing userId');
-        const { rawRes, text } = await tryFetch('/webauthn/auth/options/discover', { credentialId: resolvedCred });
+        const { rawRes, text } = await tryFetch('/webauthn/auth/options', { credentialId: resolvedCred });
         if (!rawRes.ok) {
           __webauthn_log.e('Discover endpoint failed', { status: rawRes.status, text });
           throw new Error(text || `HTTP ${rawRes.status}`);
@@ -6524,6 +6524,7 @@ function __sec_setBiometrics(parentOn, animate = true) {
   }
 }
 
+
     __sec_log.i('biom ON', { animate });
   } else {
     // Turn children off too
@@ -6608,7 +6609,7 @@ async function reconcileBiometricState() {
   try {
     __sec_log.d('reconcile: have local cred, checking server discover endpoint', { credentialIdSample: (cred && cred.slice ? cred.slice(0,20) : cred) });
     const apiBase = (window.__SEC_API_BASE || (typeof API_BASE !== 'undefined' ? API_BASE : ''));
-    const res = await (typeof window.__origFetch !== 'undefined' ? window.__origFetch : fetch)(apiBase + '/webauthn/auth/options/discover', {
+    const res = await (typeof window.__origFetch !== 'undefined' ? window.__origFetch : fetch)(apiBase + '/webauthn/auth/options', {
       method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ credentialId: cred })
     });
@@ -9677,7 +9678,7 @@ async function prefetchAuthOptionsFor(uid, context = 'reauth') {
   try {
     const apiBase = window.__SEC_API_BASE || '';
     const credentialId = localStorage.getItem('credentialId') || null;
-    const endpoint = credentialId ? '/webauthn/auth/options' : '/webauthn/auth/options/discover';
+    const endpoint = credentialId ? '/webauthn/auth/options' : '/webauthn/auth/options';
     const body = credentialId ? { userId: uid, credentialId, context } : { userId: uid, context };
 
     const res = await fetch(`${apiBase}${endpoint}`, {
