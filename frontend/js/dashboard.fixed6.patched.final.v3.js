@@ -954,6 +954,30 @@ const svgShapes = {
   receive: `<svg class="bank-icon" width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M4 9v9h16V9l-8-5-8 5zm4 4h8v2H8v-2zm0 4h4v2H8v-2z" fill="#00cc00" stroke="#fff" stroke-width="1"/></svg>`
 };
 
+// temporary debug wrapper for fetch to /webauthn/auth/options
+(function(){
+  const orig = window.__origFetch || window.fetch;
+  window.__debugFetchAuthOptions = true;
+  window.fetch = async function(input, init) {
+    try {
+      const url = (typeof input === 'string') ? input : (input && input.url) || '';
+      if (url.indexOf('/webauthn/auth/options') !== -1) {
+        let body = null;
+        try { body = init && init.body ? JSON.parse(init.body) : null; } catch(e){ body = init && init.body ? init.body : null; }
+        console.log('[DEBUG POST] ->', url, 'body:', body);
+        const start = Date.now();
+        const res = await orig(input, init);
+        const text = await res.text().catch(()=>'(no body)');
+        console.log('[DEBUG RESP] <-', url, 'status:', res.status, 'durationMs:', Date.now()-start, 'text:', text);
+        // re-create response for callers
+        return new Response(text, { status: res.status, headers: {'Content-Type':'application/json'} });
+      }
+    } catch(e){ console.warn('debug fetch wrapper error', e); }
+    return orig(input, init);
+  };
+})();
+
+
 // --- MAIN EVENT LISTENERS ---
 
 // --- WebAuthn: centralized TTL-backed fetch for /webauthn/auth/options ---
@@ -6214,6 +6238,7 @@ document.querySelectorAll('.contact-box').forEach((box) => {
     w: (...a) => { if (__sec_DEBUG) console.warn('[__sec][warn]', ...a); },
     e: (...a) => { if (__sec_DEBUG) console.error('[__sec][error]', ...a); },
   };
+  window.__sec_log = window.__sec_log || __sec_log; // expose for debugging
 
   __sec_log.d('Security module initializing with supabase:', !!supabase);
 
@@ -7463,6 +7488,7 @@ async function startAuthentication(userId) {
 window.startAuthentication = window.startAuthentication || startAuthentication;
 
 
+
 /* ---- WebAuthn helper calls to server (list/revoke) ---- */
 async function __sec_listAuthenticators(userId) {
   __sec_log.d('listAuthenticators entry', { userId });
@@ -8483,222 +8509,205 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
       console.log('Fresh user data populated and cached');
     }
 
-
-    // bind this directly to the biometric button
-async function handleBiometricButtonClick(uid, context='reauth') {
-  console.log('[BIOMETRIC CLICK] handler invoked', { uid, time: new Date().toISOString(), visible: document.visibilityState });
-  // MUST be immediate in user gesture: use cached options
-  const opts = window.__cachedAuthOptions;
-  if (!opts) {
-    console.warn('[BIOMETRIC CLICK] No cached auth options — consider prefetchAuthOptionsFor() when showing modal');
-    // Optionally: fall back to fetching then call get() (may fail due to lost gesture)
-    return;
-  }
-  try {
-    // Call get() synchronously in the click handler (no awaits before it)
-    const assertion = await navigator.credentials.get({ publicKey: opts });
-    console.log('[BIOMETRIC CLICK] navigator.credentials.get() returned', assertion);
-    // then perform your normal verify flow (send assertion to server)
-    // (perform verification async now)
-    // --- example: process and send to /webauthn/auth/verify ---
-  } catch (e) {
-    console.error('[BIOMETRIC CLICK] navigator.credentials.get() error', e);
-  }
-}
-
-// 🔹 Biometric button in PIN view (reauth)
-setTimeout(() => {
-  const bioBtn = document.getElementById('pinBiometricBtn');
-  if (!bioBtn) return;
-
-  // 🔸 Determine if biometrics enabled for login (client-side only)
-  // 🔸 Determine if biometrics enabled for login (client-side only)
-// Enable if explicit flag set OR a stored credential exists locally
-var _bioFlag = (
-  localStorage.getItem('biometricForLogin') ||
-  localStorage.getItem('__sec_bioLogin') ||
-  localStorage.getItem('security_bio_login') || ''
-).toLowerCase();
-
-var _storedCred = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id') || localStorage.getItem('webauthn_cred') || '';
-
-const bioLoginEnabled = !!_storedCred || ['true', '1', 'yes'].includes(_bioFlag);
-
-
-
-
-  // Hide button if biometric not enabled
-  bioBtn.style.display = bioLoginEnabled ? 'inline-flex' : 'none';
-  console.log(`[reauth] Biometric button visibility: ${bioLoginEnabled ? 'shown' : 'hidden'}`);
-
-  if (bioBtn.__bound) return; // prevent double-binding
-  
-bioBtn.addEventListener('click', async () => {
-    console.log('[reauth] Biometric button clicked (PIN modal)');
-
-    if (!bioLoginEnabled) {
-      console.warn('[reauth] Biometric login not enabled locally.');
-      if (typeof safeCall === 'function' && typeof notify === 'function') {
-        safeCall(notify, 'Biometric login not enabled', 'warn');
-      } else {
-        console.warn('Biometric login not enabled');
-      }
-      return;
-    }
-
-    // Show PIN/modal immediately (do not wait for any fetch)
-    try {
-      if (typeof openPinModal === 'function') {
-        openPinModal();
-      } else if (typeof showBiometricPanel === 'function') {
-        showBiometricPanel();
-      }
-    } catch (e) {
-      console.warn('Failed to open PIN/modal immediately', e);
-    }
-
-    // Trigger prefetch (non-blocking)
-    try { window.prefetchAuthOptions && window.prefetchAuthOptions(); } catch(e){}
-
-    try {
-      // Prepare publicKey options: prefer cached options for instant prompt
-      var publicKey = window.__cachedAuthOptions || null;
-      var storedId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
-
-      if (publicKey) {
-        // ensure allowCredentials includes stored id in ArrayBuffer form
-        if (!publicKey.allowCredentials || !publicKey.allowCredentials.length) {
-          try {
-            publicKey.allowCredentials = [{
-              type: 'public-key',
-              id: (window.fromBase64Url ? window.fromBase64Url(storedId) : (typeof fromBase64Url === 'function' ? fromBase64Url(storedId) : null)),
-              transports: ['internal']
-            }];
-          } catch (e) {
-            console.warn('Could not attach allowCredentials from storedId', e);
-          }
-        }
-      } else {
-        // No cached options - fetch now (will delay but UI already open)
-        var optRes = await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/options', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ credentialId: storedId, userId: (window.__webauthn_userId || null) })
-        });
-        if (!optRes.ok) {
-  const txt = await optRes.text().catch(()=>'');
-  __sec_log.w('verifyBiometrics: auth/options returned non-ok', { status: optRes.status, txtSample: (txt||'').slice(0,300) });
-  if (optRes.status === 404 || /no authenticators found/i.test(txt || '')) {
-    // clear local flags (mirror reconcile logic)
-    localStorage.setItem(__sec_KEYS.biom, '0');
-    localStorage.setItem('biometricsEnabled', 'false');
-    localStorage.setItem(__sec_KEYS.bioLogin, '0');
-    localStorage.setItem(__sec_KEYS.bioTx, '0');
-    localStorage.setItem('biometricForLogin', 'false');
-    localStorage.setItem('biometricForTx', 'false');
-    // set UI off
-    if (__sec_parentSwitch) __sec_setChecked(__sec_parentSwitch, false);
-    if (__sec_bioOptions) { __sec_bioOptions.classList.remove('show'); __sec_bioOptions.hidden = true; }
-  }
-  throw new Error('Auth options fetch failed: ' + txt);
-}
-
-        if (!optRes.ok) {
-          var txt = await optRes.text();
-          throw new Error('Auth options fetch failed: ' + txt);
-        }
-        publicKey = await optRes.json();
-        if (publicKey.challenge) {
-          try { publicKey.challenge = (window.fromBase64Url ? window.fromBase64Url(publicKey.challenge) : fromBase64Url(publicKey.challenge)); } catch(e){}
-        }
-        if (Array.isArray(publicKey.allowCredentials)) {
-          try {
-            publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){ return Object.assign({}, c, { id: (window.fromBase64Url ? window.fromBase64Url(c.id) : fromBase64Url(c.id)) }); });
-          } catch(e){}
-        } else {
-          try {
-            publicKey.allowCredentials = [{
-              type: 'public-key',
-              id: (window.fromBase64Url ? window.fromBase64Url(storedId) : fromBase64Url(storedId)),
-              transports: ['internal']
-            }];
-          } catch(e){}
-        }
-      }
-
-      // Call navigator.credentials.get immediately within the user gesture
-      var assertion = await navigator.credentials.get({ publicKey: publicKey });
-      if (!assertion) {
-        throw new Error('No assertion returned');
-      }
-
-      // Build payload (convert ArrayBuffers to base64url)
-      function bufToB64Url(buf) {
-        return (window.toBase64Url ? window.toBase64Url(buf) : (function(b){
-          var bytes = new Uint8Array(b);
-          var str = '';
-          for (var i=0;i<bytes.length;i++) str += String.fromCharCode(bytes[i]);
-          return btoa(str).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
-        })(buf));
-      }
-
-      var payload = {
-        id: assertion.id,
-        rawId: bufToB64Url(assertion.rawId),
-        type: assertion.type,
-        response: {
-          authenticatorData: bufToB64Url(assertion.response.authenticatorData),
-          clientDataJSON: bufToB64Url(assertion.response.clientDataJSON),
-          signature: bufToB64Url(assertion.response.signature),
-          userHandle: assertion.response.userHandle ? bufToB64Url(assertion.response.userHandle) : null
-        }
-      };
-
-      // Now fetch session (user id) and send payload to server for verification
-      var session = await safeCall(getSession);
-      var uid = session && (session.user && (session.user.uid || session.user.id));
-
-      var verifyRes = await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/verify', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(Object.assign({}, payload, { userId: uid }))
-      });
-
-      var verifyData = {};
-      try { verifyData = await verifyRes.json(); } catch(e){ verifyData = { error: 'Invalid JSON' }; }
-
-      if (!verifyRes.ok) {
-        console.warn('[reauth] Biometric verification failed or server error', verifyData);
-        if (typeof safeCall === 'function' && typeof notify === 'function') safeCall(notify, 'Biometric verification failed', 'error');
+    // bind this directly to the biometric button (kept so manual biometric from PIN view still works)
+    async function handleBiometricButtonClick(uid, context='reauth') {
+      console.log('[BIOMETRIC CLICK] handler invoked', { uid, time: new Date().toISOString(), visible: document.visibilityState });
+      // MUST be immediate in user gesture: use cached options
+      const opts = window.__cachedAuthOptions;
+      if (!opts) {
+        console.warn('[BIOMETRIC CLICK] No cached auth options — consider prefetchAuthOptionsFor() when showing modal');
+        // Optionally: fall back to fetching then call get() (may fail due to lost gesture)
         return;
       }
-
-      if (verifyData && verifyData.verified) {
-        console.log('[reauth] Biometric verification success', verifyData);
-        if (typeof hideReauthModal === 'function') hideReauthModal();
-        if (typeof onSuccessfulReauth === 'function') onSuccessfulReauth();
-      } else {
-        console.warn('[reauth] Biometric verification failed or cancelled', verifyData);
-        if (typeof safeCall === 'function' && typeof notify === 'function') {
-          safeCall(notify, 'Biometric verification failed', 'error');
-        }
-      }
-
-    } catch (err) {
-      console.error('[reauth] Biometric verification error:', err);
-      if (typeof safeCall === 'function' && typeof notify === 'function') {
-        safeCall(notify, 'Biometric verification failed', 'error');
+      try {
+        // Call get() synchronously in the click handler (no awaits before it)
+        const assertion = await navigator.credentials.get({ publicKey: opts });
+        console.log('[BIOMETRIC CLICK] navigator.credentials.get() returned', assertion);
+        // then perform your normal verify flow (send assertion to server)
+      } catch (e) {
+        console.error('[BIOMETRIC CLICK] navigator.credentials.get() error', e);
       }
     }
-  });
 
-  bioBtn.__bound = true;
-  console.log('[reauth] pinBiometricBtn bound successfully');
-}, 300);
+    // 🔹 Biometric button in PIN view (reauth)
+    setTimeout(() => {
+      const bioBtn = document.getElementById('pinBiometricBtn');
+      if (!bioBtn) return;
 
+      var _bioFlag = (
+        localStorage.getItem('biometricForLogin') ||
+        localStorage.getItem('__sec_bioLogin') ||
+        localStorage.getItem('security_bio_login') || ''
+      ).toLowerCase();
 
+      var _storedCred = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id') || localStorage.getItem('webauthn_cred') || '';
+
+      const bioLoginEnabled = !!_storedCred || ['true', '1', 'yes'].includes(_bioFlag);
+
+      // Hide button if biometric not enabled
+      bioBtn.style.display = bioLoginEnabled ? 'inline-flex' : 'none';
+      console.log(`[reauth] Biometric button visibility: ${bioLoginEnabled ? 'shown' : 'hidden'}`);
+
+      if (bioBtn.__bound) return; // prevent double-binding
+
+      bioBtn.addEventListener('click', async () => {
+        console.log('[reauth] Biometric button clicked (PIN modal)');
+
+        if (!bioLoginEnabled) {
+          console.warn('[reauth] Biometric login not enabled locally.');
+          if (typeof safeCall === 'function' && typeof notify === 'function') {
+            safeCall(notify, 'Biometric login not enabled', 'warn');
+          } else {
+            console.warn('Biometric login not enabled');
+          }
+          return;
+        }
+
+        // Show PIN/modal immediately (PIN view already visible, but ensure modal is open)
+        try {
+          if (typeof openPinModal === 'function') {
+            openPinModal();
+          } else if (typeof showBiometricPanel === 'function') {
+            showBiometricPanel();
+          }
+        } catch (e) {
+          console.warn('Failed to open PIN/modal immediately', e);
+        }
+
+        // Trigger prefetch (non-blocking)
+        try { window.prefetchAuthOptions && window.prefetchAuthOptions(); } catch(e){}
+
+        try {
+          // Prepare publicKey options: prefer cached options for instant prompt
+          var publicKey = window.__cachedAuthOptions || null;
+          var storedId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
+
+          if (publicKey) {
+            // ensure allowCredentials includes stored id in ArrayBuffer form
+            if (!publicKey.allowCredentials || !publicKey.allowCredentials.length) {
+              try {
+                publicKey.allowCredentials = [{
+                  type: 'public-key',
+                  id: (window.fromBase64Url ? window.fromBase64Url(storedId) : (typeof fromBase64Url === 'function' ? fromBase64Url(storedId) : null)),
+                  transports: ['internal']
+                }];
+              } catch (e) {
+                console.warn('Could not attach allowCredentials from storedId', e);
+              }
+            }
+          } else {
+            // No cached options - fetch now (will delay but UI already open)
+            var optRes = await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/options', {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ credentialId: storedId, userId: (window.__webauthn_userId || null) })
+            });
+            if (!optRes.ok) {
+              const txt = await optRes.text().catch(()=>'');
+              __sec_log && __sec_log.w && __sec_log.w('verifyBiometrics: auth/options returned non-ok', { status: optRes.status, txtSample: (txt||'').slice(0,300) });
+              if (optRes.status === 404 || /no authenticators found/i.test(txt || '')) {
+                // clear local flags (mirror reconcile logic)
+                localStorage.setItem(__sec_KEYS.biom, '0');
+                localStorage.setItem('biometricsEnabled', 'false');
+                localStorage.setItem(__sec_KEYS.bioLogin, '0');
+                localStorage.setItem(__sec_KEYS.bioTx, '0');
+                localStorage.setItem('biometricForLogin', 'false');
+                localStorage.setItem('biometricForTx', 'false');
+                if (__sec_parentSwitch) __sec_setChecked(__sec_parentSwitch, false);
+                if (__sec_bioOptions) { __sec_bioOptions.classList.remove('show'); __sec_bioOptions.hidden = true; }
+              }
+              throw new Error('Auth options fetch failed: ' + txt);
+            }
+            publicKey = await optRes.json();
+            if (publicKey.challenge) {
+              try { publicKey.challenge = (window.fromBase64Url ? window.fromBase64Url(publicKey.challenge) : fromBase64Url(publicKey.challenge)); } catch(e){}
+            }
+            if (Array.isArray(publicKey.allowCredentials)) {
+              try {
+                publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){ return Object.assign({}, c, { id: (window.fromBase64Url ? window.fromBase64Url(c.id) : fromBase64Url(c.id)) }); });
+              } catch(e){}
+            } else {
+              try {
+                publicKey.allowCredentials = [{
+                  type: 'public-key',
+                  id: (window.fromBase64Url ? window.fromBase64Url(storedId) : fromBase64Url(storedId)),
+                  transports: ['internal']
+                }];
+              } catch(e){}
+            }
+          }
+
+          // Call navigator.credentials.get immediately within the user gesture
+          var assertion = await navigator.credentials.get({ publicKey: publicKey });
+          if (!assertion) {
+            throw new Error('No assertion returned');
+          }
+
+          // Build payload (convert ArrayBuffers to base64url)
+          function bufToB64Url(buf) {
+            return (window.toBase64Url ? window.toBase64Url(buf) : (function(b){
+              var bytes = new Uint8Array(b);
+              var str = '';
+              for (var i=0;i<bytes.length;i++) str += String.fromCharCode(bytes[i]);
+              return btoa(str).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+            })(buf));
+          }
+
+          var payload = {
+            id: assertion.id,
+            rawId: bufToB64Url(assertion.rawId),
+            type: assertion.type,
+            response: {
+              authenticatorData: bufToB64Url(assertion.response.authenticatorData),
+              clientDataJSON: bufToB64Url(assertion.response.clientDataJSON),
+              signature: bufToB64Url(assertion.response.signature),
+              userHandle: assertion.response.userHandle ? bufToB64Url(assertion.response.userHandle) : null
+            }
+          };
+
+          // Now fetch session (user id) and send payload to server for verification
+          var session = await safeCall(getSession);
+          var uid = session && (session.user && (session.user.uid || session.user.id));
+
+          var verifyRes = await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/verify', {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(Object.assign({}, payload, { userId: uid }))
+          });
+
+          var verifyData = {};
+          try { verifyData = await verifyRes.json(); } catch(e){ verifyData = { error: 'Invalid JSON' }; }
+
+          if (!verifyRes.ok) {
+            console.warn('[reauth] Biometric verification failed or server error', verifyData);
+            if (typeof safeCall === 'function' && typeof notify === 'function') safeCall(notify, 'Biometric verification failed', 'error');
+            return;
+          }
+
+          if (verifyData && verifyData.verified) {
+            console.log('[reauth] Biometric verification success', verifyData);
+            if (typeof hideReauthModal === 'function') hideReauthModal();
+            if (typeof onSuccessfulReauth === 'function') onSuccessfulReauth();
+          } else {
+            console.warn('[reauth] Biometric verification failed or cancelled', verifyData);
+            if (typeof safeCall === 'function' && typeof notify === 'function') {
+              safeCall(notify, 'Biometric verification failed', 'error');
+            }
+          }
+
+        } catch (err) {
+          console.error('[reauth] Biometric verification error:', err);
+          if (typeof safeCall === 'function' && typeof notify === 'function') {
+            safeCall(notify, 'Biometric verification failed', 'error');
+          }
+        }
+      });
+
+      bioBtn.__bound = true;
+      console.log('[reauth] pinBiometricBtn bound successfully');
+    }, 300);
 
     const displayName = user.username || (user.fullName || '').split(' ')[0] || 'User';
     if (reauthName) reauthName.textContent = displayName.charAt(0).toUpperCase() + displayName.slice(1);
@@ -8728,19 +8737,22 @@ bioBtn.addEventListener('click', async () => {
     return true;
   }
 
-  // Set up views (instant sync from localStorage)
-  const isBioApplicable = reauthStatus.method === 'biometric';
+  // --------- KEY CHANGE: FORCE PIN VIEW (no view switching) ----------
   try {
-    if (biometricView) biometricView.style.display = isBioApplicable ? 'block' : 'none';
-    if (pinView) pinView.style.display = isBioApplicable ? 'none' : 'block';
-    if (switchToBiometric) switchToBiometric.style.display = localStorage.getItem('security_biom_enabled') === '1' && ('PublicKeyCredential' in window) ? '' : 'none';
-    if (switchToPin) switchToPin.style.display = '';
-    console.log('Views set - biometric display:', biometricView?.style.display, 'pin display:', pinView?.style.display);
+    // Always show PIN view and hide biometric view
+    if (biometricView) biometricView.style.display = 'none';
+    if (pinView) pinView.style.display = 'block';
+
+    // Hide any UI that allows switching away (keep elements if other code references them)
+    try { if (switchToBiometric) switchToBiometric.style.display = 'none'; } catch (e) {}
+    try { if (switchToPin) switchToPin.style.display = 'none'; } catch (e) {}
+
+    console.log('Views set - forced PIN view (biometric hidden)');
   } catch (e) {
-    console.error('Error setting views:', e);
+    console.error('Error forcing PIN view:', e);
   }
 
-  // Resume lockout countdowns
+  // Resume lockout countdowns if provided
   try {
     if (typeof resumeLockoutIfAny === 'function') {
       resumeLockoutIfAny();
@@ -8749,7 +8761,7 @@ bioBtn.addEventListener('click', async () => {
     console.error('Error calling resumeLockoutIfAny:', e);
   }
 
-  // Bind PIN inputs
+  // Bind PIN inputs (same as before)
   try {
     console.log('Binding PIN inputs');
     const inputs = getReauthInputs();
@@ -8762,7 +8774,7 @@ bioBtn.addEventListener('click', async () => {
     console.error('Error binding PIN inputs:', e);
   }
 
-  // PIN form submit
+  // PIN form submit (unchanged)
   try {
     console.log('Setting up PIN form submit');
     if (pinView && !pinView.__reauthSubmitBound) {
@@ -8806,7 +8818,7 @@ bioBtn.addEventListener('click', async () => {
     console.error('Error setting up PIN submit:', e);
   }
 
-  // Delete key
+  // Delete key (unchanged)
   try {
     console.log('Setting up delete key');
     if (deleteReauthKey && !deleteReauthKey.__bound) {
@@ -8829,7 +8841,7 @@ bioBtn.addEventListener('click', async () => {
     console.error('Error setting up delete key:', e);
   }
 
-  // Biometric verify button (manual fallback)
+  // Biometric verify button: keep as manual fallback (unchanged)
   try {
     console.log('Setting up biometric verify button');
     if (verifyBiometricBtn && !verifyBiometricBtn.__bound) {
@@ -8850,11 +8862,10 @@ bioBtn.addEventListener('click', async () => {
             return;
           }
           showSlideNotification('Biometric verification failed or cancelled', 'error');
-          switchViews(false);
+          // fallback to PIN view (already visible)
         } catch (err) {
           console.error('Biometric error in reauth:', err);
           showSlideNotification('Biometric not available — please use PIN', 'error');
-          try { if (switchToPin) switchToPin.click(); else switchViews(false); } catch (e) { console.error(e); }
         }
       });
       verifyBiometricBtn.__bound = true;
@@ -8864,22 +8875,16 @@ bioBtn.addEventListener('click', async () => {
     console.error('Error setting up biometric verify button:', e);
   }
 
-  // Switch views
+  // Remove/disable view switches (no user toggling views)
   try {
-    console.log('Setting up view switches');
-    if (switchToPin && !switchToPin.__bound) {
-      switchToPin.addEventListener('click', (ev) => { ev.preventDefault(); switchViews(false); });
-      switchToPin.__bound = true;
-    }
-    if (switchToBiometric && !switchToBiometric.__bound) {
-      switchToBiometric.addEventListener('click', (ev) => { ev.preventDefault(); switchViews(true); });
-      switchToBiometric.__bound = true;
-    }
+    console.log('Disabling view switches (modal forced to PIN view)');
+    try { if (switchToPin) switchToPin.style.display = 'none'; } catch(e){}
+    try { if (switchToBiometric) switchToBiometric.style.display = 'none'; } catch(e){}
   } catch (e) {
-    console.error('Error setting up view switches:', e);
+    console.error('Error disabling view switches:', e);
   }
 
-  // Logout & forget links
+  // Logout & forget links (unchanged)
   try {
     console.log('Setting up logout and forget links');
     [logoutLinkBio, logoutLinkPin].forEach((link) => {
@@ -8936,7 +8941,7 @@ bioBtn.addEventListener('click', async () => {
     console.error('Error calling initReauthKeypad:', e);
   }
 
-  // Modal visibility and auto-biometric attempt (instant sync from localStorage)
+  // Modal visibility and focus handling
   try {
     console.log('Handling modal visibility, show:', show);
     if (!show) {
@@ -8957,84 +8962,10 @@ bioBtn.addEventListener('click', async () => {
       reauthModal.setAttribute('aria-modal', 'true');
       reauthModal.setAttribute('role', 'dialog');
 
-      if (isBioApplicable) {
-        // Auto-attempt biometric if enabled (instant check from localStorage)
-        (async () => {
-          try {
-            const session = await safeCall(__sec_getCurrentUser) || {};
-            const uid = session.user ? (session.user.uid || session.user.id) : null;
-            if (!uid) {
-              console.warn('No uid for auto-biometric verify; showing PIN fallback');
-              showSlideNotification('Session expired, please log in', 'error');
-              setTimeout(() => window.location.href = '/', 1500);
-              return;
-            }
-
-            showSlideNotification('Please authenticate with biometrics', 'info');
-            const res = await startAuthentication(uid);
-            if (res && res.success) {
-              console.log('Auto biometric verify success');
-              showSlideNotification('Biometric authentication successful', 'success');
-              try { if (reauthModal) reauthModal.classList.add('hidden'); } catch (e) {}
-              safeCall(__sec_getCurrentUser);
-              onSuccessfulReauth();
-              return;
-            }
-            console.log('Auto biometric verify failed — switching to PIN');
-            showSlideNotification('Biometric verification failed or cancelled', 'error');
-            switchViews(false);
-          } catch (err) {
-            console.error('Auto biometric attempt error:', err);
-            showSlideNotification('Biometric not available — please use PIN', 'error');
-            try { if (switchToPin) switchToPin.click(); else switchViews(false); } catch (e) { console.error(e); }
-          }
-        })();
-
-
-// Immediate biometric click handler: show UI immediately, then trigger verify in background.
-// Replaces older handler that awaited server before showing UI.
-function __immediateBiometricClickHandler(e) {
-  try {
-    // Open PIN/modal or UI immediately if function exists
-    if (typeof openPinModal === 'function') {
-      try { openPinModal(); } catch (ignore) {}
-    } else if (typeof showBiometricPanel === 'function') {
-      try { showBiometricPanel(); } catch (ignore) {}
-    }
-  } catch (err) {
-    console.warn('Opening biometric UI failed', err);
-  }
-
-  // Start prefetch early (if not started)
-  try { window.prefetchAuthOptions && window.prefetchAuthOptions(); } catch(e) {}
-
-  // Trigger verification but don't block UI (user gesture is still active)
-  // We call verifyBiometrics and handle result asynchronously.
-  (async function() {
-    try {
-      const res = await verifyBiometrics();
-      // optional: handle result (e.g., close modal on success)
-      if (res && res.success) {
-        try { if (typeof closePinModal === 'function') closePinModal(); } catch(e) {}
-      } else {
-        // show error inside modal if available
-        try { safeCall(notify, 'Biometric auth failed', 'error'); } catch(e) {}
-      }
-    } catch (err) {
-      console.warn('verifyBiometrics error', err);
-    }
-  })();
-}
-
-
-
-      } else {
-        // Direct fallback to PIN if no biometric
-        if (biometricView) biometricView.style.display = 'none';
-        if (pinView) pinView.style.display = 'block';
-        const firstInput = getReauthInputs()[0];
-        if (firstInput) firstInput.focus();
-        console.log('Showing PIN view and focusing first input');
+      // Focus the first PIN input for usability
+      const firstInput = getReauthInputs()[0];
+      if (firstInput && firstInput.focus) {
+        try { firstInput.focus(); } catch (e) { /* ignore focus errors */ }
       }
 
       try { trapFocus(reauthModal); } catch (e) { console.warn('trapFocus failed:', e); }
