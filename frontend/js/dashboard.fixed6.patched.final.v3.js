@@ -6379,6 +6379,8 @@ document.querySelectorAll('.contact-box').forEach((box) => {
     __sec_log.e('No valid session available');
     return null;
   }
+  window.__sec_getCurrentUser = window.__sec_getCurrentUser || __sec_getCurrentUser;
+
 
   /* Animation helpers */
   let __sec_hideTimer = null;
@@ -6698,6 +6700,7 @@ try {
 }
 
 
+
 /* Initialize from storage */
 async function __sec_initFromStorage() {
   __sec_log.d('initFromStorage entry (reconciled)');
@@ -6801,6 +6804,8 @@ function showSlideNotification(message, type = "info") {
   }, 3000);
   __sec_log.d('showSlideNotification exit');
 }
+window.showSlideNotification = window.showSlideNotification || showSlideNotification;
+
 
 /* =========================
    PIN Submodule (integrated)
