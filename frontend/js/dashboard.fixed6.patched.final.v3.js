@@ -990,30 +990,102 @@ const svgShapes = {
     }
   }
 
-  function fromBase64Url(b64url){
-    let b = b64url.replace(/-/g,'+').replace(/_/g,'/');
-    while (b.length % 4) b += '=';
-    const str = atob(b);
-    const arr = new Uint8Array(str.length);
-    for (let i=0;i<str.length;i++) arr[i] = str.charCodeAt(i);
-    return arr.buffer;
-  }
+  // ---------- Robust base64url -> ArrayBuffer converter ----------
+function fromBase64Url(b64url) {
+  try {
+    // Null / undefined -> keep as-is
+    if (b64url === null || typeof b64url === 'undefined') return b64url;
 
-  function convertOptionsFromServer(publicKey) {
-    try {
-      if (!publicKey) return publicKey;
-      if (publicKey.challenge && typeof publicKey.challenge === 'string') publicKey.challenge = fromBase64Url(publicKey.challenge);
-      if (Array.isArray(publicKey.allowCredentials)) {
-        publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){ 
-          try { return Object.assign({}, c, { id: fromBase64Url(c.id) }); } catch(e){ return c; }
-        });
+    // If it's already an ArrayBuffer, return it
+    if (b64url instanceof ArrayBuffer) return b64url;
+
+    // If it's a TypedArray / DataView (Uint8Array, etc.) return underlying buffer or slice
+    if (ArrayBuffer.isView(b64url)) {
+      // If it's a Uint8Array or similar, return the buffer (copy to avoid unexpected shared memory)
+      const view = b64url;
+      if (view.buffer && view.byteLength === view.length) {
+        // return a copy as ArrayBuffer
+        return view.slice ? view.slice().buffer : view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength);
       }
-      return publicKey;
-    } catch (e) {
-      __webauthn_log.w('convertOptionsFromServer error', e);
-      return publicKey;
+      return view.buffer;
     }
+
+    // If it's already a plain object that looks like {type:'Buffer', data:[...]} (some JSON serializers):
+    if (typeof b64url === 'object' && b64url !== null && Array.isArray(b64url.data)) {
+      try {
+        const arr = new Uint8Array(b64url.data);
+        return arr.buffer;
+      } catch (e) {
+        console.warn('[webauthn] fromBase64Url: unexpected buffer-like object', b64url);
+        return b64url;
+      }
+    }
+
+    // If it's not a string at this point, just return it (idempotent and avoids crashes)
+    if (typeof b64url !== 'string') {
+      console.warn('[webauthn] fromBase64Url expected string/ArrayBuffer/TypedArray but got', typeof b64url, b64url);
+      return b64url;
+    }
+
+    // Normal string path: base64url -> base64 -> binary -> ArrayBuffer
+    let b = b64url.replace(/-/g, '+').replace(/_/g, '/');
+    // pad with '='
+    while (b.length % 4) b += '=';
+    const binary = atob(b);
+    const len = binary.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes.buffer;
+  } catch (err) {
+    console.warn('[webauthn] fromBase64Url conversion error', err, b64url);
+    return b64url;
   }
+}
+
+// ---------- Robust converter for server-provided PublicKey options ----------
+function convertOptionsFromServer(publicKey) {
+  try {
+    if (!publicKey) return publicKey;
+
+    // Convert challenge if needed (string -> ArrayBuffer), or pass through if already converted
+    if (publicKey.challenge) {
+      publicKey.challenge = fromBase64Url(publicKey.challenge);
+    }
+
+    // Convert allowCredentials entries' id fields safely
+    if (Array.isArray(publicKey.allowCredentials)) {
+      publicKey.allowCredentials = publicKey.allowCredentials.map(function (c) {
+        try {
+          // If c.id is present and not already an ArrayBuffer / TypedArray, convert it.
+          const id = (c && c.id) ? fromBase64Url(c.id) : c.id;
+          // If id is an ArrayBuffer or TypedArray, it's fine; but WebAuthn expects a BufferSource
+          // We'll convert ArrayBuffer -> Uint8Array for better compatibility
+          let finalId = id;
+          if (id instanceof ArrayBuffer) finalId = new Uint8Array(id);
+          if (ArrayBuffer.isView(id)) finalId = id; // keep typed array as-is
+
+          // return a shallow copy with id replaced
+          const copy = Object.assign({}, c, { id: finalId });
+          return copy;
+        } catch (e) {
+          console.warn('[webauthn] convertOptionsFromServer: allowCredentials entry convert failed', e, c);
+          return c;
+        }
+      });
+    }
+
+    // Some responses may include user.id in base64url form (rare) — handle defensively
+    if (publicKey.user && publicKey.user.id) {
+      publicKey.user.id = fromBase64Url(publicKey.user.id);
+    }
+
+    return publicKey;
+  } catch (e) {
+    console.warn('[webauthn] convertOptionsFromServer error', e);
+    return publicKey;
+  }
+}
+
 
   // small helper: try parse cached user from localStorage
   function deriveUserIdFromLocalStorage() {
@@ -3832,6 +3904,7 @@ function __fg_pin_clearAllInputs() {
       setTimeout(() => target.classList.add('hidden'), 3000);
     }
   }
+  window.notify = window.notify || notify;
 
   // Get user ID from Supabase
   async function getUid() {
@@ -6807,6 +6880,7 @@ function showSlideNotification(message, type = "info") {
 window.showSlideNotification = window.showSlideNotification || showSlideNotification;
 
 
+
 /* =========================
    PIN Submodule (integrated)
    ========================= */
@@ -7457,6 +7531,8 @@ async function startAuthentication(userId) {
   __sec_log.d('startAuthentication exit');
 }
 
+window.__sec_startAuthentication = window.__sec_startAuthentication || __sec_startAuthentication;
+
 /* ---- WebAuthn helper calls to server (list/revoke) ---- */
 async function __sec_listAuthenticators(userId) {
   __sec_log.d('listAuthenticators entry', { userId });
@@ -7495,6 +7571,8 @@ async function __sec_listAuthenticators(userId) {
   __sec_log.d('listAuthenticators exit');
 }
 
+window.__sec_listAuthenticators = window.__sec_listAuthenticators || __sec_listAuthenticators;
+
 async function __sec_revokeAuthenticator(userId, credentialID) {
   __sec_log.d('revokeAuthenticator entry', { userId, credentialID });
   try {
@@ -7531,6 +7609,8 @@ async function __sec_revokeAuthenticator(userId, credentialID) {
   }
   __sec_log.d('revokeAuthenticator exit');
 }
+
+window.__sec_revokeAuthenticator = window.__sec_revokeAuthenticator || __sec_revokeAuthenticator;
 
 /* Wire events (with WebAuthn integration) */
 function __sec_wireEvents() {
