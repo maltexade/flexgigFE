@@ -954,6 +954,7 @@ const svgShapes = {
   receive: `<svg class="bank-icon" width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M4 9v9h16V9l-8-5-8 5zm4 4h8v2H8v-2zm0 4h4v2H8v-2z" fill="#00cc00" stroke="#fff" stroke-width="1"/></svg>`
 };
 
+
 // temporary debug wrapper for fetch to /webauthn/auth/options
 (function(){
   const orig = window.__origFetch || window.fetch;
@@ -1014,30 +1015,79 @@ const svgShapes = {
     }
   }
 
-  function fromBase64Url(b64url){
-    let b = b64url.replace(/-/g,'+').replace(/_/g,'/');
-    while (b.length % 4) b += '=';
+  function fromBase64Url(input){
+  // Accepts:
+  //  - base64url string -> returns ArrayBuffer
+  //  - Uint8Array -> returns its .buffer (ArrayBuffer)
+  //  - ArrayBuffer -> returns it unchanged
+  //  - null/undefined -> returns null
+  if (!input && input !== 0) return null;
+
+  // If already ArrayBuffer
+  if (input instanceof ArrayBuffer) return input;
+
+  // If already a typed array, return its buffer
+  if (ArrayBuffer.isView(input)) {
+    // Uint8Array, etc.
+    return input.buffer;
+  }
+
+  // Otherwise expect a base64url string
+  if (typeof input !== 'string') {
+    // not a string — return null and let callers handle it
+    console.warn('[webauthn] fromBase64Url expected string or buffer, got', typeof input, input);
+    return null;
+  }
+
+  let b = input.replace(/-/g,'+').replace(/_/g,'/');
+  while (b.length % 4) b += '=';
+  try {
     const str = atob(b);
     const arr = new Uint8Array(str.length);
     for (let i=0;i<str.length;i++) arr[i] = str.charCodeAt(i);
     return arr.buffer;
+  } catch (e) {
+    console.warn('[webauthn] fromBase64Url decode failed', e, input);
+    return null;
   }
+}
+
 
   function convertOptionsFromServer(publicKey) {
-    try {
-      if (!publicKey) return publicKey;
-      if (publicKey.challenge && typeof publicKey.challenge === 'string') publicKey.challenge = fromBase64Url(publicKey.challenge);
-      if (Array.isArray(publicKey.allowCredentials)) {
-        publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){ 
-          try { return Object.assign({}, c, { id: fromBase64Url(c.id) }); } catch(e){ return c; }
-        });
-      }
-      return publicKey;
-    } catch (e) {
-      __webauthn_log.w('convertOptionsFromServer error', e);
-      return publicKey;
+  try {
+    if (!publicKey) return publicKey;
+    if (publicKey.challenge && typeof publicKey.challenge === 'string') {
+      const ch = fromBase64Url(publicKey.challenge);
+      if (ch) publicKey.challenge = new Uint8Array(ch);
     }
+    if (Array.isArray(publicKey.allowCredentials)) {
+      publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){
+        try {
+          // If the id is a string -> convert it, otherwise leave it alone if it's already a buffer/typed array
+          if (typeof c.id === 'string') {
+            const idBuf = fromBase64Url(c.id);
+            return Object.assign({}, c, { id: idBuf ? new Uint8Array(idBuf) : idBuf });
+          } else if (ArrayBuffer.isView(c.id)) {
+            // already a typed array
+            return Object.assign({}, c, { id: c.id });
+          } else if (c.id instanceof ArrayBuffer) {
+            return Object.assign({}, c, { id: new Uint8Array(c.id) });
+          } else {
+            // unknown type — leave as-is (navigator may throw if bad)
+            return c;
+          }
+        } catch (e) {
+          return c;
+        }
+      });
+    }
+    return publicKey;
+  } catch (e) {
+    __webauthn_log.w('convertOptionsFromServer error', e);
+    return publicKey;
   }
+}
+
 
   // small helper: try parse cached user from localStorage
   function deriveUserIdFromLocalStorage() {
@@ -6225,6 +6275,7 @@ document.querySelectorAll('.contact-box').forEach((box) => {
 
 
 
+
 /* ---------- Security modal behavior + WebAuthn integration ---------- */
 /* ---------- Security modal behavior + WebAuthn integration ---------- */
 /* ---------- Security modal behavior + WebAuthn integration ---------- */
@@ -6283,6 +6334,7 @@ document.querySelectorAll('.contact-box').forEach((box) => {
     balance: 'security_balance_visible'
   };
   __sec_log.d('Storage keys defined:', __sec_KEYS);
+  window.__sec_KEYS = window.__sec_KEYS || __sec_KEYS; // expose for debugging
 
   /* Helpers */
   const __sec_setChecked = (el, v) => { 
@@ -6660,20 +6712,51 @@ try {
 
   // Try to obtain userId (short wait). If none, do NOT call server (we avoid Missing userId).
   const resolvedUserId = await safeGetSessionUserId(900); // wait up to 900ms for session
+  // ---------- ROBUST FIX: retry a few times before clearing persisted biometric flags ----------
   if (!resolvedUserId) {
-    __sec_log.i('reconcile: no userId available after short wait — will clear biometric flags locally and skip server check');
+    __sec_log.i('reconcile: no userId available after short wait — scheduling retry (no clear yet)');
+
+    // Soft UI: show toggle OFF while we wait for session resolution (do not erase persisted flags)
     try {
-      localStorage.setItem(__sec_KEYS.biom, '0');
-      localStorage.setItem('biometricsEnabled', 'false');
-      localStorage.setItem(__sec_KEYS.bioLogin, '0');
-      localStorage.setItem(__sec_KEYS.bioTx, '0');
-      localStorage.setItem('biometricForLogin', 'false');
-      localStorage.setItem('biometricForTx', 'false');
-    } catch (e) { __sec_log.e('reconcile: local clear failed', e); }
-    if (__sec_parentSwitch) __sec_setChecked(__sec_parentSwitch, false);
-    if (__sec_bioOptions) { __sec_bioOptions.classList.remove('show'); __sec_bioOptions.hidden = true; }
-    return; // skip server call because server requires userId
+      if (__sec_parentSwitch) __sec_setChecked(__sec_parentSwitch, false);
+      if (__sec_bioOptions) { __sec_bioOptions.classList.remove('show'); __sec_bioOptions.hidden = true; }
+    } catch (e) {
+      __sec_log.e('reconcile: UI update failed', e);
+    }
+
+    // Retry logic: limited attempts stored in sessionStorage (cleared on browser close)
+    try {
+      const key = '__sec_biom_retry_count';
+      const maxAttempts = 3;
+      const count = parseInt(sessionStorage.getItem(key) || '0', 10);
+      if (count < maxAttempts) {
+        sessionStorage.setItem(key, String(count + 1));
+        const backoffMs = 250 * Math.pow(2, count); // 250ms, 500ms, 1000ms...
+        setTimeout(() => {
+          // call the same reconcile function again if available
+          try {
+            if (typeof reconcileBiometricState === 'function') {
+              reconcileBiometricState().catch && reconcileBiometricState().catch(err => __sec_log.w('reconcile retry failed', err));
+            } else {
+              __sec_log.w('reconcile retry: reconcileBiometricState not present');
+            }
+          } catch (e) {
+            __sec_log.w('reconcile retry invocation error', e);
+          }
+        }, backoffMs);
+      } else {
+        // exhausted retries — treat as no session: clear retry counter and do not clear persisted flags automatically
+        sessionStorage.removeItem(key);
+        __sec_log.i('reconcile: session not available after retry attempts — skipping server check. Persisted flags kept; will wait for user action or future session.');
+        // Optionally, you could clear persisted flags here if you want
+      }
+    } catch (e) {
+      __sec_log.e('reconcile: retry scheduling failed', e);
+    }
+
+    return;
   }
+
 
   // We have a userId — call the server with both credentialId and userId
   __sec_log.d('reconcile: resolved userId, calling /webauthn/auth/options', { userIdSample: resolvedUserId && resolvedUserId.slice ? resolvedUserId.slice(0,12) : resolvedUserId });
@@ -8586,11 +8669,20 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
             // ensure allowCredentials includes stored id in ArrayBuffer form
             if (!publicKey.allowCredentials || !publicKey.allowCredentials.length) {
               try {
+                let idVal = null;
+                if (typeof storedId === 'string') {
+                  idVal = (window.fromBase64Url ? window.fromBase64Url(storedId) : null);
+                } else if (ArrayBuffer.isView(storedId)) {
+                  idVal = storedId.buffer;
+                } else if (storedId instanceof ArrayBuffer) {
+                  idVal = storedId;
+                }
                 publicKey.allowCredentials = [{
                   type: 'public-key',
-                  id: (window.fromBase64Url ? window.fromBase64Url(storedId) : (typeof fromBase64Url === 'function' ? fromBase64Url(storedId) : null)),
+                  id: idVal ? new Uint8Array(idVal) : idVal,
                   transports: ['internal']
                 }];
+
               } catch (e) {
                 console.warn('Could not attach allowCredentials from storedId', e);
               }
@@ -9853,16 +9945,25 @@ async function prefetchAuthOptionsFor(uid, context = 'reauth') {
       const publicKey = await res.json();
 
       try {
-        if (publicKey.challenge) publicKey.challenge = window.fromBase64Url(publicKey.challenge);
-        if (Array.isArray(publicKey.allowCredentials)) {
-          publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){
-            return {
-              type: c.type || 'public-key',
-              transports: c.transports || ['internal'],
-              id: window.fromBase64Url(c.id)
-            };
-          });
-        }
+        if (publicKey.challenge && typeof publicKey.challenge === 'string') {
+  const ch = window.fromBase64Url(publicKey.challenge);
+  if (ch) publicKey.challenge = new Uint8Array(ch);
+}
+if (Array.isArray(publicKey.allowCredentials)) {
+  publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){
+    try {
+      const idVal = (typeof c.id === 'string') ? window.fromBase64Url(c.id) : (ArrayBuffer.isView(c.id) ? c.id.buffer : (c.id instanceof ArrayBuffer ? c.id : null));
+      return {
+        type: c.type || 'public-key',
+        transports: c.transports || ['internal'],
+        id: idVal ? new Uint8Array(idVal) : idVal
+      };
+    } catch (e) {
+      return { type: c.type || 'public-key', transports: c.transports || ['internal'], id: c.id };
+    }
+  });
+}
+
       } catch (e) {
         console.warn('[prefetchAuthOptions] conversion error', e);
       }
@@ -9924,17 +10025,37 @@ async function verifyBiometrics(uid, context) {
           throw new Error('Auth options fetch failed: ' + txt);
         }
         publicKey = await optRes.json();
-        if (publicKey.challenge) publicKey.challenge = window.fromBase64Url(publicKey.challenge);
-        if (Array.isArray(publicKey.allowCredentials)) {
-          publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){ return Object.assign({}, c, { id: window.fromBase64Url(c.id) }); });
-        } else {
-          var storedId2 = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
-          publicKey.allowCredentials = [{
-            type: 'public-key',
-            id: window.fromBase64Url(storedId2),
-            transports: ['internal']
-          }];
-        }
+        if (publicKey.challenge && typeof publicKey.challenge === 'string') {
+  const ch = window.fromBase64Url(publicKey.challenge);
+  if (ch) publicKey.challenge = new Uint8Array(ch);
+}
+if (Array.isArray(publicKey.allowCredentials)) {
+  publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){
+    try {
+      if (typeof c.id === 'string') {
+        const idBuf = window.fromBase64Url(c.id);
+        return Object.assign({}, c, { id: idBuf ? new Uint8Array(idBuf) : idBuf });
+      } else if (ArrayBuffer.isView(c.id)) {
+        return Object.assign({}, c, { id: c.id });
+      } else if (c.id instanceof ArrayBuffer) {
+        return Object.assign({}, c, { id: new Uint8Array(c.id) });
+      } else {
+        return c;
+      }
+    } catch(e) {
+      return c;
+    }
+  });
+} else {
+  const storedId2 = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
+  const idVal = (typeof storedId2 === 'string') ? window.fromBase64Url(storedId2) : (ArrayBuffer.isView(storedId2) ? storedId2.buffer : (storedId2 instanceof ArrayBuffer ? storedId2 : null));
+  publicKey.allowCredentials = [{
+    type: 'public-key',
+    id: idVal ? new Uint8Array(idVal) : idVal,
+    transports: ['internal']
+  }];
+}
+
       } else {
         console.log('[verifyBiometrics] using cached options for immediate prompt');
       }
