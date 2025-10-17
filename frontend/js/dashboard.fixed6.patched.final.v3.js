@@ -654,19 +654,28 @@ async function onDashboardLoad() {
       biometricsEnabled: localStorage.getItem('biometricsEnabled'),
       credentialId: localStorage.getItem('credentialId')
     });
-    // 🔹 Sync/ default sub-flags (on if bio enabled; preserve if already set)
-const bioForLogin = biometricsEnabled ? (localStorage.getItem('biometricForLogin') === 'true' || false) : false;
-const bioForTx = biometricsEnabled ? (localStorage.getItem('biometricForTx') === 'true' || false) : false;
-localStorage.setItem('biometricForLogin', bioForLogin ? 'true' : 'false');
-localStorage.setItem('biometricForTx', bioForTx ? 'true' : 'false');
-
-console.log('[DEBUG-SYNC] Sub-flags synced:', { bioForLogin, bioForTx });  // Remove after test
-    
-    // Children flags default to false if bio off
-    if (!biometricsEnabled) {
-      localStorage.setItem('biometricForLogin', 'false');
-      localStorage.setItem('biometricForTx', 'false');
-    }
+    // 🔹 Sync sub-flags: Default to 'true' ONLY if unset when bio enabled; preserve user choices
+if (biometricsEnabled) {
+  const storedLogin = localStorage.getItem('biometricForLogin');
+  const storedTx = localStorage.getItem('biometricForTx');
+  
+  // Default unset to true (first-time enable)
+  if (storedLogin === null) {
+    localStorage.setItem('biometricForLogin', 'true');
+  }
+  if (storedTx === null) {
+    localStorage.setItem('biometricForTx', 'true');
+  }
+  
+  console.log('[DEBUG-SYNC] Sub-flags preserved/defaulted:', {
+    bioForLogin: localStorage.getItem('biometricForLogin') === 'true',
+    bioForTx: localStorage.getItem('biometricForTx') === 'true'
+  });
+} else {
+  // Reset to false only if bio off (existing)
+  localStorage.setItem('biometricForLogin', 'false');
+  localStorage.setItem('biometricForTx', 'false');
+}
     
     // If bio enabled and credentialId exists, prefetch immediately
     if (biometricsEnabled && localStorage.getItem('credentialId')) {
