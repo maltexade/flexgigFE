@@ -61,6 +61,74 @@ async function withLoader(task) {
   }
 }
 
+// ======= WebAuthn helpers (single robust implementation) =======
+(function(){
+  'use strict';
+
+  // Returns ArrayBuffer or null
+  function fromBase64Url_toArrayBuffer(input) {
+    if (input == null) return null;
+    if (input instanceof ArrayBuffer) return input;
+    if (ArrayBuffer.isView(input)) return input.buffer;
+    // Node Buffer-like JSON { type:'Buffer', data:[...] }
+    if (typeof input === 'object' && input !== null && Array.isArray(input.data)) {
+      try { return new Uint8Array(input.data).buffer; } catch (e) { return null; }
+    }
+    if (typeof input !== 'string') {
+      console.warn('[webauthn] fromBase64Url: expected string or buffer, got', typeof input, input);
+      return null;
+    }
+    try {
+      let b64 = input.replace(/-/g,'+').replace(/_/g,'/');
+      while (b64.length % 4) b64 += '=';
+      const bin = atob(b64);
+      const arr = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+      return arr.buffer;
+    } catch (err) {
+      console.warn('[webauthn] fromBase64Url decode failed', err, input);
+      return null;
+    }
+  }
+
+  // Returns Uint8Array (ArrayBufferView) or null — ready for navigator.credentials
+  function ensureBufferView(val) {
+    if (val == null) return null;
+    if (ArrayBuffer.isView(val)) return val;
+    if (val instanceof ArrayBuffer) return new Uint8Array(val);
+    const ab = fromBase64Url_toArrayBuffer(val);
+    return ab ? new Uint8Array(ab) : null;
+  }
+
+  // Convert server publicKey options into browser-ready shape
+  function convertOptionsFromServer(publicKey) {
+    if (!publicKey) return publicKey;
+    // challenge -> Uint8Array if convertible
+    if (publicKey.challenge) {
+      const chAb = fromBase64Url_toArrayBuffer(publicKey.challenge);
+      if (chAb) publicKey.challenge = new Uint8Array(chAb);
+    }
+    // allowCredentials -> ensure id is Uint8Array
+    if (Array.isArray(publicKey.allowCredentials)) {
+      publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){
+        try {
+          const idView = ensureBufferView(c && c.id);
+          if (idView) return Object.assign({}, c, { id: idView });
+        } catch (e) { /* fallthrough */ }
+        return c;
+      }).filter(Boolean);
+    }
+    return publicKey;
+  }
+
+  // Expose helpers globally
+  window.fromBase64Url = function(x){ return fromBase64Url_toArrayBuffer(x); }; // ArrayBuffer or null
+  window.fromBase64UrlAsUint8 = function(x){ return ensureBufferView(x); };     // Uint8Array or null
+  window.ensureBufferView = ensureBufferView;
+  window.convertOptionsFromServer = convertOptionsFromServer;
+})();
+
+
 
 // ---------- STORAGE INSTRUMENTATION (paste once near top of script) ----------
 (function instrumentStorage() {
@@ -8727,22 +8795,42 @@ if (!opts) {
               throw new Error('Auth options fetch failed: ' + txt);
             }
             publicKey = await optRes.json();
-            if (publicKey.challenge) {
-              try { publicKey.challenge = (window.fromBase64Url ? window.fromBase64Url(publicKey.challenge) : fromBase64Url(publicKey.challenge)); } catch(e){}
-            }
-            if (Array.isArray(publicKey.allowCredentials)) {
-              try {
-                publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){ return Object.assign({}, c, { id: (window.fromBase64Url ? window.fromBase64Url(c.id) : fromBase64Url(c.id)) }); });
-              } catch(e){}
-            } else {
-              try {
-                publicKey.allowCredentials = [{
-                  type: 'public-key',
-                  id: (window.fromBase64Url ? window.fromBase64Url(storedId) : fromBase64Url(storedId)),
-                  transports: ['internal']
-                }];
-              } catch(e){}
-            }
+
+// normalize challenge -> Uint8Array (if convertible)
+try {
+  if (publicKey.challenge) {
+    const chView = (window.fromBase64UrlAsUint8 ? window.fromBase64UrlAsUint8(publicKey.challenge)
+                  : (window.fromBase64Url ? (function(v){ const a = window.fromBase64Url(v); return a? new Uint8Array(a) : null; })(publicKey.challenge) : null));
+    if (chView) publicKey.challenge = chView;
+  }
+} catch (e) {
+  console.warn('[webauthn] challenge conversion failed', e);
+}
+
+// normalize allowCredentials -> ensure id is Uint8Array
+if (Array.isArray(publicKey.allowCredentials)) {
+  publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){
+    try {
+      const idView = window.ensureBufferView ? window.ensureBufferView(c && c.id)
+                    : (window.fromBase64Url ? (function(v){ const a = window.fromBase64Url(v); return a? new Uint8Array(a): null; })(c && c.id) : null);
+      if (idView) return Object.assign({}, c, { id: idView });
+    } catch (e) {
+      console.warn('[webauthn] allowCredentials entry conversion failed', e, c);
+    }
+    return c;
+  }).filter(Boolean);
+} else {
+  // fallback: try to build allowCredentials from stored id; convert to Uint8Array
+  const storedId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id') || '';
+  const idView = window.ensureBufferView ? window.ensureBufferView(storedId)
+               : (window.fromBase64Url ? (function(v){ const a = window.fromBase64Url(v); return a? new Uint8Array(a): null; })(storedId) : null);
+  publicKey.allowCredentials = idView ? [{
+    type: 'public-key',
+    id: idView,
+    transports: ['internal']
+  }] : []; // if we can't convert, leave empty and use platform discovery
+}
+
           }
 
           // Call navigator.credentials.get immediately within the user gesture
@@ -10507,6 +10595,7 @@ try { if (!window.disableBiometrics) window.disableBiometrics = disableBiometric
 
     return true;
   }
+
 
   // Try attach immediately or wait a bit (safe on early script execution)
   (function tryAttach(count){
