@@ -529,228 +529,192 @@ function observeForElements() {
 // After getSession succeeds
 // After getSession succeeds (now cache-first)
 async function onDashboardLoad() {
-  // --- Helper: fetch a fresh session (bypass caches) ---
-  async function fetchFreshSession() {
-    try {
-      const base = window.__SEC_API_BASE || '';
-      const res = await fetch(`${base}/api/session?nocache=1`, {
-        method: 'GET',
-        credentials: 'include',
-        headers: { 'Accept': 'application/json', 'Cache-Control': 'no-cache' }
-      });
-      if (!res.ok) throw new Error(`Fresh session fetch failed: ${res.status}`);
-      const payload = await res.json();
-      return { user: payload.user };
-    } catch (e) {
-      console.warn('[fetchFreshSession] failed', e);
-      return null;
-    }
-  }
-
-  // --- 1) Instant cached render (if present & recent) ---
+  // Instant cache render first
   const cachedUserData = localStorage.getItem('userData');
   if (cachedUserData) {
     try {
       const parsed = JSON.parse(cachedUserData);
-      if (Date.now() - parsed.cachedAt < 300000) { // 5 minutes
+      if (Date.now() - parsed.cachedAt < 300000) {
         const firstName = parsed.fullName?.split(' ')[0] || 'User';
-        if (typeof waitForDomReady === 'function') {
-          const domReady = await waitForDomReady();
-          if (domReady && typeof applySessionToDOM === 'function') {
-            applySessionToDOM(parsed, firstName);
-          }
-        } else if (typeof applySessionToDOM === 'function') {
-          applySessionToDOM(parsed, firstName);
-        }
+        const domReady = await waitForDomReady(); // Reuse your func
+        if (domReady) applySessionToDOM(parsed, firstName);
       }
-    } catch (e) { /* ignore parse errors */ }
+    } catch (e) { /* ignore */ }
   }
 
-  // --- 2) Background refresh (prefer getSession if available) ---
-  let session = null;
-  if (typeof getSession === 'function') {
-    try {
-      session = await getSession(); // your existing cache-aware helper
-    } catch (e) {
-      console.warn('[onDashboardLoad] getSession failed', e);
-    }
-  }
+  // Then background refresh
+  await getSession(); // This will update if needed
 
-  // If getSession lacks fresh flags, try forcing a fresh fetch
-  const fresh = await fetchFreshSession();
-  if (fresh && fresh.user) {
-    // prefer fresh when it has relevant fields (hasPin / hasBiometrics)
-    if (typeof fresh.user.hasPin !== 'undefined' || typeof fresh.user.hasBiometrics !== 'undefined') {
-      session = fresh;
-    } else if (!session) {
-      session = fresh; // fallback if getSession failed totally
-    }
-  }
-
-  // --- 3) Securely sync PIN/bio flags to localStorage on load ---
+  // Securely sync PIN/bio flags to storage on load
   try {
-    // session might still be null if both calls failed
-    console.log('[DEBUG-SYNC] Raw session.user:', {
-      hasPin: session?.user?.hasPin,
-      hasBiometrics: session?.user?.hasBiometrics,
-      uid: session?.user?.uid,
-      email: session?.user?.email
+    // 🔹 Force fresh fetch for flags (bypass 5min cache — add Cache-Control: no-cache to bust browser cache)
+    const freshRes = await fetch(`${window.__SEC_API_BASE}/api/session`, {
+      method: 'GET',
+      credentials: 'include',
+      headers: { 
+        'Accept': 'application/json',
+        'Cache-Control': 'no-cache'  // Ensure fresh server data
+      }
+    });
+    if (!freshRes.ok) throw new Error(`Fresh session fetch failed: ${freshRes.status}`);
+    const freshPayload = await freshRes.json();
+    const freshSession = { user: freshPayload.user || {} };  // Mimic getSession structure
+
+    // 🔹 DEBUG: Log raw fresh session for bio/pin (remove after fix)
+    console.log('[DEBUG-SYNC-FRESH] Raw fresh session.user:', {
+      hasPin: freshSession?.user?.hasPin,
+      hasBiometrics: freshSession?.user?.hasBiometrics,
+      uid: freshSession?.user?.uid,
+      email: freshSession?.user?.email
     });
 
-    // Save previous values to detect changes (useful if PIN was just set)
-    const prevHasPin = localStorage.getItem('hasPin') === 'true';
-    const prevBiometrics = localStorage.getItem('biometricsEnabled') === 'true';
-
-    const hasPin = Boolean(session?.user?.hasPin) || localStorage.getItem('hasPin') === 'true' || false;
+    const hasPin = freshSession?.user?.hasPin || localStorage.getItem('hasPin') === 'true' || false;
     localStorage.setItem('hasPin', hasPin ? 'true' : 'false');
-
-    const biometricsEnabled = Boolean(session?.user?.hasBiometrics) || localStorage.getItem('biometricsEnabled') === 'true' || false;
+    
+    // 🔹 Align biometrics with fresh server fallback (uses backend's hasBiometrics count)
+    const biometricsEnabled = freshSession?.user?.hasBiometrics || localStorage.getItem('biometricsEnabled') === 'true' || false;
     localStorage.setItem('biometricsEnabled', biometricsEnabled ? 'true' : 'false');
 
-    console.log('[DEBUG-SYNC] Post-sync localStorage:', {
+    // 🔹 DEBUG: Log post-sync localStorage (remove after fix)
+    console.log('[DEBUG-SYNC-FRESH] Post-sync localStorage:', {
       hasPin: localStorage.getItem('hasPin'),
       biometricsEnabled: localStorage.getItem('biometricsEnabled'),
       credentialId: localStorage.getItem('credentialId')
     });
-
-    // If biometrics are off, make sure children flags are off as well
+    
+    // Children flags default to false if bio off
     if (!biometricsEnabled) {
       localStorage.setItem('biometricForLogin', 'false');
       localStorage.setItem('biometricForTx', 'false');
     }
-
-    // If biometrics enabled and we have a credentialId, prefetch options
+    
+    // If bio enabled and credentialId exists, prefetch immediately
     if (biometricsEnabled && localStorage.getItem('credentialId')) {
-      if (typeof prefetchAuthOptions === 'function') {
-        try { prefetchAuthOptions(); } catch (e) { console.warn('prefetchAuthOptions failed', e); }
-      }
+      prefetchAuthOptions();
     }
+    await restoreBiometricUI();  // Persist active state on reload
 
-    // Persist UI state on reload
-    if (typeof restoreBiometricUI === 'function') {
-      try { await restoreBiometricUI(); } catch (e) { console.warn('restoreBiometricUI failed', e); }
-    }
-
-    // --- 3a) PIN-change hook: if PIN was just set now, restart inactivity/setup reauth ---
-    if (!prevHasPin && hasPin) {
-      console.log('[DEBUG-SYNC] PIN was newly detected; ensure inactivity/re-auth is (re)initialized');
-      // Prefer a dedicated reauth setup function if available
-      if (window.__reauth && typeof window.__reauth.setupInactivity === 'function') {
-        try { window.__reauth.setupInactivity(); } catch (e) { console.warn('setupInactivity failed', e); }
-      } else if (typeof setupInactivity === 'function') {
-        try { setupInactivity(); } catch (e) { console.warn('setupInactivity failed', e); }
-      } else {
-        // last resort: mark a flag so other code can pick it up
-        localStorage.setItem('inactivityNeedsSetup', 'true');
-      }
-    }
-
-    // If biometrics state changed, emit an event so UI can react (optional)
-    if (prevBiometrics !== biometricsEnabled) {
-      try {
-        window.dispatchEvent(new CustomEvent('biometrics:changed', { detail: { enabled: biometricsEnabled } }));
-      } catch (e) { /* ignore */ }
-    }
   } catch (err) {
     console.warn('[onDashboardLoad] Flag sync error', err);
+    // Fallback: Use existing (potentially cached) session
+    try {
+      const session = await getSession();
+      const hasPin = session?.user?.hasPin || localStorage.getItem('hasPin') === 'true' || false;
+      localStorage.setItem('hasPin', hasPin ? 'true' : 'false');
+      
+      const biometricsEnabled = session?.user?.hasBiometrics || localStorage.getItem('biometricsEnabled') === 'true' || false;
+      localStorage.setItem('biometricsEnabled', biometricsEnabled ? 'true' : 'false');
+      
+      if (!biometricsEnabled) {
+        localStorage.setItem('biometricForLogin', 'false');
+        localStorage.setItem('biometricForTx', 'false');
+      }
+      
+      if (biometricsEnabled && localStorage.getItem('credentialId')) {
+        prefetchAuthOptions();
+      }
+      await restoreBiometricUI();
+    } catch (fallbackErr) {
+      console.error('[onDashboardLoad] Fallback sync failed too', fallbackErr);
+    }
   }
 
-  // --- 4) Broadcast subscription + reauth modal/inactivity setup ---
-  if (typeof setupBroadcastSubscription === 'function') {
-    try { setupBroadcastSubscription(); } catch (e) { console.warn('setupBroadcastSubscription failed', e); }
-  }
-
+  setupBroadcastSubscription();
   if (window.__reauth && typeof window.__reauth.initReauthModal === 'function') {
-    try { await window.__reauth.initReauthModal(); } catch (e) { console.warn('initReauthModal failed', e); }
+    await window.__reauth.initReauthModal();
   } else {
     console.warn('initReauthModal not available - skipping');
   }
-
   if (window.__reauth && typeof window.__reauth.setupInactivity === 'function') {
-    try { window.__reauth.setupInactivity(); } catch (e) { console.warn('setupInactivity failed', e); }
+    window.__reauth.setupInactivity();
   } else {
     console.warn('setupInactivity not available - skipping');
   }
 
-  // Existing inactivity check
+  // Your existing inactivity check...
   const last = parseInt(localStorage.getItem('lastActive')) || 0;
-  if (typeof IDLE_TIME !== 'undefined' && Date.now() - last > IDLE_TIME) {
-    if (typeof shouldReauth === 'function' && await shouldReauth()) {
-      if (typeof showInactivityPrompt === 'function') showInactivityPrompt();
-    }
+  if (Date.now() - last > IDLE_TIME && await shouldReauth()) {
+    showInactivityPrompt();
   }
 
-  // --- 5) Status banner polling & realtime (keeps your existing code) ---
+  // 🚀 NEW: Automatic Updates & Notifications
   const STATUS_BANNER = document.getElementById('status-banner');
   const BANNER_MSG = document.querySelector('.banner-msg');
-
-  function showBanner(msg) {
-    if (!STATUS_BANNER) return;
-    STATUS_BANNER.classList.remove('hidden');
-    if (BANNER_MSG) BANNER_MSG.textContent = msg;
-  }
-  function hideBanner() {
-    if (!STATUS_BANNER) return;
-    STATUS_BANNER.classList.add('hidden');
-    if (BANNER_MSG) BANNER_MSG.textContent = '';
-  }
 
   async function pollStatus() {
     try {
       const res = await fetch('/api/status', { credentials: 'include' });
       if (!res.ok) throw new Error('Status fetch failed');
       const { status, message } = await res.json();
-      if (status === 'down' && message) showBanner(message);
-      else hideBanner();
+      if (status === 'down' && message) {
+        showBanner(message);
+      } else {
+        hideBanner();
+      }
     } catch (err) {
       showBanner('Network downtime detected. Retrying...');
     }
   }
 
-  // Realtime via Supabase channel (only if supabaseClient present)
-  if (typeof supabaseClient !== 'undefined' && supabaseClient) {
-    try {
-      const channel = supabaseClient.channel('network-status');
-      channel
-        .on('broadcast', { event: 'network-update' }, ({ payload }) => {
-          console.log('[DEBUG] Realtime push received:', payload);
-          if (payload.status === 'down' && payload.message) showBanner(payload.message);
-          else hideBanner();
-        })
-        .subscribe((status) => {
-          console.log('[DEBUG] Realtime subscription status:', status);
-          if (status === 'SUBSCRIBED') {
-            fetch(`${window.__SEC_API_BASE || ''}/api/status`, { credentials: 'include' })
-              .then(res => res.json())
-              .then(data => { if (data.status === 'down' && data.message) showBanner(data.message); })
-              .catch(() => showBanner('Network issue detected. Checking...'));
-          }
-        });
-    } catch (e) { console.warn('Supabase realtime setup failed', e); }
-  }
+  // Subscribe to Supabase Realtime channel for instant updates
+  const channel = supabaseClient.channel('network-status');
+  channel
+    .on('broadcast', { event: 'network-update' }, ({ payload }) => {
+      console.log('[DEBUG] Realtime push received:', payload);
+      if (payload.status === 'down' && payload.message) {
+        showBanner(payload.message);  // Instant display
+      } else {
+        hideBanner();  // Instant hide
+      }
+    })
+    .subscribe((status) => {
+      console.log('[DEBUG] Realtime subscription status:', status);
+      if (status === 'SUBSCRIBED') {
+        // Optional: Fetch initial status via API if needed
+        fetch(`${window.__SEC_API_BASE}/api/status`, { credentials: 'include' })
+          .then(res => res.json())
+          .then(data => {
+            if (data.status === 'down' && data.message) showBanner(data.message);
+          })
+          .catch(() => showBanner('Network issue detected. Checking...'));
+      }
+    });
 
+  // Network listeners (fallback for offline)
   window.addEventListener('online', hideBanner);
   window.addEventListener('offline', () => showBanner('You are offline. Working with cached data.'));
 
-  // --- 6) Service worker registration / version check / polling ---
+  // SW Registration & Update Listener
   async function registerSW() {
     if ('serviceWorker' in navigator) {
       try {
         const reg = await navigator.serviceWorker.register('/service-worker.js');
         console.log('[DEBUG] SW registered', reg);
+
+        // Listen for updates
         reg.addEventListener('updatefound', () => {
           const newWorker = reg.installing;
           newWorker.addEventListener('statechange', () => {
             if (newWorker.state === 'installed') {
               if (navigator.serviceWorker.controller) {
+                // New content available; reload after 2s
+                console.log('[DEBUG] New SW version available. Reloading...');
                 setTimeout(() => {
-                  if (confirm('Update available! Reload for latest features?')) window.location.reload();
+                  if (confirm('Update available! Reload for latest features?')) {
+                    window.location.reload();
+                  }
                 }, 2000);
               } else {
+                // First install
+                console.log('[DEBUG] SW installed, page reload needed');
                 window.location.reload();
               }
             }
           });
+        });
+
+        reg.addEventListener('activated', (e) => {
+          if (e.isUpdate) console.log('[DEBUG] SW activated - new cache loaded');
         });
       } catch (err) {
         console.warn('[WARN] SW registration failed', err);
@@ -758,6 +722,13 @@ async function onDashboardLoad() {
     }
   }
 
+  // Post-login re-sync
+  if (localStorage.getItem('justLoggedIn') === 'true') {
+    localStorage.removeItem('justLoggedIn');
+    setupInactivity();
+  }
+
+  // Version check (fetches manifest to detect deploy)
   async function checkForUpdates() {
     try {
       const res = await fetch(`/frontend/pwa/manifest.json?v=${APP_VERSION}`);
@@ -769,98 +740,92 @@ async function onDashboardLoad() {
     }
   }
 
-  // Post-login re-sync: if justLoggedIn was set, re-run inactivity setup
-  if (localStorage.getItem('justLoggedIn') === 'true') {
-    localStorage.removeItem('justLoggedIn');
-    if (typeof setupInactivity === 'function') setupInactivity();
-  }
-
-  // Run SW/registers & polling
+  // 🚀 Integrate: Register SW, check updates, start polling
   registerSW();
   checkForUpdates();
-  pollStatus();
-  setInterval(pollStatus, 30000);
+  pollStatus(); // Initial
+  setInterval(pollStatus, 30000); // Every 30s
 }
 
-
 // 🔹 Biometric UI Restoration (runs on load to persist state across reloads)
 // 🔹 Biometric UI Restoration (runs on load to persist state across reloads)
-// 🔹 Biometric UI Restoration (with observer for dynamic DOM)
-async function restoreBiometricUI() {
-  const biometricsEnabled = localStorage.getItem('biometricsEnabled') === 'true';
-  const credentialId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
-  const hasPin = localStorage.getItem('hasPin') === 'true';
+async function restoreBiometricUI(retries = 3) {
+  try {
+    const biometricsEnabled = localStorage.getItem('biometricsEnabled') === 'true';
+    const credentialId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
+    const hasPin = localStorage.getItem('hasPin') === 'true';  // Optional: For fallback UX
 
-  // 🔹 DEBUG: Log inputs (remove after fix)
-  console.log('[DEBUG-UI] restoreBiometricUI inputs:', { enabled: biometricsEnabled, hasCred: !!credentialId, hasPin });
+    // 🔹 DEBUG: Log inputs
+    console.log('[DEBUG-UI] restoreBiometricUI inputs:', { enabled: biometricsEnabled, hasCred: !!credentialId, hasPin });
 
-  function applyState(bioBtn) {
-    if (!bioBtn) return;  // Safety
+    // Target elements (adjust selectors if your HTML differs)
+    const bioBtn = document.getElementById('bioBtn') || document.querySelector('.biometric-button') || document.querySelector('[data-bio-button]');
+    const statusIndicator = document.querySelector('.biometric-status') || bioBtn?.querySelector('.status-icon');  // e.g., for icon/text
 
-    // 🔹 DEBUG: Log found (remove after fix)
-    console.log('[DEBUG-UI] Found & applying to bioBtn:', bioBtn.id || bioBtn.className);
-
-    if (biometricsEnabled && credentialId) {
-      bioBtn.classList.add('active', 'enabled');
-      bioBtn.classList.remove('disabled', 'setup-needed');
-      bioBtn.textContent = 'Fingerprint Enabled';
-      bioBtn.disabled = false;
-      if (bioBtn.querySelector('.status-icon')) bioBtn.querySelector('.status-icon').textContent = '✓ Enabled';
-      console.log('[DEBUG-UI] Applied ACTIVE state');
-    } else if (biometricsEnabled && !credentialId) {
-      bioBtn.classList.add('warning', 're-setup');
-      bioBtn.classList.remove('active');
-      bioBtn.textContent = 'Re-enable Fingerprint';
-      console.warn('[WARN-UI] Applied WARNING state (missing cred)');
-    } else {
-      bioBtn.classList.remove('active', 'enabled');
-      bioBtn.classList.add('disabled', 'setup-needed');
-      bioBtn.textContent = 'Set Up Fingerprint';
-      bioBtn.disabled = hasPin ? false : true;
-      if (bioBtn.querySelector('.status-icon')) bioBtn.querySelector('.status-icon').textContent = 'Not Set Up';
-      console.log('[DEBUG-UI] Applied INACTIVE state');
+    if (!bioBtn) {
+      if (retries > 0) {
+        console.warn('[WARN-UI] Bio button not found — retrying... (attempts left:', retries, ')');
+        await new Promise(r => setTimeout(r, 300));  // Wait 300ms
+        return restoreBiometricUI(retries - 1);  // Recursive retry
+      } else {
+        console.error('[ERROR-UI] Bio button never found after retries — check HTML selectors');
+        return;
+      }
     }
 
-    // Re-attach events if needed
-    if (!bioBtn.__eventsAttached) {
-      bioBtn.addEventListener('click', handleBioToggle);  // Your toggle func
+    // 🔹 DEBUG: Log found elements
+    console.log('[DEBUG-UI] Found bio elements:', { bioBtn: !!bioBtn, statusIndicator: !!statusIndicator });
+
+    if (biometricsEnabled && credentialId) {
+      // ✅ Enabled + Credential: Show active state
+      bioBtn.classList.add('active', 'enabled');  // Add your CSS classes (e.g., green bg, check icon)
+      bioBtn.classList.remove('disabled', 'setup-needed');  // Clear opposites
+      if (statusIndicator) {
+        statusIndicator.textContent = '✓ Enabled';  // Or set innerHTML for icon: '<i class="fas fa-fingerprint"></i>'
+        statusIndicator.classList.add('success');
+      }
+      bioBtn.textContent = 'Fingerprint Enabled';  // Or append " (Active)"
+      bioBtn.disabled = false;  // Ensure interactive
+
+      // Optional: Show subtle toast/banner if just loaded
+      if (document.querySelector('.toast')) {  // Assuming you have a toast system
+        showToast('Biometrics loaded and ready!', 'success', 3000);
+      }
+
+      console.log('[DEBUG-UI] Restored active state');
+    } else if (biometricsEnabled && !credentialId) {
+      // ⚠️ Enabled but no cred: Show warning (possible corruption—prompt re-setup)
+      bioBtn.classList.add('warning', 're-setup');
+      bioBtn.classList.remove('active');
+      if (statusIndicator) statusIndicator.textContent = '⚠ Re-setup needed';
+      bioBtn.textContent = 'Re-enable Fingerprint';
+      safeCall(notify, 'Biometrics enabled but credential missing—tap to re-setup', 'warning');
+
+      console.warn('[WARN-UI] Enabled but missing credential');
+    } else {
+      // ❌ Disabled/No Setup: Reset to default (prompt setup)
+      bioBtn.classList.remove('active', 'enabled');
+      bioBtn.classList.add('disabled', 'setup-needed');
+      if (statusIndicator) {
+        statusIndicator.textContent = 'Not Set Up';
+        statusIndicator.classList.add('neutral');
+      }
+      bioBtn.textContent = 'Set Up Fingerprint';
+      bioBtn.disabled = hasPin ? false : true;  // Disable if no PIN fallback
+
+      console.log('[DEBUG-UI] Reset to inactive state');
+    }
+
+    // Re-attach any event listeners if needed (e.g., for re-setup)
+    if (bioBtn && !bioBtn.__eventsAttached) {
+      bioBtn.addEventListener('click', handleBioToggle);  // Assuming you have a toggle handler
       bioBtn.__eventsAttached = true;
     }
 
-    // 🔹 DEBUG: Log final classes (remove after fix)
-    console.log('[DEBUG-UI] Final classes:', bioBtn.className);
-  }
-
-  // Immediate check (if button already exists)
-  let bioBtn = document.getElementById('bioBtn') || document.querySelector('.biometric-button') || document.querySelector('[data-bio-button]');
-  if (bioBtn) {
-    applyState(bioBtn);
-    return;  // SUCCESS: No observer needed
-  }
-
-  // 🔹 Observer for dynamic load (like your greet observer)
-  console.log('[DEBUG-UI] Starting observer for bio button...');
-  const observer = new MutationObserver((mutations) => {
-    bioBtn = document.getElementById('bioBtn') || document.querySelector('.biometric-button') || document.querySelector('[data-bio-button]');
-    if (bioBtn) {
-      console.log('[DEBUG-UI] Observer detected button — applying state');
-      applyState(bioBtn);
-      observer.disconnect();  // Stop once found
-    }
-  });
-
-  observer.observe(document.body, { childList: true, subtree: true });
-  
-  // Fallback timeout (5s max — disconnect if never found)
-  setTimeout(() => {
-    observer.disconnect();
-    if (!bioBtn) console.error('[ERROR-UI] Observer timeout — check HTML for #bioBtn / .biometric-button / [data-bio-button]');
-  }, 5000);
-
-  // Optional: Tie to your existing observer
-  if (typeof observeForElements === 'function') {
-    // Hack: Call it after
-    setTimeout(observeForElements, 100);
+    // 🔹 DEBUG: Log final button state
+    console.log('[DEBUG-UI] Final bioBtn classes:', bioBtn.className);
+  } catch (err) {
+    console.error('[ERROR-UI] restoreBiometricUI failed', err);
   }
 }
 
