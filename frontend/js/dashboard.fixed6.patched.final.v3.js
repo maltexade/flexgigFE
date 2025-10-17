@@ -10026,6 +10026,60 @@ async function verifyBiometrics(uid, context) {
         publicKey = null;
       }
 
+      // Helper: normalize various shapes -> Uint8Array or null
+      function normalizeToUint8(val) {
+        try {
+          if (val == null) return null;
+          // already typed array
+          if (ArrayBuffer.isView(val)) return val;
+          // ArrayBuffer -> view
+          if (val instanceof ArrayBuffer) return new Uint8Array(val);
+          // Node Buffer-like { type: 'Buffer', data: [...] }
+          if (typeof val === 'object' && val !== null && Array.isArray(val.data)) {
+            try { return new Uint8Array(val.data); } catch (e) { return null; }
+          }
+          // string: base64url
+          if (typeof val === 'string') {
+            // prefer global helper if available
+            if (typeof window.fromBase64UrlAsUint8 === 'function') {
+              try { return window.fromBase64UrlAsUint8(val); } catch (e) { /* fallback below */ }
+            }
+            if (typeof window.fromBase64Url === 'function') {
+              try {
+                const ab = window.fromBase64Url(val);
+                if (ab) return new Uint8Array(ab);
+              } catch (e) { /* fallback below */ }
+            }
+            // fallback local decode
+            try {
+              let b64 = val.replace(/-/g,'+').replace(/_/g,'/');
+              while (b64.length % 4) b64 += '=';
+              const bin = atob(b64);
+              const arr = new Uint8Array(bin.length);
+              for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+              return arr;
+            } catch (e) {
+              console.warn('[webauthn] normalizeToUint8: base64url decode failed', e);
+              return null;
+            }
+          }
+          // unknown shape
+          return null;
+        } catch (err) {
+          console.warn('[webauthn] normalizeToUint8 error', err);
+          return null;
+        }
+      }
+
+      // If server returned cached options, try to normalize them using global helper if present
+      if (publicKey && typeof window.convertOptionsFromServer === 'function') {
+        try {
+          publicKey = window.convertOptionsFromServer(publicKey);
+        } catch (e) {
+          console.warn('[webauthn] convertOptionsFromServer failed on cached options', e);
+        }
+      }
+
       if (!publicKey) {
         console.log('[verifyBiometrics] no cached options - fetching from server');
         var storedId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
@@ -10039,91 +10093,122 @@ async function verifyBiometrics(uid, context) {
           var txt = await optRes.text();
           throw new Error('Auth options fetch failed: ' + txt);
         }
+
         publicKey = await optRes.json();
-        // normalize challenge -> Uint8Array (if string/buffer)
-if (publicKey.challenge) {
-  try {
-    if (typeof publicKey.challenge === 'string') {
-      const chAB = window.fromBase64Url ? window.fromBase64Url(publicKey.challenge) : null;
-      if (chAB) publicKey.challenge = new Uint8Array(chAB);
-    } else if (publicKey.challenge instanceof ArrayBuffer) {
-      publicKey.challenge = new Uint8Array(publicKey.challenge);
-    } else if (ArrayBuffer.isView(publicKey.challenge)) {
-      // already typed array - leave as is
-    }
-  } catch (e) {
-    console.warn('[webauthn] challenge conversion failed', e);
-  }
-}
 
-if (Array.isArray(publicKey.allowCredentials)) {
-  publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){
-    try {
-      // 1) string (base64url) -> ArrayBuffer -> Uint8Array
-      if (typeof c.id === 'string') {
-        const idAb = window.fromBase64Url ? window.fromBase64Url(c.id) : null;
-        if (idAb) return Object.assign({}, c, { id: new Uint8Array(idAb) });
-        return null; // drop if decode failed
-      }
+        // Prefer global converter if available
+        if (typeof window.convertOptionsFromServer === 'function') {
+          try {
+            publicKey = window.convertOptionsFromServer(publicKey);
+          } catch (e) {
+            console.warn('[webauthn] convertOptionsFromServer error', e);
+          }
+        } else {
+          // normalize challenge (handle string, ArrayBuffer, typed array, Node buffer-like)
+          if (publicKey.challenge) {
+            try {
+              const chView = normalizeToUint8(publicKey.challenge);
+              if (chView) {
+                publicKey.challenge = chView;
+              } else {
+                // if not convertible, warn and keep original (we'll catch before get)
+                console.warn('[webauthn] challenge could not be normalized', publicKey.challenge);
+              }
+            } catch (e) {
+              console.warn('[webauthn] challenge conversion failed', e);
+            }
+          }
 
-      // 2) already typed array (Uint8Array etc.) -> keep
-      if (ArrayBuffer.isView(c.id)) {
-        return Object.assign({}, c, { id: c.id });
-      }
+          // normalize allowCredentials entries
+          if (Array.isArray(publicKey.allowCredentials)) {
+            publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){
+              try {
+                const vid = normalizeToUint8(c && c.id);
+                if (vid) return Object.assign({}, c, { id: vid });
+              } catch (e) {
+                console.warn('[webauthn] allowCredentials entry conversion error', e, c);
+              }
+              return null;
+            }).filter(Boolean);
+          } else {
+            // Build from stored id if present
+            const storedId2 = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id') || '';
+            let idView = null;
+            try {
+              idView = normalizeToUint8(storedId2);
+            } catch (e) {
+              console.warn('[webauthn] storedId conversion failed', e, storedId2);
+              idView = null;
+            }
+            publicKey.allowCredentials = idView ? [{
+              type: 'public-key',
+              id: idView,
+              transports: ['internal']
+            }] : [];
+          }
+        }
 
-      // 3) plain ArrayBuffer -> wrap
-      if (c.id instanceof ArrayBuffer) {
-        return Object.assign({}, c, { id: new Uint8Array(c.id) });
-      }
-
-      // 4) Node-style Buffer JSON: { type: 'Buffer', data: [...] }
-      if (typeof c.id === 'object' && c.id !== null && Array.isArray(c.id.data)) {
+        // cache normalized options for immediate reuse (store as-is: Uint8Array are ok)
         try {
-          return Object.assign({}, c, { id: new Uint8Array(c.id.data) });
+          window.__cachedAuthOptions = publicKey;
+          window.__cachedAuthOptionsFetchedAt = Date.now();
         } catch (e) {
-          return null;
+          // ignore caching errors
+        }
+      } else {
+        console.log('[verifyBiometrics] using cached options for immediate prompt');
+        // Ensure cached options are normalized even if global helper not available
+        if (!publicKey.challenge || !ArrayBuffer.isView(publicKey.challenge)) {
+          try {
+            const chN = (publicKey && publicKey.challenge) ? normalizeToUint8(publicKey.challenge) : null;
+            if (chN) publicKey.challenge = chN;
+          } catch (e) { /* ignore */ }
+        }
+        if (Array.isArray(publicKey.allowCredentials)) {
+          try {
+            publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){
+              try {
+                const idn = normalizeToUint8(c && c.id);
+                if (idn) return Object.assign({}, c, { id: idn });
+              } catch (err) { /* noop */ }
+              return null;
+            }).filter(Boolean);
+          } catch (e) { /* noop */ }
         }
       }
 
-      // Unknown shape -> drop this credential entry (filter later)
-      return null;
-    } catch (e) {
-      console.warn('[webauthn] allowCredentials entry conversion error', e, c);
-      return null;
-    }
-  }).filter(Boolean); // remove null/invalid entries
-} else {
-  // Build from stored id (normalize or leave empty if not convertible)
-  const storedId2 = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id') || '';
-  let idView = null;
-  try {
-    if (typeof storedId2 === 'string') {
-      const ab = window.fromBase64Url ? window.fromBase64Url(storedId2) : null;
-      if (ab) idView = new Uint8Array(ab);
-    } else if (ArrayBuffer.isView(storedId2)) {
-      idView = storedId2;
-    } else if (storedId2 instanceof ArrayBuffer) {
-      idView = new Uint8Array(storedId2);
-    } else if (typeof storedId2 === 'object' && storedId2 !== null && Array.isArray(storedId2.data)) {
-      idView = new Uint8Array(storedId2.data);
-    }
-  } catch (e) {
-    console.warn('[webauthn] storedId conversion failed', e, storedId2);
-    idView = null;
-  }
-
-  publicKey.allowCredentials = idView ? [{
-    type: 'public-key',
-    id: idView,
-    transports: ['internal']
-  }] : []; // empty -> let platform discover if needed
-}
-
-
-      } else {
-        console.log('[verifyBiometrics] using cached options for immediate prompt');
+      // Debug & final checks: print types/sizes and ensure challenge is ArrayBufferView
+      try {
+        console.groupCollapsed('[webauthn debug] publicKey before navigator.credentials.get');
+        console.log('publicKey:', publicKey);
+        if (publicKey && publicKey.challenge) {
+          console.log('challenge type:', Object.prototype.toString.call(publicKey.challenge), 'byteLength:', (publicKey.challenge && publicKey.challenge.byteLength) || null);
+        } else {
+          console.warn('[webauthn debug] publicKey.challenge missing or null:', publicKey && publicKey.challenge);
+        }
+        if (Array.isArray(publicKey && publicKey.allowCredentials)) {
+          publicKey.allowCredentials.forEach(function(c, idx){
+            try {
+              console.log('[webauthn debug] allowCredentials['+idx+'] id type:', c.id && (c.id.constructor && c.id.constructor.name), 'byteLength:', (c.id && c.id.byteLength) || null);
+            } catch (e) {
+              console.warn('[webauthn debug] allowCredentials log error', e, c);
+            }
+          });
+        } else {
+          console.log('[webauthn debug] allowCredentials not present or not array:', publicKey && publicKey.allowCredentials);
+        }
+        console.groupEnd();
+      } catch (e) {
+        console.warn('[webauthn debug] final checks failed', e);
       }
 
+      // Validate critical properties before calling navigator.credentials.get
+      if (!publicKey || !publicKey.challenge || !ArrayBuffer.isView(publicKey.challenge)) {
+        // challenge must be an ArrayBufferView (Uint8Array). If invalid, stop and report a clear error.
+        throw new Error('Invalid publicKey.challenge (not ArrayBufferView) — cannot call navigator.credentials.get');
+      }
+
+      // All allowCredentials[].id are normalized (Uint8Array) or the array is empty.
       var assertion = await navigator.credentials.get({ publicKey: publicKey });
       if (!assertion) throw new Error('No assertion returned from authenticator');
 
@@ -10169,6 +10254,7 @@ if (Array.isArray(publicKey.allowCredentials)) {
     }
   });
 }
+
 
 
 
