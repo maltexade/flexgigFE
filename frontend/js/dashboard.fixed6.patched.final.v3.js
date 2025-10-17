@@ -3278,7 +3278,7 @@ updateBalanceDisplay();
     // ---------------------
     // Completion logic
     // ---------------------
-    async function handlePinCompletion() {
+  async function handlePinCompletion() {
   if (processing) return;
   if (currentPin.length !== 4) return;
 
@@ -3299,92 +3299,89 @@ updateBalanceDisplay();
       if (pinTitleEl) pinTitleEl.textContent = 'Create PIN';
       if (pinSubtitleEl) pinSubtitleEl.textContent = 'Create a 4-digit PIN';
       resetInputs();
+      localStorage.setItem('pinSet', 'false'); // PIN not set
       return;
     }
 
     processing = true;
     return withLoader(async () => {
+      try {
+        const res = await fetch('https://api.flexgig.com.ng/api/save-pin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pin: currentPin }),
+          credentials: 'include',
+        });
 
-    try {
-      const res = await fetch('https://api.flexgig.com.ng/api/save-pin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin: currentPin }),
-        credentials: 'include',
-      });
+        if (!res.ok) throw new Error('Save PIN failed');
 
-      if (!res.ok) throw new Error('Save PIN failed');
+        console.log('[dashboard.js] PIN setup successfully');
+        localStorage.setItem('pinSet', 'true'); // PIN successfully set
 
-      console.log('[dashboard.js] PIN setup successfully');
-      // Removed: localStorage.setItem('userPin', currentPin);
+        const dashboardPinCard = document.getElementById('dashboardPinCard');
+        if (dashboardPinCard) dashboardPinCard.style.display = 'none';
+        if (accountPinStatus) accountPinStatus.textContent = 'PIN set';
 
-      const dashboardPinCard = document.getElementById('dashboardPinCard');
-      if (dashboardPinCard) dashboardPinCard.style.display = 'none';
-      if (accountPinStatus) accountPinStatus.textContent = 'PIN set';
-
-      showToast('PIN updated successfully', 'success', 2400);
-      pinModal.classList.add('hidden');
-      resetInputs();
-    } catch (err) {
-      console.error('[dashboard.js] PIN save error:', err);
-      showToast('Failed to save PIN. Try again.', 'error', 2200);
-      resetInputs();
-    } finally {
-      processing = false;
-    }
-    return;
-  });
+        showToast('PIN updated successfully', 'success', 2400);
+        pinModal.classList.add('hidden');
+        resetInputs();
+      } catch (err) {
+        console.error('[dashboard.js] PIN save error:', err);
+        showToast('Failed to save PIN. Try again.', 'error', 2200);
+        localStorage.setItem('pinSet', 'false'); // PIN failed
+        resetInputs();
+      } finally {
+        processing = false;
+      }
+    });
   }
 
   if (step === 'reauth') {
     return withLoader(async () => {
+      processing = true;
+      try {
+        const res = await fetch('https://api.flexgig.com.ng/api/verify-pin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pin: currentPin }),
+          credentials: 'include',
+        });
+        if (!res.ok) throw new Error('Invalid PIN');
 
-    processing = true;
-    try {
-      const res = await fetch('https://api.flexgig.com.ng/api/verify-pin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin: currentPin }),
-        credentials: 'include',
-      });
-      if (!res.ok) throw new Error('Invalid PIN');
+        const { user } = await res.json();
+        const userData = {
+          email: user.email || '',
+          firstName: user.fullName?.split(' ')[0] || '',
+          username: user.username || '',
+          phoneNumber: user.phoneNumber || '',
+          address: user.address || '',
+          profilePicture: user.profilePicture || '',
+        };
 
-      const { user } = await res.json();
-      // Removed: localStorage.setItem calls for userEmail, firstName, username, phoneNumber, address, profilePicture
-      // Fetch user data on-demand when needed instead of storing in localStorage
-      const userData = {
-        email: user.email || '',
-        firstName: user.fullName?.split(' ')[0] || '',
-        username: user.username || '',
-        phoneNumber: user.phoneNumber || '',
-        address: user.address || '',
-        profilePicture: user.profilePicture || '',
-      };
+        if (typeof updateGreetingAndAvatar === 'function') {
+          await updateGreetingAndAvatar(userData.username, userData.firstName);
+        }
+        if (typeof loadUserProfile === 'function') {
+          await loadUserProfile(userData);
+        }
+        if (typeof updateBalanceDisplay === 'function') {
+          await updateBalanceDisplay();
+        }
 
-      if (typeof updateGreetingAndAvatar === 'function') {
-        await updateGreetingAndAvatar(userData.username, userData.firstName);
+        pinModal.classList.add('hidden');
+        resetInputs();
+        console.log('[dashboard.js] PIN re-auth: Session restored');
+      } catch (err) {
+        console.error('[dashboard.js] PIN re-auth error:', err);
+        showToast('Invalid PIN or session. Redirecting to login...', 'error', 1800);
+        setTimeout(() => (window.location.href = '/'), 1200);
+      } finally {
+        processing = false;
       }
-      if (typeof loadUserProfile === 'function') {
-        await loadUserProfile(userData); // Pass userData to function
-      }
-      if (typeof updateBalanceDisplay === 'function') {
-        await updateBalanceDisplay();
-      }
-
-      pinModal.classList.add('hidden');
-      resetInputs();
-      console.log('[dashboard.js] PIN re-auth: Session restored');
-    } catch (err) {
-      console.error('[dashboard.js] PIN re-auth error:', err);
-      showToast('Invalid PIN or session. Redirecting to login...', 'error', 1800);
-      setTimeout(() => (window.location.href = '/'), 1200);
-    } finally {
-      processing = false;
-    }
-  });
+    });
   }
-  
 }
+
 
     // ---------------------
     // Wire keypad buttons
