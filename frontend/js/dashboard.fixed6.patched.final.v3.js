@@ -3597,6 +3597,7 @@ function __fg_pin_clearAllInputs() {
   }
 }
 
+
   // Update stored PIN in Supabase
   async function __fg_pin_updateStoredPin(uid, table, column, newPin) {
   if (table !== 'users' || column !== 'pin') {
@@ -7792,84 +7793,155 @@ function __sec_wireEvents() {
 
     if (__sec_parentSwitch) {
       __sec_log.d('wireEvents: Wiring parent switch (#biometricsSwitch)');
-      const __sec_parentHandler = async () => {
-        __sec_log.d('__sec_parentHandler: Starting');
-        return withLoader(async () => {
-          __sec_setBusy(__sec_parentSwitch, true);
-          const uiOn = __sec_toggleSwitch(__sec_parentSwitch);
-          __sec_log.d('__sec_parentHandler: Toggle state', { uiOn });
+      // Replace the original __sec_parentHandler definition with this one
+const __sec_parentHandler = async () => {
+  __sec_log.d('__sec_parentHandler: Starting');
 
-          const currentUser = await __sec_getCurrentUser();
-          __sec_log.d('__sec_parentHandler: Retrieved currentUser', { hasUser: !!currentUser?.user });
+  return withLoader(async () => {
+    // mark busy spinner on the control
+    try { __sec_setBusy(__sec_parentSwitch, true); } catch (e) { __sec_log.w('setBusy failed', e); }
 
-          if (!currentUser || !currentUser.user || !currentUser.user.uid) {
-            __sec_log.e('__sec_parentHandler: No current user or invalid session');
-            __sec_setChecked(__sec_parentSwitch, false);
-            __sec_setBusy(__sec_parentSwitch, false);
-            alert('You must be signed in to enable biometrics. Please try logging in again.');
-            window.location.href = '/';
-            return;
-          }
-
-          const { user } = currentUser;
-          __sec_log.d('__sec_parentHandler: Extracted user', { userId: user.uid });
-
-          const uid = user.uid;
-          __sec_log.d('__sec_parentHandler: Proceeding with uid', uid);
-
-          if (uiOn) {
-  __sec_log.i('Parent toggle ON requested — will revoke existing authenticators (best-effort) then register new');
-
-  // Try to revoke all existing authenticators for this user (best-effort)
-  try {
-    const auths = await __sec_listAuthenticators(uid);
-    __sec_log.d('__sec_parentHandler: Authenticators found before ON', auths);
-
-    if (Array.isArray(auths) && auths.length > 0) {
-      for (const a of auths) {
-        const credential_id = a.credential_id || a.credentialID || a.credentialId;
-        if (!credential_id) {
-          __sec_log.w('__sec_parentHandler: skipping invalid credential id', a);
-          continue;
-        }
-        try {
-          await __sec_revokeAuthenticator(uid, credential_id);
-          __sec_log.i('__sec_parentHandler: revoked', credential_id);
-        } catch(revokeErr) {
-          __sec_log.w('__sec_parentHandler: revoke failed for', credential_id, revokeErr);
-        }
-      }
-    } else {
-      // still call revoke endpoint (server may have stale entries) — pass null credential id to request full reset
-      try {
-        await __sec_revokeAuthenticator(uid, null);
-        __sec_log.i('__sec_parentHandler: called revoke with null to ensure server reset');
-      } catch(e){ /* ignore errors */ }
+    // Determine desired state (we DO NOT flip UI yet)
+    // Use __sec_isChecked (exists in your code) to read current checked state
+    let wantOn = true;
+    try {
+      const currentlyChecked = !!(__sec_parentSwitch && __sec_isChecked(__sec_parentSwitch));
+      wantOn = !currentlyChecked; // if currently off -> we want ON, and vice versa
+      __sec_log.d('__sec_parentHandler: wantOn computed', { currentlyChecked, wantOn });
+    } catch (e) {
+      __sec_log.w('__sec_parentHandler: could not read current checked state, assuming ON request', e);
+      wantOn = true;
     }
-  } catch (err) {
-    __sec_log.w('__sec_parentHandler: failed listing/revoking pre-existing authenticators (non-fatal)', err);
-  }
 
-  // Now proceed to registration flow (always attempt to register fresh)
-  try {
-    __sec_log.i('Starting fresh registration flow after revoke');
-    const regResult = await startRegistration(uid, user.email || user.username || uid, user.fullName || user.email || uid);
-    __sec_log.d('__sec_parentHandler: Registration result', regResult);
-    __sec_setBiometrics(true, true);
-    __sec_log.i('Registration successful (parent ON)');
-  } catch (err) {
-    __sec_log.e('Registration failed after revoke', { err, uid });
-    __sec_setChecked(__sec_parentSwitch, false);
-    __sec_setBiometrics(false, false);
-    alert('Biometric registration failed: ' + (err.message || 'unknown error'));
-  } finally {
-    __sec_setBusy(__sec_parentSwitch, false);
-  }
-}
+    // Ensure valid session / user exists before continuing
+    const currentUser = await __sec_getCurrentUser();
+    __sec_log.d('__sec_parentHandler: Retrieved currentUser', { hasUser: !!currentUser?.user });
 
-          __sec_log.d('__sec_parentHandler: Exit');
+    if (!currentUser || !currentUser.user || !currentUser.user.uid) {
+      __sec_log.e('__sec_parentHandler: No current user or invalid session');
+      try { __sec_setChecked(__sec_parentSwitch, false); } catch (e) {}
+      try { __sec_setBusy(__sec_parentSwitch, false); } catch (e) {}
+      alert('You must be signed in to enable biometrics. Please try logging in again.');
+      window.location.href = '/';
+      return;
+    }
+
+    const { user } = currentUser;
+    __sec_log.d('__sec_parentHandler: Extracted user', { userId: user.uid });
+
+    // If user requested turning ON, require PIN BEFORE doing any UI changes or network work
+    if (wantOn) {
+      // Check localStorage first for quick live response; fall back to server session flag if present
+      let hasPin = false;
+      try {
+        hasPin = localStorage.getItem('hasPin') === 'true';
+      } catch (e) { __sec_log.w('localStorage.hasPin read failed', e); }
+
+      // fallback to server-side session user flag if local false/undefined
+      if (!hasPin && (user && (user.hasPin || user.pin))) {
+        hasPin = true;
+      }
+
+      if (!hasPin) {
+        __sec_log.i('__sec_parentHandler: PIN not present, blocking biometric enable');
+        // Notify user, keep switch visually off and clear busy state
+        try { showSlideNotification('Please set a PIN first before enabling biometrics', 'info'); } catch(e){}
+        try { __sec_setChecked(__sec_parentSwitch, false); } catch (e) {}
+        try { __sec_setBusy(__sec_parentSwitch, false); } catch (e) {}
+        return; // abort early — no flinch, no network calls
+      }
+
+      // At this point: PIN present; proceed to revoke existing authenticators and register new one
+      __sec_log.i('Parent toggle ON requested — will revoke existing authenticators (best-effort) then register new');
+
+      try {
+        // Try to revoke all existing authenticators (best-effort)
+        const auths = await __sec_listAuthenticators(user.uid).catch(err => {
+          __sec_log.w('__sec_parentHandler: listAuthenticators failed', err);
+          return [];
         });
-      };
+
+        __sec_log.d('__sec_parentHandler: Authenticators found before ON', auths);
+
+        if (Array.isArray(auths) && auths.length > 0) {
+          for (const a of auths) {
+            const credential_id = a.credential_id || a.credentialID || a.credentialId;
+            if (!credential_id) {
+              __sec_log.w('__sec_parentHandler: skipping invalid credential id', a);
+              continue;
+            }
+            try {
+              await __sec_revokeAuthenticator(user.uid, credential_id);
+              __sec_log.i('__sec_parentHandler: revoked', credential_id);
+            } catch (revokeErr) {
+              __sec_log.w('__sec_parentHandler: revoke failed for', credential_id, revokeErr);
+            }
+          }
+        } else {
+          // still call revoke endpoint (server may have stale entries) — pass null credential id to request full reset
+          try {
+            await __sec_revokeAuthenticator(user.uid, null);
+            __sec_log.i('__sec_parentHandler: called revoke with null to ensure server reset');
+          } catch (e) {
+            __sec_log.w('__sec_parentHandler: revoke-with-null failed', e);
+          }
+        }
+      } catch (err) {
+        __sec_log.w('__sec_parentHandler: failed listing/revoking pre-existing authenticators (non-fatal)', err);
+      }
+
+      // Now proceed to registration flow (always attempt to register fresh)
+      try {
+        __sec_log.i('Starting fresh registration flow after revoke');
+        const regResult = await startRegistration(user.uid, user.email || user.username || user.uid, user.fullName || user.email || user.uid);
+        __sec_log.d('__sec_parentHandler: Registration result', regResult);
+
+        // Only after successful registration set biometrics on and UI checked
+        __sec_setBiometrics(true, true);
+
+        try { __sec_setChecked(__sec_parentSwitch, true); } catch(e){}
+        __sec_log.i('Registration successful (parent ON)');
+      } catch (err) {
+        __sec_log.e('Registration failed after revoke', { err, uid: user.uid });
+        try { __sec_setChecked(__sec_parentSwitch, false); } catch(e){}
+        __sec_setBiometrics(false, false);
+        alert('Biometric registration failed: ' + (err.message || 'unknown error'));
+      } finally {
+        try { __sec_setBusy(__sec_parentSwitch, false); } catch(e){}
+      }
+
+    } else {
+      // wantOn === false -> disabling
+      __sec_log.i('Parent toggle OFF requested — revoking and disabling biometrics');
+
+      try {
+        // call revoke (await) — if it throws we'll still clean up locally
+        try {
+          await __sec_revokeAuthenticator(user.uid, null);
+        } catch (e) {
+          __sec_log.w('__sec_parentHandler: revoke during disable returned error', e);
+        }
+
+        // update state locally
+        __sec_setBiometrics(false, false);
+        try { __sec_setChecked(__sec_parentSwitch, false); } catch(e){}
+        try { localStorage.removeItem('credentialId'); } catch(e){}
+        try { invalidateAuthOptionsCache && invalidateAuthOptionsCache(); } catch(e){}
+
+        __sec_log.i('Biometrics disabled (parent OFF)');
+      } catch (err) {
+        __sec_log.e('__sec_parentHandler: disabling failed', err);
+        try { __sec_setChecked(__sec_parentSwitch, false); } catch(e){}
+        __sec_setBiometrics(false, false);
+      } finally {
+        try { __sec_setBusy(__sec_parentSwitch, false); } catch(e){}
+      }
+    }
+
+    __sec_log.d('__sec_parentHandler: Exit');
+  }); // end withLoader
+};
+
 
       __sec_parentSwitch.addEventListener('click', (e) => {
         __sec_log.d('parentSwitch click event');
@@ -8002,6 +8074,77 @@ function __sec_wireEvents() {
   }
   __sec_log.d('wireEvents exit');
 }
+
+
+/* ====== Defensive capture listeners to prevent flinch/no-PIN registration ======
+   Paste this after __sec_wireEvents() runs (or at end of the function).
+   It prevents any click/key handlers from firing if there's no PIN.        */
+(function installPinGuard() {
+  try {
+    if (typeof __sec_parentSwitch === 'undefined') {
+      console.warn('installPinGuard: __sec_parentSwitch not present yet');
+      return;
+    }
+
+    function hasPin() {
+      try { return localStorage.getItem('hasPin') === 'true'; } catch (e) { return false; }
+    }
+
+    function blockAndNotify(e, msg) {
+      try {
+        e.preventDefault();
+        e.stopImmediatePropagation(); // ensure we stop other handlers
+      } catch (err) {}
+      // keep switch visually OFF
+      try { __sec_setChecked(__sec_parentSwitch, false); } catch (err) {}
+      try { showSlideNotification(msg || 'Please set a PIN first before enabling biometrics', 'info'); } catch (err) { console.log(msg || 'Please set a PIN first before enabling biometrics'); }
+      return false;
+    }
+
+    // Parent switch: capture-phase guard
+    __sec_parentSwitch.addEventListener('click', function (e) {
+      if (!hasPin()) {
+        return blockAndNotify(e, 'Please set a PIN first before enabling biometrics.');
+      }
+      // else allow normal flow to continue
+    }, { capture: true, passive: false });
+
+    __sec_parentSwitch.addEventListener('keydown', function (e) {
+      if (e.key === ' ' || e.key === 'Enter') {
+        if (!hasPin()) {
+          return blockAndNotify(e, 'Please set a PIN first before enabling biometrics.');
+        }
+      }
+    }, { capture: true, passive: false });
+
+    // Child switches: prevent them from calling the parent handler (they attempted to auto-enable)
+    const childGuards = [__sec_bioLogin, __sec_bioTx].filter(Boolean);
+    childGuards.forEach((childEl) => {
+      childEl.addEventListener('click', function (e) {
+        try {
+          // if parent is not checked and no pin -> block and notify
+          const parentChecked = __sec_parentSwitch && __sec_isChecked && __sec_isChecked(__sec_parentSwitch);
+          if (!parentChecked && !hasPin()) {
+            return blockAndNotify(e, 'Please set a PIN first to enable biometric options.');
+          }
+        } catch (err) {}
+      }, { capture: true, passive: false });
+
+      childEl.addEventListener('keydown', function (e) {
+        if (e.key === ' ' || e.key === 'Enter') {
+          const parentChecked = __sec_parentSwitch && __sec_isChecked && __sec_isChecked(__sec_parentSwitch);
+          if (!parentChecked && !hasPin()) {
+            return blockAndNotify(e, 'Please set a PIN first to enable biometric options.');
+          }
+        }
+      }, { capture: true, passive: false });
+    });
+
+    console.debug('installPinGuard: guard installed for parent and child switches');
+  } catch (err) {
+    console.error('installPinGuard failed', err);
+  }
+})();
 
 /* Open/close modal with focus handling */
 let __sec_lastActiveElement = null;
@@ -9471,119 +9614,116 @@ function bindBiometricSettings({
 }
 
 
-  // Parent handler: Enabler (server register/revoke, auto-sets child flags)
+  // Replace your existing handleParentToggle with this version.
+// PIN-check is done *before* entering withLoader (no flinch / no server call without PIN).
 async function handleParentToggle(wantOn) {
   if (parent.__bioProcessing) return;
   parent.__bioProcessing = true;
-  try {
-    setSwitch(parent, wantOn);
-    parent.disabled = true;
 
+  // Prevent rapid clicks immediately
+  parent.disabled = true;
+
+  try {
+    // ENFORCE PIN presence before doing anything when enabling
+    if (wantOn) {
+      const hasPin = localStorage.getItem('hasPin') === 'true';
+      if (!hasPin) {
+        // Inform user and keep UI unchanged (no "flinch")
+        notify && notify('Please set a PIN first before enabling biometrics.', 'info');
+        try { setSwitch(parent, false); } catch (e) {}
+        return;
+      }
+    }
+
+    // Proceed to the loader-wrapped network work only after PIN check
     await withLoader(async () => {
       if (wantOn) {
-        // 1) PIN must exist
-        const hasPin = localStorage.getItem('hasPin') === 'true';
-        if (!hasPin) {
-          notify && notify('Please set a PIN first before enabling biometrics.', 'info');
-          setSwitch(parent, false);
-          return;
-        }
-
-        // 2) Call server registration flow (await it)
+        // Register flow (awaited)
         let res;
         try {
-          res = await registerBiometrics(); // ensure this returns { success, credentialId?, cancelled?, error? }
+          res = await registerBiometrics();
         } catch (err) {
           console.error('registerBiometrics threw', err);
           writeFlag && writeFlag('biometricsEnabled', false);
-          setSwitch(parent, false);
+          try { setSwitch(parent, false); } catch (e) {}
           setOptionsVisible && setOptionsVisible(false);
           safeCall(notify, 'Biometric setup failed (network/server error)', 'error');
           return;
         }
 
-        // 3) Handle server response
         if (res && res.success) {
-          // Write canonical flags first (atomic-ish)
+          // Persist flags
           writeFlag && writeFlag('biometricsEnabled', true);
           writeFlag && writeFlag('biometricForLogin', true);
           writeFlag && writeFlag('biometricForTx', true);
 
-          // If server returned credentialId, store it BEFORE prefetch
+          // Persist credentialId before prefetch
           if (res.credentialId) {
             try { localStorage.setItem('credentialId', String(res.credentialId)); } catch (e) { console.warn('storing credentialId failed', e); }
           }
 
-          // Prefetch auth options now that we have credentialId & flags set
-          try { window.prefetchAuthOptions && window.prefetchAuthOptions(); } catch (e) { console.warn('prefetchAuthOptions failed', e); }
-
-          // Update UI children
-          setSwitch(childLogin, true);
-          setSwitch(childTx, true);
+          // Update UI now that registration succeeded
+          try { setSwitch(parent, true); } catch (e) {}
+          try { setSwitch(childLogin, true); } catch (e) {}
+          try { setSwitch(childTx, true); } catch (e) {}
           setOptionsVisible && setOptionsVisible(true);
+
+          // Prefetch once
+          try { window.prefetchAuthOptions && window.prefetchAuthOptions(); } catch (e) { console.warn('prefetchAuthOptions failed', e); }
 
           safeCall(notify, 'Biometrics enabled', 'success');
         } else {
-          // registration failed or cancelled
+          // registration failed/cancelled — revert flags/UI
           writeFlag && writeFlag('biometricsEnabled', false);
           writeFlag && writeFlag('biometricForLogin', false);
           writeFlag && writeFlag('biometricForTx', false);
 
-          // revert UI
-          setSwitch(parent, false);
-          setSwitch(childLogin, false);
-          setSwitch(childTx, false);
+          try { setSwitch(parent, false); } catch (e) {}
+          try { setSwitch(childLogin, false); } catch (e) {}
+          try { setSwitch(childTx, false); } catch (e) {}
           setOptionsVisible && setOptionsVisible(false);
 
           const msg = res?.cancelled ? 'Biometric setup cancelled' : (res?.error || 'Biometric setup failed');
           safeCall(notify, msg, 'info');
         }
       } else {
-        // wantOn === false -> disabling
+        // DISABLE path: await server revoke and clean up locally
         try {
-          // ensure server revoke is awaited
-          const res = await disableBiometrics();
-          // Regardless of server result, clear local state to avoid stale UI
-          writeFlag && writeFlag('biometricsEnabled', false);
-          writeFlag && writeFlag('biometricForLogin', false);
-          writeFlag && writeFlag('biometricForTx', false);
-
-          // remove local credentialId and cached options
-          try { localStorage.removeItem('credentialId'); } catch (e) { console.warn('remove credentialId failed', e); }
-          try { invalidateAuthOptionsCache && invalidateAuthOptionsCache(); } catch(e){}
-
-          setSwitch(childLogin, false);
-          setSwitch(childTx, false);
-          setOptionsVisible && setOptionsVisible(false);
-
-          safeCall(notify, 'Biometrics disabled', 'info');
+          await disableBiometrics();
         } catch (err) {
           console.error('disableBiometrics error', err);
-          // best-effort local cleanup
-          writeFlag && writeFlag('biometricsEnabled', false);
-          writeFlag && writeFlag('biometricForLogin', false);
-          writeFlag && writeFlag('biometricForTx', false);
-          try { localStorage.removeItem('credentialId'); } catch(e){}
-          try { invalidateAuthOptionsCache && invalidateAuthOptionsCache(); } catch(e){}
-          setSwitch(parent, false);
-          setOptionsVisible && setOptionsVisible(false);
           safeCall(notify, `Failed to disable biometrics: ${err?.message || err}`, 'error');
+          // continue to cleanup locally anyway
         }
+
+        writeFlag && writeFlag('biometricsEnabled', false);
+        writeFlag && writeFlag('biometricForLogin', false);
+        writeFlag && writeFlag('biometricForTx', false);
+
+        try { localStorage.removeItem('credentialId'); } catch (e) { console.warn('remove credentialId failed', e); }
+        try { invalidateAuthOptionsCache && invalidateAuthOptionsCache(); } catch (e) {}
+
+        try { setSwitch(parent, false); } catch (e) {}
+        try { setSwitch(childLogin, false); } catch (e) {}
+        try { setSwitch(childTx, false); } catch (e) {}
+        setOptionsVisible && setOptionsVisible(false);
+
+        safeCall(notify, 'Biometrics disabled', 'info');
       }
     }); // end withLoader
   } catch (err) {
     console.error('Parent toggle error (outer):', err);
     writeFlag && writeFlag('biometricsEnabled', false);
-    setSwitch(parent, false);
+    try { setSwitch(parent, false); } catch (e) {}
     setOptionsVisible && setOptionsVisible(false);
     safeCall(notify, `Toggle failed: ${err?.message || err}`, 'error');
   } finally {
     parent.__bioProcessing = false;
     parent.disabled = false;
-    // Refresh UI from storage so other parts reflect canonical state
     try { syncFromStorage && syncFromStorage(); } catch (e) { console.warn('syncFromStorage failed', e); }
   }
 }
+
 
 
   // 🔹 FIXED Child handler: Pure client-side flag toggle (NO server, NO verify, NO prompt)
@@ -10368,22 +10508,53 @@ async function showReauthModal(context = 'reauth') {
 
 
   async function showInactivityPrompt() {
-    console.log('showInactivityPrompt called');
-    if (reauthModalOpen) {
-      console.log('Inactivity prompt skipped: reauth modal active');
+  console.log('showInactivityPrompt called');
+
+  // If reauth modal already open, skip
+  if (typeof reauthModalOpen !== 'undefined' && reauthModalOpen) {
+    console.log('Inactivity prompt skipped: reauth modal active');
+    return;
+  }
+
+  // Live-check: skip if neither PIN nor biometrics enabled (covers "no pin added yet" case)
+  try {
+    const hasPin = localStorage.getItem('hasPin') === 'true';
+    const biometricsEnabled = localStorage.getItem('biometricsEnabled') === 'true';
+    if (!hasPin && !biometricsEnabled) {
+      console.log('Inactivity prompt skipped: no PIN or biometrics set (live check)');
       return;
     }
-    if (!(await shouldReauth())) {
-      console.log('No reauth for prompt');
-      return;
-    }
+  } catch (e) {
+    console.warn('showInactivityPrompt: error reading localStorage flags', e);
+  }
+
+  // Properly call shouldReauth() and check .needsReauth
+  let reauthCheck = null;
+  try {
+    reauthCheck = await shouldReauth();
+  } catch (e) {
+    console.warn('showInactivityPrompt: shouldReauth threw, aborting prompt', e);
+    return;
+  }
+  if (!reauthCheck || !reauthCheck.needsReauth) {
+    console.log('No reauth needed according to shouldReauth()');
+    return;
+  }
+
+  // Continue with UI logic
+  try {
     cacheDomRefs();
-      if (!promptModal || !yesBtn) {
-        console.log('No promptModal or yesBtn, opening PIN reauth modal (inactivity)');
-        // Use initReauthModal to force PIN view (do not auto-invoke biometrics)
-        await initReauthModal({ show: true, context: 'reauth' });
-        return;
-      }
+  } catch (e) {
+    console.warn('cacheDomRefs failed', e);
+  }
+
+  try {
+    if (!promptModal || !yesBtn) {
+      console.log('No promptModal or yesBtn, opening PIN reauth modal (inactivity)');
+      // Use initReauthModal to force PIN view (do not auto-invoke biometrics)
+      try { await initReauthModal({ show: true, context: 'reauth' }); } catch (e) { console.error('initReauthModal failed', e); }
+      return;
+    }
 
     if (!promptModal.classList.contains('hidden')) {
       console.log('Prompt already shown');
@@ -10393,8 +10564,9 @@ async function showReauthModal(context = 'reauth') {
     promptModal.classList.remove('hidden');
     promptModal.setAttribute('aria-modal', 'true');
     promptModal.setAttribute('role', 'dialog');
-    yesBtn.focus();
-    trapFocus(promptModal); // Focus trap
+    try { yesBtn.focus(); } catch(e) {}
+    try { trapFocus(promptModal); } catch(e) {}
+
     console.log('Prompt shown');
 
     let promptTimeout = null;
@@ -10402,10 +10574,11 @@ async function showReauthModal(context = 'reauth') {
       console.log('Yes handler called');
       try {
         promptModal.classList.add('hidden');
-        if (promptTimeout) clearTimeout(promptTimeout);
-        try {
-          yesBtn.removeEventListener('click', yesHandler);
-        } catch (e) {}
+        if (promptTimeout) {
+          clearTimeout(promptTimeout);
+          promptTimeout = null;
+        }
+        try { yesBtn.removeEventListener('click', yesHandler); } catch (e) {}
         resetIdleTimer();
       } catch (e) {
         console.error('Error in yesHandler:', e);
@@ -10427,22 +10600,27 @@ async function showReauthModal(context = 'reauth') {
     };
     document.addEventListener('keydown', escHandler, { once: true });
 
-    if (PROMPT_AUTO_CLOSE) {
-            promptTimeout = setTimeout(async () => {
+    if (typeof PROMPT_AUTO_CLOSE !== 'undefined' && PROMPT_AUTO_CLOSE) {
+      promptTimeout = setTimeout(async () => {
         console.log('Prompt auto-close timeout');
-        if (!promptModal.classList.contains('hidden')) {
-          promptModal.classList.add('hidden');
-          try {
-            yesBtn.removeEventListener('click', yesHandler);
-          } catch (e) {}
-          document.removeEventListener('keydown', escHandler);
-          // Open PIN modal on inactivity auto-close (prevent immediate biometric)
-          await initReauthModal({ show: true, context: 'reauth' });
+        try {
+          if (!promptModal.classList.contains('hidden')) {
+            promptModal.classList.add('hidden');
+            try { yesBtn.removeEventListener('click', yesHandler); } catch (e) {}
+            document.removeEventListener('keydown', escHandler);
+            // Open PIN modal on inactivity auto-close (prevent immediate biometric)
+            try { await initReauthModal({ show: true, context: 'reauth' }); } catch (e) { console.error('initReauthModal failed (auto-close)', e); }
+          }
+        } catch (e) {
+          console.error('Error during prompt auto-close flow:', e);
         }
-      }, PROMPT_TIMEOUT);
-
+      }, typeof PROMPT_TIMEOUT !== 'undefined' ? PROMPT_TIMEOUT : 5000);
     }
+  } catch (e) {
+    console.error('showInactivityPrompt general error:', e);
   }
+}
+
 
 
   async function forceInactivityCheck() {
