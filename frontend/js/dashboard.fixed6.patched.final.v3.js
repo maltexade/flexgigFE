@@ -990,102 +990,30 @@ const svgShapes = {
     }
   }
 
-  // ---------- Robust base64url -> ArrayBuffer converter ----------
-function fromBase64Url(b64url) {
-  try {
-    // Null / undefined -> keep as-is
-    if (b64url === null || typeof b64url === 'undefined') return b64url;
-
-    // If it's already an ArrayBuffer, return it
-    if (b64url instanceof ArrayBuffer) return b64url;
-
-    // If it's a TypedArray / DataView (Uint8Array, etc.) return underlying buffer or slice
-    if (ArrayBuffer.isView(b64url)) {
-      // If it's a Uint8Array or similar, return the buffer (copy to avoid unexpected shared memory)
-      const view = b64url;
-      if (view.buffer && view.byteLength === view.length) {
-        // return a copy as ArrayBuffer
-        return view.slice ? view.slice().buffer : view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength);
-      }
-      return view.buffer;
-    }
-
-    // If it's already a plain object that looks like {type:'Buffer', data:[...]} (some JSON serializers):
-    if (typeof b64url === 'object' && b64url !== null && Array.isArray(b64url.data)) {
-      try {
-        const arr = new Uint8Array(b64url.data);
-        return arr.buffer;
-      } catch (e) {
-        console.warn('[webauthn] fromBase64Url: unexpected buffer-like object', b64url);
-        return b64url;
-      }
-    }
-
-    // If it's not a string at this point, just return it (idempotent and avoids crashes)
-    if (typeof b64url !== 'string') {
-      console.warn('[webauthn] fromBase64Url expected string/ArrayBuffer/TypedArray but got', typeof b64url, b64url);
-      return b64url;
-    }
-
-    // Normal string path: base64url -> base64 -> binary -> ArrayBuffer
-    let b = b64url.replace(/-/g, '+').replace(/_/g, '/');
-    // pad with '='
+  function fromBase64Url(b64url){
+    let b = b64url.replace(/-/g,'+').replace(/_/g,'/');
     while (b.length % 4) b += '=';
-    const binary = atob(b);
-    const len = binary.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
-    return bytes.buffer;
-  } catch (err) {
-    console.warn('[webauthn] fromBase64Url conversion error', err, b64url);
-    return b64url;
+    const str = atob(b);
+    const arr = new Uint8Array(str.length);
+    for (let i=0;i<str.length;i++) arr[i] = str.charCodeAt(i);
+    return arr.buffer;
   }
-}
 
-// ---------- Robust converter for server-provided PublicKey options ----------
-function convertOptionsFromServer(publicKey) {
-  try {
-    if (!publicKey) return publicKey;
-
-    // Convert challenge if needed (string -> ArrayBuffer), or pass through if already converted
-    if (publicKey.challenge) {
-      publicKey.challenge = fromBase64Url(publicKey.challenge);
+  function convertOptionsFromServer(publicKey) {
+    try {
+      if (!publicKey) return publicKey;
+      if (publicKey.challenge && typeof publicKey.challenge === 'string') publicKey.challenge = fromBase64Url(publicKey.challenge);
+      if (Array.isArray(publicKey.allowCredentials)) {
+        publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){ 
+          try { return Object.assign({}, c, { id: fromBase64Url(c.id) }); } catch(e){ return c; }
+        });
+      }
+      return publicKey;
+    } catch (e) {
+      __webauthn_log.w('convertOptionsFromServer error', e);
+      return publicKey;
     }
-
-    // Convert allowCredentials entries' id fields safely
-    if (Array.isArray(publicKey.allowCredentials)) {
-      publicKey.allowCredentials = publicKey.allowCredentials.map(function (c) {
-        try {
-          // If c.id is present and not already an ArrayBuffer / TypedArray, convert it.
-          const id = (c && c.id) ? fromBase64Url(c.id) : c.id;
-          // If id is an ArrayBuffer or TypedArray, it's fine; but WebAuthn expects a BufferSource
-          // We'll convert ArrayBuffer -> Uint8Array for better compatibility
-          let finalId = id;
-          if (id instanceof ArrayBuffer) finalId = new Uint8Array(id);
-          if (ArrayBuffer.isView(id)) finalId = id; // keep typed array as-is
-
-          // return a shallow copy with id replaced
-          const copy = Object.assign({}, c, { id: finalId });
-          return copy;
-        } catch (e) {
-          console.warn('[webauthn] convertOptionsFromServer: allowCredentials entry convert failed', e, c);
-          return c;
-        }
-      });
-    }
-
-    // Some responses may include user.id in base64url form (rare) — handle defensively
-    if (publicKey.user && publicKey.user.id) {
-      publicKey.user.id = fromBase64Url(publicKey.user.id);
-    }
-
-    return publicKey;
-  } catch (e) {
-    console.warn('[webauthn] convertOptionsFromServer error', e);
-    return publicKey;
   }
-}
-
 
   // small helper: try parse cached user from localStorage
   function deriveUserIdFromLocalStorage() {
@@ -9899,23 +9827,49 @@ async function prefetchAuthOptionsFor(uid, context = 'reauth') {
 (function(){
   if (!window.fromBase64Url) {
     window.fromBase64Url = function (b64url) {
-      if (!b64url) return new ArrayBuffer(0);
-      b64url = b64url.replace(/-/g, '+').replace(/_/g, '/');
-      while (b64url.length % 4) b64url += '=';
-      const str = atob(b64url);
-      const arr = new Uint8Array(str.length);
-      for (let i = 0; i < str.length; i++) arr[i] = str.charCodeAt(i);
-      return arr.buffer;
+      try {
+        if (b64url == null) return new ArrayBuffer(0);
+
+        // Already a buffer or typed array — return its buffer
+        if (b64url instanceof ArrayBuffer) return b64url;
+        if (ArrayBuffer.isView(b64url)) return b64url.buffer;
+
+        // Some servers may send {type:'Buffer', data:[...]}
+        if (typeof b64url === 'object' && Array.isArray(b64url.data)) {
+          return new Uint8Array(b64url.data).buffer;
+        }
+
+        // If it's not a string, don't try to convert — just return it
+        if (typeof b64url !== 'string') {
+          console.warn('[webauthn] fromBase64Url expected string, got', typeof b64url, b64url);
+          return b64url;
+        }
+
+        // Normal string decode path
+        let s = b64url.replace(/-/g, '+').replace(/_/g, '/');
+        while (s.length % 4) s += '=';
+        const str = atob(s);
+        const arr = new Uint8Array(str.length);
+        for (let i = 0; i < str.length; i++) arr[i] = str.charCodeAt(i);
+        return arr.buffer;
+      } catch (err) {
+        console.warn('[webauthn] fromBase64Url error', err, b64url);
+        return new ArrayBuffer(0);
+      }
     };
   }
+
   if (!window.toBase64Url) {
     window.toBase64Url = function (buffer) {
+      if (!buffer) return '';
       const bytes = new Uint8Array(buffer);
       let str = '';
       for (let i = 0; i < bytes.length; i++) str += String.fromCharCode(bytes[i]);
       return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
     };
   }
+
+
 
 
 // ===== WebAuthn session init: cache userId for fast auth/options requests =====
