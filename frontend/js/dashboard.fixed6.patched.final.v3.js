@@ -6804,6 +6804,9 @@ function showSlideNotification(message, type = "info") {
   }, 3000);
   __sec_log.d('showSlideNotification exit');
 }
+window.showSlideNotification = window.showSlideNotification || showSlideNotification;
+
+
 
 /* =========================
    PIN Submodule (integrated)
@@ -7454,6 +7457,8 @@ async function startAuthentication(userId) {
   }
   __sec_log.d('startAuthentication exit');
 }
+
+window.__sec_startAuthentication = window.__sec_startAuthentication || __sec_startAuthentication;
 
 /* ---- WebAuthn helper calls to server (list/revoke) ---- */
 async function __sec_listAuthenticators(userId) {
