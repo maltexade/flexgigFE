@@ -526,33 +526,7 @@ function observeForElements() {
   }
 }
 
-async function handleBioToggle(e) {
-  e.preventDefault();
-  const mainSwitch = e.target;
-  const currentlyEnabled = mainSwitch.getAttribute('aria-checked') === 'true';
-  
-  if (currentlyEnabled) {
-    // Disable: Revoke credential, update DB/local
-    await disableBiometrics();  // Your disable func (clear local, call revoke endpoint)
-    mainSwitch.setAttribute('aria-checked', 'false');
-    mainSwitch.classList.remove('active');
-    mainSwitch.classList.add('inactive');
-    const subgroup = document.getElementById('biometricsOptions');
-    if (subgroup) subgroup.hidden = true;
-    notify('Biometrics disabled', 'info');
-  } else {
-    // Enable: Register if no credential, update
-    const { success } = await registerBiometrics();  // Your register func
-    if (success) {
-      mainSwitch.setAttribute('aria-checked', 'true');
-      mainSwitch.classList.add('active');
-      mainSwitch.classList.remove('inactive');
-      const subgroup = document.getElementById('biometricsOptions');
-      if (subgroup) subgroup.hidden = false;
-      notify('Biometrics enabled', 'success');
-    }
-  }
-}
+
 
 // 🔹 Sub-handler stubs (add these functions globally — simple local toggles)
 async function handleBioLoginToggle(e) {
@@ -4714,48 +4688,38 @@ async function updateStoredPin(uid, newPin) {
   // }
 
   // Initialize on page load
-  // 🔹 Boot sequence (updated: async + await session before PIN check)
-(async function boot(supabaseClient) {
+  function boot() {
   log.d('Booting PIN and security module');
-  
-  try {
-    // Init modals (unchanged)
-    initPinModal();
-    initPinVerifyModal();
-    initSecurityPinModal();
-    initCheckoutPin();
-    
-    // Setup inactivity (unchanged)
-    if (window.__reauth && typeof window.__reauth.setupInactivity === 'function') {
-      window.__reauth.setupInactivity();
-    }
-    
-    // 🔹 Delay + pre-sync session before PIN check (fixes "No signed-in user")
-    setTimeout(async () => {
-      try {
-        console.log('[BOOT] Starting PIN check...');
-        await getSession();  // Ensure session ready first (unblocks getUid)
-        window.checkPinExists((hasPin) => {
-          if (hasPin) {
-            window.ModalManager.openModal('pinVerifyModal');
-          }
-        }, 'load');
-        console.log('[BOOT] PIN check complete');
-      } catch (e) {
-        console.error('[BOOT] PIN check failed', e);
-        // Optional: Assume no PIN (hide setup modal if needed)
-      }
-    }, 1000);  // 1s buffer (your 4000ms was long; 1s suffices post-session)
-
-  } catch (bootErr) {
-    console.error('[BOOT] Overall boot error', bootErr);
+  initPinModal();
+  initPinVerifyModal();
+  initSecurityPinModal();
+  initCheckoutPin();
+  if (window.__reauth && typeof window.__reauth.setupInactivity === 'function') {
+    window.__reauth.setupInactivity();
   }
-})();
+
+  // 🔹 Delay + pre-sync session before PIN check (inside boot, keeps original structure)
+  setTimeout(async () => {
+    try {
+      console.log('[BOOT] Starting PIN check...');
+      await getSession();  // Ensure session ready first (unblocks getUid)
+      window.checkPinExists((hasPin) => {
+        if (hasPin) {
+          window.ModalManager.openModal('pinVerifyModal');
+        }
+      }, 'load');
+      console.log('[BOOT] PIN check complete');
+    } catch (e) {
+      console.error('[BOOT] PIN check failed', e);
+      // Optional: Assume no PIN (skip modal)
+    }
+  }, 1000);  // 1s buffer (adjust if needed; keeps your 1000ms outer delay)
+}
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', boot);
 } else {
-  setTimeout(boot, 4000);  // Keep your existing delay for non-loading state
+  setTimeout(boot, 1000);
 }
 })(supabaseClient);
 
