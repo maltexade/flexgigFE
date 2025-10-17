@@ -1016,43 +1016,68 @@ const svgShapes = {
     }
   }
 
-  function fromBase64Url(input) {
-  if (!input && input !== 0) return null;
-
-  // Already ArrayBuffer
-  if (input instanceof ArrayBuffer) return input;
-  // Typed array
-  if (ArrayBuffer.isView(input)) return input.buffer;
-  // Handle object-likes like {0:52,1:246,...}
-  if (typeof input === 'object' && input !== null && Object.keys(input).length > 0) {
+  // --- Robust fromBase64Url (replace existing definition) ---
+if (!window.fromBase64Url) {
+  window.fromBase64Url = function (input) {
     try {
-      const values = Object.values(input);
-      if (values.every(v => typeof v === 'number')) {
-        return new Uint8Array(values).buffer;
+      // null / undefined -> empty ArrayBuffer
+      if (input == null) return new ArrayBuffer(0);
+
+      // If already an ArrayBuffer -> return as-is
+      if (input instanceof ArrayBuffer) return input;
+
+      // If a TypedArray (Uint8Array, etc.) -> return its buffer
+      if (ArrayBuffer.isView(input)) return input.buffer;
+
+      // Node Buffer-like object: { type: 'Buffer', data: [...] }
+      if (typeof input === 'object' && Array.isArray(input.data)) {
+        return new Uint8Array(input.data).buffer;
       }
-    } catch (e) {
-      console.warn('[webauthn] fromBase64Url object→buffer failed', e);
-    }
-    return null;
-  }
-  // Normal string decode
-  if (typeof input === 'string') {
-    let b = input.replace(/-/g, '+').replace(/_/g, '/');
-    while (b.length % 4) b += '=';
-    try {
-      const str = atob(b);
-      const arr = new Uint8Array(str.length);
-      for (let i = 0; i < str.length; i++) arr[i] = str.charCodeAt(i);
-      return arr.buffer;
-    } catch (e) {
-      console.warn('[webauthn] fromBase64Url decode failed', e);
-      return null;
-    }
-  }
 
-  console.warn('[webauthn] fromBase64Url unsupported type', typeof input, input);
-  return null;
+      // Plain numeric-keyed object (JSON-decoded typed array), e.g. {0:12,1:34,...}
+      if (typeof input === 'object') {
+        // Collect numeric keys in order 0..N-1 if present, else attempt Object.values
+        const keys = Object.keys(input);
+        const numericKeys = keys.filter(k => /^[0-9]+$/.test(k));
+        if (numericKeys.length) {
+          // Build values in numeric order
+          const maxIndex = Math.max(...numericKeys.map(k => parseInt(k, 10)));
+          const arr = new Uint8Array(maxIndex + 1);
+          for (let i = 0; i <= maxIndex; i++) {
+            // if key missing, set 0
+            arr[i] = typeof input[i] === 'number' ? input[i] & 0xff : 0;
+          }
+          return arr.buffer;
+        }
+        // Fallback: if it's some other object, try to take Object.values if they look numeric
+        const vals = Object.values(input);
+        if (Array.isArray(vals) && vals.length && typeof vals[0] === 'number') {
+          return new Uint8Array(vals.map(v => v & 0xff)).buffer;
+        }
+      }
+
+      // If it's a string -> treat as base64url and decode
+      if (typeof input === 'string') {
+        // normalise base64url -> base64
+        let s = input.replace(/-/g, '+').replace(/_/g, '/');
+        // pad to multiple of 4
+        while (s.length % 4) s += '=';
+        const raw = atob(s);
+        const arr = new Uint8Array(raw.length);
+        for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+        return arr.buffer;
+      }
+
+      // Unknown type: log and return empty buffer to avoid breaking caller runtime expectations
+      console.warn('[webauthn] fromBase64Url: unknown input type', typeof input, input);
+      return new ArrayBuffer(0);
+    } catch (err) {
+      console.warn('[webauthn] fromBase64Url error', err, input);
+      return new ArrayBuffer(0);
+    }
+  };
 }
+
 
 function convertOptionsFromServer(publicKey) {
   try {
@@ -1064,16 +1089,34 @@ function convertOptionsFromServer(publicKey) {
     }
 
     if (Array.isArray(publicKey.allowCredentials)) {
-      publicKey.allowCredentials = publicKey.allowCredentials.map(c => {
-        try {
-          let idBuf = fromBase64Url(c.id);
-          if (!idBuf) return c;
-          return { ...c, id: new Uint8Array(idBuf) };
-        } catch (e) {
-          console.warn('[webauthn] allowCredentials id convert failed', e);
-          return c;
-        }
-      });
+      // inside convertOptionsFromServer, replace the mapping with this:
+publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){
+  try {
+    let idBuf = null;
+    if (typeof c.id === 'string') {
+      idBuf = fromBase64Url(c.id);
+    } else if (c instanceof ArrayBuffer) {
+      idBuf = c;
+    } else if (ArrayBuffer.isView(c.id)) {
+      idBuf = c.id.buffer;
+    } else if (typeof c.id === 'object') {
+      // object may be {type:'Buffer',data:[...]} or numeric keys
+      const maybe = fromBase64Url(c.id);
+      // fromBase64Url already handles numeric-keyed objects and node-buffers
+      idBuf = maybe && (maybe instanceof ArrayBuffer) ? maybe : null;
+      // As a last resort, try Object.values
+      if (!idBuf) {
+        const vals = Object.values(c.id || {});
+        if (vals.length && typeof vals[0] === 'number') idBuf = new Uint8Array(vals.map(v=>v&0xff)).buffer;
+      }
+    }
+    return Object.assign({}, c, { id: idBuf ? new Uint8Array(idBuf) : idBuf });
+  } catch (e) {
+    // fallback: return original credential descriptor (navigator.get may still error but we don't break)
+    return c;
+  }
+});
+
     }
 
     return publicKey;
@@ -1082,6 +1125,7 @@ function convertOptionsFromServer(publicKey) {
     return publicKey;
   }
 }
+
 
 
 
