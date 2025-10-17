@@ -6379,6 +6379,8 @@ document.querySelectorAll('.contact-box').forEach((box) => {
     __sec_log.e('No valid session available');
     return null;
   }
+  window.__sec_getCurrentUser = window.__sec_getCurrentUser || __sec_getCurrentUser;
+
 
   /* Animation helpers */
   let __sec_hideTimer = null;
@@ -6696,6 +6698,7 @@ try {
 // END REPLACE BLOCK
 // =======================
 }
+
 
 
 /* Initialize from storage */
