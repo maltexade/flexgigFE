@@ -551,7 +551,8 @@ try {
   const hasPin = session?.user?.hasPin || localStorage.getItem('hasPin') === 'true' || false;
   localStorage.setItem('hasPin', hasPin ? 'true' : 'false');
   
-  const biometricsEnabled = localStorage.getItem('biometricsEnabled') === 'true' || false;
+  // 🔹 NEW: Align biometrics with server fallback (uses backend's hasBiometrics count)
+  const biometricsEnabled = session?.user?.hasBiometrics || localStorage.getItem('biometricsEnabled') === 'true' || false;
   localStorage.setItem('biometricsEnabled', biometricsEnabled ? 'true' : 'false');
   
   // Children flags default to false if bio off
