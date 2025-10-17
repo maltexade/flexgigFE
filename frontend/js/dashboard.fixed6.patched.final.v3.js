@@ -581,6 +581,13 @@ async function onDashboardLoad() {
       biometricsEnabled: localStorage.getItem('biometricsEnabled'),
       credentialId: localStorage.getItem('credentialId')
     });
+    // 🔹 Sync/ default sub-flags (on if bio enabled; preserve if already set)
+const bioForLogin = biometricsEnabled ? (localStorage.getItem('biometricForLogin') === 'true' || false) : false;
+const bioForTx = biometricsEnabled ? (localStorage.getItem('biometricForTx') === 'true' || false) : false;
+localStorage.setItem('biometricForLogin', bioForLogin ? 'true' : 'false');
+localStorage.setItem('biometricForTx', bioForTx ? 'true' : 'false');
+
+console.log('[DEBUG-SYNC] Sub-flags synced:', { bioForLogin, bioForTx });  // Remove after test
     
     // Children flags default to false if bio off
     if (!biometricsEnabled) {
@@ -4182,14 +4189,16 @@ function __fg_pin_clearAllInputs() {
   // Get user ID from Supabase
   async function getUid() {
   try {
-    const s = await window.getSession();
-    log.d('getSession result', s);
-    if (s && s.user && s.user.uid) return { uid: s.user.uid, session: s };
-    // No fallback - rely on cookies/session
-    throw new Error('No signed-in user');
+    let session = window.__cachedSession || await getSession();  // Use global cache if ready
+    if (!session?.user?.uid) {
+      console.warn('[PIN] getUid: No user yet—retrying session...');
+      session = await getSession();  // Retry once
+      if (!session?.user?.uid) throw new Error('No signed-in user');
+    }
+    return session.user.uid;
   } catch (err) {
-    log.e('getUid error', err);
-    return null;
+    console.error('[PIN] getUid error', err);
+    throw err;
   }
 }
 
@@ -4609,7 +4618,7 @@ async function updateStoredPin(uid, newPin) {
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', boot);
   } else {
-    setTimeout(boot, 0);
+    setTimeout(boot, 1000);
   }
 })(supabaseClient);
 
