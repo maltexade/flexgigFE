@@ -9827,49 +9827,23 @@ async function prefetchAuthOptionsFor(uid, context = 'reauth') {
 (function(){
   if (!window.fromBase64Url) {
     window.fromBase64Url = function (b64url) {
-      try {
-        if (b64url == null) return new ArrayBuffer(0);
-
-        // Already a buffer or typed array — return its buffer
-        if (b64url instanceof ArrayBuffer) return b64url;
-        if (ArrayBuffer.isView(b64url)) return b64url.buffer;
-
-        // Some servers may send {type:'Buffer', data:[...]}
-        if (typeof b64url === 'object' && Array.isArray(b64url.data)) {
-          return new Uint8Array(b64url.data).buffer;
-        }
-
-        // If it's not a string, don't try to convert — just return it
-        if (typeof b64url !== 'string') {
-          console.warn('[webauthn] fromBase64Url expected string, got', typeof b64url, b64url);
-          return b64url;
-        }
-
-        // Normal string decode path
-        let s = b64url.replace(/-/g, '+').replace(/_/g, '/');
-        while (s.length % 4) s += '=';
-        const str = atob(s);
-        const arr = new Uint8Array(str.length);
-        for (let i = 0; i < str.length; i++) arr[i] = str.charCodeAt(i);
-        return arr.buffer;
-      } catch (err) {
-        console.warn('[webauthn] fromBase64Url error', err, b64url);
-        return new ArrayBuffer(0);
-      }
+      if (!b64url) return new ArrayBuffer(0);
+      b64url = b64url.replace(/-/g, '+').replace(/_/g, '/');
+      while (b64url.length % 4) b64url += '=';
+      const str = atob(b64url);
+      const arr = new Uint8Array(str.length);
+      for (let i = 0; i < str.length; i++) arr[i] = str.charCodeAt(i);
+      return arr.buffer;
     };
   }
-
   if (!window.toBase64Url) {
     window.toBase64Url = function (buffer) {
-      if (!buffer) return '';
       const bytes = new Uint8Array(buffer);
       let str = '';
       for (let i = 0; i < bytes.length; i++) str += String.fromCharCode(bytes[i]);
       return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
     };
   }
-
-
 
 
 // ===== WebAuthn session init: cache userId for fast auth/options requests =====
