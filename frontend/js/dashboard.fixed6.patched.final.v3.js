@@ -9,6 +9,243 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const { createClient } = supabase;
 const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+
+// ===== Robust loader helpers + withLoader wrapper (ref-counted, min-visible-time, verbose logs) =====
+(function(){
+  // guard so we don't rebind repeatedly
+  if (window.__robustLoaderInstalled) return;
+  window.__robustLoaderInstalled = true;
+
+  // fallback show/hide if your app doesn't implement them.
+  // We do a non-destructive fallback that creates a simple overlay #cg-loader.
+  if (typeof window.showLoader !== 'function' || typeof window.hideLoader !== 'function') {
+    (function(){
+      const id = 'cg-loader';
+      function create() {
+        if (document.getElementById(id)) return;
+        const el = document.createElement('div');
+        el.id = id;
+        el.style.position = 'fixed';
+        el.style.left = '0';
+        el.style.top = '0';
+        el.style.right = '0';
+        el.style.bottom = '0';
+        el.style.zIndex = 999999;
+        el.style.display = 'flex';
+        el.style.alignItems = 'center';
+        el.style.justifyContent = 'center';
+        el.style.background = 'rgba(0,0,0,0.35)';
+        el.innerHTML = '<div style="padding:14px 20px;border-radius:12px;background:#fff;color:#000;font-weight:600;font-family:system-ui, sans-serif">Loading…</div>';
+        el.style.transition = 'opacity .18s ease';
+        el.style.opacity = '0';
+        document.body.appendChild(el);
+        // allow fade-in
+        requestAnimationFrame(()=> el.style.opacity = '1');
+      }
+      window.showLoader = function(){ try { create(); const el = document.getElementById(id); if (el) el.style.display = 'flex'; } catch(e){} };
+      window.hideLoader = function(){ try { const el = document.getElementById(id); if (el) { el.style.opacity = '0'; setTimeout(()=> { if (el && el.parentNode) el.parentNode.removeChild(el); }, 220); } } catch(e){} };
+    })();
+    console.info('[robustLoader] installed fallback showLoader/hideLoader');
+  } else {
+    console.info('[robustLoader] using app-provided showLoader/hideLoader');
+  }
+
+  // ref-counting
+  window.__loaderRefCount = window.__loaderRefCount || 0;
+  window.showLoaderRef = function(reason){
+    try {
+      window.__loaderRefCount = (window.__loaderRefCount || 0) + 1;
+      console.debug('[robustLoader] showLoaderRef ++', window.__loaderRefCount, reason || '');
+      if (window.__loaderRefCount === 1) {
+        try { window.showLoader(); } catch(e){ console.warn('[robustLoader] showLoader() threw', e); }
+      }
+    } catch(e){ console.warn('[robustLoader] showLoaderRef error', e); }
+  };
+  window.hideLoaderRef = function(reason){
+    try {
+      window.__loaderRefCount = Math.max(0, (window.__loaderRefCount || 0) - 1);
+      console.debug('[robustLoader] hideLoaderRef --', window.__loaderRefCount, reason || '');
+      if (window.__loaderRefCount === 0) {
+        try { window.hideLoader(); } catch(e){ console.warn('[robustLoader] hideLoader() threw', e); }
+      }
+    } catch(e){ console.warn('[robustLoader] hideLoaderRef error', e); }
+  };
+
+  // robust withLoader wrapper: accepts async function (or sync) and options {minMs}
+  window.withLoader = window.withLoader || async function(fn, opts){
+    opts = opts || {};
+    const minMs = typeof opts.minMs === 'number' ? opts.minMs : 300; // guarantee visible at least 300ms
+    const reason = opts.reason || 'withLoader';
+    window.showLoaderRef(reason + ':start');
+    const start = Date.now();
+    try {
+      const result = await Promise.resolve().then(() => fn());
+      const elapsed = Date.now() - start;
+      if (elapsed < minMs) {
+        await new Promise(r => setTimeout(r, minMs - elapsed));
+      }
+      console.debug('[withLoader] completed', { reason, elapsedMs: Date.now() - start });
+      return result;
+    } catch (e) {
+      console.debug('[withLoader] threw', { reason, err: e && e.message ? e.message : e });
+      throw e;
+    } finally {
+      window.hideLoaderRef(reason + ':end');
+    }
+  };
+
+  // Defensive: ensure loader ref isn't stuck (debug helper)
+  window.__robustLoaderSanityCheck = function(){
+    if ((window.__loaderRefCount || 0) > 0) {
+      console.warn('[robustLoader] sanity: non-zero count found', window.__loaderRefCount);
+      // try to reset gracefully
+      window.__loaderRefCount = 0;
+      try { window.hideLoader(); } catch(e){ console.warn('[robustLoader] hideLoader reset failed', e); }
+    }
+  };
+
+})(); // end robust loader install
+
+
+// ===== Improved simulatePinEntry: waits for inputs, enables them, dispatches events =====
+async function simulatePinEntry(opts = {}) {
+  opts = opts || {};
+  const timeout = typeof opts.timeout === 'number' ? opts.timeout : 2000;
+  const poll = typeof opts.poll === 'number' ? opts.poll : 80;
+  console.debug('[simulatePinEntry] called; waiting for PIN inputs');
+
+  const start = Date.now();
+  // prefer app helper if it exists
+  let inputs = (typeof getReauthInputs === 'function') ? getReauthInputs() : Array.from(document.querySelectorAll('.reauthpin-inputs input'));
+  while ((!inputs || inputs.length === 0) && (Date.now() - start) < timeout) {
+    await new Promise(r => setTimeout(r, poll));
+    inputs = (typeof getReauthInputs === 'function') ? getReauthInputs() : Array.from(document.querySelectorAll('.reauthpin-inputs input'));
+  }
+
+  if (!inputs || inputs.length === 0) {
+    console.warn('[simulatePinEntry] no inputs found after wait; aborting');
+    return false;
+  }
+
+  // If app expects exactly 4, still proceed if count matches or greater
+  if (inputs.length < 1) {
+    console.warn('[simulatePinEntry] unexpected input count', inputs.length);
+    return false;
+  }
+
+  console.debug('[simulatePinEntry] found inputs', inputs.length, inputs.map(i=>({id:i.id,disabled:i.disabled})));
+
+  // Ensure modal/dialog visible (if helper exists)
+  if (typeof openPinModalForReauth === 'function') {
+    try { await safeCall(openPinModalForReauth); } catch(e){ console.warn('[simulatePinEntry] openPinModalForReauth failed', e); }
+  }
+
+  // enable inputs and dispatch events with stagger
+  inputs.forEach((input, idx) => {
+    setTimeout(() => {
+      try {
+        input.disabled = false;
+        input.classList.add('filled');
+        input.value = '•';
+        // dispatch input event
+        try { input.dispatchEvent(new Event('input', { bubbles: true })); } catch(e){}
+        // dispatch change event too (some handlers listen for change)
+        try { input.dispatchEvent(new Event('change', { bubbles: true })); } catch(e){}
+      } catch(e){
+        console.warn('[simulatePinEntry] failed acting on input', idx, e);
+      }
+    }, idx * 140);
+  });
+
+  return true;
+}
+
+
+// ===== Replace verifyBiometrics' server-verify stage to use withLoader (if verifyBiometrics is defined) =====
+// If you already replace verifyBiometrics manually, skip this; otherwise this injects a patched wrapper
+if (typeof verifyBiometrics === 'function') {
+  // wrap the original to call our robust withLoader specifically for server-verify
+  const __origVerifyBiometrics = verifyBiometrics;
+  verifyBiometrics = async function(uid, context){
+    console.debug('[verifyBiometrics-wrapper] invoked', { uid, context });
+    // call original up until it reaches server-verify, but since we cannot safely splice it, we'll
+    // implement a recommended pattern here: call original to perform native prompt and get assertion,
+    // then do server verify inside withLoader. Many bundles implement verify in one function; if your
+    // current verifyBiometrics already does server post inside itself, prefer editing it directly.
+    //
+    // If the original returns the assertion and expects to do server verify inside, the cleanest path
+    // is to replace your function with the full robust variant I provided earlier. However, this wrapper
+    // will attempt to detect if the original returns an object like { assertion } and perform the
+    // withLoader step. If it doesn't, it will fallback to calling the original end-to-end.
+    try {
+      // attempt optimistic path: if original returns an intermediate that includes `assertion` or `rawAssertion`
+      const maybe = await __origVerifyBiometrics(uid, context);
+      // if the original already handled loading/verify then just return it
+      if (maybe && (maybe.verifyData || maybe.success !== undefined)) {
+        console.debug('[verifyBiometrics-wrapper] original handled verify fully; returning result');
+        return maybe;
+      }
+      // if original returned an assertion-like object (rare), do server verify with loader
+      if (maybe && maybe.assertion) {
+        console.debug('[verifyBiometrics-wrapper] original returned assertion; running server verify via withLoader');
+        // build payload (small helper)
+        function bufferToBase64url(buf) {
+          if (!buf) return '';
+          let arr;
+          if (buf instanceof Uint8Array) arr = buf;
+          else if (buf instanceof ArrayBuffer) arr = new Uint8Array(buf);
+          else if (ArrayBuffer.isView(buf) && buf.buffer) arr = new Uint8Array(buf.buffer);
+          else return '';
+          let s = '';
+          for (let i=0;i<arr.length;i++) s += String.fromCharCode(arr[i]);
+          return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+        }
+        const assertion = maybe.assertion;
+        const payload = {
+          id: assertion.id,
+          rawId: bufferToBase64url(assertion.rawId),
+          type: assertion.type,
+          response: {
+            authenticatorData: bufferToBase64url(assertion.response && assertion.response.authenticatorData),
+            clientDataJSON: bufferToBase64url(assertion.response && assertion.response.clientDataJSON),
+            signature: bufferToBase64url(assertion.response && assertion.response.signature),
+            userHandle: assertion.response && assertion.response.userHandle ? bufferToBase64url(assertion.response.userHandle) : null
+          }
+        };
+        // Perform server verify in withLoader (guarantees visible loader)
+        const verifyData = await withLoader(async ()=>{
+          const res = await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/verify', {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(Object.assign({}, payload, { userId: uid || window.__webauthn_userId || null }))
+          });
+          const j = await res.json().catch(()=>({ __raw: '(no-json)' }));
+          if (!res.ok) throw new Error('Server verify failed: ' + (j && j.error ? j.error : res.status));
+          // ensure we show PIN simulation
+          try { await simulatePinEntry(); } catch(e){ console.warn('simulatePinEntry failed after verify', e); }
+          return j;
+        }, { minMs: 400, reason: 'biometric-server-verify' });
+        return { success: !!verifyData.verified, verifyData };
+      }
+
+      // fallback: original likely handled everything; return its result
+      return maybe;
+    } catch (e) {
+      console.error('[verifyBiometrics-wrapper] error', e);
+      // try to ensure loader hidden
+      try { window.hideLoaderRef && window.hideLoaderRef('error-fallback'); } catch(err){}
+      throw e;
+    }
+  };
+  console.info('[verifyBiometrics-wrapper] installed wrapper (ensures withLoader usage when possible).');
+} else {
+  console.info('[verifyBiometrics-wrapper] no verifyBiometrics found to wrap — ensure you paste robust verifyBiometrics implementation that uses window.withLoader and simulatePinEntry.');
+}
+
+
+
+
 let __backHandler = null;
 
 function showLoader() {
