@@ -4708,46 +4708,47 @@ async function updateStoredPin(uid, newPin) {
   }
 
   // 🔹 Delay + pre-sync session before PIN check (with retry + catch for race)
-  setTimeout(async () => {
-    try {
-      console.log('[BOOT] Starting PIN check...');
-      await getSession();  // Ensure session ready first (unblocks getUid)
-      
-      // Call checkPinExists with catch for promise rejection
-      await new Promise((resolve, reject) => {
-        window.checkPinExists((hasPin) => {
-          try {
-            if (hasPin) {
-              window.ModalManager.openModal('pinVerifyModal');
-            }
-            resolve();  // Success
-          } catch (e) {
-            reject(e);  // Bubble modal error if needed
-          }
-        }, 'load');
-      }).catch(async (e) => {
-        console.error('[BOOT] PIN check failed on first try:', e);
-        // Retry once after short wait (handles race)
-        await new Promise(r => setTimeout(r, 500));
-        try {
-          await getSession();  // Re-sync
+  setTimeout(() => {
+    (async () => {
+      try {
+        console.log('[BOOT] Starting PIN check...');
+        await getSession();  // Ensure session ready first (unblocks getUid)
+        
+        // Call checkPinExists with .catch for promise rejection
+        await new Promise((resolve, reject) => {
           window.checkPinExists((hasPin) => {
-            if (hasPin) {
-              window.ModalManager.openModal('pinVerifyModal');
+            try {
+              if (hasPin) {
+                window.ModalManager.openModal('pinVerifyModal');
+              }
+              resolve();  // Success
+            } catch (e) {
+              reject(e);  // Bubble error
             }
           }, 'load');
-          console.log('[BOOT] PIN check retry success');
-        } catch (retryErr) {
-          console.error('[BOOT] PIN check retry failed', retryErr);
-          // Optional: Assume no PIN (skip modal)
-        }
-      });
-      
-      console.log('[BOOT] PIN check complete');
-    } catch (e) {
-      console.error('[BOOT] PIN check failed', e);
-      // Optional: Assume no PIN (skip modal)
-    }
+        }).catch(async (e) => {
+          console.error('[BOOT] PIN check failed on first try:', e);
+          // Retry once after short wait
+          await new Promise(r => setTimeout(r, 500));
+          try {
+            await getSession();  // Re-sync
+            window.checkPinExists((hasPin) => {
+              if (hasPin) {
+                window.ModalManager.openModal('pinVerifyModal');
+              }
+            }, 'load');
+            console.log('[BOOT] PIN check retry success');
+          } catch (retryErr) {
+            console.error('[BOOT] PIN check retry failed', retryErr);
+            // Optional: Assume no PIN (skip modal)
+          }
+        });
+        
+        console.log('[BOOT] PIN check complete');
+      } catch (e) {
+        console.error('[BOOT] PIN check failed', e);
+      }
+    })();
   }, 1000);  // 1s buffer (adjust if needed)
 }
 
