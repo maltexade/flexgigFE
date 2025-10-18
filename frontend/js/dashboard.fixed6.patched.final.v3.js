@@ -10022,61 +10022,134 @@ async function registerBiometrics() {
    ----------------------- */
   // 🔹 NEW: Disable/Revoke Biometrics
 
+// Updated disableBiometrics — robust, awaits server revoke, uses existing helper and fixes key mismatch
 async function disableBiometrics() {
-  console.log('disableBiometrics (optimistic update) called');
+  console.log('[disableBiometrics] called — starting optimistic local cleanup');
 
+  // Optimistic local cleanup & UI hide immediately
   try {
-    localStorage.removeItem('credentialId');
-    localStorage.removeItem('webauthn-cred-id');
-    localStorage.setItem('biometricForLogin', 'false');
+    try { localStorage.removeItem('credentialId'); } catch(e){ console.warn('[disableBiometrics] remove credentialId failed', e); }
+    try { localStorage.removeItem('webauthn-cred-id'); } catch(e){ /* ignore */ }
 
+    // Ensure the canonical "enabled" flag is cleared in both namespaces
+    try { localStorage.setItem('biometricsEnabled', 'false'); } catch(e){ console.warn('[disableBiometrics] set biometricsEnabled failed', e); }
+    try { localStorage.setItem('biometricForLogin', 'false'); } catch(e){ /* ignore */ }
+    try { localStorage.setItem('biometricForTx', 'false'); } catch(e){ /* ignore */ }
+
+    // If your secure keys map exists, clear that too (best-effort)
     try {
-      var bioBtn = document.getElementById('bioBtn') || document.querySelector('.biometric-button');
-      if (bioBtn) bioBtn.style.display = 'none';
-    } catch (e) { /* ignore UI errors */ }
+      if (window.__sec_KEYS && __sec_KEYS.biom) localStorage.setItem(__sec_KEYS.biom, '0');
+      if (window.__sec_KEYS && __sec_KEYS.bioLogin) localStorage.setItem(__sec_KEYS.bioLogin, '0');
+      if (window.__sec_KEYS && __sec_KEYS.bioTx) localStorage.setItem(__sec_KEYS.bioTx, '0');
+    } catch (e) { console.warn('[disableBiometrics] clearing __sec_KEYS storage failed', e); }
+
+    // Hide UI button instantly so the toggle appears off
+    try {
+      var bioBtn = document.getElementById('bioBtn') || document.querySelector('.biometric-button') || document.querySelector('[data-bio-button]');
+      if (bioBtn) {
+        bioBtn.style.display = 'none';
+        console.log('[disableBiometrics] hid bio button (optimistic)');
+      }
+    } catch (e) { console.warn('[disableBiometrics] hide bio button failed', e); }
 
     safeCall(notify, 'Biometric disabled locally — revoking on server...', 'info');
   } catch (e) {
-    console.warn('Local clear failed', e);
+    console.warn('[disableBiometrics] optimistic local cleanup threw', e);
   }
 
-  (async function(){
+  // Try to revoke on server (await, log, and handle mismatched keys if helper absent)
+  let serverRevoked = false;
+  try {
+    // Resolve UID from session helper or fallback
+    let uid = null;
     try {
-      var session = await safeCall(getSession);
-      var uid = session && (session.user && (session.user.id || session.user.uid));
-      if (!uid) {
-        safeCall(notify, 'Could not revoke on server: missing session', 'error');
-        return;
-      }
-
-      var apiBase = window.__SEC_API_BASE || API_BASE || '';
-
-      var res = await fetch(apiBase + '/webauthn/authenticators/' + encodeURIComponent(uid) + '/revoke', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ credentialId: null })
-      });
-
-      if (!res.ok) {
-        var txt = await res.text();
-        console.error('[disableBiometrics] revoke failed', txt);
-        safeCall(notify, 'Server revoke failed: ' + (txt || res.statusText), 'error');
-        return;
-      }
-
-      var data = await res.json();
-      safeCall(notify, 'Biometric revoked on server', 'success');
-      restoreBiometricUI();
-      console.log('[disableBiometrics] revoke response', data);
-    } catch (err) {
-      console.error('[disableBiometrics] background revoke error', err);
-      safeCall(notify, 'Server revoke failed (network)', 'error');
+      const session = (typeof getSession === 'function') ? await safeCall(getSession) : null;
+      uid = session && session.user && (session.user.id || session.user.uid);
+    } catch (e) {
+      console.warn('[disableBiometrics] getSession failed', e);
     }
-  })();
 
-  return { success: true };
+    if (!uid) {
+      // try other helpers
+      try { uid = (typeof __sec_getCurrentUser === 'function' && (await safeCall(__sec_getCurrentUser))?.user?.uid) || uid; } catch(e){/*ignore*/ }
+    }
+
+    if (!uid) {
+      console.warn('[disableBiometrics] No user id available to revoke on server — skipping server revoke');
+      safeCall(notify, 'Local biometric disabled; server revoke skipped (no user session)', 'info');
+    } else {
+      console.log('[disableBiometrics] attempting server revoke for uid:', uid);
+
+      // Prefer the central helper to keep semantics consistent (it posts credentialID)
+      if (typeof __sec_revokeAuthenticator === 'function') {
+        try {
+          const ok = await safeCall(__sec_revokeAuthenticator, uid, null); // pass null to request full reset
+          serverRevoked = !!ok;
+          console.log('[disableBiometrics] __sec_revokeAuthenticator result:', serverRevoked);
+          if (serverRevoked) safeCall(notify, 'Biometric revoked on server', 'success');
+          else safeCall(notify, 'Server revoke responded negative (check logs)', 'error');
+        } catch (e) {
+          console.error('[disableBiometrics] __sec_revokeAuthenticator threw', e);
+          // fall through to fallback below
+        }
+      }
+
+      // Fallback: direct fetch but use expected server key (credentialID) and await
+      if (!serverRevoked) {
+        try {
+          const apiBase = window.__SEC_API_BASE || (typeof API_BASE !== 'undefined' ? API_BASE : '');
+          const url = `${apiBase}/webauthn/authenticators/${encodeURIComponent(uid)}/revoke`;
+          console.log('[disableBiometrics] fallback fetch ->', url, 'body:', { credentialID: null });
+
+          const res = await fetch(url, {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ credentialID: null })
+          });
+
+          const txt = await res.text().catch(()=>'(no-body)');
+          if (!res.ok) {
+            console.error('[disableBiometrics] server revoke failed status', res.status, 'body:', txt);
+            safeCall(notify, 'Server revoke failed: ' + (txt || res.statusText), 'error');
+          } else {
+            try {
+              const j = JSON.parse(txt || '{}');
+              console.log('[disableBiometrics] server revoke success response:', j);
+            } catch (e) {
+              console.log('[disableBiometrics] server revoke response (non-json):', txt);
+            }
+            serverRevoked = true;
+            safeCall(notify, 'Biometric revoked on server', 'success');
+          }
+        } catch (e) {
+          console.error('[disableBiometrics] fallback revoke fetch error', e);
+          safeCall(notify, 'Server revoke failed (network)', 'error');
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[disableBiometrics] background revoke error', err);
+    safeCall(notify, 'Server revoke failed (background)', 'error');
+  } finally {
+    // Always reconcile client state & UI after attempts
+    try {
+      // Invalidate cached auth options so prefetch won't reuse stale challenges
+      try { invalidateAuthOptionsCache && invalidateAuthOptionsCache(); } catch(e){}
+
+      // Restore / reconcile UI to the cleared state
+      try { restoreBiometricUI && restoreBiometricUI(); } catch (e) { console.warn('[disableBiometrics] restoreBiometricUI failed', e); }
+
+      // Extra: log result
+      console.log('[disableBiometrics] finished — serverRevoked:', serverRevoked);
+    } catch (e) {
+      console.warn('[disableBiometrics] final reconcile failed', e);
+    }
+  }
+
+  return { success: true, serverRevoked: !!serverRevoked };
 }
+
 
 
 /* -----------------------
