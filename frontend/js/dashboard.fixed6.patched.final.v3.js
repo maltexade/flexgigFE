@@ -10588,6 +10588,30 @@ if (Array.isArray(publicKey.allowCredentials)) {
 
 
 // 🔹 Main verifyBiometrics (updated with simulation during loader delay)
+// 🔹 Helper: Simulate PIN entry (fill inputs with .filled for yellow bg/border)
+function simulatePinEntry() {
+  console.log('[DEBUG-BIO] simulatePinEntry called - starting animation');
+  const inputs = document.querySelectorAll('.reauthpin-inputs input');
+  console.log('[DEBUG-BIO] Found inputs:', inputs.length, 'expected 4');
+  
+  if (inputs.length !== 4) {
+    console.warn('[DEBUG-BIO] PIN inputs not found (4 expected)');
+    return;
+  }
+  
+  console.log('[DEBUG-BIO] Simulating PIN entry for 4 inputs');
+  inputs.forEach((input, index) => {
+    setTimeout(() => {
+      console.log(`[DEBUG-BIO] Adding .filled to input ${index + 1}`);
+      input.classList.add('filled');  // Trigger CSS "filled" (yellow bg/border)
+      input.value = '*';  // Masked char (hidden by CSS, but sets state)
+      console.log(`[DEBUG-BIO] Input ${index + 1} filled - classList:`, input.classList.toString());
+    }, index * 150);  // Stagger 150ms per digit for "typing" effect
+  });
+  console.log('[DEBUG-BIO] Simulation complete - all inputs should fill staggered');
+}
+
+// 🔹 Main verifyBiometrics (updated with logs for loader/simulation debugging)
 async function verifyBiometrics(uid, context) {
   if (context === undefined) context = 'reauth';
   console.log('%c[verifyBiometrics] Called (fresh mode)', 'color:#0ff;font-weight:bold');
@@ -10600,7 +10624,7 @@ async function verifyBiometrics(uid, context) {
     }
     if (!userId) throw new Error('No user id available');
 
-    // 🔹 Invalidate cache for fresh challenge
+    // 🔹 Invalidate cache for fresh challenge (robust for future issues)
     window.__cachedAuthOptions = null;
     window.__cachedAuthOptionsFetchedAt = 0;
     console.log('[verifyBiometrics] Cache invalidated for fresh options');
@@ -10644,12 +10668,14 @@ async function verifyBiometrics(uid, context) {
     }
 
     // 🔹 Bio prompt (NO loader - native flow)
+    console.log('[verifyBiometrics] Starting bio prompt (navigator.credentials.get)');
     var assertion = await navigator.credentials.get({ publicKey: publicKey });
     if (!assertion) throw new Error('No assertion returned from authenticator');
+    console.log('[verifyBiometrics] Bio prompt success - got assertion');
 
     // 🔹 Show loader NOW (during verify POST + simulation)
-    console.log('[verifyBiometrics] Bio prompt success - starting verify with loader');
-    showLoader();  // Manual show after prompt
+    console.log('[verifyBiometrics] Bio prompt success - calling showLoader');
+    showLoader();  // Manual show after prompt - DEBUG: Check if this logs
 
     function bufferToBase64url(buf) {
       if (!buf || !(buf instanceof ArrayBuffer)) return '';
@@ -10688,6 +10714,7 @@ async function verifyBiometrics(uid, context) {
     var verifyData = await verifyRes.json();
 
     if (!verifyRes.ok) {
+      console.log('[verifyBiometrics] Verify failed - hiding loader');
       hideLoader();  // Hide on fail
       safeCall(notify, 'Authentication failed', 'error');
       console.error('[verifyBiometrics] Server verify failed', verifyData);
@@ -10698,11 +10725,13 @@ async function verifyBiometrics(uid, context) {
     }
 
     // 🔹 Success: Simulate PIN entry (stagger .filled) + brief loader, then hide
-    console.log('[verifyBiometrics] Verify success - simulating PIN entry');
+    console.log('[verifyBiometrics] Verify success - calling simulatePinEntry');
     simulatePinEntry();  // Staggers .filled class (yellow fill)
 
     // Hide loader after animation (600ms for 4 inputs @ 150ms stagger)
+    console.log('[verifyBiometrics] Scheduling hideLoader after 600ms');
     setTimeout(() => {
+      console.log('[verifyBiometrics] Hiding loader and notifying success');
       hideLoader();
       safeCall(notify, verifyData.verified ? 'Authentication successful' : 'Authentication failed', verifyData.verified ? 'success' : 'error');
     }, 600);
@@ -10710,28 +10739,12 @@ async function verifyBiometrics(uid, context) {
     console.log('[verifyBiometrics] Verify success:', verifyData);
     return { success: !!verifyData.verified, verifyData: verifyData };
   } catch (err) {
+    console.log('[verifyBiometrics] Error - hiding loader');
     hideLoader();  // Always hide on error
     console.error('[verifyBiometrics] Error', err);
     safeCall(notify, 'Biometric auth error: ' + (err && err.message ? err.message : err), 'error');
     return { success: false, error: (err && err.message) ? err.message : String(err) };
   }
-}
-
-// 🔹 Helper: Simulate PIN entry (fill inputs with .filled for yellow bg/border)
-function simulatePinEntry() {
-  const inputs = document.querySelectorAll('.reauthpin-inputs input');
-  if (inputs.length !== 4) {
-    console.warn('[DEBUG-BIO] PIN inputs not found (4 expected)');
-    return;
-  }
-  
-  console.log('[DEBUG-BIO] Simulating PIN entry for 4 inputs');
-  inputs.forEach((input, index) => {
-    setTimeout(() => {
-      input.classList.add('filled');  // Trigger CSS "filled" (yellow bg/border)
-      input.value = '*';  // Masked char (hidden by CSS, but sets state)
-    }, index * 150);  // Stagger 150ms per digit for "typing" effect
-  });
 }
 
 
