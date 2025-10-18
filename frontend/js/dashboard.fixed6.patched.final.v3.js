@@ -4707,22 +4707,48 @@ async function updateStoredPin(uid, newPin) {
     window.__reauth.setupInactivity();
   }
 
-  // 🔹 Delay + pre-sync session before PIN check (inside boot, keeps original structure)
+  // 🔹 Delay + pre-sync session before PIN check (with retry + catch for race)
   setTimeout(async () => {
     try {
       console.log('[BOOT] Starting PIN check...');
       await getSession();  // Ensure session ready first (unblocks getUid)
-      window.checkPinExists((hasPin) => {
-        if (hasPin) {
-          window.ModalManager.openModal('pinVerifyModal');
+      
+      // Call checkPinExists with catch for promise rejection
+      await new Promise((resolve, reject) => {
+        window.checkPinExists((hasPin) => {
+          try {
+            if (hasPin) {
+              window.ModalManager.openModal('pinVerifyModal');
+            }
+            resolve();  // Success
+          } catch (e) {
+            reject(e);  // Bubble modal error if needed
+          }
+        }, 'load');
+      }).catch(async (e) => {
+        console.error('[BOOT] PIN check failed on first try:', e);
+        // Retry once after short wait (handles race)
+        await new Promise(r => setTimeout(r, 500));
+        try {
+          await getSession();  // Re-sync
+          window.checkPinExists((hasPin) => {
+            if (hasPin) {
+              window.ModalManager.openModal('pinVerifyModal');
+            }
+          }, 'load');
+          console.log('[BOOT] PIN check retry success');
+        } catch (retryErr) {
+          console.error('[BOOT] PIN check retry failed', retryErr);
+          // Optional: Assume no PIN (skip modal)
         }
-      }, 'load');
+      });
+      
       console.log('[BOOT] PIN check complete');
     } catch (e) {
       console.error('[BOOT] PIN check failed', e);
       // Optional: Assume no PIN (skip modal)
     }
-  }, 1000);  // 1s buffer (adjust if needed; keeps your 1000ms outer delay)
+  }, 1000);  // 1s buffer (adjust if needed)
 }
 
 if (document.readyState === 'loading') {
