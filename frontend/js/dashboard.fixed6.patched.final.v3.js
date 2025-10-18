@@ -10585,100 +10585,154 @@ if (Array.isArray(publicKey.allowCredentials)) {
 })();
 
 
+
+
+// 🔹 Main verifyBiometrics (updated with simulation during loader delay)
 async function verifyBiometrics(uid, context) {
   if (context === undefined) context = 'reauth';
-  console.log('%c[verifyBiometrics] CALLED (cached-optimize)', 'color:#0ff;font-weight:bold');
-  return withLoader(async function(){
-    try {
-      var userId = uid;
-      if (!userId) {
-        var session = await safeCall(getSession);
-        userId = session && (session.user && (session.user.id || session.user.uid));
-      }
-      if (!userId) throw new Error('No user id available');
-
-      var publicKey = window.__cachedAuthOptions;
-      var maxCacheMs = 30 * 1000;
-      if (publicKey && window.__cachedAuthOptionsFetchedAt && ((Date.now() - window.__cachedAuthOptionsFetchedAt) > maxCacheMs)) {
-        publicKey = null;
-      }
-
-      if (!publicKey) {
-        console.log('[verifyBiometrics] no cached options - fetching from server');
-        var storedId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
-        var optRes = await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/options', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId: userId, credentialId: storedId })
-        });
-        if (!optRes.ok) {
-          var txt = await optRes.text();
-          throw new Error('Auth options fetch failed: ' + txt);
-        }
-        publicKey = await optRes.json();
-        if (publicKey.challenge) publicKey.challenge = window.fromBase64Url(publicKey.challenge);
-        if (Array.isArray(publicKey.allowCredentials)) {
-          publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){ return Object.assign({}, c, { id: window.fromBase64Url(c.id) }); });
-        } else {
-          var storedId2 = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
-          publicKey.allowCredentials = [{
-            type: 'public-key',
-            id: window.fromBase64Url(storedId2),
-            transports: ['internal']
-          }];
-        }
-      } else {
-        console.log('[verifyBiometrics] using cached options for immediate prompt');
-      }
-
-      var assertion = await navigator.credentials.get({ publicKey: publicKey });
-      if (!assertion) throw new Error('No assertion returned from authenticator');
-
-      function bufferToBase64url(buf) {
-        return window.toBase64Url(buf);
-      }
-
-      var payload = {
-        id: assertion.id,
-        rawId: bufferToBase64url(assertion.rawId),
-        type: assertion.type,
-        response: {
-          authenticatorData: bufferToBase64url(assertion.response.authenticatorData),
-          clientDataJSON: bufferToBase64url(assertion.response.clientDataJSON),
-          signature: bufferToBase64url(assertion.response.signature),
-          userHandle: assertion.response.userHandle ? bufferToBase64url(assertion.response.userHandle) : null
-        }
-      };
-
-      console.log('[verifyBiometrics] sending assertion payload to server');
-      var verifyRes = await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/verify', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(Object.assign({}, payload, { userId: uid }))
-      });
-
-      var verifyData = await verifyRes.json();
-
-      if (!verifyRes.ok) {
-        safeCall(notify, 'Authentication failed', 'error');
-        console.error('[verifyBiometrics] server verify failed', verifyData);
-        return { success: false, verifyData: verifyData };
-      }
-
-      safeCall(notify, verifyData.verified ? 'Authentication successful' : 'Authentication failed', verifyData.verified ? 'success' : 'error');
-      console.log('[verifyBiometrics] verifyData:', verifyData);
-      return { success: !!verifyData.verified, verifyData: verifyData };
-    } catch (err) {
-      console.error('[verifyBiometrics] error', err);
-      safeCall(notify, 'Biometric auth error: ' + (err && err.message ? err.message : err), 'error');
-      return { success: false, error: (err && err.message) ? err.message : String(err) };
+  console.log('%c[verifyBiometrics] Called (fresh mode)', 'color:#0ff;font-weight:bold');
+  
+  try {
+    var userId = uid;
+    if (!userId) {
+      var session = await safeCall(getSession);
+      userId = session && (session.user && (session.user.id || session.user.uid));
     }
-  });
+    if (!userId) throw new Error('No user id available');
+
+    // 🔹 Invalidate cache for fresh challenge
+    window.__cachedAuthOptions = null;
+    window.__cachedAuthOptionsFetchedAt = 0;
+    console.log('[verifyBiometrics] Cache invalidated for fresh options');
+
+    // Fetch fresh options (no loader - quick)
+    console.log('[verifyBiometrics] Fetching fresh options from server');
+    var storedId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
+    var optRes = await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/options', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 
+        'Content-Type': 'application/json',
+        'X-Bypass-AuthCache': '1'
+      },
+      body: JSON.stringify({ userId: userId, credentialId: storedId })
+    });
+
+    if (!optRes.ok) {
+      var txt = await optRes.text();
+      throw new Error('Auth options fetch failed: ' + txt);
+    }
+    var publicKey = await optRes.json();
+
+    // Log fresh challenge
+    console.log('[verifyBiometrics] Fresh challenge:', publicKey.challenge ? publicKey.challenge.substring(0, 20) + '...' : 'none');
+
+    // Convert
+    if (publicKey.challenge) publicKey.challenge = window.fromBase64Url(publicKey.challenge);
+    if (Array.isArray(publicKey.allowCredentials)) {
+      publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){ 
+        return Object.assign({}, c, { id: window.fromBase64Url(c.id) }); 
+      });
+    } else {
+      if (storedId) {
+        publicKey.allowCredentials = [{
+          type: 'public-key',
+          id: window.fromBase64Url(storedId),
+          transports: ['internal']
+        }];
+      }
+    }
+
+    // 🔹 Bio prompt (NO loader - native flow)
+    var assertion = await navigator.credentials.get({ publicKey: publicKey });
+    if (!assertion) throw new Error('No assertion returned from authenticator');
+
+    // 🔹 Show loader NOW (during verify POST + simulation)
+    console.log('[verifyBiometrics] Bio prompt success - starting verify with loader');
+    showLoader();  // Manual show after prompt
+
+    function bufferToBase64url(buf) {
+      if (!buf || !(buf instanceof ArrayBuffer)) return '';
+      const bytes = new Uint8Array(buf);
+      let str = '';
+      for (let i = 0; i < bytes.length; i++) str += String.fromCharCode(bytes[i]);
+      return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    }
+
+    var payload = {
+      id: assertion.id,
+      rawId: bufferToBase64url(assertion.rawId),
+      type: assertion.type,
+      response: {
+        authenticatorData: bufferToBase64url(assertion.response.authenticatorData),
+        clientDataJSON: bufferToBase64url(assertion.response.clientDataJSON),
+        signature: bufferToBase64url(assertion.response.signature),
+        userHandle: assertion.response.userHandle ? bufferToBase64url(assertion.response.userHandle) : null
+      }
+    };
+
+    // Log payload
+    console.log('[verifyBiometrics] Payload with fresh challenge:', { 
+      challengeUsed: publicKey.challenge ? Array.from(new Uint8Array(publicKey.challenge)).slice(0, 5).join(',') + '...' : 'N/A',
+      rawIdPreview: payload.rawId.substring(0, 20) + '...'
+    });
+
+    console.log('[verifyBiometrics] Sending assertion to server');
+    var verifyRes = await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/verify', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(Object.assign({}, payload, { userId: userId }))
+    });
+
+    var verifyData = await verifyRes.json();
+
+    if (!verifyRes.ok) {
+      hideLoader();  // Hide on fail
+      safeCall(notify, 'Authentication failed', 'error');
+      console.error('[verifyBiometrics] Server verify failed', verifyData);
+      if (verifyData.error && (verifyData.error.toLowerCase().includes('challenge') || verifyData.error.toLowerCase().includes('mismatch'))) {
+        console.error('[verifyBiometrics] Likely stale challenge—server expected different value');
+      }
+      return { success: false, verifyData: verifyData };
+    }
+
+    // 🔹 Success: Simulate PIN entry (stagger .filled) + brief loader, then hide
+    console.log('[verifyBiometrics] Verify success - simulating PIN entry');
+    simulatePinEntry();  // Staggers .filled class (yellow fill)
+
+    // Hide loader after animation (600ms for 4 inputs @ 150ms stagger)
+    setTimeout(() => {
+      hideLoader();
+      safeCall(notify, verifyData.verified ? 'Authentication successful' : 'Authentication failed', verifyData.verified ? 'success' : 'error');
+    }, 600);
+
+    console.log('[verifyBiometrics] Verify success:', verifyData);
+    return { success: !!verifyData.verified, verifyData: verifyData };
+  } catch (err) {
+    hideLoader();  // Always hide on error
+    console.error('[verifyBiometrics] Error', err);
+    safeCall(notify, 'Biometric auth error: ' + (err && err.message ? err.message : err), 'error');
+    return { success: false, error: (err && err.message) ? err.message : String(err) };
+  }
 }
 
-
+// 🔹 Helper: Simulate PIN entry (fill inputs with .filled for yellow bg/border)
+function simulatePinEntry() {
+  const inputs = document.querySelectorAll('.reauthpin-inputs input');
+  if (inputs.length !== 4) {
+    console.warn('[DEBUG-BIO] PIN inputs not found (4 expected)');
+    return;
+  }
+  
+  console.log('[DEBUG-BIO] Simulating PIN entry for 4 inputs');
+  inputs.forEach((input, index) => {
+    setTimeout(() => {
+      input.classList.add('filled');  // Trigger CSS "filled" (yellow bg/border)
+      input.value = '*';  // Masked char (hidden by CSS, but sets state)
+    }, index * 150);  // Stagger 150ms per digit for "typing" effect
+  });
+}
 
 
 
