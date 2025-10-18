@@ -7152,7 +7152,7 @@ try {
   };
 
   // Try to obtain userId (short wait). If none, do NOT call server (we avoid Missing userId).
-  const resolvedUserId = await safeGetSessionUserId(900); // wait up to 900ms for session
+  const resolvedUserId = await safeGetSessionUserId(4000); // wait up to 4000ms for session
   if (!resolvedUserId) {
     __sec_log.i('reconcile: no userId available after short wait — will clear biometric flags locally and skip server check');
     try {
