@@ -1333,119 +1333,105 @@ const svgShapes = {
     }
   }
 
-  // --- Robust fromBase64Url (replace existing definition) ---
-if (!window.fromBase64Url) {
-  window.fromBase64Url = function (input) {
-    try {
-      // null / undefined -> empty ArrayBuffer
-      if (input == null) return new ArrayBuffer(0);
+  // --- Robust fromBase64Url (replace existing definition if missing) ---
+  if (!window.fromBase64Url) {
+    window.fromBase64Url = function (input) {
+      try {
+        // null / undefined -> empty ArrayBuffer
+        if (input == null) return new ArrayBuffer(0);
 
-      // If already an ArrayBuffer -> return as-is
-      if (input instanceof ArrayBuffer) return input;
+        // If already an ArrayBuffer -> return as-is
+        if (input instanceof ArrayBuffer) return input;
 
-      // If a TypedArray (Uint8Array, etc.) -> return its buffer
-      if (ArrayBuffer.isView(input)) return input.buffer;
+        // If a TypedArray (Uint8Array, etc.) -> return its buffer
+        if (ArrayBuffer.isView(input)) return input.buffer;
 
-      // Node Buffer-like object: { type: 'Buffer', data: [...] }
-      if (typeof input === 'object' && Array.isArray(input.data)) {
-        return new Uint8Array(input.data).buffer;
-      }
+        // Node Buffer-like object: { type: 'Buffer', data: [...] }
+        if (typeof input === 'object' && Array.isArray(input.data)) {
+          return new Uint8Array(input.data).buffer;
+        }
 
-      // Plain numeric-keyed object (JSON-decoded typed array), e.g. {0:12,1:34,...}
-      if (typeof input === 'object') {
-        // Collect numeric keys in order 0..N-1 if present, else attempt Object.values
-        const keys = Object.keys(input);
-        const numericKeys = keys.filter(k => /^[0-9]+$/.test(k));
-        if (numericKeys.length) {
-          // Build values in numeric order
-          const maxIndex = Math.max(...numericKeys.map(k => parseInt(k, 10)));
-          const arr = new Uint8Array(maxIndex + 1);
-          for (let i = 0; i <= maxIndex; i++) {
-            // if key missing, set 0
-            arr[i] = typeof input[i] === 'number' ? input[i] & 0xff : 0;
+        // Plain numeric-keyed object (JSON-decoded typed array), e.g. {0:12,1:34,...}
+        if (typeof input === 'object') {
+          const keys = Object.keys(input);
+          const numericKeys = keys.filter(k => /^[0-9]+$/.test(k));
+          if (numericKeys.length) {
+            const maxIndex = Math.max(...numericKeys.map(k => parseInt(k, 10)));
+            const arr = new Uint8Array(maxIndex + 1);
+            for (let i = 0; i <= maxIndex; i++) {
+              arr[i] = typeof input[i] === 'number' ? input[i] & 0xff : 0;
+            }
+            return arr.buffer;
           }
+          // Fallback: if it's some other object, try to take Object.values if they look numeric
+          const vals = Object.values(input);
+          if (Array.isArray(vals) && vals.length && typeof vals[0] === 'number') {
+            return new Uint8Array(vals.map(v => v & 0xff)).buffer;
+          }
+        }
+
+        // If it's a string -> treat as base64url and decode
+        if (typeof input === 'string') {
+          let s = input.replace(/-/g, '+').replace(/_/g, '/');
+          while (s.length % 4) s += '=';
+          const raw = atob(s);
+          const arr = new Uint8Array(raw.length);
+          for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
           return arr.buffer;
         }
-        // Fallback: if it's some other object, try to take Object.values if they look numeric
-        const vals = Object.values(input);
-        if (Array.isArray(vals) && vals.length && typeof vals[0] === 'number') {
-          return new Uint8Array(vals.map(v => v & 0xff)).buffer;
-        }
+
+        // Unknown type: log and return empty buffer
+        console.warn('[webauthn] fromBase64Url: unknown input type', typeof input, input);
+        return new ArrayBuffer(0);
+      } catch (err) {
+        console.warn('[webauthn] fromBase64Url error', err, input);
+        return new ArrayBuffer(0);
       }
-
-      // If it's a string -> treat as base64url and decode
-      if (typeof input === 'string') {
-        // normalise base64url -> base64
-        let s = input.replace(/-/g, '+').replace(/_/g, '/');
-        // pad to multiple of 4
-        while (s.length % 4) s += '=';
-        const raw = atob(s);
-        const arr = new Uint8Array(raw.length);
-        for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
-        return arr.buffer;
-      }
-
-      // Unknown type: log and return empty buffer to avoid breaking caller runtime expectations
-      console.warn('[webauthn] fromBase64Url: unknown input type', typeof input, input);
-      return new ArrayBuffer(0);
-    } catch (err) {
-      console.warn('[webauthn] fromBase64Url error', err, input);
-      return new ArrayBuffer(0);
-    }
-  };
-}
-
-
-function convertOptionsFromServer(publicKey) {
-  try {
-    if (!publicKey) return publicKey;
-
-    if (publicKey.challenge) {
-      const ch = fromBase64Url(publicKey.challenge);
-      if (ch) publicKey.challenge = new Uint8Array(ch);
-    }
-
-    if (Array.isArray(publicKey.allowCredentials)) {
-      // inside convertOptionsFromServer, replace the mapping with this:
-publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){
-  try {
-    let idBuf = null;
-    if (typeof c.id === 'string') {
-      idBuf = fromBase64Url(c.id);
-    } else if (c instanceof ArrayBuffer) {
-      idBuf = c;
-    } else if (ArrayBuffer.isView(c.id)) {
-      idBuf = c.id.buffer;
-    } else if (typeof c.id === 'object') {
-      // object may be {type:'Buffer',data:[...]} or numeric keys
-      const maybe = fromBase64Url(c.id);
-      // fromBase64Url already handles numeric-keyed objects and node-buffers
-      idBuf = maybe && (maybe instanceof ArrayBuffer) ? maybe : null;
-      // As a last resort, try Object.values
-      if (!idBuf) {
-        const vals = Object.values(c.id || {});
-        if (vals.length && typeof vals[0] === 'number') idBuf = new Uint8Array(vals.map(v=>v&0xff)).buffer;
-      }
-    }
-    return Object.assign({}, c, { id: idBuf ? new Uint8Array(idBuf) : idBuf });
-  } catch (e) {
-    // fallback: return original credential descriptor (navigator.get may still error but we don't break)
-    return c;
+    };
   }
-});
 
+  function convertOptionsFromServer(publicKey) {
+    try {
+      if (!publicKey) return publicKey;
 
+      if (publicKey.challenge) {
+        const ch = fromBase64Url(publicKey.challenge);
+        if (ch) publicKey.challenge = new Uint8Array(ch);
+      }
+
+      if (Array.isArray(publicKey.allowCredentials)) {
+        publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){
+          try {
+            let idBuf = null;
+            if (typeof c.id === 'string') {
+              idBuf = fromBase64Url(c.id);
+            } else if (c instanceof ArrayBuffer) {
+              idBuf = c;
+            } else if (ArrayBuffer.isView(c.id)) {
+              idBuf = c.id.buffer;
+            } else if (typeof c.id === 'object') {
+              // object may be {type:'Buffer',data:[...]} or numeric keys
+              const maybe = fromBase64Url(c.id);
+              idBuf = maybe && (maybe instanceof ArrayBuffer) ? maybe : null;
+              if (!idBuf) {
+                const vals = Object.values(c.id || {});
+                if (vals.length && typeof vals[0] === 'number') idBuf = new Uint8Array(vals.map(v=>v&0xff)).buffer;
+              }
+            }
+            return Object.assign({}, c, { id: idBuf ? new Uint8Array(idBuf) : idBuf });
+          } catch (e) {
+            __webauthn_log.w('allowCredentials conversion failed for item', c, e);
+            return c;
+          }
+        });
+      }
+
+      return publicKey;
+    } catch (e) {
+      __webauthn_log.w('convertOptionsFromServer error', e);
+      return publicKey;
     }
-
-    return publicKey;
-  } catch (e) {
-    console.warn('[webauthn] convertOptionsFromServer error', e);
-    return publicKey;
   }
-}
-
-
-
 
   // small helper: try parse cached user from localStorage
   function deriveUserIdFromLocalStorage() {
@@ -1509,11 +1495,12 @@ publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){
 
     // Choose endpoint: prefer options endpoint when we have userId, otherwise try discover endpoint
     let triedDiscoverFallback = false;
-    const tryFetch = async (endpoint, body) => {
+    const tryFetch = async (endpoint, body, headers) => {
       const url = `${apiBase}${endpoint}`;
       const start = Date.now();
       __webauthn_log.d('POST ->', url, 'body:', body);
-      const rawRes = await (typeof window.__origFetch !== 'undefined' ? window.__origFetch(url, { method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }) : fetch(url, { method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }));
+      const fetchImpl = (typeof window.__origFetch !== 'undefined') ? window.__origFetch : fetch.bind(window);
+      const rawRes = await fetchImpl(url, { method:'POST', credentials:'include', headers: Object.assign({'Content-Type':'application/json'}, headers||{}), body: JSON.stringify(body) });
       const duration = Date.now() - start;
       let text = '';
       try { text = await rawRes.text(); } catch(e){ text = '(no body)'; }
@@ -1534,7 +1521,6 @@ publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){
         const body = { credentialId: resolvedCred, userId: resolvedUser };
         const { rawRes, text } = await tryFetch('/webauthn/auth/options', body);
         if (!rawRes.ok) {
-          // If server explicitly indicates missing userId or 400 and we have no cred or discover fallback available, attempt discover fallback
           __webauthn_log.w('Primary options endpoint returned non-ok, will inspect for fallback', { status: rawRes.status, text });
           if ((rawRes.status === 400 && /missing.*user/i.test(text || '')) || !resolvedUser) {
             __webauthn_log.i('Primary failed due to missing userId; will try discover fallback');
@@ -1584,7 +1570,6 @@ publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){
         __webauthn_log.d('prefetchAuthOptions: already fresh, skipping');
         return;
       }
-      // Best-effort: don't throw UI errors, just log raw outcomes
       try {
         await window.getAuthOptionsWithCache({});
         __webauthn_log.i('prefetchAuthOptions: cached options ready');
@@ -1600,49 +1585,59 @@ publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){
   if (!window.__webauthnFetchWrapped) {
     window.__webauthnFetchWrapped = true;
     if (typeof window.fetch === 'function') {
+      // preserve original fetch so we can call into it safely
       window.__origFetch = window.fetch.bind(window);
       window.fetch = async function(input, init){
         try {
           const url = (typeof input === 'string') ? input : (input && input.url) || '';
-          // Replace wrapper block with this (keeps same logging + safe header handling)
-if (url && url.indexOf('/webauthn/auth/options') !== -1) {
-  __webauthn_log.d('fetch wrapper intercept', { url, initBody: init && init.body ? (typeof init.body === 'string' ? init.body.slice(0,400) : '[non-string body]') : null });
+          if (url && url.indexOf('/webauthn/auth/options') !== -1) {
+            __webauthn_log.d('fetch wrapper intercept', { url, initBody: init && init.body ? (typeof init.body === 'string' ? init.body.slice(0,400) : '[non-string body]') : null });
 
-  // Helper: robust header check (Headers instance / object / array)
-  const headerHasBypass = (h) => {
-    if (!h) return false;
-    try {
-      if (typeof h.get === 'function') {
-        return !!(h.get('X-Bypass-AuthCache') || h.get('x-bypass-authcache'));
-      }
-      if (Array.isArray(h)) {
-        for (const pair of h) {
-          if (Array.isArray(pair) && String(pair[0]).toLowerCase() === 'x-bypass-authcache') return true;
-        }
-      } else if (typeof h === 'object') {
-        for (const k of Object.keys(h)) if (k.toLowerCase() === 'x-bypass-authcache') return true;
-      }
-    } catch(e){ /* ignore */ }
-    return false;
-  };
+            // Helper: robust header check (Headers instance / object / array)
+            const headerHasBypass = (h) => {
+              if (!h) return false;
+              try {
+                if (typeof h.get === 'function') {
+                  return !!(h.get('X-Bypass-AuthCache') || h.get('x-bypass-authcache'));
+                }
+                if (Array.isArray(h)) {
+                  for (const pair of h) {
+                    if (Array.isArray(pair) && String(pair[0]).toLowerCase() === 'x-bypass-authcache') return true;
+                  }
+                } else if (typeof h === 'object') {
+                  for (const k of Object.keys(h)) if (k.toLowerCase() === 'x-bypass-authcache') return true;
+                }
+              } catch(e){ /* ignore */ }
+              // also allow a global flag
+              if (window.__bypassAuthOptions) return true;
+              return false;
+            };
 
-  // if caller explicitly asks to bypass the cached options -> do a real network call
-  if (init && headerHasBypass(init.headers)) {
-    __webauthn_log.i('fetch wrapper bypass header present - calling network directly');
-    return window.__origFetch(input, init);
-  }
+            // if caller explicitly asks to bypass the cached options -> do a real network call
+            if (init && headerHasBypass(init.headers)) {
+              __webauthn_log.i('fetch wrapper bypass header present - calling network directly');
+              return window.__origFetch(input, init);
+            }
 
-  // otherwise, parse body for credentialId/userId and return cached (fast) options
-  let credentialId = null, userId = null;
-  try {
-    const b = init && init.body ? JSON.parse(init.body) : null;
-    if (b && typeof b === 'object') { credentialId = b.credentialId || null; userId = b.userId || null; }
-  } catch(e){ __webauthn_log.w('fetch wrapper parse body failed', e); }
-  const opts = await window.getAuthOptionsWithCache({ credentialId, userId });
-  __webauthn_log.d('fetch wrapper returning cached options', { cached: !!opts });
-  return new Response(JSON.stringify(opts), { status: 200, headers: { 'Content-Type': 'application/json' } });
-}
+            // otherwise, parse body for credentialId/userId and return cached (fast) options
+            let credentialId = null, userId = null;
+            try {
+              const b = init && init.body ? JSON.parse(init.body) : null;
+              if (b && typeof b === 'object') { credentialId = b.credentialId || null; userId = b.userId || null; }
+            } catch(e){ __webauthn_log.w('fetch wrapper parse body failed', e); }
 
+            // Try to obtain cached options via the canonical helper (this may fetch if not cached)
+            try {
+              const opts = await window.getAuthOptionsWithCache({ credentialId, userId });
+              __webauthn_log.d('fetch wrapper returning cached options', { cached: !!opts });
+              // Return a sanitized Response so consumers get a normal fetch response shape
+              return new Response(JSON.stringify(opts), { status: 200, headers: { 'Content-Type': 'application/json' } });
+            } catch (e) {
+              __webauthn_log.w('fetch wrapper getAuthOptionsWithCache failed, falling back to network', e);
+              // fallback to real network call
+              return window.__origFetch(input, init);
+            }
+          }
         } catch(e){ __webauthn_log.w('fetch wrapper error', e); }
         return window.__origFetch(input, init);
       };
@@ -1650,6 +1645,7 @@ if (url && url.indexOf('/webauthn/auth/options') !== -1) {
   }
 
 })();
+
 
 document.addEventListener('DOMContentLoaded', () => {
   const providerClasses = ['mtn', 'airtel', 'glo', 'ninemobile'];
@@ -10855,39 +10851,42 @@ async function verifyBiometrics(uid, context) {
 }
 
 // 🔹 Improved helper: Simulate PIN entry (fill inputs with .filled for yellow bg/border)
-function simulatePinEntry() {
-  const inputs = Array.from(document.querySelectorAll('.reauthpin-inputs input'));
-  if (!inputs || inputs.length === 0) {
-    console.warn('[DEBUG-BIO] simulatePinEntry: No PIN inputs found');
+// 🔹 Robust Simulate PIN entry (waits for inputs + uses your getReauthInputs if available)
+async function simulatePinEntry({ timeout = 2000, poll = 80 } = {}) {
+  console.log('[DEBUG-BIO] simulatePinEntry called (waiting for inputs)');
+
+  const start = Date.now();
+  let inputs = (typeof getReauthInputs === 'function') ? getReauthInputs() : Array.from(document.querySelectorAll('.reauthpin-inputs input'));
+
+  // wait/poll until inputs available or timeout
+  while ((!inputs || inputs.length === 0) && (Date.now() - start) < timeout) {
+    await new Promise(r => setTimeout(r, poll));
+    inputs = (typeof getReauthInputs === 'function') ? getReauthInputs() : Array.from(document.querySelectorAll('.reauthpin-inputs input'));
+  }
+
+  if (!inputs || inputs.length < 4) {
+    console.warn('[DEBUG-BIO] PIN inputs not found or incomplete (needed 4). Found:', inputs ? inputs.length : 0);
     return;
   }
 
-  // If expected 4, log warning if different
-  if (inputs.length !== 4) {
-    console.warn('[DEBUG-BIO] simulatePinEntry: unexpected PIN input count:', inputs.length);
-  }
-
-  console.log('[DEBUG-BIO] simulatePinEntry: starting, inputs:', inputs.map(i => ({ id: i.id, disabled: i.disabled })));
+  console.log('[DEBUG-BIO] Found PIN inputs, simulating fill for', inputs.length, 'inputs');
 
   inputs.forEach((input, index) => {
     setTimeout(() => {
       try {
-        // Ensure enabled and visible
-        try { input.disabled = false; } catch (e) { /* ignore */ }
-        input.classList.add('filled'); // Trigger CSS "filled" (yellow bg/border)
-        // Set a masked value — CSS likely hides it; this sets state for other scripts
-        try { input.value = '*'; } catch (e) { /* ignore */ }
-        // Optionally trigger input events so any watchers pick up the change
-        try {
-          const ev = new Event('input', { bubbles: true });
-          input.dispatchEvent(ev);
-        } catch (e) { /* ignore */ }
+        // Visual state
+        input.classList.add('filled');     // your CSS shows yellow on .filled
+        // Set masked char (handlers normally read value or currentPin)
+        input.value = '•';
+        // Trigger input handlers so any bound logic runs (updatePinInputs / refreshInputsUI)
+        input.dispatchEvent(new Event('input', { bubbles: true }));
       } catch (e) {
-        console.warn('[DEBUG-BIO] simulatePinEntry error for input', index, e);
+        console.warn('[DEBUG-BIO] simulatePinEntry element set failed', e);
       }
-    }, index * 150);
+    }, index * 120);
   });
 }
+
 
 
 
