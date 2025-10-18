@@ -460,6 +460,21 @@ async function getSession() {
 // Make globally accessible
 window.getSession = getSession;
 
+// 🔹 Global session promise (await this in boot/security for no races)
+let __sessionPromise = null;
+function getOrCreateSessionPromise() {
+  if (!__sessionPromise) {
+    __sessionPromise = getSession().then(session => {
+      console.log('[GLOBAL] Session ready for boot');
+      return session;
+    }).catch(e => {
+      console.error('[GLOBAL] Session promise failed', e);
+      throw e;
+    });
+  }
+  return __sessionPromise;
+}
+
 
 
 // --- Safe wrapper with retries ---
@@ -4707,49 +4722,34 @@ async function updateStoredPin(uid, newPin) {
     window.__reauth.setupInactivity();
   }
 
-  // 🔹 Delay + pre-sync session before PIN check (with retry + catch for race)
-  setTimeout(() => {
-    (async () => {
-      try {
-        console.log('[BOOT] Starting PIN check...');
-        await getSession();  // Ensure session ready first (unblocks getUid)
-        
-        // Call checkPinExists with .catch for promise rejection
-        await new Promise((resolve, reject) => {
-          window.checkPinExists((hasPin) => {
-            try {
-              if (hasPin) {
-                window.ModalManager.openModal('pinVerifyModal');
-              }
-              resolve();  // Success
-            } catch (e) {
-              reject(e);  // Bubble error
-            }
-          }, 'load');
-        }).catch(async (e) => {
-          console.error('[BOOT] PIN check failed on first try:', e);
-          // Retry once after short wait
-          await new Promise(r => setTimeout(r, 500));
+  // 🔹 Delay + await global session before PIN check (eliminates race)
+  setTimeout(async () => {
+    try {
+      console.log('[BOOT] Starting PIN check...');
+      await getOrCreateSessionPromise();  // Wait for session (global, no duplicate fetches)
+      
+      // Now safe: Wrap with full catch
+      await new Promise((resolve, reject) => {
+        window.checkPinExists((hasPin) => {
           try {
-            await getSession();  // Re-sync
-            window.checkPinExists((hasPin) => {
-              if (hasPin) {
-                window.ModalManager.openModal('pinVerifyModal');
-              }
-            }, 'load');
-            console.log('[BOOT] PIN check retry success');
-          } catch (retryErr) {
-            console.error('[BOOT] PIN check retry failed', retryErr);
-            // Optional: Assume no PIN (skip modal)
+            if (hasPin) {
+              window.ModalManager.openModal('pinVerifyModal');
+            }
+            resolve();
+          } catch (e) {
+            reject(e);
           }
-        });
-        
-        console.log('[BOOT] PIN check complete');
-      } catch (e) {
-        console.error('[BOOT] PIN check failed', e);
-      }
-    })();
-  }, 1000);  // 1s buffer (adjust if needed)
+        }, 'load');
+      }).catch(async (e) => {
+        console.error('[BOOT] PIN check failed first try:', e);
+        // No retry needed (global promise ensures session); log & skip
+      });
+      
+      console.log('[BOOT] PIN check complete');
+    } catch (e) {
+      console.error('[BOOT] PIN check error', e);
+    }
+  }, 2000);  // 2s buffer (covers everything; adjust down if too slow)
 }
 
 if (document.readyState === 'loading') {
@@ -7152,7 +7152,7 @@ try {
   };
 
   // Try to obtain userId (short wait). If none, do NOT call server (we avoid Missing userId).
-  const resolvedUserId = await safeGetSessionUserId(4000); // wait up to 4000ms for session
+  const resolvedUserId = await getOrCreateSessionPromise(); // wait up to 4000ms for session
   if (!resolvedUserId) {
     __sec_log.i('reconcile: no userId available after short wait — will clear biometric flags locally and skip server check');
     try {
