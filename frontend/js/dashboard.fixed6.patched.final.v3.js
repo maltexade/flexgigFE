@@ -11042,10 +11042,8 @@ async function verifyBiometrics(uid, context) {
 
 
 // 🔹 Improved simulatePinEntry with verbose debug logs and Promise-based completion
-// Improved simulatePinEntry: focuses each input, types a numeric digit, fires key events and input/change.
-// Returns a Promise that resolves true if inputs were found+filled, false otherwise.
 function simulatePinEntry(opts = {}) {
-  const stagger = typeof opts.stagger === 'number' ? opts.stagger : 120;
+  const stagger = typeof opts.stagger === 'number' ? opts.stagger : 150;
   const expectedCount = typeof opts.expectedCount === 'number' ? opts.expectedCount : 4;
   const debugTag = '[DEBUG-BIO simulatePinEntry]';
 
@@ -11053,7 +11051,7 @@ function simulatePinEntry(opts = {}) {
 
   return new Promise((resolve) => {
     try {
-      // selectors fallback list
+      // Try multiple selectors as fallback to find PIN inputs
       const selectors = [
         '.reauthpin-inputs input',
         '.pin-input',
@@ -11072,82 +11070,92 @@ function simulatePinEntry(opts = {}) {
       }
 
       if (!inputs || inputs.length === 0) {
-        // fallback: any visible inputs
+        console.warn(`${debugTag} No PIN inputs found with known selectors; trying to find any visible inputs as fallback`);
         inputs = Array.from(document.querySelectorAll('input')).filter(i => i.offsetParent !== null).slice(0, expectedCount);
       }
 
       if (!inputs || inputs.length === 0) {
-        console.warn(`${debugTag} no inputs found; aborting`);
+        console.warn(`${debugTag} still no inputs found; aborting simulatePinEntry`);
         resolve(false);
         return;
       }
 
       if (inputs.length !== expectedCount) {
-        console.warn(`${debugTag} unexpected input count: ${inputs.length} (expected ${expectedCount})`);
+        console.warn(`${debugTag} unexpected PIN input count: ${inputs.length} (expected ${expectedCount})`);
       }
 
-      // scroll into view
-      try { inputs[0].scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) {}
+      // Scroll the first input into view to ensure visuals update
+      try {
+        const first = inputs[0];
+        if (first && typeof first.scrollIntoView === 'function') {
+          first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      } catch (e) { /* ignore */ }
 
-      // choose digits sequence (1,2,3,4) - real numeric values help formatters
-      const digits = opts.digits && opts.digits.length ? opts.digits : ['1','2','3','4'];
+      console.log(`${debugTag} starting fill for ${inputs.length} inputs`);
 
+      // create an aria-live node for debug UX (non-intrusive)
+      let liveNode;
+      try {
+        liveNode = document.getElementById('__debug_pin_live');
+        if (!liveNode) {
+          liveNode = document.createElement('div');
+          liveNode.id = '__debug_pin_live';
+          liveNode.setAttribute('aria-live', 'polite');
+          liveNode.style.position = 'fixed';
+          liveNode.style.left = '-9999px';
+          liveNode.style.width = '1px';
+          liveNode.style.height = '1px';
+          document.body.appendChild(liveNode);
+        }
+      } catch (e) { liveNode = null; }
+
+      // perform staggered fill
       inputs.forEach((input, index) => {
         setTimeout(() => {
           try {
-            // Ensure enabled / visible
-            try { input.disabled = false; } catch (e) {}
+            // Make sure input is enabled & visible
+            try { input.disabled = false; } catch (e) { /* ignore */ }
             try { input.style.visibility = input.style.visibility || 'visible'; } catch (e) {}
 
-            // Focus the input — many widgets process key events only when focused
-            try { input.focus({ preventScroll: true }); } catch (e) { try { input.focus(); } catch(_) {} }
-
-            // Fire keydown/keypress/input/change/keyup sequence with a numeric key
-            const key = digits[index] || '1';
-            const keyCode = key.charCodeAt(0);
-
-            // keydown
-            try {
-              const kd = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: key, code: 'Digit' + key, charCode: keyCode, keyCode });
-              input.dispatchEvent(kd);
-            } catch (e) {}
-
-            // keypress (some libs)
-            try {
-              const kp = new KeyboardEvent('keypress', { bubbles: true, cancelable: true, key: key, code: 'Digit' + key, charCode: keyCode, keyCode });
-              input.dispatchEvent(kp);
-            } catch (e) {}
-
-            // set value to numeric char (use actual digit so internal masks run)
-            try { input.value = key; } catch (e) {}
-
-            // input & change
-            try {
-              input.dispatchEvent(new Event('input', { bubbles: true }));
-              input.dispatchEvent(new Event('change', { bubbles: true }));
-            } catch (e) {}
-
-            // keyup
-            try {
-              const ku = new KeyboardEvent('keyup', { bubbles: true, key: key, code: 'Digit' + key, charCode: keyCode, keyCode });
-              input.dispatchEvent(ku);
-            } catch (e) {}
-
-            // Add visual hooks so CSS reacts
+            // Add CSS hooks so your styles can react
             input.classList.add('filled', 'simulated-pin');
-            input.setAttribute('data-simulated', 'true');
 
-            console.log(`${debugTag} filled input[${index}] id="${input.id || '(no-id)'}" value="${input.value}"`);
+            // Set a display-safe masked character (use bullet so it looks like a PIN)
+            try {
+              input.value = '•';
+            } catch (e) { /* ignore */ }
+
+            // Trigger events so any listeners pick up the programmatic change
+            try {
+              const evInput = new Event('input', { bubbles: true });
+              const evChange = new Event('change', { bubbles: true });
+              input.dispatchEvent(evInput);
+              input.dispatchEvent(evChange);
+              // also dispatch key events (some libs listen for keyup)
+              try {
+                const ku = new KeyboardEvent('keyup', { bubbles: true, key: 'Unidentified' });
+                input.dispatchEvent(ku);
+              } catch (e) {}
+            } catch (e) {
+              console.warn(`${debugTag} event dispatch failed for input[${index}]`, e);
+            }
+
+            console.log(`${debugTag} filled input[${index}] id="${input.id || '(no-id)'}"`);
+            if (liveNode) liveNode.textContent = `Simulated PIN: ${index + 1}/${inputs.length} filled`;
           } catch (err) {
-            console.warn(`${debugTag} error for input[${index}]`, err);
+            console.warn(`${debugTag} simulate error for index ${index}`, err);
           }
         }, index * stagger);
       });
 
-      // resolve after last stagger + small buffer
-      const totalDelay = Math.max(0, (inputs.length - 1) * stagger) + 160;
+      // resolve after last stagger + small delay to allow UI to reflect changes
+      const totalDelay = Math.max(0, (inputs.length - 1) * stagger) + 120;
       setTimeout(() => {
         console.log(`${debugTag} complete after ${totalDelay}ms`);
+        if (liveNode) {
+          try { liveNode.textContent = 'Simulated PIN complete'; } catch (e) {}
+        }
         resolve(true);
       }, totalDelay);
     } catch (err) {
@@ -11156,7 +11164,6 @@ function simulatePinEntry(opts = {}) {
     }
   });
 }
-
 
 
 
