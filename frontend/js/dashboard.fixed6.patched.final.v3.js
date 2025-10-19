@@ -3643,6 +3643,7 @@ updateBalanceDisplay();
         window.location.href = '/';
       }
     }
+    window.openPinModalForReauth = window.openPinModalForReauth || openPinModalForReauth;
 
     // ---------------------
     // Close/back button
