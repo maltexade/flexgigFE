@@ -52,14 +52,67 @@ function hideLoader() {
 }
 
 async function withLoader(task) {
-  console.log('[DEBUG ⌛⌛⌛] withLoader: Starting task with loader');
+  const start = Date.now();
+
+  // Try to extract caller info from the stack trace
+  let callerInfo = 'unknown';
+  try {
+    const rawStack = (new Error()).stack || '';
+    const lines = rawStack.split('\n').map(l => l.trim()).filter(Boolean);
+
+    // Find the first stack frame that is NOT inside withLoader itself
+    // The stack usually looks like:
+    // Error
+    // at withLoader (file:line:col)
+    // at callerFunction (file:line:col)
+    let callerLine = lines.find(l => !/withLoader/.test(l) && !/Error/.test(l));
+    // Fallback to the second line if above didn't work
+    if (!callerLine && lines.length >= 2) callerLine = lines[1];
+
+    if (callerLine) {
+      // Try to match common V8/Chromium stack frame: "at funcName (fileURL:line:col)"
+      let m = callerLine.match(/at\s+(.*)\s+\((.*):(\d+):(\d+)\)/);
+      if (m) {
+        const func = m[1];
+        const file = m[2].split('/').pop(); // keep filename for readability
+        const line = m[3];
+        const col = m[4];
+        callerInfo = `${func} @ ${file}:${line}:${col}`;
+      } else {
+        // Try Firefox-like format: "funcName@fileURL:line:col"
+        m = callerLine.match(/(.*)@(.+):(\d+):(\d+)/);
+        if (m) {
+          const func = m[1] || '(anonymous)';
+          const file = m[2].split('/').pop();
+          const line = m[3];
+          const col = m[4];
+          callerInfo = `${func} @ ${file}:${line}:${col}`;
+        } else {
+          // Last resort: just use the raw frame string
+          callerInfo = callerLine;
+        }
+      }
+    }
+  } catch (e) {
+    callerInfo = 'unknown';
+  }
+
+  console.log(`[DEBUG ⌛⌛⌛] withLoader: Starting task (called from ${callerInfo})`);
   showLoader();
   try {
-    return await task();
+    const result = await task();
+    const duration = Date.now() - start;
+    console.log(`[DEBUG ⌛⌛⌛] withLoader: Task completed (duration: ${duration}ms) (called from ${callerInfo})`);
+    return result;
+  } catch (err) {
+    const duration = Date.now() - start;
+    console.error(`[DEBUG ⌛⌛⌛] withLoader: Task failed after ${duration}ms (called from ${callerInfo})`, err);
+    throw err;
   } finally {
-    hideLoader();
+    try { hideLoader(); } catch (e) { /* ignore */ }
   }
 }
+
 
 
 // ---------- STORAGE INSTRUMENTATION (paste once near top of script) ----------
