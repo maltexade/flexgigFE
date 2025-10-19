@@ -9270,26 +9270,66 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
             }
           };
           const session = await safeCall(getSession);
-          const uid = session && session.user ? (session.user.uid || session.user.id) : null;
-          const verifyRes = await withLoader(async () => {
-            notify('Verifying fingerprint — logging you in...', 'info');
-            return await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/verify', {
-              method: 'POST',
-              credentials: 'include',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(Object.assign({}, payload, { userId: uid }))
-            });
-          });
-          const verifyData = await (verifyRes.ok ? verifyRes.json().catch(()=>({})) : verifyRes.json().catch(()=>({})));
-          if (verifyRes.ok && verifyData && verifyData.verified) {
-            safeCall(__sec_getCurrentUser);
-            safeCall(onSuccessfulReauth);
-            try { if (reauthModal) reauthModal.classList.add('hidden'); } catch(e){}
-            return;
-          } else {
-            safeCall(notify, 'Biometric verification failed', 'error', reauthAlert, reauthAlertMsg);
-            return;
-          }
+const uid = session && session.user ? (session.user.uid || session.user.id) : null;
+
+if (!uid) {
+  console.warn('[reauth] No session user id found before biometric verify');
+  safeCall(notify, 'Unable to find your session. Please try again.', 'error', reauthAlert, reauthAlertMsg);
+  return;
+}
+
+let verifyRes;
+try {
+  verifyRes = await withLoader(async () => {
+    // keep this user-visible message inside the loader so it's shown while waiting
+    notify('Verifying fingerprint — logging you in...', 'info');
+    return await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/verify', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...payload, userId: uid })
+    });
+  });
+} catch (err) {
+  // withLoader or fetch threw (network/other)
+  console.error('[reauth] network/loader error during verify', err);
+  safeCall(notify, 'Verification failed — network error. Please try again.', 'error', reauthAlert, reauthAlertMsg);
+  return;
+}
+
+if (!verifyRes) {
+  console.error('[reauth] verifyRes is falsy after withLoader');
+  safeCall(notify, 'Verification failed — no response from server.', 'error', reauthAlert, reauthAlertMsg);
+  return;
+}
+
+let verifyData = {};
+if (!verifyRes.ok) {
+  // try to read textual error (safer than assuming JSON)
+  const errText = await verifyRes.text().catch(() => verifyRes.statusText || `HTTP ${verifyRes.status}`);
+  console.warn('[reauth] server verify returned non-OK:', verifyRes.status, errText);
+  safeCall(notify, 'Biometric verification failed: ' + (errText || 'Server error'), 'error', reauthAlert, reauthAlertMsg);
+  return;
+}
+
+try {
+  verifyData = await verifyRes.json().catch(() => ({}));
+} catch (err) {
+  console.warn('[reauth] failed to parse verify response JSON', err);
+  verifyData = {};
+}
+
+if (verifyData && verifyData.verified) {
+  safeCall(__sec_getCurrentUser);
+  safeCall(onSuccessfulReauth);
+  try { if (reauthModal) reauthModal.classList.add('hidden'); } catch(e){}
+  return;
+} else {
+  console.warn('[reauth] verify returned ok but not verified', verifyData);
+  safeCall(notify, 'Biometric verification failed', 'error', reauthAlert, reauthAlertMsg);
+  return;
+}
+
         } catch (err) {
           console.error('Cached biometric verify flow error', err);
           safeCall(notify, 'Biometric verification error', 'error', reauthAlert, reauthAlertMsg);
@@ -9435,53 +9475,94 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
   } catch (e) { console.warn('verifyBiometricBtn bind failed', e); }
 
   // helper to post verification payload to server (used by verify button path)
-  async function bioVerifyAndFinalize(assertion) {
-    try {
-      function bufToB64Url(buf) {
-        return (window.toBase64Url ? window.toBase64Url(buf) : (function(b){
-          var bytes = new Uint8Array(b);
-          var str = '';
-          for (var i=0;i<bytes.length;i++) str += String.fromCharCode(bytes[i]);
-          return btoa(str).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
-        })(buf));
+ async function bioVerifyAndFinalize(assertion) {
+  try {
+    function bufToB64Url(buf) {
+      return (window.toBase64Url ? window.toBase64Url(buf) : (function(b){
+        var bytes = new Uint8Array(b);
+        var str = '';
+        for (var i=0;i<bytes.length;i++) str += String.fromCharCode(bytes[i]);
+        return btoa(str).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+      })(buf));
+    }
+
+    const payload = {
+      id: assertion.id,
+      rawId: bufToB64Url(assertion.rawId),
+      type: assertion.type,
+      response: {
+        authenticatorData: bufToB64Url(assertion.response.authenticatorData),
+        clientDataJSON: bufToB64Url(assertion.response.clientDataJSON),
+        signature: bufToB64Url(assertion.response.signature),
+        userHandle: assertion.response.userHandle ? bufToB64Url(assertion.response.userHandle) : null
       }
-      const payload = {
-        id: assertion.id,
-        rawId: bufToB64Url(assertion.rawId),
-        type: assertion.type,
-        response: {
-          authenticatorData: bufToB64Url(assertion.response.authenticatorData),
-          clientDataJSON: bufToB64Url(assertion.response.clientDataJSON),
-          signature: bufToB64Url(assertion.response.signature),
-          userHandle: assertion.response.userHandle ? bufToB64Url(assertion.response.userHandle) : null
-        }
-      };
-      const session = await safeCall(getSession);
-      const uid = session && session.user ? (session.user.uid || session.user.id) : null;
-      const verifyRes = await withLoader(async () => {
+    };
+
+    const session = await safeCall(getSession);
+    const uid = session && session.user ? (session.user.uid || session.user.id) : null;
+
+    if (!uid) {
+      console.warn('[bio] no session uid found before verify');
+      safeCall(notify, 'Unable to find your session. Please try again.', 'error');
+      return false;
+    }
+
+    let verifyRes;
+    try {
+      verifyRes = await withLoader(async () => {
         notify('Verifying fingerprint — logging you in...', 'info');
         return await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/verify', {
           method: 'POST',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(Object.assign({}, payload, { userId: uid }))
+          body: JSON.stringify({ ...payload, userId: uid })
         });
       });
-      const verifyData = await (verifyRes.ok ? verifyRes.json().catch(()=>({})) : verifyRes.json().catch(()=>({})));
-      if (verifyRes.ok && verifyData && verifyData.verified) {
-        safeCall(__sec_getCurrentUser);
-        safeCall(onSuccessfulReauth);
-        try { if (reauthModal) reauthModal.classList.add('hidden'); } catch(e){}
-        return true;
-      }
-      safeCall(notify, 'Biometric verification failed', 'error');
-      return false;
     } catch (err) {
-      console.error('bioVerifyAndFinalize error', err);
-      safeCall(notify, 'Biometric verification error', 'error');
+      console.error('[bio] network/withLoader error during verify', err);
+      safeCall(notify, 'Verification failed — network error. Please try again.', 'error');
       return false;
     }
+
+    if (!verifyRes) {
+      console.error('[bio] verifyRes falsy after fetch');
+      safeCall(notify, 'Verification failed — no response from server.', 'error');
+      return false;
+    }
+
+    if (!verifyRes.ok) {
+      // try to surface server error message (text) for debugging/UX
+      const errText = await verifyRes.text().catch(() => verifyRes.statusText || `HTTP ${verifyRes.status}`);
+      console.warn('[bio] server responded non-OK:', verifyRes.status, errText);
+      safeCall(notify, 'Biometric verification failed: ' + (errText || 'Server error'), 'error');
+      return false;
+    }
+
+    let verifyData = {};
+    try {
+      verifyData = await verifyRes.json().catch(() => ({}));
+    } catch (err) {
+      console.warn('[bio] failed to parse verify JSON', err);
+      verifyData = {};
+    }
+
+    if (verifyData && verifyData.verified) {
+      safeCall(__sec_getCurrentUser);
+      safeCall(onSuccessfulReauth);
+      try { if (reauthModal) reauthModal.classList.add('hidden'); } catch(e){}
+      return true;
+    } else {
+      console.warn('[bio] verify returned ok but not verified', verifyData);
+      safeCall(notify, 'Biometric verification failed', 'error');
+      return false;
+    }
+  } catch (err) {
+    console.error('bioVerifyAndFinalize error', err);
+    safeCall(notify, 'Biometric verification error', 'error');
+    return false;
   }
+}
+
 
   // disable view switches
   try { if (switchToPin) switchToPin.style.display = 'none'; if (switchToBiometric) switchToBiometric.style.display = 'none'; } catch(e){}
@@ -10644,9 +10725,9 @@ async function verifyBiometrics(uid, context) {
 
   try {
     // Resolve userId
-    var userId = uid;
+    let userId = uid;
     if (!userId) {
-      var session = await safeCall(getSession);
+      const session = await safeCall(getSession);
       userId = session && (session.user && (session.user.id || session.user.uid));
     }
     if (!userId) throw new Error('No user id available');
@@ -10658,8 +10739,8 @@ async function verifyBiometrics(uid, context) {
 
     // Fetch fresh options (no loader - quick)
     console.log('[verifyBiometrics] Fetching fresh options from server');
-    var storedId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
-    var optRes = await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/options', {
+    const storedId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
+    const optRes = await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/options', {
       method: 'POST',
       credentials: 'include',
       headers: {
@@ -10670,24 +10751,24 @@ async function verifyBiometrics(uid, context) {
     });
 
     if (!optRes.ok) {
-      var txt = await optRes.text().catch(() => '(no body)');
+      const txt = await optRes.text().catch(() => '(no body)');
       throw new Error('Auth options fetch failed: ' + txt);
     }
-    var publicKey = await optRes.json();
+    const publicKey = await optRes.json();
 
-    // Debug: show challenge presence (do NOT log raw full challenge in prod)
-    console.log('[verifyBiometrics] Fresh challenge (base64url present?):', !!publicKey.challenge);
+    // Debug (do NOT log raw bytes in production)
+    console.log('[verifyBiometrics] Fresh challenge present?:', !!publicKey.challenge);
 
-    // Convert challenge to ArrayBuffer/Uint8Array as expected by WebAuthn
+    // Convert challenge/allowCredentials to buffers as required
     try {
-      if (publicKey.challenge && typeof publicKey.challenge === 'string') {
+      if (publicKey.challenge && typeof publicKey.challenge === 'string' && typeof window.fromBase64Url === 'function') {
         const ch = window.fromBase64Url(publicKey.challenge);
         if (ch) publicKey.challenge = (ch instanceof Uint8Array) ? ch : new Uint8Array(ch);
       }
       if (Array.isArray(publicKey.allowCredentials) && publicKey.allowCredentials.length) {
         publicKey.allowCredentials = publicKey.allowCredentials.map(function (c) {
           try {
-            const idRaw = (typeof c.id === 'string') ? window.fromBase64Url(c.id) : c.id;
+            const idRaw = (typeof c.id === 'string' && typeof window.fromBase64Url === 'function') ? window.fromBase64Url(c.id) : c.id;
             return {
               type: c.type || 'public-key',
               transports: c.transports || ['internal'],
@@ -10698,8 +10779,7 @@ async function verifyBiometrics(uid, context) {
             return c;
           }
         });
-      } else if (storedId) {
-        // Fallback: use stored credential id if server didn't include allowCredentials
+      } else if (storedId && typeof window.fromBase64Url === 'function') {
         try {
           const idBuf = window.fromBase64Url(storedId);
           publicKey.allowCredentials = [{
@@ -10715,20 +10795,14 @@ async function verifyBiometrics(uid, context) {
       console.warn('[verifyBiometrics] conversion error for publicKey', e);
     }
 
-    // Debug: log shape of publicKey relevant fields
     console.log('[verifyBiometrics] publicKey prepared', {
       hasChallenge: !!publicKey.challenge,
       allowCredCount: Array.isArray(publicKey.allowCredentials) ? publicKey.allowCredentials.length : 0
     });
 
-    // Debug: about to call navigator.credentials.get
-    console.log('[verifyBiometrics] About to call navigator.credentials.get (publicKey)', {
-      hasPublicKey: !!publicKey,
-      allowCount: publicKey && Array.isArray(publicKey.allowCredentials) ? publicKey.allowCredentials.length : 0
-    });
-
-    // Native platform prompt (no loader here — native OS will show prompt)
-    var assertion;
+    // Call the authenticator (user gesture must have happened already or be triggered by user)
+    console.log('[verifyBiometrics] About to call navigator.credentials.get (publicKey)');
+    let assertion;
     try {
       assertion = await navigator.credentials.get({ publicKey: publicKey });
       console.log('[verifyBiometrics] navigator.credentials.get returned', !!assertion, assertion && { id: assertion.id, type: assertion.type });
@@ -10736,10 +10810,9 @@ async function verifyBiometrics(uid, context) {
       console.error('[verifyBiometrics] navigator.credentials.get threw', e);
       throw e;
     }
-
     if (!assertion) throw new Error('No assertion returned from authenticator');
 
-    // Helper: convert ArrayBuffer/Uint8Array -> base64url string
+    // Helper: ArrayBuffer / Typed -> base64url
     function bufferToBase64url(buf) {
       if (!buf) return '';
       let arr;
@@ -10752,12 +10825,12 @@ async function verifyBiometrics(uid, context) {
       return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
     }
 
-    // Use withLoader for server-verify + UI simulation so loader lifecycle is reliable
+    // One withLoader around the server verify + UI simulation (remove nested withLoader)
     console.log('[verifyBiometrics] Bio prompt success - entering server-verify via withLoader');
     const verifyResult = await withLoader(async () => {
       console.log('[verifyBiometrics] withLoader: server verify started');
 
-      // Build payload from assertion
+      // Build payload
       const payload = {
         id: assertion.id,
         rawId: bufferToBase64url(assertion.rawId),
@@ -10774,17 +10847,28 @@ async function verifyBiometrics(uid, context) {
         rawIdPreview: payload.rawId && payload.rawId.slice(0, 20) + '...',
       });
 
-      // POST verify
-      const verifyRes = await withLoader(async () => {
-        return await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/verify', {
+      // Single fetch call (no inner withLoader)
+      let verifyRes;
+      try {
+        verifyRes = await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/verify', {
           method: 'POST',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(Object.assign({}, payload, { userId: userId }))
+          body: JSON.stringify({ ...payload, userId: userId })
         });
-      });
+      } catch (e) {
+        console.error('[verifyBiometrics] network error when posting verify', e);
+        throw new Error('Network error during server verification');
+      }
 
+      // Parse response (prefer JSON, fallback to text)
       let verifyData = null;
+      if (!verifyRes.ok) {
+        const txt = await verifyRes.text().catch(() => '(no-body)');
+        console.error('[verifyBiometrics] Server verify returned error', { status: verifyRes.status, body: txt });
+        // surface server message if any
+        throw new Error('Server verify failed: ' + (txt || verifyRes.statusText || verifyRes.status));
+      }
       try {
         verifyData = await verifyRes.json();
       } catch (e) {
@@ -10792,20 +10876,9 @@ async function verifyBiometrics(uid, context) {
         verifyData = { __rawText: txt };
       }
 
-      if (!verifyRes.ok) {
-        console.error('[verifyBiometrics] Server verify returned error', { status: verifyRes.status, body: verifyData });
-        // Allow withLoader's finally to hide loader
-        // Provide actionable log if looks like challenge mismatch
-        if (verifyData && typeof verifyData.error === 'string' && (verifyData.error.toLowerCase().includes('challenge') || verifyData.error.toLowerCase().includes('mismatch'))) {
-          console.error('[verifyBiometrics] Server indicates challenge mismatch / stale challenge');
-        }
-        // Throw to propagate to outer catch (withLoader will hide loader)
-        throw new Error('Server verify failed: ' + (verifyData && (verifyData.message || verifyData.error) || verifyRes.status));
-      }
-
       console.log('[verifyBiometrics] Server verify OK', verifyData);
 
-      // Defensive: ensure the reauth PIN modal is visible and inputs enabled before simulation
+      // Ensure PIN modal + inputs are ready before simulation
       try {
         if (typeof openPinModalForReauth === 'function') {
           console.log('[verifyBiometrics] attempting to open reauth PIN modal (openPinModalForReauth)');
@@ -10819,7 +10892,6 @@ async function verifyBiometrics(uid, context) {
         if (typeof enableReauthInputs === 'function') {
           enableReauthInputs();
         } else {
-          // attempt to enable any inputs found
           const inputs = Array.from(document.querySelectorAll('.reauthpin-inputs input'));
           inputs.forEach(i => { try { i.disabled = false; } catch(e){} });
         }
@@ -10827,21 +10899,14 @@ async function verifyBiometrics(uid, context) {
         console.warn('[verifyBiometrics] enableReauthInputs fallback failed', e);
       }
 
-      // Debug: list inputs found just before filling
-      const inputsDebug = Array.from(document.querySelectorAll('.reauthpin-inputs input'));
-      console.log('[verifyBiometrics] PIN inputs found for simulation:', inputsDebug.length, inputsDebug.map(i => ({ id: i.id, disabled: i.disabled })));
-
-      // Simulate PIN entry (staggered fill)
+      // Simulate PIN entry (staggered)
       try {
         simulatePinEntry();
       } catch (e) {
         console.warn('[verifyBiometrics] simulatePinEntry threw', e);
       }
 
-      // Give animation time to run (slightly longer than simulate stagger)
       await new Promise(r => setTimeout(r, 700));
-
-      // Notify UI about result
       safeCall(notify, verifyData.verified ? 'Authentication successful' : 'Authentication failed', verifyData.verified ? 'success' : 'error');
 
       return verifyData;
@@ -10850,7 +10915,6 @@ async function verifyBiometrics(uid, context) {
     console.log('[verifyBiometrics] verifyResult:', verifyResult);
     return { success: !!verifyResult.verified, verifyData: verifyResult };
   } catch (err) {
-    // Ensure loader hidden and surface error
     try { hideLoader(); } catch (e) { /* ignore */ }
     console.error('[verifyBiometrics] Error', err);
     safeCall(notify, 'Biometric auth error: ' + (err && err.message ? err.message : err), 'error');
@@ -10858,40 +10922,131 @@ async function verifyBiometrics(uid, context) {
   }
 }
 
-// 🔹 Improved helper: Simulate PIN entry (fill inputs with .filled for yellow bg/border)
-function simulatePinEntry() {
-  const inputs = Array.from(document.querySelectorAll('.reauthpin-inputs input'));
-  if (!inputs || inputs.length === 0) {
-    console.warn('[DEBUG-BIO] simulatePinEntry: No PIN inputs found');
-    return;
-  }
 
-  // If expected 4, log warning if different
-  if (inputs.length !== 4) {
-    console.warn('[DEBUG-BIO] simulatePinEntry: unexpected PIN input count:', inputs.length);
-  }
+// 🔹 Improved simulatePinEntry with verbose debug logs and Promise-based completion
+function simulatePinEntry(opts = {}) {
+  const stagger = typeof opts.stagger === 'number' ? opts.stagger : 150;
+  const expectedCount = typeof opts.expectedCount === 'number' ? opts.expectedCount : 4;
+  const debugTag = '[DEBUG-BIO simulatePinEntry]';
 
-  console.log('[DEBUG-BIO] simulatePinEntry: starting, inputs:', inputs.map(i => ({ id: i.id, disabled: i.disabled })));
+  console.log(`${debugTag} start; options:`, { stagger, expectedCount });
 
-  inputs.forEach((input, index) => {
-    setTimeout(() => {
-      try {
-        // Ensure enabled and visible
-        try { input.disabled = false; } catch (e) { /* ignore */ }
-        input.classList.add('filled'); // Trigger CSS "filled" (yellow bg/border)
-        // Set a masked value — CSS likely hides it; this sets state for other scripts
-        try { input.value = '*'; } catch (e) { /* ignore */ }
-        // Optionally trigger input events so any watchers pick up the change
-        try {
-          const ev = new Event('input', { bubbles: true });
-          input.dispatchEvent(ev);
-        } catch (e) { /* ignore */ }
-      } catch (e) {
-        console.warn('[DEBUG-BIO] simulatePinEntry error for input', index, e);
+  return new Promise((resolve) => {
+    try {
+      // Try multiple selectors as fallback to find PIN inputs
+      const selectors = [
+        '.reauthpin-inputs input',
+        '.pin-input',
+        'input.pin',
+        '.pin > input',
+        '.pin-inputs input',
+        'input[id^="pin"]',
+      ];
+      let inputs = [];
+      for (const s of selectors) {
+        inputs = Array.from(document.querySelectorAll(s));
+        if (inputs && inputs.length) {
+          console.log(`${debugTag} found inputs with selector "${s}" (count=${inputs.length})`);
+          break;
+        }
       }
-    }, index * 150);
+
+      if (!inputs || inputs.length === 0) {
+        console.warn(`${debugTag} No PIN inputs found with known selectors; trying to find any visible inputs as fallback`);
+        inputs = Array.from(document.querySelectorAll('input')).filter(i => i.offsetParent !== null).slice(0, expectedCount);
+      }
+
+      if (!inputs || inputs.length === 0) {
+        console.warn(`${debugTag} still no inputs found; aborting simulatePinEntry`);
+        resolve(false);
+        return;
+      }
+
+      if (inputs.length !== expectedCount) {
+        console.warn(`${debugTag} unexpected PIN input count: ${inputs.length} (expected ${expectedCount})`);
+      }
+
+      // Scroll the first input into view to ensure visuals update
+      try {
+        const first = inputs[0];
+        if (first && typeof first.scrollIntoView === 'function') {
+          first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      } catch (e) { /* ignore */ }
+
+      console.log(`${debugTag} starting fill for ${inputs.length} inputs`);
+
+      // create an aria-live node for debug UX (non-intrusive)
+      let liveNode;
+      try {
+        liveNode = document.getElementById('__debug_pin_live');
+        if (!liveNode) {
+          liveNode = document.createElement('div');
+          liveNode.id = '__debug_pin_live';
+          liveNode.setAttribute('aria-live', 'polite');
+          liveNode.style.position = 'fixed';
+          liveNode.style.left = '-9999px';
+          liveNode.style.width = '1px';
+          liveNode.style.height = '1px';
+          document.body.appendChild(liveNode);
+        }
+      } catch (e) { liveNode = null; }
+
+      // perform staggered fill
+      inputs.forEach((input, index) => {
+        setTimeout(() => {
+          try {
+            // Make sure input is enabled & visible
+            try { input.disabled = false; } catch (e) { /* ignore */ }
+            try { input.style.visibility = input.style.visibility || 'visible'; } catch (e) {}
+
+            // Add CSS hooks so your styles can react
+            input.classList.add('filled', 'simulated-pin');
+
+            // Set a display-safe masked character (use bullet so it looks like a PIN)
+            try {
+              input.value = '•';
+            } catch (e) { /* ignore */ }
+
+            // Trigger events so any listeners pick up the programmatic change
+            try {
+              const evInput = new Event('input', { bubbles: true });
+              const evChange = new Event('change', { bubbles: true });
+              input.dispatchEvent(evInput);
+              input.dispatchEvent(evChange);
+              // also dispatch key events (some libs listen for keyup)
+              try {
+                const ku = new KeyboardEvent('keyup', { bubbles: true, key: 'Unidentified' });
+                input.dispatchEvent(ku);
+              } catch (e) {}
+            } catch (e) {
+              console.warn(`${debugTag} event dispatch failed for input[${index}]`, e);
+            }
+
+            console.log(`${debugTag} filled input[${index}] id="${input.id || '(no-id)'}"`);
+            if (liveNode) liveNode.textContent = `Simulated PIN: ${index + 1}/${inputs.length} filled`;
+          } catch (err) {
+            console.warn(`${debugTag} simulate error for index ${index}`, err);
+          }
+        }, index * stagger);
+      });
+
+      // resolve after last stagger + small delay to allow UI to reflect changes
+      const totalDelay = Math.max(0, (inputs.length - 1) * stagger) + 120;
+      setTimeout(() => {
+        console.log(`${debugTag} complete after ${totalDelay}ms`);
+        if (liveNode) {
+          try { liveNode.textContent = 'Simulated PIN complete'; } catch (e) {}
+        }
+        resolve(true);
+      }, totalDelay);
+    } catch (err) {
+      console.error(`${debugTag} unexpected error`, err);
+      resolve(false);
+    }
   });
 }
+
 
 
 
