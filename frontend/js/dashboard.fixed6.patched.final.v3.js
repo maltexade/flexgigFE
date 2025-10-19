@@ -9300,160 +9300,156 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
       // Try synchronous cached option path first (keeps user gesture)
       const cachedAttempt = await tryBiometricWithCachedOptions();
       if (cachedAttempt.ok) {
-  // build payload and verify as in your original flow
-  try {
-    const assertion = cachedAttempt.assertion;
+        // build payload and verify as in your original flow
+        try {
+          const assertion = cachedAttempt.assertion;
 
-    function bufToB64Url(buf) {
-      return (window.toBase64Url ? window.toBase64Url(buf) : (function(b){
-        var bytes = new Uint8Array(b);
-        var str = '';
-        for (var i=0;i<bytes.length;i++) str += String.fromCharCode(bytes[i]);
-        return btoa(str).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
-      })(buf));
-    }
+          function bufToB64Url(buf) {
+            return (window.toBase64Url ? window.toBase64Url(buf) : (function(b){
+              var bytes = new Uint8Array(b);
+              var str = '';
+              for (var i=0;i<bytes.length;i++) str += String.fromCharCode(bytes[i]);
+              return btoa(str).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+            })(buf));
+          }
 
-    const payload = {
-      id: assertion.id,
-      rawId: bufToB64Url(assertion.rawId),
-      type: assertion.type,
-      response: {
-        authenticatorData: bufToB64Url(assertion.response.authenticatorData),
-        clientDataJSON: bufToB64Url(assertion.response.clientDataJSON),
-        signature: bufToB64Url(assertion.response.signature),
-        userHandle: assertion.response.userHandle ? bufToB64Url(assertion.response.userHandle) : null
+          const payload = {
+            id: assertion.id,
+            rawId: bufToB64Url(assertion.rawId),
+            type: assertion.type,
+            response: {
+              authenticatorData: bufToB64Url(assertion.response.authenticatorData),
+              clientDataJSON: bufToB64Url(assertion.response.clientDataJSON),
+              signature: bufToB64Url(assertion.response.signature),
+              userHandle: assertion.response.userHandle ? bufToB64Url(assertion.response.userHandle) : null
+            }
+          };
+
+          const session = await safeCall(getSession);
+          const uid = session && session.user ? (session.user.uid || session.user.id) : null;
+          if (!uid) {
+            console.warn('[reauth] No session user id found before biometric verify');
+            safeCall(notify, 'Unable to find your session. Please try again.', 'error', reauthAlert, reauthAlertMsg);
+            return;
+          }
+
+          // Notify user and give a tiny tick so the notify can paint
+          try { safeCall(notify, 'Verifying fingerprint — logging you in...', 'info', reauthAlert, reauthAlertMsg); } catch (e) { console.warn('[reauth] notify call failed', e); }
+          await new Promise(r => setTimeout(r, 30));
+
+          // Show loader immediately so user sees instant feedback
+          try { showLoader(); } catch (e) { console.warn('[reauth] showLoader failed', e); }
+
+          // Immediately open PIN modal and enable inputs (non-blocking where possible)
+          try {
+            if (typeof openPinModalForReauth === 'function') {
+              // intentionally non-blocking to allow server verify to proceed immediately
+              safeCall(openPinModalForReauth);
+            } else if (reauthModal && reauthModal.classList) {
+              reauthModal.classList.remove('hidden');
+            }
+          } catch (e) {
+            console.warn('[reauth] openPinModalForReauth failed', e);
+          }
+
+          try {
+            if (typeof enableReauthInputs === 'function') {
+              enableReauthInputs();
+            } else {
+              const inputs = Array.from(document.querySelectorAll('.reauthpin-inputs input'));
+              inputs.forEach(i => { try { i.disabled = false; } catch(e){} });
+            }
+          } catch (e) {
+            console.warn('[reauth] enableReauthInputs fallback failed', e);
+          }
+
+          // Fire-and-forget immediate fill so server verify can proceed concurrently
+          try {
+            if (typeof simulatePinEntry === 'function') {
+              simulatePinEntry({ stagger: 0, expectedCount: 4, fillAll: true });
+              console.log('[reauth] simulatePinEntry (immediate) started (non-blocking)');
+            } else {
+              console.warn('[reauth] simulatePinEntry not available for immediate fill');
+            }
+          } catch (e) {
+            console.warn('[reauth] simulatePinEntry immediate threw', e);
+          }
+
+          // Single withLoader wrapper for server verify (no duplicate simulation inside)
+          let verifyTaskResult;
+          try {
+            verifyTaskResult = await withLoader(async () => {
+              console.log('[reauth] withLoader: starting server verify (cached path)');
+
+              // POST verify to server
+              let verifyRes;
+              try {
+                verifyRes = await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/verify', {
+                  method: 'POST',
+                  credentials: 'include',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ ...payload, userId: uid })
+                });
+              } catch (err) {
+                console.error('[reauth] network error posting verify', err);
+                throw new Error('Network error during biometric verification');
+              }
+
+              // Parse response safely
+              let verifyData = {};
+              if (!verifyRes || !verifyRes.ok) {
+                const txt = verifyRes ? await verifyRes.text().catch(()=>verifyRes.statusText || `HTTP ${verifyRes && verifyRes.status}`) : '(no-response)';
+                console.error('[reauth] server verify returned non-OK', verifyRes && verifyRes.status, txt);
+                // Throw so withLoader's catch logs and outer handler shows notify
+                throw new Error('Server verification failed: ' + (txt || 'server error'));
+              }
+
+              try {
+                verifyData = await verifyRes.json().catch(() => ({}));
+              } catch (err) {
+                const txt = await verifyRes.text().catch(()=>'(no-body)');
+                verifyData = { __rawText: txt };
+              }
+
+              console.log('[reauth] server verify ok, verifyData:', verifyData);
+
+              // small post-verify delay so any UI animations finish
+              await new Promise(r => setTimeout(r, 120));
+
+              // Notify outcome while loader still showing (so user sees final status)
+              try {
+                safeCall(notify, verifyData.verified ? 'Authentication successful' : 'Authentication failed', verifyData.verified ? 'success' : 'error', reauthAlert, reauthAlertMsg);
+              } catch (e) {
+                console.warn('[reauth] notify after verify failed', e);
+              }
+
+              // return verifyData
+              return verifyData;
+            }); // end withLoader
+          } catch (err) {
+            console.error('[reauth] verify task failed', err);
+            safeCall(notify, 'Biometric verification failed — ' + (err && err.message ? err.message : 'server error'), 'error', reauthAlert, reauthAlertMsg);
+            return;
+          }
+
+          // Post-verify handling
+          const verifyData = verifyTaskResult || {};
+          if (verifyData && verifyData.verified) {
+            safeCall(__sec_getCurrentUser);
+            safeCall(onSuccessfulReauth);
+            try { if (reauthModal) reauthModal.classList.add('hidden'); } catch(e){}
+            return;
+          } else {
+            console.warn('[reauth] verify returned ok but not verified', verifyData);
+            safeCall(notify, 'Biometric verification failed', 'error', reauthAlert, reauthAlertMsg);
+            return;
+          }
+        } catch (err) {
+          console.error('Cached biometric verify flow error', err);
+          safeCall(notify, 'Biometric verification error', 'error', reauthAlert, reauthAlertMsg);
+          return;
+        }
       }
-    };
-
-    const session = await safeCall(getSession);
-    const uid = session && session.user ? (session.user.uid || session.user.id) : null;
-    if (!uid) {
-      console.warn('[reauth] No session user id found before biometric verify');
-      safeCall(notify, 'Unable to find your session. Please try again.', 'error', reauthAlert, reauthAlertMsg);
-      return;
-    }
-
-    // Ensure the user sees the notify message before the loader overlay appears.
-    // It's OK to notify now because navigator.credentials.get() already completed.
-    try { safeCall(notify, 'Verifying fingerprint — logging you in...', 'info', reauthAlert, reauthAlertMsg); } catch (e) { console.warn('[reauth] notify call failed', e); }
-    // give browser a tiny tick to paint the notify before showLoader() runs
-    await new Promise(r => setTimeout(r, 30));
-
-    // Single withLoader wrapper for server verify + UI simulation
-    let verifyTaskResult;
-    try {
-      verifyTaskResult = await withLoader(async () => {
-        console.log('[reauth] withLoader: starting server verify (cached path)');
-
-        // POST verify to server
-        let verifyRes;
-        try {
-          verifyRes = await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/verify', {
-            method: 'POST',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ...payload, userId: uid })
-          });
-        } catch (err) {
-          console.error('[reauth] network error posting verify', err);
-          throw new Error('Network error during biometric verification');
-        }
-
-        // Parse response safely
-        let verifyData = {};
-        if (!verifyRes || !verifyRes.ok) {
-          const txt = verifyRes ? await verifyRes.text().catch(()=>verifyRes.statusText || `HTTP ${verifyRes && verifyRes.status}`) : '(no-response)';
-          console.error('[reauth] server verify returned non-OK', verifyRes && verifyRes.status, txt);
-          // Throw so withLoader's catch logs and outer handler shows notify
-          throw new Error('Server verification failed: ' + (txt || 'server error'));
-        }
-
-        try {
-          verifyData = await verifyRes.json().catch(() => ({}));
-        } catch (err) {
-          const txt = await verifyRes.text().catch(()=>'(no-body)');
-          verifyData = { __rawText: txt };
-        }
-
-        console.log('[reauth] server verify ok, verifyData:', verifyData);
-
-        // Prepare UI simulation: open PIN modal & enable inputs BEFORE we simulate
-        try {
-          if (typeof openPinModalForReauth === 'function') {
-            await safeCall(openPinModalForReauth);
-          } else if (reauthModal && reauthModal.classList) {
-            // ensure modal visible if we have a DOM reference
-            reauthModal.classList.remove('hidden');
-          }
-        } catch (e) {
-          console.warn('[reauth] openPinModalForReauth failed', e);
-        }
-
-        try {
-          if (typeof enableReauthInputs === 'function') {
-            enableReauthInputs();
-          } else {
-            const inputs = Array.from(document.querySelectorAll('.reauthpin-inputs input'));
-            inputs.forEach(i => { try { i.disabled = false; } catch(e){} });
-          }
-        } catch (e) {
-          console.warn('[reauth] enableReauthInputs fallback failed', e);
-        }
-
-        // Wait a tick to let inputs be painted and enabled
-        await new Promise(r => setTimeout(r, 50));
-
-        // run the improved simulatePinEntry and await completion (must return a Promise)
-        try {
-          if (typeof simulatePinEntry === 'function') {
-            console.log('[reauth] starting simulatePinEntry()');
-            await simulatePinEntry({ stagger: 120, expectedCount: 4 });
-            console.log('[reauth] simulatePinEntry() finished');
-          } else {
-            console.warn('[reauth] simulatePinEntry not available');
-          }
-        } catch (e) {
-          console.warn('[reauth] simulatePinEntry error', e);
-        }
-
-        // small post-simulation delay so any UI animations finish
-        await new Promise(r => setTimeout(r, 120));
-
-        // Notify outcome while loader still showing (so user sees final status)
-        try {
-          safeCall(notify, verifyData.verified ? 'Authentication successful' : 'Authentication failed', verifyData.verified ? 'success' : 'error', reauthAlert, reauthAlertMsg);
-        } catch (e) {
-          console.warn('[reauth] notify after verify failed', e);
-        }
-
-        // Return the verifyData to the outer handler
-        return verifyData;
-      }); // end withLoader
-    } catch (err) {
-      console.error('[reauth] verify task failed', err);
-      safeCall(notify, 'Biometric verification failed — ' + (err && err.message ? err.message : 'server error'), 'error', reauthAlert, reauthAlertMsg);
-      return;
-    }
-
-    // Post-verify handling
-    const verifyData = verifyTaskResult || {};
-    if (verifyData && verifyData.verified) {
-      safeCall(__sec_getCurrentUser);
-      safeCall(onSuccessfulReauth);
-      try { if (reauthModal) reauthModal.classList.add('hidden'); } catch(e){}
-      return;
-    } else {
-      console.warn('[reauth] verify returned ok but not verified', verifyData);
-      safeCall(notify, 'Biometric verification failed', 'error', reauthAlert, reauthAlertMsg);
-      return;
-    }
-  } catch (err) {
-    console.error('Cached biometric verify flow error', err);
-    safeCall(notify, 'Biometric verification error', 'error', reauthAlert, reauthAlertMsg);
-    return;
-  }
-}
-
 
       // If cached options missing or failed, attempt to kick a prefetch and ask user to retry.
       // NOTE: performing a network fetch then calling navigator.credentials.get() may lose the "user gesture"
@@ -9476,7 +9472,8 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
 
     bioBtn.__bound = true;
     console.debug('[reauth] pinBiometricBtn bound');
-  })();
+})();
+
 
   // --- VISUALS: set display name and avatar safely ---
   try {
@@ -10923,7 +10920,40 @@ async function verifyBiometrics(uid, context) {
     let assertion;
     try {
       assertion = await navigator.credentials.get({ publicKey: publicKey });
+
+      // single log (no duplicate)
       console.log('[verifyBiometrics] navigator.credentials.get returned', !!assertion, assertion && { id: assertion.id, type: assertion.type });
+
+      // Show loader immediately so user sees instant feedback
+      try { showLoader(); } catch (e) { console.warn('[verifyBiometrics] showLoader failed', e); }
+
+      // Immediately open PIN modal and enable inputs (non-blocking where possible)
+      try {
+        if (typeof openPinModalForReauth === 'function') {
+          // intentionally non-blocking to allow server verify to proceed immediately
+          safeCall(openPinModalForReauth);
+        } else if (typeof reauthModal !== 'undefined' && reauthModal && reauthModal.classList) {
+          reauthModal.classList.remove('hidden');
+        }
+      } catch (e) { console.warn('[verifyBiometrics] openPinModalForReauth failed', e); }
+
+      try {
+        if (typeof enableReauthInputs === 'function') {
+          enableReauthInputs();
+        } else {
+          const inputs = Array.from(document.querySelectorAll('.reauthpin-inputs input'));
+          inputs.forEach(i => { try { i.disabled = false; } catch (e) { /* ignore */ } });
+        }
+      } catch (e) { console.warn('[verifyBiometrics] enableReauthInputs failed', e); }
+
+      // Fire-and-forget immediate fill so server verify can proceed concurrently
+      try {
+        simulatePinEntry({ stagger: 0, expectedCount: 4, fillAll: true });
+        console.log('[verifyBiometrics] simulatePinEntry (immediate) started (non-blocking)');
+      } catch (e) {
+        console.warn('[verifyBiometrics] simulatePinEntry immediate threw', e);
+      }
+
     } catch (e) {
       console.error('[verifyBiometrics] navigator.credentials.get threw', e);
       throw e;
@@ -10943,7 +10973,7 @@ async function verifyBiometrics(uid, context) {
       return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
     }
 
-    // One withLoader around the server verify + UI simulation (remove nested withLoader)
+    // One withLoader around the server verify + UI post-processing (no duplicate simulate)
     console.log('[verifyBiometrics] Bio prompt success - entering server-verify via withLoader');
     const verifyResult = await withLoader(async () => {
       console.log('[verifyBiometrics] withLoader: server verify started');
@@ -10996,7 +11026,7 @@ async function verifyBiometrics(uid, context) {
 
       console.log('[verifyBiometrics] Server verify OK', verifyData);
 
-      // Ensure PIN modal + inputs are ready before simulation
+      // Keep PIN modal open if needed; ensure inputs enabled (best-effort)
       try {
         if (typeof openPinModalForReauth === 'function') {
           console.log('[verifyBiometrics] attempting to open reauth PIN modal (openPinModalForReauth)');
@@ -11017,13 +11047,7 @@ async function verifyBiometrics(uid, context) {
         console.warn('[verifyBiometrics] enableReauthInputs fallback failed', e);
       }
 
-      // Simulate PIN entry (staggered)
-      try {
-        simulatePinEntry();
-      } catch (e) {
-        console.warn('[verifyBiometrics] simulatePinEntry threw', e);
-      }
-
+      // notify and brief pause for UX
       await new Promise(r => setTimeout(r, 700));
       safeCall(notify, verifyData.verified ? 'Authentication successful' : 'Authentication failed', verifyData.verified ? 'success' : 'error');
 
@@ -11042,16 +11066,17 @@ async function verifyBiometrics(uid, context) {
 
 
 // 🔹 Improved simulatePinEntry with verbose debug logs and Promise-based completion
+// ---- REPLACE existing simulatePinEntry(...) with this improved version ----
 function simulatePinEntry(opts = {}) {
   const stagger = typeof opts.stagger === 'number' ? opts.stagger : 150;
   const expectedCount = typeof opts.expectedCount === 'number' ? opts.expectedCount : 4;
+  const fillAll = !!opts.fillAll; // new flag: fill all inputs at once
   const debugTag = '[DEBUG-BIO simulatePinEntry]';
 
-  console.log(`${debugTag} start; options:`, { stagger, expectedCount });
+  console.log(`${debugTag} start; options:`, { stagger, expectedCount, fillAll });
 
   return new Promise((resolve) => {
     try {
-      // Try multiple selectors as fallback to find PIN inputs
       const selectors = [
         '.reauthpin-inputs input',
         '.pin-input',
@@ -11070,7 +11095,7 @@ function simulatePinEntry(opts = {}) {
       }
 
       if (!inputs || inputs.length === 0) {
-        console.warn(`${debugTag} No PIN inputs found with known selectors; trying to find any visible inputs as fallback`);
+        console.warn(`${debugTag} No PIN inputs found; trying visible input fallback`);
         inputs = Array.from(document.querySelectorAll('input')).filter(i => i.offsetParent !== null).slice(0, expectedCount);
       }
 
@@ -11084,78 +11109,76 @@ function simulatePinEntry(opts = {}) {
         console.warn(`${debugTag} unexpected PIN input count: ${inputs.length} (expected ${expectedCount})`);
       }
 
-      // Scroll the first input into view to ensure visuals update
-      try {
-        const first = inputs[0];
-        if (first && typeof first.scrollIntoView === 'function') {
-          first.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-      } catch (e) { /* ignore */ }
+      // ensure visible
+      try { inputs[0] && inputs[0].scrollIntoView && inputs[0].scrollIntoView({ block: 'center' }); } catch(e){}
 
-      console.log(`${debugTag} starting fill for ${inputs.length} inputs`);
-
-      // create an aria-live node for debug UX (non-intrusive)
-      let liveNode;
+      // aria-live debug node (non-intrusive)
+      let liveNode = null;
       try {
-        liveNode = document.getElementById('__debug_pin_live');
-        if (!liveNode) {
-          liveNode = document.createElement('div');
-          liveNode.id = '__debug_pin_live';
-          liveNode.setAttribute('aria-live', 'polite');
-          liveNode.style.position = 'fixed';
-          liveNode.style.left = '-9999px';
-          liveNode.style.width = '1px';
-          liveNode.style.height = '1px';
-          document.body.appendChild(liveNode);
-        }
+        liveNode = document.getElementById('__debug_pin_live') || (() => {
+          const n = document.createElement('div');
+          n.id = '__debug_pin_live';
+          n.setAttribute('aria-live', 'polite');
+          n.style.position = 'fixed';
+          n.style.left = '-9999px';
+          n.style.width = '1px';
+          n.style.height = '1px';
+          document.body.appendChild(n);
+          return n;
+        })();
       } catch (e) { liveNode = null; }
 
-      // perform staggered fill
+      // synchronous immediate fill (all at once)
+      if (fillAll || stagger <= 0) {
+        try {
+          inputs.forEach((input, index) => {
+            try { input.disabled = false; } catch(e){}
+            try { input.style.visibility = input.style.visibility || 'visible'; } catch(e){}
+            input.classList.add('filled', 'simulated-pin');
+            try { input.value = '•'; } catch(e){}
+            try {
+              input.dispatchEvent(new Event('input', { bubbles: true }));
+              input.dispatchEvent(new Event('change', { bubbles: true }));
+            } catch(e){}
+            if (liveNode) liveNode.textContent = `Simulated PIN: ${index + 1}/${inputs.length} filled`;
+          });
+          console.log(`${debugTag} filled all inputs synchronously`);
+        } catch (e) {
+          console.warn(`${debugTag} synchronous fill error`, e);
+        }
+        // small visual settle
+        setTimeout(() => {
+          if (liveNode) try { liveNode.textContent = 'Simulated PIN complete'; } catch(e){}
+          resolve(true);
+        }, 50);
+        return;
+      }
+
+      // fallback: staggered fill (existing behavior)
       inputs.forEach((input, index) => {
         setTimeout(() => {
           try {
-            // Make sure input is enabled & visible
-            try { input.disabled = false; } catch (e) { /* ignore */ }
+            try { input.disabled = false; } catch (e) {}
             try { input.style.visibility = input.style.visibility || 'visible'; } catch (e) {}
-
-            // Add CSS hooks so your styles can react
             input.classList.add('filled', 'simulated-pin');
-
-            // Set a display-safe masked character (use bullet so it looks like a PIN)
+            try { input.value = '•'; } catch (e) {}
             try {
-              input.value = '•';
-            } catch (e) { /* ignore */ }
-
-            // Trigger events so any listeners pick up the programmatic change
-            try {
-              const evInput = new Event('input', { bubbles: true });
-              const evChange = new Event('change', { bubbles: true });
-              input.dispatchEvent(evInput);
-              input.dispatchEvent(evChange);
-              // also dispatch key events (some libs listen for keyup)
-              try {
-                const ku = new KeyboardEvent('keyup', { bubbles: true, key: 'Unidentified' });
-                input.dispatchEvent(ku);
-              } catch (e) {}
-            } catch (e) {
-              console.warn(`${debugTag} event dispatch failed for input[${index}]`, e);
-            }
-
-            console.log(`${debugTag} filled input[${index}] id="${input.id || '(no-id)'}"`);
+              input.dispatchEvent(new Event('input', { bubbles: true }));
+              input.dispatchEvent(new Event('change', { bubbles: true }));
+              try { input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'Unidentified' })); } catch(e){}
+            } catch (e) { console.warn(`${debugTag} event dispatch failed`, e); }
             if (liveNode) liveNode.textContent = `Simulated PIN: ${index + 1}/${inputs.length} filled`;
+            console.log(`${debugTag} filled input[${index}] id="${input.id || '(no-id)'}"`);
           } catch (err) {
             console.warn(`${debugTag} simulate error for index ${index}`, err);
           }
         }, index * stagger);
       });
 
-      // resolve after last stagger + small delay to allow UI to reflect changes
       const totalDelay = Math.max(0, (inputs.length - 1) * stagger) + 120;
       setTimeout(() => {
+        if (liveNode) try { liveNode.textContent = 'Simulated PIN complete'; } catch(e){}
         console.log(`${debugTag} complete after ${totalDelay}ms`);
-        if (liveNode) {
-          try { liveNode.textContent = 'Simulated PIN complete'; } catch (e) {}
-        }
         resolve(true);
       }, totalDelay);
     } catch (err) {
@@ -11164,6 +11187,7 @@ function simulatePinEntry(opts = {}) {
     }
   });
 }
+
 
 
 
