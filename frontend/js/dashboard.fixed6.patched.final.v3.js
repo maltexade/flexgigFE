@@ -9,243 +9,6 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const { createClient } = supabase;
 const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-
-// ===== Robust loader helpers + withLoader wrapper (ref-counted, min-visible-time, verbose logs) =====
-(function(){
-  // guard so we don't rebind repeatedly
-  if (window.__robustLoaderInstalled) return;
-  window.__robustLoaderInstalled = true;
-
-  // fallback show/hide if your app doesn't implement them.
-  // We do a non-destructive fallback that creates a simple overlay #cg-loader.
-  if (typeof window.showLoader !== 'function' || typeof window.hideLoader !== 'function') {
-    (function(){
-      const id = 'cg-loader';
-      function create() {
-        if (document.getElementById(id)) return;
-        const el = document.createElement('div');
-        el.id = id;
-        el.style.position = 'fixed';
-        el.style.left = '0';
-        el.style.top = '0';
-        el.style.right = '0';
-        el.style.bottom = '0';
-        el.style.zIndex = 999999;
-        el.style.display = 'flex';
-        el.style.alignItems = 'center';
-        el.style.justifyContent = 'center';
-        el.style.background = 'rgba(0,0,0,0.35)';
-        el.innerHTML = '<div style="padding:14px 20px;border-radius:12px;background:#fff;color:#000;font-weight:600;font-family:system-ui, sans-serif">Loading…</div>';
-        el.style.transition = 'opacity .18s ease';
-        el.style.opacity = '0';
-        document.body.appendChild(el);
-        // allow fade-in
-        requestAnimationFrame(()=> el.style.opacity = '1');
-      }
-      window.showLoader = function(){ try { create(); const el = document.getElementById(id); if (el) el.style.display = 'flex'; } catch(e){} };
-      window.hideLoader = function(){ try { const el = document.getElementById(id); if (el) { el.style.opacity = '0'; setTimeout(()=> { if (el && el.parentNode) el.parentNode.removeChild(el); }, 220); } } catch(e){} };
-    })();
-    console.info('[robustLoader] installed fallback showLoader/hideLoader');
-  } else {
-    console.info('[robustLoader] using app-provided showLoader/hideLoader');
-  }
-
-  // ref-counting
-  window.__loaderRefCount = window.__loaderRefCount || 0;
-  window.showLoaderRef = function(reason){
-    try {
-      window.__loaderRefCount = (window.__loaderRefCount || 0) + 1;
-      console.debug('[robustLoader] showLoaderRef ++', window.__loaderRefCount, reason || '');
-      if (window.__loaderRefCount === 1) {
-        try { window.showLoader(); } catch(e){ console.warn('[robustLoader] showLoader() threw', e); }
-      }
-    } catch(e){ console.warn('[robustLoader] showLoaderRef error', e); }
-  };
-  window.hideLoaderRef = function(reason){
-    try {
-      window.__loaderRefCount = Math.max(0, (window.__loaderRefCount || 0) - 1);
-      console.debug('[robustLoader] hideLoaderRef --', window.__loaderRefCount, reason || '');
-      if (window.__loaderRefCount === 0) {
-        try { window.hideLoader(); } catch(e){ console.warn('[robustLoader] hideLoader() threw', e); }
-      }
-    } catch(e){ console.warn('[robustLoader] hideLoaderRef error', e); }
-  };
-
-  // robust withLoader wrapper: accepts async function (or sync) and options {minMs}
-  window.withLoader = window.withLoader || async function(fn, opts){
-    opts = opts || {};
-    const minMs = typeof opts.minMs === 'number' ? opts.minMs : 300; // guarantee visible at least 300ms
-    const reason = opts.reason || 'withLoader';
-    window.showLoaderRef(reason + ':start');
-    const start = Date.now();
-    try {
-      const result = await Promise.resolve().then(() => fn());
-      const elapsed = Date.now() - start;
-      if (elapsed < minMs) {
-        await new Promise(r => setTimeout(r, minMs - elapsed));
-      }
-      console.debug('[withLoader] completed', { reason, elapsedMs: Date.now() - start });
-      return result;
-    } catch (e) {
-      console.debug('[withLoader] threw', { reason, err: e && e.message ? e.message : e });
-      throw e;
-    } finally {
-      window.hideLoaderRef(reason + ':end');
-    }
-  };
-
-  // Defensive: ensure loader ref isn't stuck (debug helper)
-  window.__robustLoaderSanityCheck = function(){
-    if ((window.__loaderRefCount || 0) > 0) {
-      console.warn('[robustLoader] sanity: non-zero count found', window.__loaderRefCount);
-      // try to reset gracefully
-      window.__loaderRefCount = 0;
-      try { window.hideLoader(); } catch(e){ console.warn('[robustLoader] hideLoader reset failed', e); }
-    }
-  };
-
-})(); // end robust loader install
-
-
-// ===== Improved simulatePinEntry: waits for inputs, enables them, dispatches events =====
-async function simulatePinEntry(opts = {}) {
-  opts = opts || {};
-  const timeout = typeof opts.timeout === 'number' ? opts.timeout : 2000;
-  const poll = typeof opts.poll === 'number' ? opts.poll : 80;
-  console.debug('[simulatePinEntry] called; waiting for PIN inputs');
-
-  const start = Date.now();
-  // prefer app helper if it exists
-  let inputs = (typeof getReauthInputs === 'function') ? getReauthInputs() : Array.from(document.querySelectorAll('.reauthpin-inputs input'));
-  while ((!inputs || inputs.length === 0) && (Date.now() - start) < timeout) {
-    await new Promise(r => setTimeout(r, poll));
-    inputs = (typeof getReauthInputs === 'function') ? getReauthInputs() : Array.from(document.querySelectorAll('.reauthpin-inputs input'));
-  }
-
-  if (!inputs || inputs.length === 0) {
-    console.warn('[simulatePinEntry] no inputs found after wait; aborting');
-    return false;
-  }
-
-  // If app expects exactly 4, still proceed if count matches or greater
-  if (inputs.length < 1) {
-    console.warn('[simulatePinEntry] unexpected input count', inputs.length);
-    return false;
-  }
-
-  console.debug('[simulatePinEntry] found inputs', inputs.length, inputs.map(i=>({id:i.id,disabled:i.disabled})));
-
-  // Ensure modal/dialog visible (if helper exists)
-  if (typeof openPinModalForReauth === 'function') {
-    try { await safeCall(openPinModalForReauth); } catch(e){ console.warn('[simulatePinEntry] openPinModalForReauth failed', e); }
-  }
-
-  // enable inputs and dispatch events with stagger
-  inputs.forEach((input, idx) => {
-    setTimeout(() => {
-      try {
-        input.disabled = false;
-        input.classList.add('filled');
-        input.value = '•';
-        // dispatch input event
-        try { input.dispatchEvent(new Event('input', { bubbles: true })); } catch(e){}
-        // dispatch change event too (some handlers listen for change)
-        try { input.dispatchEvent(new Event('change', { bubbles: true })); } catch(e){}
-      } catch(e){
-        console.warn('[simulatePinEntry] failed acting on input', idx, e);
-      }
-    }, idx * 140);
-  });
-
-  return true;
-}
-
-
-// ===== Replace verifyBiometrics' server-verify stage to use withLoader (if verifyBiometrics is defined) =====
-// If you already replace verifyBiometrics manually, skip this; otherwise this injects a patched wrapper
-if (typeof verifyBiometrics === 'function') {
-  // wrap the original to call our robust withLoader specifically for server-verify
-  const __origVerifyBiometrics = verifyBiometrics;
-  verifyBiometrics = async function(uid, context){
-    console.debug('[verifyBiometrics-wrapper] invoked', { uid, context });
-    // call original up until it reaches server-verify, but since we cannot safely splice it, we'll
-    // implement a recommended pattern here: call original to perform native prompt and get assertion,
-    // then do server verify inside withLoader. Many bundles implement verify in one function; if your
-    // current verifyBiometrics already does server post inside itself, prefer editing it directly.
-    //
-    // If the original returns the assertion and expects to do server verify inside, the cleanest path
-    // is to replace your function with the full robust variant I provided earlier. However, this wrapper
-    // will attempt to detect if the original returns an object like { assertion } and perform the
-    // withLoader step. If it doesn't, it will fallback to calling the original end-to-end.
-    try {
-      // attempt optimistic path: if original returns an intermediate that includes `assertion` or `rawAssertion`
-      const maybe = await __origVerifyBiometrics(uid, context);
-      // if the original already handled loading/verify then just return it
-      if (maybe && (maybe.verifyData || maybe.success !== undefined)) {
-        console.debug('[verifyBiometrics-wrapper] original handled verify fully; returning result');
-        return maybe;
-      }
-      // if original returned an assertion-like object (rare), do server verify with loader
-      if (maybe && maybe.assertion) {
-        console.debug('[verifyBiometrics-wrapper] original returned assertion; running server verify via withLoader');
-        // build payload (small helper)
-        function bufferToBase64url(buf) {
-          if (!buf) return '';
-          let arr;
-          if (buf instanceof Uint8Array) arr = buf;
-          else if (buf instanceof ArrayBuffer) arr = new Uint8Array(buf);
-          else if (ArrayBuffer.isView(buf) && buf.buffer) arr = new Uint8Array(buf.buffer);
-          else return '';
-          let s = '';
-          for (let i=0;i<arr.length;i++) s += String.fromCharCode(arr[i]);
-          return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
-        }
-        const assertion = maybe.assertion;
-        const payload = {
-          id: assertion.id,
-          rawId: bufferToBase64url(assertion.rawId),
-          type: assertion.type,
-          response: {
-            authenticatorData: bufferToBase64url(assertion.response && assertion.response.authenticatorData),
-            clientDataJSON: bufferToBase64url(assertion.response && assertion.response.clientDataJSON),
-            signature: bufferToBase64url(assertion.response && assertion.response.signature),
-            userHandle: assertion.response && assertion.response.userHandle ? bufferToBase64url(assertion.response.userHandle) : null
-          }
-        };
-        // Perform server verify in withLoader (guarantees visible loader)
-        const verifyData = await withLoader(async ()=>{
-          const res = await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/verify', {
-            method: 'POST',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(Object.assign({}, payload, { userId: uid || window.__webauthn_userId || null }))
-          });
-          const j = await res.json().catch(()=>({ __raw: '(no-json)' }));
-          if (!res.ok) throw new Error('Server verify failed: ' + (j && j.error ? j.error : res.status));
-          // ensure we show PIN simulation
-          try { await simulatePinEntry(); } catch(e){ console.warn('simulatePinEntry failed after verify', e); }
-          return j;
-        }, { minMs: 400, reason: 'biometric-server-verify' });
-        return { success: !!verifyData.verified, verifyData };
-      }
-
-      // fallback: original likely handled everything; return its result
-      return maybe;
-    } catch (e) {
-      console.error('[verifyBiometrics-wrapper] error', e);
-      // try to ensure loader hidden
-      try { window.hideLoaderRef && window.hideLoaderRef('error-fallback'); } catch(err){}
-      throw e;
-    }
-  };
-  console.info('[verifyBiometrics-wrapper] installed wrapper (ensures withLoader usage when possible).');
-} else {
-  console.info('[verifyBiometrics-wrapper] no verifyBiometrics found to wrap — ensure you paste robust verifyBiometrics implementation that uses window.withLoader and simulatePinEntry.');
-}
-
-
-
-
 let __backHandler = null;
 
 function showLoader() {
@@ -9508,11 +9271,14 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
           };
           const session = await safeCall(getSession);
           const uid = session && session.user ? (session.user.uid || session.user.id) : null;
-          const verifyRes = await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/verify', {
-            method: 'POST',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(Object.assign({}, payload, { userId: uid }))
+          const verifyRes = await withLoader(async () => {
+            notify('Verifying fingerprint — logging you in...', 'info');
+            return await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/verify', {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(Object.assign({}, payload, { userId: uid }))
+            });
           });
           const verifyData = await (verifyRes.ok ? verifyRes.json().catch(()=>({})) : verifyRes.json().catch(()=>({})));
           if (verifyRes.ok && verifyData && verifyData.verified) {
@@ -9692,11 +9458,14 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
       };
       const session = await safeCall(getSession);
       const uid = session && session.user ? (session.user.uid || session.user.id) : null;
-      const verifyRes = await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/verify', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(Object.assign({}, payload, { userId: uid }))
+      const verifyRes = await withLoader(async () => {
+        notify('Verifying fingerprint — logging you in...', 'info');
+        return await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/verify', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(Object.assign({}, payload, { userId: uid }))
+        });
       });
       const verifyData = await (verifyRes.ok ? verifyRes.json().catch(()=>({})) : verifyRes.json().catch(()=>({})));
       if (verifyRes.ok && verifyData && verifyData.verified) {
@@ -9892,130 +9661,65 @@ function dumpCredentialStorage() {
 }
 
 // ---- registerBiometrics ----
-// Robust registerBiometrics: wait-for-session, fallbacks, verbose logs
 async function registerBiometrics() {
-  console.log('%c[registerBiometrics] CALLED (robust session resolution)', 'color:#0ff;font-weight:bold');
-
+  console.log('%c[registerBiometrics] CALLED', 'color:#0ff;font-weight:bold');
   return withLoader(async () => {
     try {
       if (!('PublicKeyCredential' in window)) throw new Error('WebAuthn not supported by this browser');
 
-      // ---- Resolve session / user id robustly ----
-      console.log('[registerBiometrics] resolving session/user id (attempting getSession)');
-      let session = null;
-      try {
-        session = await safeCall(getSession);
-      } catch (e) {
-        console.warn('[registerBiometrics] initial safeCall(getSession) threw', e);
-        session = null;
-      }
+      console.log('[registerBiometrics] fetching session for UID...');
+      const session = await safeCall(getSession);
+      const uid = session?.user?.id || session?.user?.uid;
+      console.log('[registerBiometrics] session =>', session ? { uid: session.user?.id || session.user?.uid, email: session.user?.email } : null);
+      if (!uid) throw new Error('No user id available (session empty)');
 
-      // If no session returned, poll a few times (short) before falling back to other mechanisms
-      if (!session) {
-        const pollMs = 1200;      // overall wait window for session
-        const tick = 120;        // poll interval
-        const start = Date.now();
-        console.log('[registerBiometrics] session not ready, polling for up to', pollMs, 'ms');
-        while (!session && (Date.now() - start) < pollMs) {
-          await new Promise(r => setTimeout(r, tick));
-          try {
-            session = await safeCall(getSession);
-            if (session) break;
-          } catch (e) {
-            // ignore and continue polling
-          }
-        }
-      }
-
-      // Fallbacks if still no session
-      let uid = session?.user?.id || session?.user?.uid || null;
-      if (!uid) {
-        // 1) global cached user id
-        if (window.__webauthn_userId) {
-          uid = window.__webauthn_userId;
-          console.log('[registerBiometrics] using global cached __webauthn_userId', uid);
-        }
-      }
-      if (!uid) {
-        // 2) localStorage userData parse
-        try {
-          const ud = localStorage.getItem('userData') || localStorage.getItem('user');
-          if (ud) {
-            const parsed = JSON.parse(ud);
-            uid = parsed?.id || parsed?.uid || parsed?.userId || uid;
-            if (uid) console.log('[registerBiometrics] derived uid from localStorage userData', uid);
-          }
-        } catch (e) {
-          console.warn('[registerBiometrics] parsing localStorage userData failed', e);
-        }
-      }
-
-      // Final check
-      if (!uid) {
-        console.error('[registerBiometrics] ERROR: No user id available (session empty, fallbacks failed)');
-        throw new Error('No user id available (session empty)');
-      }
-
-      console.log('[registerBiometrics] resolved uid:', uid);
-
-      // ---- Fetch registration options from server ----
       const apiBase = window.__SEC_API_BASE || '';
       console.log('[registerBiometrics] POST ->', `${apiBase}/webauthn/register/options`, 'body:', { userId: uid });
 
       const optRes = await fetch(`${apiBase}/webauthn/register/options`, {
-        method: 'POST', credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: uid })
       });
 
-      if (!optRes.ok) {
-        const txt = await optRes.text().catch(()=>'(no-body)');
-        console.error('[registerBiometrics] register/options failed', optRes.status, txt);
-        throw new Error('Failed to fetch registration options: ' + (txt || optRes.status));
-      }
-
-      const options = await optRes.json();
-      console.log('[registerBiometrics] RAW options:', options);
-      if (!options || !options.challenge) throw new Error('No challenge returned from server');
-
-      // Convert server-sent base64url fields to ArrayBuffer/Uint8Array as needed
+      console.log('[registerBiometrics] Options fetch status:', optRes.status, optRes.statusText);
+      const optText = await optRes.text();
+      let options;
       try {
-        options.challenge = base64UrlToBuffer(options.challenge);
+        options = JSON.parse(optText);
       } catch (e) {
-        console.warn('[registerBiometrics] challenge conversion failed (attempting fallback)', e);
-        options.challenge = base64UrlToBuffer(String(options.challenge || ''));
+        console.error('[registerBiometrics] Failed to parse options JSON:', optText);
+        throw new Error('Invalid options JSON from server');
       }
+      console.log('[registerBiometrics] RAW options:', options);
+
+      if (!options.challenge) throw new Error('No challenge returned from server');
+
+      // convert challenge + user.id + exclude credentials
+      options.challenge = base64UrlToBuffer(options.challenge);
       if (options.user && options.user.id) {
-        try { options.user.id = base64UrlToBuffer(options.user.id); } catch(e){ console.warn('[registerBiometrics] user.id conversion failed', e); }
+        try {
+          options.user.id = base64UrlToBuffer(options.user.id);
+        } catch (e) {
+          console.warn('[registerBiometrics] user.id conversion failed, leaving as-is', e);
+        }
       }
       if (Array.isArray(options.excludeCredentials)) {
+        console.log('[registerBiometrics] excludeCredentials count', options.excludeCredentials.length);
         options.excludeCredentials = options.excludeCredentials.map(c => ({ ...c, id: base64UrlToBuffer(c.id) }));
       }
       options.timeout = options.timeout || 60000;
-      console.log('[registerBiometrics] publicKey options prepared', {
+      console.log('[registerBiometrics] Final publicKey options prepared (challenge bytes, excludeCount):', {
         challengeLen: options.challenge ? options.challenge.byteLength : null,
-        excludeCount: Array.isArray(options.excludeCredentials) ? options.excludeCredentials.length : 0
+        excludeCount: Array.isArray(options.excludeCredentials) ? options.excludeCredentials.length : 0,
+        authenticatorSelection: options.authenticatorSelection || null
       });
 
-      // ---- Call authenticator to create credential ----
       console.log('%c[registerBiometrics] calling navigator.credentials.create()', 'color:yellow');
       const credential = await navigator.credentials.create({ publicKey: options });
       console.log('[registerBiometrics] navigator.credentials.create() returned:', credential);
       if (!credential) throw new Error('navigator.credentials.create() returned null');
 
-      // ---- Build payload for server verify ----
-      function bufferToBase64Url(buf) {
-        if (!buf) return '';
-        let arr;
-        if (buf instanceof Uint8Array) arr = buf;
-        else if (buf instanceof ArrayBuffer) arr = new Uint8Array(buf);
-        else if (ArrayBuffer.isView(buf) && buf.buffer) arr = new Uint8Array(buf.buffer);
-        else return '';
-        let s = '';
-        for (let i = 0; i < arr.length; i++) s += String.fromCharCode(arr[i]);
-        return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
-      }
-
+      // build payload for server
       const credToSend = {
         id: credential.id,
         rawId: bufferToBase64Url(credential.rawId),
@@ -10026,48 +9730,56 @@ async function registerBiometrics() {
         },
         transports: credential.response.getTransports ? credential.response.getTransports() : []
       };
-
       console.log('[registerBiometrics] credToSend (sanitized):', {
         id: credToSend.id,
-        rawIdLen: credToSend.rawId ? credToSend.rawId.length : 0,
+        rawIdLen: credToSend.rawId.length,
         transports: credToSend.transports
       });
 
-      // ---- POST verify to server ----
       console.log('[registerBiometrics] POST ->', `${apiBase}/webauthn/register/verify`);
       const verifyRes = await fetch(`${apiBase}/webauthn/register/verify`, {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(Object.assign({}, credToSend, { userId: uid }))
+        body: JSON.stringify({ userId: uid, credential: credToSend })
       });
 
-      let verifyData = null;
-      try { verifyData = await verifyRes.json(); } catch(e) { verifyData = { __raw: await verifyRes.text().catch(()=>'(no-body)') }; }
-
-      if (!verifyRes.ok) {
-        console.error('[registerBiometrics] register/verify failed', verifyRes.status, verifyData);
-        throw new Error('Registration verify failed: ' + (verifyData && (verifyData.message || verifyData.error) || verifyRes.status));
-      }
-
-      console.log('[registerBiometrics] register/verify success', verifyData);
-
-      // ---- persist credential id locally (so prefetch/verify can use it) ----
+      console.log('[registerBiometrics] Verify response status:', verifyRes.status);
+      const verifyText = await verifyRes.text();
+      let verifyJson;
       try {
-        const persisted = await safeCall(persistCredentialId, verifyData && verifyData.credentialId || credToSend.id);
-        console.log('[registerBiometrics] persistCredentialId result', persisted);
+        verifyJson = JSON.parse(verifyText);
       } catch (e) {
-        console.warn('[registerBiometrics] persistCredentialId failed', e);
-        try { localStorage.setItem('credentialId', verifyData && verifyData.credentialId || credToSend.id); } catch(e){}
+        console.error('[registerBiometrics] Failed to parse verify JSON:', verifyText);
+        throw new Error('Invalid verify response from server');
+      }
+      console.log('[registerBiometrics] Verify server result:', verifyJson);
+
+      // store credentialId robustly and show reads
+      if (verifyJson && verifyJson.credentialId) {
+        const id = verifyJson.credentialId;
+        const reads = persistCredentialId(id);
+        console.log('%c[registerBiometrics] STORED credentialId (server gave):', 'color:lime', id, 'readsAfter:', reads);
+      } else {
+        console.warn('[registerBiometrics] Server did not return credentialId');
       }
 
-      // final notify
-      safeCall(notify, 'Biometric registration successful', 'success');
-      return { success: true, verifyData };
+      restoreBiometricUI();
+
+      safeCall(notify, 'Biometric registration successful!', 'success');
+
+      // OPTIONAL: do not automatically reload in dev — comment out if causing flakiness
+      // setTimeout(() => window.location.reload(), 1000);
+
+      console.log('%c[registerBiometrics] DONE', 'color:lime');
+      return { success: true, result: verifyJson };
     } catch (err) {
-      console.error('[registerBiometrics] ERROR:', err);
-      safeCall(notify, 'Biometric registration failed: ' + (err && err.message ? err.message : String(err)), 'error');
-      return { success: false, error: err && err.message ? err.message : String(err) };
+      console.error('%c[registerBiometrics] ERROR:', 'color:red', err);
+      if (err.name === 'NotAllowedError' || err.name === 'AbortError') {
+        return { success: false, cancelled: true, error: err.message };
+      }
+      safeCall(notify, `Registration failed: ${err.message || err}`, 'error');
+      return { success: false, error: err.message || String(err) };
     }
-  }, { minMs: 300, reason: 'registerBiometrics' });
+  });
 }
 
 
@@ -10079,134 +9791,61 @@ async function registerBiometrics() {
    ----------------------- */
   // 🔹 NEW: Disable/Revoke Biometrics
 
-// Updated disableBiometrics — robust, awaits server revoke, uses existing helper and fixes key mismatch
 async function disableBiometrics() {
-  console.log('[disableBiometrics] called — starting optimistic local cleanup');
+  console.log('disableBiometrics (optimistic update) called');
 
-  // Optimistic local cleanup & UI hide immediately
   try {
-    try { localStorage.removeItem('credentialId'); } catch(e){ console.warn('[disableBiometrics] remove credentialId failed', e); }
-    try { localStorage.removeItem('webauthn-cred-id'); } catch(e){ /* ignore */ }
+    localStorage.removeItem('credentialId');
+    localStorage.removeItem('webauthn-cred-id');
+    localStorage.setItem('biometricForLogin', 'false');
 
-    // Ensure the canonical "enabled" flag is cleared in both namespaces
-    try { localStorage.setItem('biometricsEnabled', 'false'); } catch(e){ console.warn('[disableBiometrics] set biometricsEnabled failed', e); }
-    try { localStorage.setItem('biometricForLogin', 'false'); } catch(e){ /* ignore */ }
-    try { localStorage.setItem('biometricForTx', 'false'); } catch(e){ /* ignore */ }
-
-    // If your secure keys map exists, clear that too (best-effort)
     try {
-      if (window.__sec_KEYS && __sec_KEYS.biom) localStorage.setItem(__sec_KEYS.biom, '0');
-      if (window.__sec_KEYS && __sec_KEYS.bioLogin) localStorage.setItem(__sec_KEYS.bioLogin, '0');
-      if (window.__sec_KEYS && __sec_KEYS.bioTx) localStorage.setItem(__sec_KEYS.bioTx, '0');
-    } catch (e) { console.warn('[disableBiometrics] clearing __sec_KEYS storage failed', e); }
-
-    // Hide UI button instantly so the toggle appears off
-    try {
-      var bioBtn = document.getElementById('bioBtn') || document.querySelector('.biometric-button') || document.querySelector('[data-bio-button]');
-      if (bioBtn) {
-        bioBtn.style.display = 'none';
-        console.log('[disableBiometrics] hid bio button (optimistic)');
-      }
-    } catch (e) { console.warn('[disableBiometrics] hide bio button failed', e); }
+      var bioBtn = document.getElementById('bioBtn') || document.querySelector('.biometric-button');
+      if (bioBtn) bioBtn.style.display = 'none';
+    } catch (e) { /* ignore UI errors */ }
 
     safeCall(notify, 'Biometric disabled locally — revoking on server...', 'info');
   } catch (e) {
-    console.warn('[disableBiometrics] optimistic local cleanup threw', e);
+    console.warn('Local clear failed', e);
   }
 
-  // Try to revoke on server (await, log, and handle mismatched keys if helper absent)
-  let serverRevoked = false;
-  try {
-    // Resolve UID from session helper or fallback
-    let uid = null;
+  (async function(){
     try {
-      const session = (typeof getSession === 'function') ? await safeCall(getSession) : null;
-      uid = session && session.user && (session.user.id || session.user.uid);
-    } catch (e) {
-      console.warn('[disableBiometrics] getSession failed', e);
-    }
-
-    if (!uid) {
-      // try other helpers
-      try { uid = (typeof __sec_getCurrentUser === 'function' && (await safeCall(__sec_getCurrentUser))?.user?.uid) || uid; } catch(e){/*ignore*/ }
-    }
-
-    if (!uid) {
-      console.warn('[disableBiometrics] No user id available to revoke on server — skipping server revoke');
-      safeCall(notify, 'Local biometric disabled; server revoke skipped (no user session)', 'info');
-    } else {
-      console.log('[disableBiometrics] attempting server revoke for uid:', uid);
-
-      // Prefer the central helper to keep semantics consistent (it posts credentialID)
-      if (typeof __sec_revokeAuthenticator === 'function') {
-        try {
-          const ok = await safeCall(__sec_revokeAuthenticator, uid, null); // pass null to request full reset
-          serverRevoked = !!ok;
-          console.log('[disableBiometrics] __sec_revokeAuthenticator result:', serverRevoked);
-          if (serverRevoked) safeCall(notify, 'Biometric revoked on server', 'success');
-          else safeCall(notify, 'Server revoke responded negative (check logs)', 'error');
-        } catch (e) {
-          console.error('[disableBiometrics] __sec_revokeAuthenticator threw', e);
-          // fall through to fallback below
-        }
+      var session = await safeCall(getSession);
+      var uid = session && (session.user && (session.user.id || session.user.uid));
+      if (!uid) {
+        safeCall(notify, 'Could not revoke on server: missing session', 'error');
+        return;
       }
 
-      // Fallback: direct fetch but use expected server key (credentialID) and await
-      if (!serverRevoked) {
-        try {
-          const apiBase = window.__SEC_API_BASE || (typeof API_BASE !== 'undefined' ? API_BASE : '');
-          const url = `${apiBase}/webauthn/authenticators/${encodeURIComponent(uid)}/revoke`;
-          console.log('[disableBiometrics] fallback fetch ->', url, 'body:', { credentialID: null });
+      var apiBase = window.__SEC_API_BASE || API_BASE || '';
 
-          const res = await fetch(url, {
-            method: 'POST',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ credentialID: null })
-          });
+      var res = await fetch(apiBase + '/webauthn/authenticators/' + encodeURIComponent(uid) + '/revoke', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ credentialId: null })
+      });
 
-          const txt = await res.text().catch(()=>'(no-body)');
-          if (!res.ok) {
-            console.error('[disableBiometrics] server revoke failed status', res.status, 'body:', txt);
-            safeCall(notify, 'Server revoke failed: ' + (txt || res.statusText), 'error');
-          } else {
-            try {
-              const j = JSON.parse(txt || '{}');
-              console.log('[disableBiometrics] server revoke success response:', j);
-            } catch (e) {
-              console.log('[disableBiometrics] server revoke response (non-json):', txt);
-            }
-            serverRevoked = true;
-            safeCall(notify, 'Biometric revoked on server', 'success');
-          }
-        } catch (e) {
-          console.error('[disableBiometrics] fallback revoke fetch error', e);
-          safeCall(notify, 'Server revoke failed (network)', 'error');
-        }
+      if (!res.ok) {
+        var txt = await res.text();
+        console.error('[disableBiometrics] revoke failed', txt);
+        safeCall(notify, 'Server revoke failed: ' + (txt || res.statusText), 'error');
+        return;
       }
+
+      var data = await res.json();
+      safeCall(notify, 'Biometric revoked on server', 'success');
+      restoreBiometricUI();
+      console.log('[disableBiometrics] revoke response', data);
+    } catch (err) {
+      console.error('[disableBiometrics] background revoke error', err);
+      safeCall(notify, 'Server revoke failed (network)', 'error');
     }
-  } catch (err) {
-    console.error('[disableBiometrics] background revoke error', err);
-    safeCall(notify, 'Server revoke failed (background)', 'error');
-  } finally {
-    // Always reconcile client state & UI after attempts
-    try {
-      // Invalidate cached auth options so prefetch won't reuse stale challenges
-      try { invalidateAuthOptionsCache && invalidateAuthOptionsCache(); } catch(e){}
+  })();
 
-      // Restore / reconcile UI to the cleared state
-      try { restoreBiometricUI && restoreBiometricUI(); } catch (e) { console.warn('[disableBiometrics] restoreBiometricUI failed', e); }
-
-      // Extra: log result
-      console.log('[disableBiometrics] finished — serverRevoked:', serverRevoked);
-    } catch (e) {
-      console.warn('[disableBiometrics] final reconcile failed', e);
-    }
-  }
-
-  return { success: true, serverRevoked: !!serverRevoked };
+  return { success: true };
 }
-
 
 
 /* -----------------------
@@ -11136,11 +10775,13 @@ async function verifyBiometrics(uid, context) {
       });
 
       // POST verify
-      const verifyRes = await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/verify', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(Object.assign({}, payload, { userId: userId }))
+      const verifyRes = await withLoader(async () => {
+        return await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/verify', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(Object.assign({}, payload, { userId: userId }))
+        });
       });
 
       let verifyData = null;
@@ -11218,42 +10859,39 @@ async function verifyBiometrics(uid, context) {
 }
 
 // 🔹 Improved helper: Simulate PIN entry (fill inputs with .filled for yellow bg/border)
-// 🔹 Robust Simulate PIN entry (waits for inputs + uses your getReauthInputs if available)
-async function simulatePinEntry({ timeout = 2000, poll = 80 } = {}) {
-  console.log('[DEBUG-BIO] simulatePinEntry called (waiting for inputs)');
-
-  const start = Date.now();
-  let inputs = (typeof getReauthInputs === 'function') ? getReauthInputs() : Array.from(document.querySelectorAll('.reauthpin-inputs input'));
-
-  // wait/poll until inputs available or timeout
-  while ((!inputs || inputs.length === 0) && (Date.now() - start) < timeout) {
-    await new Promise(r => setTimeout(r, poll));
-    inputs = (typeof getReauthInputs === 'function') ? getReauthInputs() : Array.from(document.querySelectorAll('.reauthpin-inputs input'));
-  }
-
-  if (!inputs || inputs.length < 4) {
-    console.warn('[DEBUG-BIO] PIN inputs not found or incomplete (needed 4). Found:', inputs ? inputs.length : 0);
+function simulatePinEntry() {
+  const inputs = Array.from(document.querySelectorAll('.reauthpin-inputs input'));
+  if (!inputs || inputs.length === 0) {
+    console.warn('[DEBUG-BIO] simulatePinEntry: No PIN inputs found');
     return;
   }
 
-  console.log('[DEBUG-BIO] Found PIN inputs, simulating fill for', inputs.length, 'inputs');
+  // If expected 4, log warning if different
+  if (inputs.length !== 4) {
+    console.warn('[DEBUG-BIO] simulatePinEntry: unexpected PIN input count:', inputs.length);
+  }
+
+  console.log('[DEBUG-BIO] simulatePinEntry: starting, inputs:', inputs.map(i => ({ id: i.id, disabled: i.disabled })));
 
   inputs.forEach((input, index) => {
     setTimeout(() => {
       try {
-        // Visual state
-        input.classList.add('filled');     // your CSS shows yellow on .filled
-        // Set masked char (handlers normally read value or currentPin)
-        input.value = '•';
-        // Trigger input handlers so any bound logic runs (updatePinInputs / refreshInputsUI)
-        input.dispatchEvent(new Event('input', { bubbles: true }));
+        // Ensure enabled and visible
+        try { input.disabled = false; } catch (e) { /* ignore */ }
+        input.classList.add('filled'); // Trigger CSS "filled" (yellow bg/border)
+        // Set a masked value — CSS likely hides it; this sets state for other scripts
+        try { input.value = '*'; } catch (e) { /* ignore */ }
+        // Optionally trigger input events so any watchers pick up the change
+        try {
+          const ev = new Event('input', { bubbles: true });
+          input.dispatchEvent(ev);
+        } catch (e) { /* ignore */ }
       } catch (e) {
-        console.warn('[DEBUG-BIO] simulatePinEntry element set failed', e);
+        console.warn('[DEBUG-BIO] simulatePinEntry error for input', index, e);
       }
-    }, index * 120);
+    }, index * 150);
   });
 }
-
 
 
 
