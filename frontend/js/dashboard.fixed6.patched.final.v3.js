@@ -4350,41 +4350,6 @@ function __fg_pin_clearAllInputs() {
   }
   window.notify = window.notify || notify;
 
-  // showImmediateToast: creates a short-lived high-z-index toast so messages are visible even if loader overlays
-function showImmediateToast(message, type = 'info', timeout = 3000) {
-  try {
-    const id = '__immediate_toast';
-    // remove existing one
-    const existing = document.getElementById(id);
-    if (existing) existing.remove();
-
-    const el = document.createElement('div');
-    el.id = id;
-    el.className = 'immediate-toast ' + (type || 'info');
-    el.textContent = message;
-    // inline styles minimal; prefer to add CSS below
-    el.style.position = 'fixed';
-    el.style.top = '16px';
-    el.style.right = '16px';
-    el.style.zIndex = 99999;
-    el.style.padding = '10px 14px';
-    el.style.borderRadius = '6px';
-    el.style.boxShadow = '0 6px 18px rgba(0,0,0,0.15)';
-    el.style.background = (type === 'error' ? '#ffdddd' : type === 'success' ? '#ddffdd' : '#fffbea');
-    el.style.color = '#111';
-    el.style.fontSize = '13px';
-    el.style.pointerEvents = 'auto';
-    document.body.appendChild(el);
-    // auto-remove
-    setTimeout(() => { try { el.remove(); } catch (e) {} }, timeout);
-    return el;
-  } catch (e) {
-    console.warn('[showImmediateToast] error', e);
-  }
-}
-window.showImmediateToast = window.showImmediateToast || showImmediateToast;
-
-
   // Get user ID from Supabase
   async function getUid() {
   try {
@@ -9368,13 +9333,11 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
       return;
     }
 
-    // Show guaranteed visible toast so user sees the message even if loader overlays
-try { showImmediateToast('Verifying fingerprint — logging you in...', 'info', 3000); } catch(e) {}
-// also call normal app notify (keeps app toast API consistent)
-try { safeCall(notify, 'Verifying fingerprint — logging you in...', 'info', reauthAlert, reauthAlertMsg); } catch(e){}
-// tiny tick to allow paint
-await new Promise(r => setTimeout(r, 30));
-
+    // Ensure the user sees the notify message before the loader overlay appears.
+    // It's OK to notify now because navigator.credentials.get() already completed.
+    try { safeCall(notify, 'Verifying fingerprint — logging you in...', 'info', reauthAlert, reauthAlertMsg); } catch (e) { console.warn('[reauth] notify call failed', e); }
+    // give browser a tiny tick to paint the notify before showLoader() runs
+    await new Promise(r => setTimeout(r, 30));
 
     // Single withLoader wrapper for server verify + UI simulation
     let verifyTaskResult;
