@@ -9291,13 +9291,12 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
   // Synchronously attempt biometric auth using cached options (must be user gesture)
   // Synchronously attempt biometric auth using cached options (must be user gesture)
 // Patched: sets a short-lived lock so prefetch won't replace cached options while we call the authenticator
-// Replace existing tryBiometricWithCachedOptions with this robust version
+// Robust tryBiometricWithCachedOptions — preserves typed arrays (no Object.assign on raw)
 async function tryBiometricWithCachedOptions() {
-  // if no cached options, bail
   const raw = window.__cachedAuthOptions;
   if (!raw) return { ok: false, reason: 'no-cache' };
 
-  // Helper: convert base64url string -> Uint8Array (use window.fromBase64Url if available)
+  // helpers
   function base64UrlToUint8(s) {
     if (!s) return null;
     try {
@@ -9305,116 +9304,122 @@ async function tryBiometricWithCachedOptions() {
         const v = window.fromBase64Url(s);
         return (v instanceof Uint8Array) ? v : new Uint8Array(v);
       }
-      // fallback: base64url -> base64 -> atob -> Uint8Array
       const pad = (4 - (s.length % 4)) % 4;
       const base64 = s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat(pad);
       const binary = atob(base64);
-      const len = binary.length;
-      const out = new Uint8Array(len);
-      for (let i = 0; i < len; i++) out[i] = binary.charCodeAt(i);
+      const out = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
       return out;
     } catch (e) {
-      console.warn('[tryBiometricWithCachedOptions] base64UrlToUint8 failed for', s, e);
+      console.warn('[tryBiometricWithCachedOptions] base64UrlToUint8 failed', e);
       return null;
     }
   }
 
-  // Helper: ensure value is an ArrayBuffer/Uint8Array (no-op if already proper)
-  function ensureUint8(value) {
-    if (!value) return null;
-    if (value instanceof Uint8Array) return value;
-    if (value instanceof ArrayBuffer) return new Uint8Array(value);
-    // Some code may store objects with .data or .buffer — try common shapes
-    if (ArrayBuffer.isView(value) && value.buffer) return new Uint8Array(value.buffer);
-    if (typeof value === 'string') return base64UrlToUint8(value);
-    // If it's object with type 'Buffer' (node-ish), try to read .data
+  function ensureUint8(val) {
+    if (!val) return null;
+    if (val instanceof Uint8Array) return val;
+    if (val instanceof ArrayBuffer) return new Uint8Array(val);
+    if (ArrayBuffer.isView(val) && val.buffer) return new Uint8Array(val.buffer);
+    if (typeof val === 'string') return base64UrlToUint8(val);
+    // handle node-style object shapes { data: [...] }
     try {
-      if (value && Array.isArray(value.data)) return new Uint8Array(value.data);
+      if (val && Array.isArray(val.data)) return new Uint8Array(val.data);
     } catch (e) {}
     return null;
   }
 
-  // Clone a shallow copy of raw to avoid mutating the cached object in-place
-  const publicKey = Object.assign({}, raw);
+  // Build a fresh publicKey object explicitly (do NOT shallow-clone raw with Object.assign)
+  const publicKey = {};
 
-  // Convert challenge
+  // copy top-level simple properties
+  if ('rpId' in raw) publicKey.rpId = raw.rpId;
+  if ('timeout' in raw) publicKey.timeout = raw.timeout;
+  if ('userVerification' in raw) publicKey.userVerification = raw.userVerification;
+  // ... copy other primitive props if you rely on them
+  if ('extensions' in raw) publicKey.extensions = raw.extensions;
+
+  // convert challenge
   try {
-    publicKey.challenge = ensureUint8(publicKey.challenge) || (publicKey.challenge && typeof publicKey.challenge === 'string' ? base64UrlToUint8(publicKey.challenge) : publicKey.challenge);
+    const ch = ensureUint8(raw.challenge);
+    if (ch) publicKey.challenge = ch;
+    else if (raw.challenge && typeof raw.challenge === 'string') publicKey.challenge = base64UrlToUint8(raw.challenge);
+    else publicKey.challenge = raw.challenge; // fallback (will likely fail validation later)
   } catch (e) {
-    console.warn('[tryBiometricWithCachedOptions] challenge conversion failed', e);
+    console.warn('[tryBiometricWithCachedOptions] challenge conversion error', e);
+    publicKey.challenge = null;
   }
 
-  // Ensure allowCredentials is an array of objects with id as Uint8Array where possible
+  // normalize allowCredentials into new array with typed ids
   try {
     const storedId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id') || localStorage.getItem('webauthn_cred') || '';
-    let allow = Array.isArray(publicKey.allowCredentials) ? publicKey.allowCredentials.slice() : [];
+    const rawAllow = Array.isArray(raw.allowCredentials) ? raw.allowCredentials : [];
+    const allow = [];
 
-    // Convert existing allow entries
-    allow = allow.map((c) => {
-      if (!c) return c;
-      const copy = Object.assign({}, c);
-      try {
-        copy.id = ensureUint8(copy.id) || (typeof copy.id === 'string' ? base64UrlToUint8(copy.id) : copy.id);
-      } catch (e) {
-        console.warn('[tryBiometricWithCachedOptions] allowCredential id conversion failed', e, c);
-      }
-      // if conversion failed above and storedId exists, we'll fill below
-      return copy;
-    });
+    for (let i = 0; i < rawAllow.length; i++) {
+      const c = rawAllow[i];
+      if (!c) continue;
+      const item = {};
+      item.type = c.type || 'public-key';
+      item.transports = c.transports || ['internal'];
 
-    // If allow is empty but we have a storedId string, insert it
+      const idBuf = ensureUint8(c.id) || (typeof c.id === 'string' ? base64UrlToUint8(c.id) : null);
+      if (idBuf) item.id = idBuf;
+      else item.id = c.id; // fallback to whatever it was (maybe already ArrayBuffer)
+
+      allow.push(item);
+    }
+
+    // ensure storedId present
     if ((!allow || allow.length === 0) && storedId) {
       const idBuf = ensureUint8(storedId);
-      if (idBuf) allow = [{ type: 'public-key', id: idBuf, transports: ['internal'] }];
+      if (idBuf) allow.push({ type: 'public-key', id: idBuf, transports: ['internal'] });
     } else if (storedId) {
-      // ensure storedId is present (best-effort)
-      const found = allow.some(c => {
-        const id = c && c.id;
-        if (!id) return false;
-        // compare ArrayBuffer content
-        try {
-          const a = ensureUint8(id);
-          const b = ensureUint8(storedId);
-          if (!a || !b || a.length !== b.length) return false;
-          for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
-          return true;
-        } catch (e) { return false; }
-      });
-      if (!found) {
-        const idBuf = ensureUint8(storedId);
-        if (idBuf) allow.unshift({ type: 'public-key', id: idBuf, transports: ['internal'] });
+      // ensure at least one entry matches storedId (best-effort equality)
+      const idBuf = ensureUint8(storedId);
+      if (idBuf) {
+        let found = false;
+        for (const a of allow) {
+          try {
+            const aId = ensureUint8(a.id);
+            if (!aId) continue;
+            if (aId.length === idBuf.length) {
+              let eq = true;
+              for (let i = 0; i < aId.length; i++) if (aId[i] !== idBuf[i]) { eq = false; break; }
+              if (eq) { found = true; break; }
+            }
+          } catch (e) {}
+        }
+        if (!found) allow.unshift({ type: 'public-key', id: idBuf, transports: ['internal'] });
       }
     }
 
     publicKey.allowCredentials = allow;
   } catch (e) {
     console.warn('[tryBiometricWithCachedOptions] allowCredentials normalization failed', e);
+    publicKey.allowCredentials = raw.allowCredentials || [];
   }
 
-  // Basic validation: challenge must be Uint8Array/ArrayBuffer-like
+  // sanity check: challenge must be ArrayBuffer/Uint8Array
   if (!publicKey.challenge || !(publicKey.challenge instanceof Uint8Array || publicKey.challenge instanceof ArrayBuffer || (ArrayBuffer.isView(publicKey.challenge) && publicKey.challenge.buffer))) {
     console.warn('[tryBiometricWithCachedOptions] invalid challenge type after conversion', publicKey.challenge);
-    return { ok: false, reason: 'bad-challenge' };
+    return { ok: false, reason: 'bad-challenge', debug: publicKey.challenge };
   }
 
-  // Acquire lock so prefetch won't stomp the challenge on server
+  // Acquire short lock so prefetch won't stomp server challenge while we call the authenticator
   window.__cachedAuthOptionsLock = true;
   window.__cachedAuthOptionsLockSince = Date.now();
 
   try {
-    // Call the authenticator with the prepared publicKey object
     const assertion = await navigator.credentials.get({ publicKey });
     return { ok: true, assertion };
   } catch (err) {
-    console.warn('navigator.credentials.get failed with cached options', err);
+    console.warn('[tryBiometricWithCachedOptions] navigator.credentials.get failed', err);
     return { ok: false, reason: 'get-failed', error: err };
   } finally {
-    // release the lock after a short grace window to avoid immediate prefetch racing
+    // small grace window to avoid immediate race
     setTimeout(() => {
-      try {
-        window.__cachedAuthOptionsLock = false;
-        window.__cachedAuthOptionsLockSince = 0;
-      } catch (e) { /* ignore */ }
+      try { window.__cachedAuthOptionsLock = false; window.__cachedAuthOptionsLockSince = 0; } catch(e) {}
     }, 80);
   }
 }
