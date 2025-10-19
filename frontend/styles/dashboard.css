@@ -3040,3 +3040,16 @@ a[style*="color: #f00"] { color: var(--danger); }
   }
 }
 
+/* ensure loader is below immediate toast */
+.immediate-toast {
+  z-index: 99999 !important;
+}
+
+/* if your app has a loader with a known class, ensure it's lower */
+.app-loader, .global-loader, .loader-overlay {
+  z-index: 9990 !important; /* lower than immediate toast */
+}
+
+/* visual classes used by simulatePinEntry */
+.simulated-pin { outline: none; }
+.filled { background-color: #fffdef; border-color: #f1c40f !important; }

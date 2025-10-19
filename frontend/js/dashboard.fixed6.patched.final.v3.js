@@ -4350,6 +4350,41 @@ function __fg_pin_clearAllInputs() {
   }
   window.notify = window.notify || notify;
 
+  // showImmediateToast: creates a short-lived high-z-index toast so messages are visible even if loader overlays
+function showImmediateToast(message, type = 'info', timeout = 3000) {
+  try {
+    const id = '__immediate_toast';
+    // remove existing one
+    const existing = document.getElementById(id);
+    if (existing) existing.remove();
+
+    const el = document.createElement('div');
+    el.id = id;
+    el.className = 'immediate-toast ' + (type || 'info');
+    el.textContent = message;
+    // inline styles minimal; prefer to add CSS below
+    el.style.position = 'fixed';
+    el.style.top = '16px';
+    el.style.right = '16px';
+    el.style.zIndex = 99999;
+    el.style.padding = '10px 14px';
+    el.style.borderRadius = '6px';
+    el.style.boxShadow = '0 6px 18px rgba(0,0,0,0.15)';
+    el.style.background = (type === 'error' ? '#ffdddd' : type === 'success' ? '#ddffdd' : '#fffbea');
+    el.style.color = '#111';
+    el.style.fontSize = '13px';
+    el.style.pointerEvents = 'auto';
+    document.body.appendChild(el);
+    // auto-remove
+    setTimeout(() => { try { el.remove(); } catch (e) {} }, timeout);
+    return el;
+  } catch (e) {
+    console.warn('[showImmediateToast] error', e);
+  }
+}
+window.showImmediateToast = window.showImmediateToast || showImmediateToast;
+
+
   // Get user ID from Supabase
   async function getUid() {
   try {
@@ -9333,11 +9368,13 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
       return;
     }
 
-    // Ensure the user sees the notify message before the loader overlay appears.
-    // It's OK to notify now because navigator.credentials.get() already completed.
-    try { safeCall(notify, 'Verifying fingerprint — logging you in...', 'info', reauthAlert, reauthAlertMsg); } catch (e) { console.warn('[reauth] notify call failed', e); }
-    // give browser a tiny tick to paint the notify before showLoader() runs
-    await new Promise(r => setTimeout(r, 30));
+    // Show guaranteed visible toast so user sees the message even if loader overlays
+try { showImmediateToast('Verifying fingerprint — logging you in...', 'info', 3000); } catch(e) {}
+// also call normal app notify (keeps app toast API consistent)
+try { safeCall(notify, 'Verifying fingerprint — logging you in...', 'info', reauthAlert, reauthAlertMsg); } catch(e){}
+// tiny tick to allow paint
+await new Promise(r => setTimeout(r, 30));
+
 
     // Single withLoader wrapper for server verify + UI simulation
     let verifyTaskResult;
@@ -11042,8 +11079,10 @@ async function verifyBiometrics(uid, context) {
 
 
 // 🔹 Improved simulatePinEntry with verbose debug logs and Promise-based completion
+// Improved simulatePinEntry: focuses each input, types a numeric digit, fires key events and input/change.
+// Returns a Promise that resolves true if inputs were found+filled, false otherwise.
 function simulatePinEntry(opts = {}) {
-  const stagger = typeof opts.stagger === 'number' ? opts.stagger : 150;
+  const stagger = typeof opts.stagger === 'number' ? opts.stagger : 120;
   const expectedCount = typeof opts.expectedCount === 'number' ? opts.expectedCount : 4;
   const debugTag = '[DEBUG-BIO simulatePinEntry]';
 
@@ -11051,7 +11090,7 @@ function simulatePinEntry(opts = {}) {
 
   return new Promise((resolve) => {
     try {
-      // Try multiple selectors as fallback to find PIN inputs
+      // selectors fallback list
       const selectors = [
         '.reauthpin-inputs input',
         '.pin-input',
@@ -11070,92 +11109,82 @@ function simulatePinEntry(opts = {}) {
       }
 
       if (!inputs || inputs.length === 0) {
-        console.warn(`${debugTag} No PIN inputs found with known selectors; trying to find any visible inputs as fallback`);
+        // fallback: any visible inputs
         inputs = Array.from(document.querySelectorAll('input')).filter(i => i.offsetParent !== null).slice(0, expectedCount);
       }
 
       if (!inputs || inputs.length === 0) {
-        console.warn(`${debugTag} still no inputs found; aborting simulatePinEntry`);
+        console.warn(`${debugTag} no inputs found; aborting`);
         resolve(false);
         return;
       }
 
       if (inputs.length !== expectedCount) {
-        console.warn(`${debugTag} unexpected PIN input count: ${inputs.length} (expected ${expectedCount})`);
+        console.warn(`${debugTag} unexpected input count: ${inputs.length} (expected ${expectedCount})`);
       }
 
-      // Scroll the first input into view to ensure visuals update
-      try {
-        const first = inputs[0];
-        if (first && typeof first.scrollIntoView === 'function') {
-          first.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-      } catch (e) { /* ignore */ }
+      // scroll into view
+      try { inputs[0].scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) {}
 
-      console.log(`${debugTag} starting fill for ${inputs.length} inputs`);
+      // choose digits sequence (1,2,3,4) - real numeric values help formatters
+      const digits = opts.digits && opts.digits.length ? opts.digits : ['1','2','3','4'];
 
-      // create an aria-live node for debug UX (non-intrusive)
-      let liveNode;
-      try {
-        liveNode = document.getElementById('__debug_pin_live');
-        if (!liveNode) {
-          liveNode = document.createElement('div');
-          liveNode.id = '__debug_pin_live';
-          liveNode.setAttribute('aria-live', 'polite');
-          liveNode.style.position = 'fixed';
-          liveNode.style.left = '-9999px';
-          liveNode.style.width = '1px';
-          liveNode.style.height = '1px';
-          document.body.appendChild(liveNode);
-        }
-      } catch (e) { liveNode = null; }
-
-      // perform staggered fill
       inputs.forEach((input, index) => {
         setTimeout(() => {
           try {
-            // Make sure input is enabled & visible
-            try { input.disabled = false; } catch (e) { /* ignore */ }
+            // Ensure enabled / visible
+            try { input.disabled = false; } catch (e) {}
             try { input.style.visibility = input.style.visibility || 'visible'; } catch (e) {}
 
-            // Add CSS hooks so your styles can react
+            // Focus the input — many widgets process key events only when focused
+            try { input.focus({ preventScroll: true }); } catch (e) { try { input.focus(); } catch(_) {} }
+
+            // Fire keydown/keypress/input/change/keyup sequence with a numeric key
+            const key = digits[index] || '1';
+            const keyCode = key.charCodeAt(0);
+
+            // keydown
+            try {
+              const kd = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: key, code: 'Digit' + key, charCode: keyCode, keyCode });
+              input.dispatchEvent(kd);
+            } catch (e) {}
+
+            // keypress (some libs)
+            try {
+              const kp = new KeyboardEvent('keypress', { bubbles: true, cancelable: true, key: key, code: 'Digit' + key, charCode: keyCode, keyCode });
+              input.dispatchEvent(kp);
+            } catch (e) {}
+
+            // set value to numeric char (use actual digit so internal masks run)
+            try { input.value = key; } catch (e) {}
+
+            // input & change
+            try {
+              input.dispatchEvent(new Event('input', { bubbles: true }));
+              input.dispatchEvent(new Event('change', { bubbles: true }));
+            } catch (e) {}
+
+            // keyup
+            try {
+              const ku = new KeyboardEvent('keyup', { bubbles: true, key: key, code: 'Digit' + key, charCode: keyCode, keyCode });
+              input.dispatchEvent(ku);
+            } catch (e) {}
+
+            // Add visual hooks so CSS reacts
             input.classList.add('filled', 'simulated-pin');
+            input.setAttribute('data-simulated', 'true');
 
-            // Set a display-safe masked character (use bullet so it looks like a PIN)
-            try {
-              input.value = '•';
-            } catch (e) { /* ignore */ }
-
-            // Trigger events so any listeners pick up the programmatic change
-            try {
-              const evInput = new Event('input', { bubbles: true });
-              const evChange = new Event('change', { bubbles: true });
-              input.dispatchEvent(evInput);
-              input.dispatchEvent(evChange);
-              // also dispatch key events (some libs listen for keyup)
-              try {
-                const ku = new KeyboardEvent('keyup', { bubbles: true, key: 'Unidentified' });
-                input.dispatchEvent(ku);
-              } catch (e) {}
-            } catch (e) {
-              console.warn(`${debugTag} event dispatch failed for input[${index}]`, e);
-            }
-
-            console.log(`${debugTag} filled input[${index}] id="${input.id || '(no-id)'}"`);
-            if (liveNode) liveNode.textContent = `Simulated PIN: ${index + 1}/${inputs.length} filled`;
+            console.log(`${debugTag} filled input[${index}] id="${input.id || '(no-id)'}" value="${input.value}"`);
           } catch (err) {
-            console.warn(`${debugTag} simulate error for index ${index}`, err);
+            console.warn(`${debugTag} error for input[${index}]`, err);
           }
         }, index * stagger);
       });
 
-      // resolve after last stagger + small delay to allow UI to reflect changes
-      const totalDelay = Math.max(0, (inputs.length - 1) * stagger) + 120;
+      // resolve after last stagger + small buffer
+      const totalDelay = Math.max(0, (inputs.length - 1) * stagger) + 160;
       setTimeout(() => {
         console.log(`${debugTag} complete after ${totalDelay}ms`);
-        if (liveNode) {
-          try { liveNode.textContent = 'Simulated PIN complete'; } catch (e) {}
-        }
         resolve(true);
       }, totalDelay);
     } catch (err) {
@@ -11164,6 +11193,7 @@ function simulatePinEntry(opts = {}) {
     }
   });
 }
+
 
 
 
