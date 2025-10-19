@@ -9291,57 +9291,134 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
   // Synchronously attempt biometric auth using cached options (must be user gesture)
   // Synchronously attempt biometric auth using cached options (must be user gesture)
 // Patched: sets a short-lived lock so prefetch won't replace cached options while we call the authenticator
+// Replace existing tryBiometricWithCachedOptions with this robust version
 async function tryBiometricWithCachedOptions() {
-  // Prefer a cached publicKey object
-  const publicKey = window.__cachedAuthOptions || null;
-  if (!publicKey) return { ok: false, reason: 'no-cache' };
+  // if no cached options, bail
+  const raw = window.__cachedAuthOptions;
+  if (!raw) return { ok: false, reason: 'no-cache' };
 
-  // Ensure allowCredentials contains stored credential id (same as your existing logic)
-  const storedId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id') || localStorage.getItem('webauthn_cred') || '';
-  try {
-    const allow = Array.isArray(publicKey.allowCredentials) ? publicKey.allowCredentials.slice() : [];
-    if (!allow.length && storedId) {
-      const idBuf = idToUint8(storedId);
-      if (idBuf) {
-        allow.push({ type: 'public-key', id: idBuf, transports: ['internal'] });
+  // Helper: convert base64url string -> Uint8Array (use window.fromBase64Url if available)
+  function base64UrlToUint8(s) {
+    if (!s) return null;
+    try {
+      if (typeof window.fromBase64Url === 'function') {
+        const v = window.fromBase64Url(s);
+        return (v instanceof Uint8Array) ? v : new Uint8Array(v);
       }
-    } else if (allow.length && storedId) {
-      // ensure the stored id exists in allowCredentials (convert if necessary)
-      let found = allow.some(c => c && (c.id instanceof Uint8Array || c.id instanceof ArrayBuffer || typeof c.id === 'object'));
+      // fallback: base64url -> base64 -> atob -> Uint8Array
+      const pad = (4 - (s.length % 4)) % 4;
+      const base64 = s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat(pad);
+      const binary = atob(base64);
+      const len = binary.length;
+      const out = new Uint8Array(len);
+      for (let i = 0; i < len; i++) out[i] = binary.charCodeAt(i);
+      return out;
+    } catch (e) {
+      console.warn('[tryBiometricWithCachedOptions] base64UrlToUint8 failed for', s, e);
+      return null;
+    }
+  }
+
+  // Helper: ensure value is an ArrayBuffer/Uint8Array (no-op if already proper)
+  function ensureUint8(value) {
+    if (!value) return null;
+    if (value instanceof Uint8Array) return value;
+    if (value instanceof ArrayBuffer) return new Uint8Array(value);
+    // Some code may store objects with .data or .buffer — try common shapes
+    if (ArrayBuffer.isView(value) && value.buffer) return new Uint8Array(value.buffer);
+    if (typeof value === 'string') return base64UrlToUint8(value);
+    // If it's object with type 'Buffer' (node-ish), try to read .data
+    try {
+      if (value && Array.isArray(value.data)) return new Uint8Array(value.data);
+    } catch (e) {}
+    return null;
+  }
+
+  // Clone a shallow copy of raw to avoid mutating the cached object in-place
+  const publicKey = Object.assign({}, raw);
+
+  // Convert challenge
+  try {
+    publicKey.challenge = ensureUint8(publicKey.challenge) || (publicKey.challenge && typeof publicKey.challenge === 'string' ? base64UrlToUint8(publicKey.challenge) : publicKey.challenge);
+  } catch (e) {
+    console.warn('[tryBiometricWithCachedOptions] challenge conversion failed', e);
+  }
+
+  // Ensure allowCredentials is an array of objects with id as Uint8Array where possible
+  try {
+    const storedId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id') || localStorage.getItem('webauthn_cred') || '';
+    let allow = Array.isArray(publicKey.allowCredentials) ? publicKey.allowCredentials.slice() : [];
+
+    // Convert existing allow entries
+    allow = allow.map((c) => {
+      if (!c) return c;
+      const copy = Object.assign({}, c);
+      try {
+        copy.id = ensureUint8(copy.id) || (typeof copy.id === 'string' ? base64UrlToUint8(copy.id) : copy.id);
+      } catch (e) {
+        console.warn('[tryBiometricWithCachedOptions] allowCredential id conversion failed', e, c);
+      }
+      // if conversion failed above and storedId exists, we'll fill below
+      return copy;
+    });
+
+    // If allow is empty but we have a storedId string, insert it
+    if ((!allow || allow.length === 0) && storedId) {
+      const idBuf = ensureUint8(storedId);
+      if (idBuf) allow = [{ type: 'public-key', id: idBuf, transports: ['internal'] }];
+    } else if (storedId) {
+      // ensure storedId is present (best-effort)
+      const found = allow.some(c => {
+        const id = c && c.id;
+        if (!id) return false;
+        // compare ArrayBuffer content
+        try {
+          const a = ensureUint8(id);
+          const b = ensureUint8(storedId);
+          if (!a || !b || a.length !== b.length) return false;
+          for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+          return true;
+        } catch (e) { return false; }
+      });
       if (!found) {
-        const idBuf = idToUint8(storedId);
+        const idBuf = ensureUint8(storedId);
         if (idBuf) allow.unshift({ type: 'public-key', id: idBuf, transports: ['internal'] });
       }
     }
+
     publicKey.allowCredentials = allow;
   } catch (e) {
-    console.warn('Could not massage allowCredentials', e);
+    console.warn('[tryBiometricWithCachedOptions] allowCredentials normalization failed', e);
   }
 
-  // Acquire the in-use lock so prefetch won't update server challenge while we are calling the authenticator.
-  // This lock must be short-lived and released in finally
+  // Basic validation: challenge must be Uint8Array/ArrayBuffer-like
+  if (!publicKey.challenge || !(publicKey.challenge instanceof Uint8Array || publicKey.challenge instanceof ArrayBuffer || (ArrayBuffer.isView(publicKey.challenge) && publicKey.challenge.buffer))) {
+    console.warn('[tryBiometricWithCachedOptions] invalid challenge type after conversion', publicKey.challenge);
+    return { ok: false, reason: 'bad-challenge' };
+  }
+
+  // Acquire lock so prefetch won't stomp the challenge on server
   window.__cachedAuthOptionsLock = true;
   window.__cachedAuthOptionsLockSince = Date.now();
 
   try {
-    // call authenticator synchronously — the lock prevents prefetch races
+    // Call the authenticator with the prepared publicKey object
     const assertion = await navigator.credentials.get({ publicKey });
     return { ok: true, assertion };
   } catch (err) {
     console.warn('navigator.credentials.get failed with cached options', err);
     return { ok: false, reason: 'get-failed', error: err };
   } finally {
-    // release lock (give a tiny grace so any immediate UI that triggers prefetch doesn't stomp)
+    // release the lock after a short grace window to avoid immediate prefetch racing
     setTimeout(() => {
       try {
         window.__cachedAuthOptionsLock = false;
         window.__cachedAuthOptionsLockSince = 0;
-        // Optionally: invalidate cache if it is older than a small window to force a safe refetch next time
-        // e.g. if (Date.now() - (window.__cachedAuthOptionsFetchedAt||0) > 10000) window.__cachedAuthOptions = null;
       } catch (e) { /* ignore */ }
-    }, 80); // 80ms grace window to avoid immediate event races; tune as needed
+    }, 80);
   }
 }
+
 
 
   // Attach biometric click handler for the PIN modal's biometric button
