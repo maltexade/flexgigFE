@@ -9289,26 +9289,30 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
   }
 
   // Synchronously attempt biometric auth using cached options (must be user gesture)
-  // Synchronously attempt biometric auth using cached options (must be user gesture)
-// Patched: sets a short-lived lock so prefetch won't replace cached options while we call the authenticator
-// Robust tryBiometricWithCachedOptions — preserves typed arrays (no Object.assign on raw)
+  // Replace tryBiometricWithCachedOptions with this version
 async function tryBiometricWithCachedOptions() {
-  const raw = window.__cachedAuthOptions;
+  // Prefer a cached publicKey object
+  const raw = window.__cachedAuthOptions || null;
   if (!raw) return { ok: false, reason: 'no-cache' };
 
-  // helpers
+  // helpers --------------------------------------------------------------
+  const storedId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id') || localStorage.getItem('webauthn_cred') || '';
+
   function base64UrlToUint8(s) {
     if (!s) return null;
     try {
+      // prefer app helpers if present
+      if (typeof window.idToUint8 === 'function') return window.idToUint8(s);
       if (typeof window.fromBase64Url === 'function') {
         const v = window.fromBase64Url(s);
         return (v instanceof Uint8Array) ? v : new Uint8Array(v);
       }
+      // fallback decode base64url -> atob -> Uint8Array
       const pad = (4 - (s.length % 4)) % 4;
       const base64 = s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat(pad);
-      const binary = atob(base64);
-      const out = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+      const bin = atob(base64);
+      const out = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
       return out;
     } catch (e) {
       console.warn('[tryBiometricWithCachedOptions] base64UrlToUint8 failed', e);
@@ -9316,43 +9320,74 @@ async function tryBiometricWithCachedOptions() {
     }
   }
 
-  function ensureUint8(val) {
-    if (!val) return null;
-    if (val instanceof Uint8Array) return val;
-    if (val instanceof ArrayBuffer) return new Uint8Array(val);
-    if (ArrayBuffer.isView(val) && val.buffer) return new Uint8Array(val.buffer);
-    if (typeof val === 'string') return base64UrlToUint8(val);
-    // handle node-style object shapes { data: [...] }
+  function numericObjectToUint8(obj) {
     try {
-      if (val && Array.isArray(val.data)) return new Uint8Array(val.data);
+      // detect numeric-key shaped objects like {0:143,1:209,...}
+      const keys = Object.keys(obj);
+      if (!keys.length) return null;
+      // find the maximum numeric index
+      let max = -1;
+      for (let k of keys) {
+        const n = parseInt(k, 10);
+        if (!Number.isNaN(n)) max = Math.max(max, n);
+      }
+      if (max < 0) return null;
+      const out = new Uint8Array(max + 1);
+      for (let i = 0; i <= max; i++) out[i] = typeof obj[i] === 'number' ? obj[i] & 0xff : 0;
+      return out;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function ensureUint8(value) {
+    if (!value) return null;
+    // already typed
+    if (value instanceof Uint8Array) return value;
+    if (value instanceof ArrayBuffer) return new Uint8Array(value);
+    if (ArrayBuffer.isView(value) && value.buffer) return new Uint8Array(value.buffer, value.byteOffset || 0, value.byteLength || value.length);
+    if (typeof value === 'string') return base64UrlToUint8(value);
+    // node-ish object like { data: [...] }
+    try {
+      if (value && Array.isArray(value.data)) return new Uint8Array(value.data);
+    } catch (e) {}
+    // numeric-key object
+    try {
+      const conv = numericObjectToUint8(value);
+      if (conv) return conv;
     } catch (e) {}
     return null;
   }
 
-  // Build a fresh publicKey object explicitly (do NOT shallow-clone raw with Object.assign)
+  // Build a fresh publicKey object explicitly (avoid Object.assign on raw)
   const publicKey = {};
-
-  // copy top-level simple properties
+  // copy primitive top-level props that matter
   if ('rpId' in raw) publicKey.rpId = raw.rpId;
   if ('timeout' in raw) publicKey.timeout = raw.timeout;
   if ('userVerification' in raw) publicKey.userVerification = raw.userVerification;
-  // ... copy other primitive props if you rely on them
   if ('extensions' in raw) publicKey.extensions = raw.extensions;
 
-  // convert challenge
+  // convert challenge (string, numeric-object, ArrayBuffer, Uint8Array)
   try {
     const ch = ensureUint8(raw.challenge);
-    if (ch) publicKey.challenge = ch;
-    else if (raw.challenge && typeof raw.challenge === 'string') publicKey.challenge = base64UrlToUint8(raw.challenge);
-    else publicKey.challenge = raw.challenge; // fallback (will likely fail validation later)
+    if (ch) {
+      publicKey.challenge = ch;
+    } else if (raw.challenge && typeof raw.challenge === 'object') {
+      // if it's unexpectedly shaped, try numeric-object conversion
+      const n = numericObjectToUint8(raw.challenge);
+      if (n) publicKey.challenge = n;
+      else publicKey.challenge = raw.challenge; // will be caught by validation below
+    } else {
+      // last resort: attempt base64url from string
+      publicKey.challenge = (typeof raw.challenge === 'string') ? base64UrlToUint8(raw.challenge) : raw.challenge;
+    }
   } catch (e) {
-    console.warn('[tryBiometricWithCachedOptions] challenge conversion error', e);
+    console.warn('[tryBiometricWithCachedOptions] challenge conversion failed', e);
     publicKey.challenge = null;
   }
 
-  // normalize allowCredentials into new array with typed ids
+  // normalize allowCredentials -> ensure id is Uint8Array where possible
   try {
-    const storedId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id') || localStorage.getItem('webauthn_cred') || '';
     const rawAllow = Array.isArray(raw.allowCredentials) ? raw.allowCredentials : [];
     const allow = [];
 
@@ -9361,37 +9396,35 @@ async function tryBiometricWithCachedOptions() {
       if (!c) continue;
       const item = {};
       item.type = c.type || 'public-key';
-      item.transports = c.transports || ['internal'];
-
+      item.transports = c.transports || (c.transports === undefined ? ['internal'] : c.transports);
       const idBuf = ensureUint8(c.id) || (typeof c.id === 'string' ? base64UrlToUint8(c.id) : null);
       if (idBuf) item.id = idBuf;
-      else item.id = c.id; // fallback to whatever it was (maybe already ArrayBuffer)
-
+      else item.id = c.id; // keep as-is if we can't convert (fallback)
       allow.push(item);
     }
 
-    // ensure storedId present
+    // ensure storedId present as a typed id if allow is empty or doesn't match
     if ((!allow || allow.length === 0) && storedId) {
       const idBuf = ensureUint8(storedId);
       if (idBuf) allow.push({ type: 'public-key', id: idBuf, transports: ['internal'] });
-    } else if (storedId) {
-      // ensure at least one entry matches storedId (best-effort equality)
-      const idBuf = ensureUint8(storedId);
-      if (idBuf) {
-        let found = false;
-        for (const a of allow) {
-          try {
+    } else if (storedId && allow.length) {
+      // best-effort ensure storedId is in allow
+      try {
+        const idBuf = ensureUint8(storedId);
+        if (idBuf) {
+          let found = false;
+          for (const a of allow) {
             const aId = ensureUint8(a.id);
             if (!aId) continue;
             if (aId.length === idBuf.length) {
               let eq = true;
-              for (let i = 0; i < aId.length; i++) if (aId[i] !== idBuf[i]) { eq = false; break; }
+              for (let j = 0; j < aId.length; j++) if (aId[j] !== idBuf[j]) { eq = false; break; }
               if (eq) { found = true; break; }
             }
-          } catch (e) {}
+          }
+          if (!found) allow.unshift({ type: 'public-key', id: idBuf, transports: ['internal'] });
         }
-        if (!found) allow.unshift({ type: 'public-key', id: idBuf, transports: ['internal'] });
-      }
+      } catch (e) { /* ignore equality errors */ }
     }
 
     publicKey.allowCredentials = allow;
@@ -9406,24 +9439,24 @@ async function tryBiometricWithCachedOptions() {
     return { ok: false, reason: 'bad-challenge', debug: publicKey.challenge };
   }
 
-  // Acquire short lock so prefetch won't stomp server challenge while we call the authenticator
+  // Acquire the in-use lock so prefetch won't update server challenge while we are calling the authenticator.
   window.__cachedAuthOptionsLock = true;
   window.__cachedAuthOptionsLockSince = Date.now();
 
   try {
+    // Call the authenticator with the prepared publicKey object
     const assertion = await navigator.credentials.get({ publicKey });
     return { ok: true, assertion };
   } catch (err) {
-    console.warn('[tryBiometricWithCachedOptions] navigator.credentials.get failed', err);
+    console.warn('navigator.credentials.get failed with cached options', err);
     return { ok: false, reason: 'get-failed', error: err };
   } finally {
-    // small grace window to avoid immediate race
+    // release lock after a short grace window to avoid immediate prefetch racing
     setTimeout(() => {
-      try { window.__cachedAuthOptionsLock = false; window.__cachedAuthOptionsLockSince = 0; } catch(e) {}
+      try { window.__cachedAuthOptionsLock = false; window.__cachedAuthOptionsLockSince = 0; } catch (e) {}
     }, 80);
   }
 }
-
 
 
   // Attach biometric click handler for the PIN modal's biometric button
