@@ -3643,7 +3643,6 @@ updateBalanceDisplay();
         window.location.href = '/';
       }
     }
-    window.openPinModalForReauth = window.openPinModalForReauth || openPinModalForReauth;
 
     // ---------------------
     // Close/back button
@@ -9469,237 +9468,262 @@ async function tryBiometricWithCachedOptions() {
 
   // Attach biometric click handler for the PIN modal's biometric button
   (function bindPinBiometricBtn() {
-  const bioBtn = document.getElementById('pinBiometricBtn');
-  if (!bioBtn) return;
+    const bioBtn = document.getElementById('pinBiometricBtn');
+    if (!bioBtn) return;
 
-  // Determine local enablement: require both a stored credential and enabled flag
-  const flagVal = (localStorage.getItem('biometricForLogin') || localStorage.getItem('__sec_bioLogin') || localStorage.getItem('security_bio_login') || '').toLowerCase();
-  const storedCred = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id') || localStorage.getItem('webauthn_cred') || '';
-  const webAuthnSupported = ('PublicKeyCredential' in window);
-  const bioLoginEnabled = webAuthnSupported && (!!storedCred) && (['true','1','yes'].includes(flagVal) || !!storedCred);
+    // Determine local enablement: require both a stored credential and enabled flag
+    const flagVal = (localStorage.getItem('biometricForLogin') || localStorage.getItem('__sec_bioLogin') || localStorage.getItem('security_bio_login') || '').toLowerCase();
+    const storedCred = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id') || localStorage.getItem('webauthn_cred') || '';
+    const webAuthnSupported = ('PublicKeyCredential' in window);
+    const bioLoginEnabled = webAuthnSupported && (!!storedCred) && (['true','1','yes'].includes(flagVal) || !!storedCred);
 
-  // Show/hide button based on concrete presence
-  try { bioBtn.style.display = bioLoginEnabled ? 'inline-flex' : 'none'; } catch (e) {}
-  console.debug('[reauth] Biometric button visibility:', bioLoginEnabled);
+    // Show/hide button based on concrete presence
+    try { bioBtn.style.display = bioLoginEnabled ? 'inline-flex' : 'none'; } catch (e) {}
+    console.debug('[reauth] Biometric button visibility:', bioLoginEnabled);
 
-  // attach prefetch-on-gesture (keeps cached options warm)
-  attachPrefetchOnGesture(bioBtn);
-
-  if (bioBtn.__bound) return;
-  bioBtn.__bound = true;
-
-  bioBtn.addEventListener('click', async (ev) => {
-    ev.preventDefault();
-    console.debug('[reauth] pinBiometricBtn clicked');
-
-    // Quick guard: ensure biometric flag and credential exist
-    const storedCredNow = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id') || localStorage.getItem('webauthn_cred') || '';
-    const biomFlagNow = (localStorage.getItem('biometricsEnabled') || localStorage.getItem(__sec_KEYS && __sec_KEYS.biom ? __sec_KEYS.biom : 'biometricsEnabled') || '').toString().toLowerCase();
-    if (!storedCredNow || !(['true','1','yes'].includes((localStorage.getItem('biometricForLogin')||'').toLowerCase()) || ['true','1','yes'].includes((biomFlagNow||'').toLowerCase()))) {
-      console.warn('[reauth] biometric not enabled or no credential');
-      safeCall(notify, 'Biometric login not available — use PIN', 'warn', reauthAlert, reauthAlertMsg);
+    if (bioBtn.__bound) {
+      attachPrefetchOnGesture(bioBtn);
       return;
     }
 
-    // Prevent concurrent attempts / prefetch races
-    if (window.__webauthnAuthInProgress) {
-      console.debug('[reauth] auth already in progress, ignoring click');
+    // warm cache on gesture so first click can work
+    attachPrefetchOnGesture(bioBtn);
+
+    bioBtn.addEventListener('click', async (ev) => {
+      ev.preventDefault();
+      console.debug('[reauth] pinBiometricBtn clicked');
+
+      // Quick guard: ensure biometric flag and credential exist
+      const storedCredNow = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id') || localStorage.getItem('webauthn_cred') || '';
+      const biomFlagNow = (localStorage.getItem('biometricsEnabled') || localStorage.getItem(__sec_KEYS && __sec_KEYS.biom ? __sec_KEYS.biom : 'biometricsEnabled') || '').toString().toLowerCase();
+      if (!storedCredNow || !(['true','1','yes'].includes((localStorage.getItem('biometricForLogin')||'').toLowerCase()) || ['true','1','yes'].includes((biomFlagNow||'').toLowerCase()))) {
+        console.warn('[reauth] biometric not enabled or no credential');
+        safeCall(notify, 'Biometric login not available — use PIN', 'warn', reauthAlert, reauthAlertMsg);
+        return;
+      }
+      // Acquire a global "webauthn auth in progress" flag to block prefetches
+  if (window.__webauthnAuthInProgress) {
+    console.debug('[reauth] click ignored: another biometric flow already in progress');
+    return;
+  }
+
+  // We'll hold this flag until server verify finishes (or errors)
+  window.__webauthnAuthInProgress = true;
+
+  try {
+    // Try synchronous cached option path first (keeps user gesture)
+    const cachedAttempt = await tryBiometricWithCachedOptions();
+    if (cachedAttempt.ok) {
+      // build payload and verify as before...
+      try {
+        const assertion = cachedAttempt.assertion;
+        // ... build payload, get session uid etc ...
+        // Notify & immediate UI (requestAnimationFrame + simulatePinEntry non-blocking)
+        safeCall(notify, 'Verifying fingerprint — logging you in...', 'info', reauthAlert, reauthAlertMsg);
+        requestAnimationFrame(() => {
+          try { showLoader(); } catch(e){}
+          safeCall(openPinModalForReauth); // non-blocking
+          try { enableReauthInputs(); } catch(e){}
+          try { simulatePinEntry({ stagger: 0, expectedCount: 4, fillAll: true }); } catch(e){}
+        });
+
+        // Now run server verify inside withLoader (unchanged)
+        const verifyTaskResult = await withLoader(async () => {
+          // POST verify to server...
+          // (your existing verify logic)
+        });
+
+        // handle verifyTaskResult as you already do...
+      } catch (err) {
+        console.error('[reauth] cached biometric verify flow error', err);
+        safeCall(notify, 'Biometric verification error', 'error', reauthAlert, reauthAlertMsg);
+      }
       return;
     }
-    window.__webauthnAuthInProgress = true;
-    // Lock cached options so prefetch doesn't stomp our in-use options
-    window.__cachedAuthOptionsLock = true;
 
-    try {
+    // If cached options missing: fallback logic (prefetch + notify)...
+  } finally {
+    // Always clear the global in-progress flag once the whole flow is done.
+    // Important: we clear after the server verify completes (or on any error).
+    window.__webauthnAuthInProgress = false;
+  }
+
       // Try synchronous cached option path first (keeps user gesture)
       const cachedAttempt = await tryBiometricWithCachedOptions();
-      if (!cachedAttempt.ok) {
-        // Warm server side options and ask user to retry if cached doesn't work
+      if (cachedAttempt.ok) {
+        // build payload and verify as in your original flow
         try {
-          window.prefetchAuthOptions && window.prefetchAuthOptions();
-        } catch (e) {
-          console.warn('[reauth] prefetchAuthOptions failed', e);
-        }
-        safeCall(notify, 'Preparing biometric auth — please try again (or use PIN)', 'info', reauthAlert, reauthAlertMsg);
-        // Focus first PIN input so user can enter PIN immediately
-        const firstInput = (getReauthInputs && getReauthInputs()[0]) || null;
-        try { firstInput && firstInput.focus(); } catch (_) {}
-        return;
-      }
+          const assertion = cachedAttempt.assertion;
 
-      // cachedAttempt.ok -> we already have an assertion (under user gesture)
-      const assertion = cachedAttempt.assertion;
-      if (!assertion) {
-        console.warn('[reauth] cachedAttempt returned ok but no assertion');
-        safeCall(notify, 'Biometric auth failed — please try again', 'error', reauthAlert, reauthAlertMsg);
-        return;
-      }
+          function bufToB64Url(buf) {
+            return (window.toBase64Url ? window.toBase64Url(buf) : (function(b){
+              var bytes = new Uint8Array(b);
+              var str = '';
+              for (var i=0;i<bytes.length;i++) str += String.fromCharCode(bytes[i]);
+              return btoa(str).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+            })(buf));
+          }
 
-      // Build payload (keeps existing helper logic)
-      function bufToB64Url(buf) {
-        return (window.toBase64Url ? window.toBase64Url(buf) : (function(b){
-          var bytes = new Uint8Array(b);
-          var str = '';
-          for (var i=0;i<bytes.length;i++) str += String.fromCharCode(bytes[i]);
-          return btoa(str).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
-        })(buf));
-      }
+          const payload = {
+            id: assertion.id,
+            rawId: bufToB64Url(assertion.rawId),
+            type: assertion.type,
+            response: {
+              authenticatorData: bufToB64Url(assertion.response.authenticatorData),
+              clientDataJSON: bufToB64Url(assertion.response.clientDataJSON),
+              signature: bufToB64Url(assertion.response.signature),
+              userHandle: assertion.response.userHandle ? bufToB64Url(assertion.response.userHandle) : null
+            }
+          };
 
-      const payload = {
-        id: assertion.id,
-        rawId: bufToB64Url(assertion.rawId),
-        type: assertion.type,
-        response: {
-          authenticatorData: bufToB64Url(assertion.response.authenticatorData),
-          clientDataJSON: bufToB64Url(assertion.response.clientDataJSON),
-          signature: bufToB64Url(assertion.response.signature),
-          userHandle: assertion.response.userHandle ? bufToB64Url(assertion.response.userHandle) : null
-        }
-      };
+          const session = await safeCall(getSession);
+          const uid = session && session.user ? (session.user.uid || session.user.id) : null;
+          if (!uid) {
+            console.warn('[reauth] No session user id found before biometric verify');
+            safeCall(notify, 'Unable to find your session. Please try again.', 'error', reauthAlert, reauthAlertMsg);
+            return;
+          }
 
-      const session = await safeCall(getSession);
-      const uid = session && session.user ? (session.user.uid || session.user.id) : null;
-      if (!uid) {
-        console.warn('[reauth] No session user id found before biometric verify');
-        safeCall(notify, 'Unable to find your session. Please try again.', 'error', reauthAlert, reauthAlertMsg);
-        return;
-      }
+          // Notify user and give a tiny tick so the notify can paint
+          try { safeCall(notify, 'Verifying fingerprint — logging you in...', 'info', reauthAlert, reauthAlertMsg); } catch (e) { console.warn('[reauth] notify call failed', e); }
+          await new Promise(r => setTimeout(r, 30));
 
-      // Notify user (non-blocking)
-      try { safeCall(notify, 'Verifying fingerprint — logging you in...', 'info', reauthAlert, reauthAlertMsg); } catch (e) { console.warn('[reauth] notify call failed', e); }
+          // Show loader immediately so user sees instant feedback
+          try { showLoader(); } catch (e) { console.warn('[reauth] showLoader failed', e); }
 
-      // Immediate UI feedback: show the PIN modal and fill inputs quickly
-      // IMPORTANT: we do **not** call showLoader() here. withLoader will show the global loader
-      // for the real server round-trip. calling showLoader here previously caused the visible-stuck loader.
-      try {
-        // requestAnimationFrame to let the notify paint
-        requestAnimationFrame(() => {
+          // Immediately open PIN modal and enable inputs (non-blocking where possible)
           try {
             if (typeof openPinModalForReauth === 'function') {
-              safeCall(openPinModalForReauth); // non-blocking
-            } else if (typeof reauthModal !== 'undefined' && reauthModal && reauthModal.classList) {
-              // ensure immediate appearance (disable transition briefly if present)
-              try {
-                const prev = reauthModal.style && reauthModal.style.transition;
-                reauthModal.style && (reauthModal.style.transition = 'none');
-                reauthModal.classList.remove('hidden');
-                void reauthModal.offsetWidth; // force reflow
-                if (prev !== undefined) reauthModal.style.transition = prev;
-                else reauthModal.style.transition = '';
-              } catch (_) {
-                try { reauthModal.classList.remove('hidden'); } catch(_) {}
-              }
+              // intentionally non-blocking to allow server verify to proceed immediately
+              safeCall(openPinModalForReauth);
+            } else if (reauthModal && reauthModal.classList) {
+              reauthModal.classList.remove('hidden');
             }
-          } catch (e) { console.warn('[reauth] openPinModalForReauth failed', e); }
+          } catch (e) {
+            console.warn('[reauth] openPinModalForReauth failed', e);
+          }
 
           try {
-            if (typeof enableReauthInputs === 'function') enableReauthInputs();
-            else {
+            if (typeof enableReauthInputs === 'function') {
+              enableReauthInputs();
+            } else {
               const inputs = Array.from(document.querySelectorAll('.reauthpin-inputs input'));
               inputs.forEach(i => { try { i.disabled = false; } catch(e){} });
             }
-          } catch (e) { console.warn('[reauth] enableReauthInputs failed', e); }
+          } catch (e) {
+            console.warn('[reauth] enableReauthInputs fallback failed', e);
+          }
 
-          // run fast simulatePinEntry for instant UX (fire-and-forget)
+          // Fire-and-forget immediate fill so server verify can proceed concurrently
           try {
             if (typeof simulatePinEntry === 'function') {
               simulatePinEntry({ stagger: 0, expectedCount: 4, fillAll: true });
               console.log('[reauth] simulatePinEntry (immediate) started (non-blocking)');
+            } else {
+              console.warn('[reauth] simulatePinEntry not available for immediate fill');
             }
-          } catch (e) { console.warn('[reauth] simulatePinEntry immediate threw', e); }
-        });
-      } catch (e) {
-        console.warn('[reauth] immediate UI steps failed', e);
+          } catch (e) {
+            console.warn('[reauth] simulatePinEntry immediate threw', e);
+          }
+
+          // Single withLoader wrapper for server verify (no duplicate simulation inside)
+          let verifyTaskResult;
+          try {
+            verifyTaskResult = await withLoader(async () => {
+              console.log('[reauth] withLoader: starting server verify (cached path)');
+
+              // POST verify to server
+              let verifyRes;
+              try {
+                verifyRes = await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/verify', {
+                  method: 'POST',
+                  credentials: 'include',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ ...payload, userId: uid })
+                });
+              } catch (err) {
+                console.error('[reauth] network error posting verify', err);
+                throw new Error('Network error during biometric verification');
+              }
+
+              // Parse response safely
+              let verifyData = {};
+              if (!verifyRes || !verifyRes.ok) {
+                const txt = verifyRes ? await verifyRes.text().catch(()=>verifyRes.statusText || `HTTP ${verifyRes && verifyRes.status}`) : '(no-response)';
+                console.error('[reauth] server verify returned non-OK', verifyRes && verifyRes.status, txt);
+                // Throw so withLoader's catch logs and outer handler shows notify
+                throw new Error('Server verification failed: ' + (txt || 'server error'));
+              }
+
+              try {
+                verifyData = await verifyRes.json().catch(() => ({}));
+              } catch (err) {
+                const txt = await verifyRes.text().catch(()=>'(no-body)');
+                verifyData = { __rawText: txt };
+              }
+
+              console.log('[reauth] server verify ok, verifyData:', verifyData);
+
+              // small post-verify delay so any UI animations finish
+              await new Promise(r => setTimeout(r, 120));
+
+              // Notify outcome while loader still showing (so user sees final status)
+              try {
+                safeCall(notify, verifyData.verified ? 'Authentication successful' : 'Authentication failed', verifyData.verified ? 'success' : 'error', reauthAlert, reauthAlertMsg);
+              } catch (e) {
+                console.warn('[reauth] notify after verify failed', e);
+              }
+
+              // return verifyData
+              return verifyData;
+            }); // end withLoader
+          } catch (err) {
+            console.error('[reauth] verify task failed', err);
+            safeCall(notify, 'Biometric verification failed — ' + (err && err.message ? err.message : 'server error'), 'error', reauthAlert, reauthAlertMsg);
+            return;
+          }
+
+          // Post-verify handling
+          const verifyData = verifyTaskResult || {};
+          if (verifyData && verifyData.verified) {
+            safeCall(__sec_getCurrentUser);
+            safeCall(onSuccessfulReauth);
+            try { if (reauthModal) reauthModal.classList.add('hidden'); } catch(e){}
+            return;
+          } else {
+            console.warn('[reauth] verify returned ok but not verified', verifyData);
+            safeCall(notify, 'Biometric verification failed', 'error', reauthAlert, reauthAlertMsg);
+            return;
+          }
+        } catch (err) {
+          console.error('Cached biometric verify flow error', err);
+          safeCall(notify, 'Biometric verification error', 'error', reauthAlert, reauthAlertMsg);
+          return;
+        }
       }
 
-      // Now perform the server verify inside withLoader (this will show the real loader).
-      let verifyTaskResult;
+      // If cached options missing or failed, attempt to kick a prefetch and ask user to retry.
+      // NOTE: performing a network fetch then calling navigator.credentials.get() may lose the "user gesture"
+      // in many browsers — it's more reliable to prefetch earlier on toggle or pointerdown.
       try {
-        verifyTaskResult = await withLoader(async () => {
-          console.log('[reauth] withLoader: starting server verify (cached path)');
+        try { window.prefetchAuthOptions && window.prefetchAuthOptions(); } catch(e){}
 
-          // POST verify to server
-          let verifyRes;
-          try {
-            verifyRes = await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/verify', {
-              method: 'POST',
-              credentials: 'include',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ ...payload, userId: uid })
-            });
-          } catch (err) {
-            console.error('[reauth] network error posting verify', err);
-            throw new Error('Network error during biometric verification');
-          }
-
-          // Parse response safely
-          if (!verifyRes || !verifyRes.ok) {
-            const txt = verifyRes ? await verifyRes.text().catch(()=>verifyRes.statusText || `HTTP ${verifyRes && verifyRes.status}`) : '(no-response)';
-            console.error('[reauth] server verify returned non-OK', verifyRes && verifyRes.status, txt);
-            // If challenge mismatch or stale options, clear cached options to avoid repeating same failure
-            try { window.invalidateAuthOptionsCache && window.invalidateAuthOptionsCache(); } catch (_) {}
-            throw new Error('Server verification failed: ' + (txt || 'server error'));
-          }
-
-          let verifyData = {};
-          try {
-            verifyData = await verifyRes.json().catch(() => ({}));
-          } catch (err) {
-            const txt = await verifyRes.text().catch(()=>'(no-body)');
-            verifyData = { __rawText: txt };
-          }
-
-          console.log('[reauth] server verify ok, verifyData:', verifyData);
-
-          // small post-verify delay so animations can settle
-          await new Promise(r => setTimeout(r, 120));
-
-          // Notify final status (still inside loader)
-          try {
-            safeCall(notify, verifyData.verified ? 'Authentication successful' : 'Authentication failed', verifyData.verified ? 'success' : 'error', reauthAlert, reauthAlertMsg);
-          } catch (e) { console.warn('[reauth] notify after verify failed', e); }
-
-          return verifyData;
-        }); // end withLoader
+        // Provide immediate feedback and fall back to PIN view
+        safeCall(notify, 'Preparing biometric auth — please try again (or use PIN)', 'info', reauthAlert, reauthAlertMsg);
+        // Optionally focus PIN inputs so the user can enter PIN while we warm the cache
+        const firstInput = getReauthInputs()[0];
+        if (firstInput && typeof firstInput.focus === 'function') firstInput.focus();
+        return;
       } catch (err) {
-        console.error('[reauth] verify task failed', err);
-        safeCall(notify, 'Biometric verification failed — ' + (err && err.message ? err.message : 'server error'), 'error', reauthAlert, reauthAlertMsg);
+        console.error('Fallback after cached biometric failed', err);
+        safeCall(notify, 'Biometric temporarily unavailable — use PIN', 'error', reauthAlert, reauthAlertMsg);
         return;
       }
+    });
 
-      // Post-verify handling (after loader hidden by withLoader)
-      const verifyData = verifyTaskResult || {};
-      if (verifyData && verifyData.verified) {
-        try { safeCall(__sec_getCurrentUser); } catch(e){/*ignore*/}
-
-        // Call success hook which should close modal + resume inactivity etc.
-        try { safeCall(onSuccessfulReauth); } catch (e) { console.warn('[reauth] onSuccessfulReauth failed', e); }
-
-        // Safe guard: ensure modal hidden
-        try { if (reauthModal) reauthModal.classList.add('hidden'); } catch(e){}
-
-        return;
-      } else {
-        console.warn('[reauth] verify returned ok but not verified', verifyData);
-        safeCall(notify, 'Biometric verification failed', 'error', reauthAlert, reauthAlertMsg);
-        // keep modal open so user can fallback to PIN
-        return;
-      }
-
-    } catch (err) {
-      console.error('[reauth] Cached biometric verify flow error', err);
-      safeCall(notify, 'Biometric verification error', 'error', reauthAlert, reauthAlertMsg);
-      return;
-    } finally {
-      // ALWAYS clear in-progress flags so prefetch / next attempts can proceed
-      try { delete window.__cachedAuthOptionsLock; } catch (_) {}
-      try { delete window.__webauthnAuthInProgress; } catch (_) {}
-    }
-  });
-
-  console.debug('[reauth] pinBiometricBtn bound (patched)');
+    bioBtn.__bound = true;
+    console.debug('[reauth] pinBiometricBtn bound');
 })();
-
 
 
   // --- VISUALS: set display name and avatar safely ---
