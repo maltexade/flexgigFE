@@ -9300,95 +9300,160 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
       // Try synchronous cached option path first (keeps user gesture)
       const cachedAttempt = await tryBiometricWithCachedOptions();
       if (cachedAttempt.ok) {
-        // build payload and verify as in your original flow
-        try {
-          const assertion = cachedAttempt.assertion;
-          function bufToB64Url(buf) {
-            return (window.toBase64Url ? window.toBase64Url(buf) : (function(b){
-              var bytes = new Uint8Array(b);
-              var str = '';
-              for (var i=0;i<bytes.length;i++) str += String.fromCharCode(bytes[i]);
-              return btoa(str).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
-            })(buf));
-          }
-          const payload = {
-            id: assertion.id,
-            rawId: bufToB64Url(assertion.rawId),
-            type: assertion.type,
-            response: {
-              authenticatorData: bufToB64Url(assertion.response.authenticatorData),
-              clientDataJSON: bufToB64Url(assertion.response.clientDataJSON),
-              signature: bufToB64Url(assertion.response.signature),
-              userHandle: assertion.response.userHandle ? bufToB64Url(assertion.response.userHandle) : null
-            }
-          };
-          const session = await safeCall(getSession);
-const uid = session && session.user ? (session.user.uid || session.user.id) : null;
+  // build payload and verify as in your original flow
+  try {
+    const assertion = cachedAttempt.assertion;
 
-if (!uid) {
-  console.warn('[reauth] No session user id found before biometric verify');
-  safeCall(notify, 'Unable to find your session. Please try again.', 'error', reauthAlert, reauthAlertMsg);
-  return;
-}
+    function bufToB64Url(buf) {
+      return (window.toBase64Url ? window.toBase64Url(buf) : (function(b){
+        var bytes = new Uint8Array(b);
+        var str = '';
+        for (var i=0;i<bytes.length;i++) str += String.fromCharCode(bytes[i]);
+        return btoa(str).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+      })(buf));
+    }
 
-let verifyRes;
-try {
-  verifyRes = await withLoader(async () => {
-    // keep this user-visible message inside the loader so it's shown while waiting
-    notify('Verifying fingerprint — logging you in...', 'info');
-    return await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/verify', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...payload, userId: uid })
-    });
-  });
-} catch (err) {
-  // withLoader or fetch threw (network/other)
-  console.error('[reauth] network/loader error during verify', err);
-  safeCall(notify, 'Verification failed — network error. Please try again.', 'error', reauthAlert, reauthAlertMsg);
-  return;
-}
-
-if (!verifyRes) {
-  console.error('[reauth] verifyRes is falsy after withLoader');
-  safeCall(notify, 'Verification failed — no response from server.', 'error', reauthAlert, reauthAlertMsg);
-  return;
-}
-
-let verifyData = {};
-if (!verifyRes.ok) {
-  // try to read textual error (safer than assuming JSON)
-  const errText = await verifyRes.text().catch(() => verifyRes.statusText || `HTTP ${verifyRes.status}`);
-  console.warn('[reauth] server verify returned non-OK:', verifyRes.status, errText);
-  safeCall(notify, 'Biometric verification failed: ' + (errText || 'Server error'), 'error', reauthAlert, reauthAlertMsg);
-  return;
-}
-
-try {
-  verifyData = await verifyRes.json().catch(() => ({}));
-} catch (err) {
-  console.warn('[reauth] failed to parse verify response JSON', err);
-  verifyData = {};
-}
-
-if (verifyData && verifyData.verified) {
-  safeCall(__sec_getCurrentUser);
-  safeCall(onSuccessfulReauth);
-  try { if (reauthModal) reauthModal.classList.add('hidden'); } catch(e){}
-  return;
-} else {
-  console.warn('[reauth] verify returned ok but not verified', verifyData);
-  safeCall(notify, 'Biometric verification failed', 'error', reauthAlert, reauthAlertMsg);
-  return;
-}
-
-        } catch (err) {
-          console.error('Cached biometric verify flow error', err);
-          safeCall(notify, 'Biometric verification error', 'error', reauthAlert, reauthAlertMsg);
-          return;
-        }
+    const payload = {
+      id: assertion.id,
+      rawId: bufToB64Url(assertion.rawId),
+      type: assertion.type,
+      response: {
+        authenticatorData: bufToB64Url(assertion.response.authenticatorData),
+        clientDataJSON: bufToB64Url(assertion.response.clientDataJSON),
+        signature: bufToB64Url(assertion.response.signature),
+        userHandle: assertion.response.userHandle ? bufToB64Url(assertion.response.userHandle) : null
       }
+    };
+
+    const session = await safeCall(getSession);
+    const uid = session && session.user ? (session.user.uid || session.user.id) : null;
+    if (!uid) {
+      console.warn('[reauth] No session user id found before biometric verify');
+      safeCall(notify, 'Unable to find your session. Please try again.', 'error', reauthAlert, reauthAlertMsg);
+      return;
+    }
+
+    // Ensure the user sees the notify message before the loader overlay appears.
+    // It's OK to notify now because navigator.credentials.get() already completed.
+    try { safeCall(notify, 'Verifying fingerprint — logging you in...', 'info', reauthAlert, reauthAlertMsg); } catch (e) { console.warn('[reauth] notify call failed', e); }
+    // give browser a tiny tick to paint the notify before showLoader() runs
+    await new Promise(r => setTimeout(r, 30));
+
+    // Single withLoader wrapper for server verify + UI simulation
+    let verifyTaskResult;
+    try {
+      verifyTaskResult = await withLoader(async () => {
+        console.log('[reauth] withLoader: starting server verify (cached path)');
+
+        // POST verify to server
+        let verifyRes;
+        try {
+          verifyRes = await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/verify', {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...payload, userId: uid })
+          });
+        } catch (err) {
+          console.error('[reauth] network error posting verify', err);
+          throw new Error('Network error during biometric verification');
+        }
+
+        // Parse response safely
+        let verifyData = {};
+        if (!verifyRes || !verifyRes.ok) {
+          const txt = verifyRes ? await verifyRes.text().catch(()=>verifyRes.statusText || `HTTP ${verifyRes && verifyRes.status}`) : '(no-response)';
+          console.error('[reauth] server verify returned non-OK', verifyRes && verifyRes.status, txt);
+          // Throw so withLoader's catch logs and outer handler shows notify
+          throw new Error('Server verification failed: ' + (txt || 'server error'));
+        }
+
+        try {
+          verifyData = await verifyRes.json().catch(() => ({}));
+        } catch (err) {
+          const txt = await verifyRes.text().catch(()=>'(no-body)');
+          verifyData = { __rawText: txt };
+        }
+
+        console.log('[reauth] server verify ok, verifyData:', verifyData);
+
+        // Prepare UI simulation: open PIN modal & enable inputs BEFORE we simulate
+        try {
+          if (typeof openPinModalForReauth === 'function') {
+            await safeCall(openPinModalForReauth);
+          } else if (reauthModal && reauthModal.classList) {
+            // ensure modal visible if we have a DOM reference
+            reauthModal.classList.remove('hidden');
+          }
+        } catch (e) {
+          console.warn('[reauth] openPinModalForReauth failed', e);
+        }
+
+        try {
+          if (typeof enableReauthInputs === 'function') {
+            enableReauthInputs();
+          } else {
+            const inputs = Array.from(document.querySelectorAll('.reauthpin-inputs input'));
+            inputs.forEach(i => { try { i.disabled = false; } catch(e){} });
+          }
+        } catch (e) {
+          console.warn('[reauth] enableReauthInputs fallback failed', e);
+        }
+
+        // Wait a tick to let inputs be painted and enabled
+        await new Promise(r => setTimeout(r, 50));
+
+        // run the improved simulatePinEntry and await completion (must return a Promise)
+        try {
+          if (typeof simulatePinEntry === 'function') {
+            console.log('[reauth] starting simulatePinEntry()');
+            await simulatePinEntry({ stagger: 120, expectedCount: 4 });
+            console.log('[reauth] simulatePinEntry() finished');
+          } else {
+            console.warn('[reauth] simulatePinEntry not available');
+          }
+        } catch (e) {
+          console.warn('[reauth] simulatePinEntry error', e);
+        }
+
+        // small post-simulation delay so any UI animations finish
+        await new Promise(r => setTimeout(r, 120));
+
+        // Notify outcome while loader still showing (so user sees final status)
+        try {
+          safeCall(notify, verifyData.verified ? 'Authentication successful' : 'Authentication failed', verifyData.verified ? 'success' : 'error', reauthAlert, reauthAlertMsg);
+        } catch (e) {
+          console.warn('[reauth] notify after verify failed', e);
+        }
+
+        // Return the verifyData to the outer handler
+        return verifyData;
+      }); // end withLoader
+    } catch (err) {
+      console.error('[reauth] verify task failed', err);
+      safeCall(notify, 'Biometric verification failed — ' + (err && err.message ? err.message : 'server error'), 'error', reauthAlert, reauthAlertMsg);
+      return;
+    }
+
+    // Post-verify handling
+    const verifyData = verifyTaskResult || {};
+    if (verifyData && verifyData.verified) {
+      safeCall(__sec_getCurrentUser);
+      safeCall(onSuccessfulReauth);
+      try { if (reauthModal) reauthModal.classList.add('hidden'); } catch(e){}
+      return;
+    } else {
+      console.warn('[reauth] verify returned ok but not verified', verifyData);
+      safeCall(notify, 'Biometric verification failed', 'error', reauthAlert, reauthAlertMsg);
+      return;
+    }
+  } catch (err) {
+    console.error('Cached biometric verify flow error', err);
+    safeCall(notify, 'Biometric verification error', 'error', reauthAlert, reauthAlertMsg);
+    return;
+  }
+}
+
 
       // If cached options missing or failed, attempt to kick a prefetch and ask user to retry.
       // NOTE: performing a network fetch then calling navigator.credentials.get() may lose the "user gesture"
