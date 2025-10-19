@@ -1619,6 +1619,13 @@ const svgShapes = {
   // Prefetch helper used by UI (non-blocking) — patched to respect in-use lock
 if (!window.prefetchAuthOptions) window.prefetchAuthOptions = async function prefetchAuthOptions() {
   try {
+    // NEW: don't start prefetch while a biometric auth + verify is in progress
+    if (window.__webauthnAuthInProgress) {
+      console.debug('[prefetchAuthOptions] abort: webauthn auth in progress (global lock)');
+      return;
+    }
+
+    
     // If another prefetch is running, or an auth operation is currently using the cached options, skip.
     if (window.__prefetchInFlight) {
       console.debug('[prefetchAuthOptions] abort: prefetch already in flight');
@@ -9494,6 +9501,52 @@ async function tryBiometricWithCachedOptions() {
         safeCall(notify, 'Biometric login not available — use PIN', 'warn', reauthAlert, reauthAlertMsg);
         return;
       }
+      // Acquire a global "webauthn auth in progress" flag to block prefetches
+  if (window.__webauthnAuthInProgress) {
+    console.debug('[reauth] click ignored: another biometric flow already in progress');
+    return;
+  }
+
+  // We'll hold this flag until server verify finishes (or errors)
+  window.__webauthnAuthInProgress = true;
+
+  try {
+    // Try synchronous cached option path first (keeps user gesture)
+    const cachedAttempt = await tryBiometricWithCachedOptions();
+    if (cachedAttempt.ok) {
+      // build payload and verify as before...
+      try {
+        const assertion = cachedAttempt.assertion;
+        // ... build payload, get session uid etc ...
+        // Notify & immediate UI (requestAnimationFrame + simulatePinEntry non-blocking)
+        safeCall(notify, 'Verifying fingerprint — logging you in...', 'info', reauthAlert, reauthAlertMsg);
+        requestAnimationFrame(() => {
+          try { showLoader(); } catch(e){}
+          safeCall(openPinModalForReauth); // non-blocking
+          try { enableReauthInputs(); } catch(e){}
+          try { simulatePinEntry({ stagger: 0, expectedCount: 4, fillAll: true }); } catch(e){}
+        });
+
+        // Now run server verify inside withLoader (unchanged)
+        const verifyTaskResult = await withLoader(async () => {
+          // POST verify to server...
+          // (your existing verify logic)
+        });
+
+        // handle verifyTaskResult as you already do...
+      } catch (err) {
+        console.error('[reauth] cached biometric verify flow error', err);
+        safeCall(notify, 'Biometric verification error', 'error', reauthAlert, reauthAlertMsg);
+      }
+      return;
+    }
+
+    // If cached options missing: fallback logic (prefetch + notify)...
+  } finally {
+    // Always clear the global in-progress flag once the whole flow is done.
+    // Important: we clear after the server verify completes (or on any error).
+    window.__webauthnAuthInProgress = false;
+  }
 
       // Try synchronous cached option path first (keeps user gesture)
       const cachedAttempt = await tryBiometricWithCachedOptions();
