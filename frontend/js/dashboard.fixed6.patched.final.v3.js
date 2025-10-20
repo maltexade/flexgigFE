@@ -11716,7 +11716,7 @@ try { if (!window.disableBiometrics) window.disableBiometrics = disableBiometric
  * This reduces "No stored auth challenge" on second attempt while keeping single-use safety.
  */
 (function installConsumeAfterVerify() {
-  console.info('[webauthn-patch] installing consume-after-verify patch', 'style="color:cyan;font-weight:bold"');
+  console.info('[webauthn-patch] installing consume-after-verify patch', { color:'#0ff', fontWeight:'bold' });
   const LOCK_KEY = '__fg_webauthn_cached_lock';
   const USED_KEY = '__fg_webauthn_cached_used_at';
   const LOCK_TTL_MS = 5000;
