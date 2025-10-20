@@ -11033,11 +11033,12 @@ async function prefetchAuthOptionsFor(uid, context = 'reauth') {
 
 // 🔹 Main verifyBiometrics (robust: fresh challenge + withLoader + debug logs + safe PIN simulation)
 // 🔹 Main verifyBiometrics (always fresh: invalidate cache + fetch new + debug + safe PIN fallback)
+// 🔹 verifyBiometrics (mobile-optimized, no prefetch, robust error handling)
 async function verifyBiometrics(uid, context = 'reauth') {
-  console.log('%c[verifyBiometrics] Called (always fresh)', 'color:#0ff;font-weight:bold');
+  console.log('%c[verifyBiometrics] Called (fresh, mobile-optimized)', 'color:#0ff;font-weight:bold');
 
   try {
-    // Resolve userId if not provided
+    // Resolve userId
     let userId = uid;
     if (!userId) {
       const session = await safeCall(getSession);
@@ -11045,12 +11046,12 @@ async function verifyBiometrics(uid, context = 'reauth') {
       if (!userId) throw new Error('No user ID available');
     }
 
-    // Always invalidate cache for fresh challenge (fix stale prefetch issue)
+    // Clear any cached options to prevent stale challenge (critical for mobile)
     window.__cachedAuthOptions = null;
     window.__cachedAuthOptionsFetchedAt = 0;
-    console.log('[verifyBiometrics] Cache invalidated—fetching fresh options');
+    console.log('[verifyBiometrics] Cache cleared, fetching fresh options');
 
-    // Fetch fresh options (include credentialId for specific allowCredentials)
+    // Fetch fresh options with credentialId
     const storedId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
     if (!storedId) throw new Error('No stored credential ID—biometrics not registered?');
 
@@ -11068,9 +11069,9 @@ async function verifyBiometrics(uid, context = 'reauth') {
     }
 
     const publicKey = await optRes.json();
-    console.log('[verifyBiometrics] Fresh options received', { challenge: publicKey.challenge.slice(0, 10) + '...', allowCredCount: publicKey.allowCredentials?.length || 0 });
+    console.log('[verifyBiometrics] Fresh options', { challenge: publicKey.challenge.slice(0, 10) + '...', allowCredCount: publicKey.allowCredentials?.length || 0 });
 
-    // Convert base64url to buffers (using your fromBase64Url helper)
+    // Convert base64url to ArrayBuffer
     publicKey.challenge = fromBase64Url(publicKey.challenge);
     if (Array.isArray(publicKey.allowCredentials)) {
       publicKey.allowCredentials = publicKey.allowCredentials.map(c => ({
@@ -11078,16 +11079,18 @@ async function verifyBiometrics(uid, context = 'reauth') {
         id: fromBase64Url(c.id)
       }));
     }
-    publicKey.userVerification = 'required';
-    publicKey.timeout = 60000;
 
-    // Prompt user for biometrics
+    // Mobile-optimized settings
+    publicKey.userVerification = 'required';
+    publicKey.timeout = 90000; // Increase to 90s for mobile prompt delays (Face ID, etc.)
+
+    // Prompt for biometrics
+    console.log('[verifyBiometrics] Requesting assertion from authenticator');
     const assertion = await navigator.credentials.get({ publicKey });
-    if (!assertion) throw new Error('No assertion from authenticator');
+    if (!assertion) throw new Error('No assertion returned—user canceled or authenticator failed');
 
     // Show loader during verify
     return await withLoader(async () => {
-      // Build payload with base64url encoding (using your toBase64Url)
       const payload = {
         id: assertion.id,
         rawId: toBase64Url(assertion.rawId),
@@ -11098,8 +11101,10 @@ async function verifyBiometrics(uid, context = 'reauth') {
           signature: toBase64Url(assertion.response.signature),
           userHandle: assertion.response.userHandle ? toBase64Url(assertion.response.userHandle) : null
         },
-        userId  // Include for server
+        userId
       };
+
+      console.log('[verifyBiometrics] Sending verify request', { payloadId: payload.id, challengeInClientData: JSON.parse(atob(payload.response.clientDataJSON)).challenge.slice(0, 10) + '...' });
 
       const verifyRes = await fetch(`${window.__SEC_API_BASE}/webauthn/auth/verify`, {
         method: 'POST',
@@ -11117,7 +11122,6 @@ async function verifyBiometrics(uid, context = 'reauth') {
       const verifyData = await verifyRes.json();
       console.log('[verifyBiometrics] Verify success', verifyData);
 
-      // Handle success (e.g., close modal)
       onSuccessfulReauth();
       notify('Authentication successful', 'success');
       return { success: true, data: verifyData };
@@ -11125,8 +11129,17 @@ async function verifyBiometrics(uid, context = 'reauth') {
   } catch (err) {
     console.error('[verifyBiometrics] Error', err);
     notify(`Biometric error: ${err.message}`, 'error');
-    // Fallback to PIN view
-    switchViews(false);  // Show PIN
+    // Mobile-specific retry logic
+    if (err.name === 'NotAllowedError' || err.message.includes('timeout')) {
+      console.log('[verifyBiometrics] Mobile timeout or cancel, retrying once...');
+      // Retry once with fresh options
+      if (!window.__retryAttempted) {
+        window.__retryAttempted = true;
+        return await verifyBiometrics(uid, context);
+      }
+    }
+    window.__retryAttempted = false; // Reset retry flag
+    switchViews(false); // Fallback to PIN
     return { success: false, error: err.message };
   }
 }
