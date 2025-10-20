@@ -11130,6 +11130,7 @@ async function verifyBiometrics(uid, context = 'reauth') {
     return { success: false, error: err.message };
   }
 }
+window.verifyBiometrics = window.verifyBiometrics || verifyBiometrics;
 
 
 // 🔹 Improved simulatePinEntry with verbose debug logs and Promise-based completion
