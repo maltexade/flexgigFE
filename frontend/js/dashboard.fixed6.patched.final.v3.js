@@ -11703,226 +11703,168 @@ try { if (!window.disableBiometrics) window.disableBiometrics = disableBiometric
 })();
 
 /**
- * WebAuthn cache / prefetch robustness fix
+ * Patch: only consume cached WebAuthn options after server verify succeeds.
+ * Insert this after your WebAuthn/security module (or at end of bundle).
  *
- * Install this after your WebAuthn/security module (or at end of bundle).
- * See instructions in chat for placement and testing.
+ * Behavior:
+ *  - tryBiometricWithCachedOptions: acquires short cross-tab lock while calling
+ *    navigator.credentials.get(), but does NOT mark cached options consumed.
+ *  - verifyBiometrics: on successful server verify -> mark cached options consumed.
+ *    on server error "No stored auth challenge" -> invalidate cached options (consume).
+ *  - On navigator.credentials.get cancel (NotAllowedError/AbortError) -> do NOT consume.
+ *
+ * This reduces "No stored auth challenge" on second attempt while keeping single-use safety.
  */
-(function installWebAuthnCacheFixes() {
-  console.info('%c[webauthn-fix] Installing WebAuthn cache robustness fixes', 'color: orange; font-weight: bold;');
+(function installConsumeAfterVerify() {
+  console.info('[webauthn-patch] installing consume-after-verify patch', 'style="color:cyan;font-weight:bold"');
   const LOCK_KEY = '__fg_webauthn_cached_lock';
   const USED_KEY = '__fg_webauthn_cached_used_at';
-  const LOCK_TTL_MS = 5000; // safety expiry for stale locks (ms)
+  const LOCK_TTL_MS = 5000;
 
-  function nowTs() { return String(Date.now()); }
-
-  function setCrossTabLock() {
-    try {
-      localStorage.setItem(LOCK_KEY, nowTs());
-      window.__cachedAuthOptionsLock = true;
-      window.__cachedAuthOptionsLockSince = Date.now();
-    } catch (e) {
-      console.warn('[webauthn-fix] setCrossTabLock failed', e);
-      window.__cachedAuthOptionsLock = true;
-      window.__cachedAuthOptionsLockSince = Date.now();
-    }
+  function nowTs(){ return String(Date.now()); }
+  function setCrossTabLock(){
+    try{ localStorage.setItem(LOCK_KEY, nowTs()); window.__cachedAuthOptionsLock = true; window.__cachedAuthOptionsLockSince = Date.now(); }
+    catch(e){ window.__cachedAuthOptionsLock = true; window.__cachedAuthOptionsLockSince = Date.now(); }
   }
-
-  function clearCrossTabLock() {
-    try {
-      localStorage.removeItem(LOCK_KEY);
-      window.__cachedAuthOptionsLock = false;
-      window.__cachedAuthOptionsLockSince = 0;
-    } catch (e) {
-      console.warn('[webauthn-fix] clearCrossTabLock failed', e);
-      window.__cachedAuthOptionsLock = false;
-      window.__cachedAuthOptionsLockSince = 0;
-    }
+  function clearCrossTabLock(){
+    try{ localStorage.removeItem(LOCK_KEY); window.__cachedAuthOptionsLock = false; window.__cachedAuthOptionsLockSince = 0; }
+    catch(e){ window.__cachedAuthOptionsLock = false; window.__cachedAuthOptionsLockSince = 0; }
   }
-
-  function isCrossTabLocked() {
-    try {
+  function isCrossTabLocked(){
+    try{
       const v = localStorage.getItem(LOCK_KEY);
-      if (!v) return false;
-      const ts = parseInt(v, 10);
-      if (Number.isNaN(ts)) return false;
-      if (Date.now() - ts > LOCK_TTL_MS) {
-        try { localStorage.removeItem(LOCK_KEY); } catch(e){}
-        return false;
-      }
+      if(!v) return false;
+      const ts = parseInt(v,10);
+      if(Number.isNaN(ts)) return false;
+      if(Date.now() - ts > LOCK_TTL_MS){ try{ localStorage.removeItem(LOCK_KEY);}catch(e){}; return false; }
       return true;
-    } catch (e) {
-      return !!window.__cachedAuthOptionsLock;
-    }
+    }catch(e){ return !!window.__cachedAuthOptionsLock; }
   }
-
-  function markCachedOptionsConsumed() {
-    try {
-      if (window.__cachedAuthOptions) {
-        try { window.__cachedAuthOptions._consumed = true; } catch(e){}
-      }
-      localStorage.setItem(USED_KEY, nowTs());
+  function invalidateCachedOptions(){
+    try{
       window.__cachedAuthOptions = null;
       window.__cachedAuthOptionsFetchedAt = 0;
-      if (typeof window.invalidateAuthOptionsCache === 'function') {
-        try { window.invalidateAuthOptionsCache(); } catch(e){}
+      try{ localStorage.setItem(USED_KEY, nowTs()); }catch(e){}
+      if(typeof window.invalidateAuthOptionsCache === 'function') {
+        try{ window.invalidateAuthOptionsCache(); }catch(e){}
       }
-    } catch (e) {
-      console.warn('[webauthn-fix] markCachedOptionsConsumed failed', e);
-      try { window.__cachedAuthOptions = null; window.__cachedAuthOptionsFetchedAt = 0; } catch(e){}
-    }
+    }catch(e){}
   }
-
-  function cachedOptionsIsConsumed() {
-    try {
-      if (window.__cachedAuthOptions && window.__cachedAuthOptions._consumed) return true;
-      const used = localStorage.getItem(USED_KEY);
-      if (!used) return false;
-      return true;
-    } catch (e) {
-      return !!(window.__cachedAuthOptions && window.__cachedAuthOptions._consumed);
-    }
-  }
-
-  if (typeof window.prefetchAuthOptions === 'function') {
-    const originalPrefetch = window.prefetchAuthOptions;
-    window.prefetchAuthOptions = async function patchedPrefetchAuthOptions(...args) {
-      if (isCrossTabLocked()) {
-        console.debug('[webauthn-fix] prefetch aborted: cross-tab lock active');
-        return;
+  function markCachedOptionsConsumed(){
+    try{
+      // server verified — mark consumed and clear
+      try{ window.__cachedAuthOptions._consumed = true; }catch(e){}
+      try{ localStorage.setItem(USED_KEY, nowTs()); }catch(e){}
+      window.__cachedAuthOptions = null;
+      window.__cachedAuthOptionsFetchedAt = 0;
+      if(typeof window.invalidateAuthOptionsCache === 'function'){
+        try{ window.invalidateAuthOptionsCache(); }catch(e){}
       }
-      try {
-        const fresh = typeof window.__cachedAuthOptionsFetchedAt === 'number' && window.__cachedAuthOptionsFetchedAt > 0;
-        if (fresh && window.__cachedAuthOptions && !cachedOptionsIsConsumed()) {
-          console.debug('[webauthn-fix] prefetch skipped: cache fresh & not consumed');
-          return;
-        }
-      } catch (e) {}
-      try {
-        await originalPrefetch.apply(this, args);
-        try { if (window.__cachedAuthOptions) window.__cachedAuthOptions._consumed = false; } catch (e){}
-        try { localStorage.removeItem(USED_KEY); } catch(e){}
-      } catch (err) {
-        console.warn('[webauthn-fix] prefetch original failed', err);
-      }
-    };
-    console.info('[webauthn-fix] patched prefetchAuthOptions');
-  } else {
-    console.warn('[webauthn-fix] prefetchAuthOptions not found to patch');
+    }catch(e){}
   }
 
-  if (typeof window.getAuthOptionsWithCache === 'function') {
-    const originalGetAuth = window.getAuthOptionsWithCache;
-    window.getAuthOptionsWithCache = async function patchedGetAuthOptionsWithCache(opts = {}) {
-      const res = await originalGetAuth.call(this, opts);
-      try {
-        if (res && typeof res === 'object') {
-          if (window.__cachedAuthOptions) window.__cachedAuthOptions._consumed = false;
-          try { localStorage.removeItem(USED_KEY); } catch(e){}
+  // Patch / override tryBiometricWithCachedOptions
+  async function tryBiometricWithCachedOptions_noConsume() {
+    try{
+      // If no cache or already consumed -> let caller fallback to fetch path
+      if(!window.__cachedAuthOptions) return { ok:false, reason:'no-cache' };
+      if(window.__cachedAuthOptions && window.__cachedAuthOptions._consumed) return { ok:false, reason:'cache-consumed' };
+      if(isCrossTabLocked()) return { ok:false, reason:'locked' };
+
+      // Build a safe copy
+      let raw = window.__cachedAuthOptions;
+      const publicKey = JSON.parse(JSON.stringify(raw));
+      // do some light conversions if helpers exist
+      try{
+        if(publicKey.challenge && typeof publicKey.challenge === 'string' && typeof window.fromBase64Url === 'function'){
+          publicKey.challenge = new Uint8Array(window.fromBase64Url(publicKey.challenge));
         }
-      } catch (e) {}
-      return res;
-    };
-    console.info('[webauthn-fix] patched getAuthOptionsWithCache');
-  } else {
-    console.warn('[webauthn-fix] getAuthOptionsWithCache not found to patch');
-  }
-
-  async function defaultTryBiometricWithCachedOptions() {
-    try {
-      if (!window.__cachedAuthOptions) return { ok: false, reason: 'no-cache' };
-      if (cachedOptionsIsConsumed()) return { ok: false, reason: 'cache-consumed' };
-      if (isCrossTabLocked()) return { ok: false, reason: 'locked' };
-
-      let cached = window.__cachedAuthOptions;
-      const publicKey = JSON.parse(JSON.stringify(cached));
-
-      try {
-        if (publicKey.challenge && typeof publicKey.challenge === 'object' && !(publicKey.challenge instanceof Uint8Array)) {
-          if (typeof window.fromBase64Url === 'function' && typeof publicKey.challenge === 'string') {
-            publicKey.challenge = new Uint8Array(window.fromBase64Url(publicKey.challenge));
-          }
-        }
-        if (Array.isArray(publicKey.allowCredentials)) {
-          publicKey.allowCredentials = publicKey.allowCredentials.map(c => {
-            try {
-              const id = c.id;
-              if (typeof id === 'string' && typeof window.fromBase64Url === 'function') {
-                return Object.assign({}, c, { id: new Uint8Array(window.fromBase64Url(id)) });
+        if(Array.isArray(publicKey.allowCredentials)){
+          publicKey.allowCredentials = publicKey.allowCredentials.map(c=>{
+            try{
+              if(typeof c.id === 'string' && typeof window.fromBase64Url === 'function'){
+                return { ...c, id: new Uint8Array(window.fromBase64Url(c.id)) };
               }
               return c;
-            } catch (e) { return c; }
+            }catch(e){ return c; }
           });
         }
-      } catch (e) {}
+      }catch(e){ /* best-effort */ }
 
+      // Acquire lock so other tabs / prefetchers don't stomp while we're calling authenticator
       setCrossTabLock();
 
-      try { if (window.__cachedAuthOptions) window.__cachedAuthOptions._consumed = true; } catch(e){}
-
-      try {
+      try{
         const assertion = await navigator.credentials.get({ publicKey });
-        markCachedOptionsConsumed();
+        // NOTE: intentionally do NOT mark consumed here; verify will mark on success.
+        // Release lock and return assertion to consumer.
         clearCrossTabLock();
-        return { ok: true, assertion };
-      } catch (err) {
-        try { markCachedOptionsConsumed(); } catch(e){}
+        return { ok:true, assertion };
+      }catch(err){
+        // If user cancelled (NotAllowed/Abort), do NOT invalidate cache (let retry)
+        const isCancel = err && (err.name === 'NotAllowedError' || err.name === 'AbortError');
         clearCrossTabLock();
-        return { ok: false, reason: 'get-failed', error: err };
+        return { ok:false, reason:'get-failed', error:err, cancelled:isCancel };
       }
-    } catch (e) {
-      try { clearCrossTabLock(); } catch (ee){}
-      return { ok: false, reason: 'exception', error: e };
+    }catch(e){
+      try{ clearCrossTabLock(); }catch(_){}
+      return { ok:false, reason:'exception', error:e };
     }
   }
 
-  if (typeof window.tryBiometricWithCachedOptions === 'function') {
-    const orig = window.tryBiometricWithCachedOptions;
-    window.tryBiometricWithCachedOptions = async function patchedTryBiometricWithCachedOptions(...args) {
-      if (isCrossTabLocked()) return { ok: false, reason: 'locked' };
-      try {
-        if (window.__cachedAuthOptions && !cachedOptionsIsConsumed()) {
-          return await defaultTryBiometricWithCachedOptions();
-        }
-      } catch (e) {
-        console.warn('[webauthn-fix] patched tryBio fallback to original due to error', e);
-        try { return await orig.apply(this, args); } catch (err) { return { ok: false, reason: 'original-failed', error: err }; }
-      }
-      try { return await orig.apply(this, args); } catch (err) { return { ok: false, reason: 'original-failed', error: err }; }
-    };
-    console.info('[webauthn-fix] patched tryBiometricWithCachedOptions');
-  } else {
-    window.tryBiometricWithCachedOptions = defaultTryBiometricWithCachedOptions;
-    console.info('[webauthn-fix] installed tryBiometricWithCachedOptions fallback helper');
+  // Install or override global
+  try{
+    if(typeof window.tryBiometricWithCachedOptions === 'function'){
+      const orig = window.tryBiometricWithCachedOptions;
+      window.tryBiometricWithCachedOptions = async function patchedTry(...args){
+        // prefer the new conservative implementation
+        return await tryBiometricWithCachedOptions_noConsume.apply(this,args);
+      };
+    } else {
+      window.tryBiometricWithCachedOptions = tryBiometricWithCachedOptions_noConsume;
+    }
+    console.info('[webauthn-patch] installed tryBiometricWithCachedOptions_noConsume');
+  }catch(e){
+    console.warn('[webauthn-patch] failed to install tryBiometricWithCachedOptions', e);
   }
 
-  window.addEventListener('storage', (e) => {
-    if (e.key === LOCK_KEY) return;
-    if (e.key === USED_KEY) {
-      try {
-        if (localStorage.getItem(USED_KEY)) {
-          window.__cachedAuthOptions = null;
-          window.__cachedAuthOptionsFetchedAt = 0;
-          if (typeof window.invalidateAuthOptionsCache === 'function') {
-            try { window.invalidateAuthOptionsCache(); } catch(e){}
+  // Patch verifyBiometrics to consume/invalidate cache only after server response
+  if(typeof window.verifyBiometrics === 'function'){
+    const origVerify = window.verifyBiometrics;
+    window.verifyBiometrics = async function patchedVerify(uid, context='reauth'){
+      // Call original verify but intercept the network verify step by wrapping fetch
+      // Simpler approach: call original verify then inspect outcome; if success => mark consumed
+      // If original verify throws with server text "No stored auth challenge" => invalidate cache.
+      try{
+        const result = await origVerify.apply(this, [uid, context]);
+        // origVerify returns { success: true, data } on success in your code
+        if(result && result.success){
+          console.debug('[webauthn-patch] verify success — marking cached options consumed');
+          try{ markCachedOptionsConsumed(); }catch(e){ console.warn('mark consume failed', e); }
+        }
+        return result;
+      }catch(err){
+        // If server returned an HTTP error with message "No stored auth challenge" we should clear cache
+        try{
+          const text = (err && err.message) ? err.message : '';
+          if(text && /no stored auth challenge/i.test(text)){
+            console.warn('[webauthn-patch] server returned No stored auth challenge — invalidating cached options');
+            try{ invalidateCachedOptions(); }catch(e){}
           }
-        }
-      } catch (err) {}
-    }
-  });
-
-  setInterval(() => {
-    try {
-      const v = localStorage.getItem(LOCK_KEY);
-      if (!v) return;
-      const ts = parseInt(v, 10);
-      if (!isNaN(ts) && Date.now() - ts > LOCK_TTL_MS) {
-        try { localStorage.removeItem(LOCK_KEY); } catch (e){}
+        }catch(e){}
+        throw err;
       }
-    } catch (e) {}
-  }, Math.max(2000, Math.floor(LOCK_TTL_MS / 2)));
+    };
+    console.info('[webauthn-patch] wrapped verifyBiometrics to consume cache only after verify success');
+  } else {
+    console.warn('[webauthn-patch] verifyBiometrics not found to patch — please ensure this snippet runs after your WebAuthn module');
+  }
 
-  console.info('[webauthn-fix] WebAuthn cached-options fixes installed');
+  // also export helpers so other code can call them if needed
+  window.__webauthn_consume_helpers = {
+    setCrossTabLock, clearCrossTabLock, invalidateCachedOptions, markCachedOptionsConsumed, isCrossTabLocked
+  };
+
 })();
 
 
