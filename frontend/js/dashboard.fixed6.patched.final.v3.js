@@ -11,6 +11,157 @@ const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let __backHandler = null;
 
+// 🔹 1. Define Missing Constants (Fix onDashboardLoad Crash)
+const IDLE_TIME = 15 * 60 * 1000; // 15 min inactivity
+const RESET_DEBOUNCE_MS = 1000; // Debounce resets
+const PROMPT_TIMEOUT = 5000; // 5s prompt auto-close
+const PROMPT_AUTO_CLOSE = true; // Enable auto-close
+
+console.log('[Fix] Constants defined: IDLE_TIME etc.—preventing ReferenceError');
+
+// 🔹 2. Aggressive Prefetch Disable (Catch All Instances)
+(function disableAllPrefetchCompletely() {
+  // Override global prefetch function
+  if (window.prefetchAuthOptions) {
+    const original = window.prefetchAuthOptions;
+    window.prefetchAuthOptions = () => {
+      console.warn('[Prefetch Fully Disabled] Fresh fetch in verifyBiometrics—skipping');
+      return Promise.resolve({}); // Return empty to avoid errors
+    };
+  }
+  
+  // Clear cache aggressively
+  window.__cachedAuthOptions = null;
+  window.__cachedAuthOptionsFetchedAt = 0;
+  
+  // Unbind from all potential elements (modal, buttons, dashboard)
+  const potentialSelectors = [
+    '#bioBtn', '.biometric-button', '[data-bio-button]', '.fingerprint-btn',
+    '#reauthModal button', '.keypad button[data-action="fingerprint"]',
+    '.biometricsSwitch', '[aria-checked="true"]'
+  ];
+  potentialSelectors.forEach(sel => {
+    const el = document.querySelector(sel);
+    if (el) {
+      ['click', 'touchstart', 'mouseenter', 'focus', 'mouseover', 'pointerdown'].forEach(evt => {
+        el.removeEventListener(evt, originalPrefetch || window.prefetchAuthOptions);
+      });
+    }
+  });
+  
+  // Kill any pending timeouts
+  if (window.__pendingPrefetchTimeout) clearTimeout(window.__pendingPrefetchTimeout);
+  
+  // Patch onDashboardLoad to skip prefetch calls
+  const originalOnLoad = window.onDashboardLoad;
+  window.onDashboardLoad = async () => {
+    if (originalOnLoad) await originalOnLoad();
+    console.log('[Prefetch Disable] Patched onDashboardLoad—no timed prefetch');
+  };
+  
+  console.log('[Prefetch Disable] All instances neutralized—fresh only on demand');
+})();
+
+// 🔹 3. Patch Keypad Handler for Direct Fingerprint Trigger
+(function patchFingerprintDirect() {
+  // Use MutationObserver to catch keypad render
+  const observer = new MutationObserver(() => {
+    const fpBtn = document.querySelector('button[data-action="fingerprint"], [data-keypad-index="7"], .fingerprint-btn');
+    if (fpBtn && !fpBtn.dataset.__directBioPatched) {
+      fpBtn.dataset.__directBioPatched = 'true';
+      
+      // Remove any old handlers
+      fpBtn.onclick = null;
+      ['click', 'touchend'].forEach(evt => fpBtn.removeEventListener(evt, window.prefetchAuthOptions));
+      
+      // New direct handler: Fresh fetch + prompt
+      const directHandler = async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log('[Fingerprint Direct Patch] Clicked—fetching fresh options + prompting');
+        
+        try {
+          // Quick session grab
+          const session = await getOrCreateSessionPromise();
+          const uid = session?.user?.id || session?.user?.uid;
+          if (!uid) throw new Error('No UID—check session');
+          
+          // Call verify (forces fresh)
+          const result = await verifyBiometrics(uid, 'reauth');
+          if (result.success) {
+            console.log('[Fingerprint Direct] Success—modal close');
+            onSuccessfulReauth?.();
+          } else {
+            console.warn('[Fingerprint Direct] Failed—show PIN');
+            switchViews?.(false);
+          }
+        } catch (err) {
+          console.error('[Fingerprint Direct] Error:', err);
+          notify(`Bio prompt failed: ${err.message}`, 'error');
+          switchViews?.(false);
+        }
+      };
+      
+      fpBtn.addEventListener('click', directHandler);
+      fpBtn.addEventListener('touchend', directHandler, { passive: false });
+      
+      console.log('[Fingerprint Direct Patch] Bound to button');
+    }
+  });
+  
+  observer.observe(document.body, { childList: true, subtree: true });
+  
+  // Immediate check
+  setTimeout(() => observer.takeRecords(), 100);
+  
+  console.log('[Fingerprint Direct Patch] Observer active—will trigger prompt on click');
+})();
+
+// 🔹 4. Enhance showReauthModal (Auto-Attempt Bio if Enabled)
+const originalShowReauth = window.showReauthModal || showReauthModal;
+window.showReauthModal = async (context = 'reauth') => {
+  console.log('showReauthModal Enhanced:', { context });
+  
+  try {
+    const status = await shouldReauth(context);
+    if (!status?.needsReauth) {
+      onSuccessfulReauth?.();
+      return;
+    }
+    
+    // Check bio flags
+    const bioEnabled = localStorage.getItem('biometricsEnabled') === 'true';
+    const hasCred = !!(localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id'));
+    
+    if (status.method === 'biometric' && bioEnabled && hasCred) {
+      console.log('showReauthModal: Auto bio attempt');
+      const session = await getOrCreateSessionPromise();
+      const uid = session?.user?.id || session?.user?.uid;
+      if (uid) {
+        const result = await verifyBiometrics(uid, context);
+        if (result.success) {
+          onSuccessfulReauth?.();
+          return; // Success—bail
+        }
+      }
+      console.log('showReauthModal: Bio attempt failed—PIN modal');
+    }
+    
+    // Fallback: Open PIN modal
+    await initReauthModal?.({ show: true, context });
+  } catch (err) {
+    console.error('showReauthModal Error:', err);
+    await initReauthModal?.({ show: true, context });
+  }
+};
+
+// 🔹 5. Ensure Constants in Inactivity (Prevent Further Crashes)
+if (typeof IDLE_TIME === 'undefined') window.IDLE_TIME = 15 * 60 * 1000;
+if (typeof RESET_DEBOUNCE_MS === 'undefined') window.RESET_DEBOUNCE_MS = 1000;
+
+// 🔹 6. Debug Logging for Flow (Add to Console for Testing)
+console.log('[Full Patches Applied] Fingerprint direct-trigger + prefetch kill + constants + modal bio-auto. Test: Inactivity → Modal → Fingerprint click → Prompt should appear.');
+
 function showLoader() {
   const loader = document.getElementById('appLoader');
   if (!loader) return;
