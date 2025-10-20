@@ -11033,22 +11033,48 @@ async function prefetchAuthOptionsFor(uid, context = 'reauth') {
 
 // 🔹 Main verifyBiometrics (robust: fresh challenge + withLoader + debug logs + safe PIN simulation)
 // 🔹 Main verifyBiometrics (always fresh: invalidate cache + fetch new + debug + safe PIN fallback)
-// Disable prefetch entirely (add this in your init/onload to remove bindings)
-function disablePrefetch() {
-  const bioBtn = document.getElementById('bioBtn') || document.querySelector('.biometric-button') || document.querySelector('[data-bio-button]');
-  if (bioBtn) {
-    ['pointerdown', 'mouseenter', 'click', 'touchstart', 'focus'].forEach(evt => bioBtn.removeEventListener(evt, window.prefetchAuthOptions));
+// Disable prefetch entirely (add this globally, e.g., after imports/onload)
+(function disableAllPrefetch() {
+  // Remove any existing prefetch event listeners/bindings
+  const bioSelectors = ['#bioBtn', '.biometric-button', '[data-bio-button]', '.fingerprint-btn'];
+  bioSelectors.forEach(sel => {
+    const btn = document.querySelector(sel);
+    if (btn) {
+      ['pointerdown', 'mouseenter', 'click', 'touchstart', 'focus', 'mouseover'].forEach(evt => {
+        btn.removeEventListener(evt, window.prefetchAuthOptions);
+      });
+    }
+  });
+  
+  // Disable global/timed prefetch
+  if (window.prefetchAuthOptions) {
+    window.prefetchAuthOptions = () => {
+      console.warn('[Prefetch Disabled] Fresh options fetched on demand to avoid staleness');
+    };
   }
-  // Remove any global/timed prefetch
-  window.prefetchAuthOptions = () => console.warn('[Prefetch Disabled] Use fresh options only');
-}
-disablePrefetch(); // Call on load
+  
+  // Clear any existing cache
+  window.__cachedAuthOptions = null;
+  window.__cachedAuthOptionsFetchedAt = 0;
+  
+  // Remove any timed prefetch setTimeout if pending
+  if (window.__pendingPrefetchTimeout) {
+    clearTimeout(window.__pendingPrefetchTimeout);
+    window.__pendingPrefetchTimeout = null;
+  }
+  
+  console.log('[Client Fix] All prefetch disabled—fresh fetches only on button click');
+})();
 
-// Updated verifyBiometrics (tighter: fresh only, integrity check, retries)
+// Updated verifyBiometrics (force fresh fetch + integrity check + no cache + retry on mismatch)
 async function verifyBiometrics(uid, context = 'reauth') {
-  console.log('%c[verifyBiometrics] Called (fresh-only, robust)', 'color:#0ff;font-weight:bold');
+  console.log('%c[verifyBiometrics] Called (fresh-only, no prefetch)', 'color:#0ff;font-weight:bold');
+  
+  // Disable prefetch just-in-case (redundant but safe)
+  disableAllPrefetch();
+  
   let attempts = 0;
-  const maxRetries = 2;
+  const maxRetries = 2; // Retry on mismatch/timeout
 
   while (attempts <= maxRetries) {
     attempts++;
@@ -11061,13 +11087,15 @@ async function verifyBiometrics(uid, context = 'reauth') {
         if (!userId) throw new Error('No user ID');
       }
 
-      // Clear cache (redundant but explicit)
+      // Force clear cache (no reliance on prefetch)
       window.__cachedAuthOptions = null;
+      window.__cachedAuthOptionsFetchedAt = 0;
 
-      // Fetch fresh options
+      // Fetch fresh options (explicit POST with credentialId)
       const storedId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
       if (!storedId) throw new Error('No credential ID—re-register biometrics');
 
+      console.log(`[verifyBiometrics] Attempt ${attempts}: Fetching fresh options for ${userId}`);
       const optRes = await fetch(`${window.__SEC_API_BASE}/webauthn/auth/options`, {
         method: 'POST',
         credentials: 'include',
@@ -11075,31 +11103,52 @@ async function verifyBiometrics(uid, context = 'reauth') {
         body: JSON.stringify({ userId, credentialId: storedId, context })
       });
 
-      if (!optRes.ok) throw new Error(`Options failed: ${await optRes.text()}`);
+      if (!optRes.ok) {
+        const errText = await optRes.text();
+        console.error('[verifyBiometrics] Options fetch failed', optRes.status, errText);
+        throw new Error(`Options fetch failed: ${errText}`);
+      }
 
       const publicKey = await optRes.json();
-      console.log('[verifyBiometrics] Fresh options', { challenge: publicKey.challenge.slice(0, 10) + '...' });
+      console.log('[verifyBiometrics] Fresh options received', { 
+        challengePreview: publicKey.challenge.slice(0, 10) + '...', 
+        allowCredCount: publicKey.allowCredentials?.length || 0 
+      });
 
-      // Convert to buffers
+      // Convert to buffers (assume fromBase64Url/toBase64Url helpers exist; fallback if not)
+      const fromBase64Url = (str) => {
+        str = str.replace(/-/g, '+').replace(/_/g, '/');
+        while (str.length % 4) str += '=';
+        return Uint8Array.from(atob(str), c => c.charCodeAt(0)).buffer;
+      };
+      const toBase64Url = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)))
+        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
       publicKey.challenge = fromBase64Url(publicKey.challenge);
       if (Array.isArray(publicKey.allowCredentials)) {
-        publicKey.allowCredentials = publicKey.allowCredentials.map(c => ({ ...c, id: fromBase64Url(c.id) }));
+        publicKey.allowCredentials = publicKey.allowCredentials.map(c => ({
+          ...c,
+          id: fromBase64Url(c.id)
+        }));
       }
       publicKey.userVerification = 'required';
-      publicKey.timeout = 90000; // 90s for mobile
+      publicKey.timeout = 90000; // 90s for mobile delays
 
-      // Get assertion
+      // Get assertion with fresh options
+      console.log('[verifyBiometrics] Prompting authenticator with fresh challenge');
       const assertion = await navigator.credentials.get({ publicKey });
-      if (!assertion) throw new Error('No assertion—canceled?');
+      if (!assertion) throw new Error('No assertion—user canceled or failed');
 
-      // Integrity check: Ensure signed challenge matches fetched one
-      const clientData = JSON.parse(atob(toBase64Url(assertion.response.clientDataJSON)));
-      if (clientData.challenge !== publicKey.challenge) {
-        throw new Error('Assertion challenge mismatch—stale data detected');
+      // Integrity check: Verify signed challenge matches fetched one
+      const clientDataJSON = toBase64Url(assertion.response.clientDataJSON);
+      const clientData = JSON.parse(atob(clientDataJSON));
+      const signedChallenge = clientData.challenge;
+      if (signedChallenge !== publicKey.challenge.toString()) { // Compare as string for mismatch detect
+        throw new Error('Signed challenge mismatch—stale data detected; retrying');
       }
-      console.log('[verifyBiometrics] Integrity OK—challenge matches');
+      console.log('[verifyBiometrics] Integrity check passed—challenge matches');
 
-      // Verify with loader
+      // Verify with server (in withLoader)
       return await withLoader(async () => {
         const payload = {
           id: assertion.id,
@@ -11114,6 +11163,8 @@ async function verifyBiometrics(uid, context = 'reauth') {
           userId
         };
 
+        console.log('[verifyBiometrics] Sending to /verify', { payloadId: payload.id });
+
         const verifyRes = await fetch(`${window.__SEC_API_BASE}/webauthn/auth/verify`, {
           method: 'POST',
           credentials: 'include',
@@ -11122,29 +11173,63 @@ async function verifyBiometrics(uid, context = 'reauth') {
         });
 
         if (!verifyRes.ok) {
-          const err = await verifyRes.text();
-          if (err.includes('unexpected challenge') && attempts < maxRetries) {
-            console.warn('[verifyBiometrics] Unexpected challenge—retrying fresh');
-            throw new Error('Retryable error');
+          const errText = await verifyRes.text();
+          console.error('[verifyBiometrics] Verify failed', verifyRes.status, errText);
+          // If mismatch error, throw retryable
+          if (errText.includes('unexpected challenge') && attempts <= maxRetries) {
+            throw new Error('Challenge mismatch—retrying with fresh options');
           }
-          throw new Error(`Verify failed: ${err}`);
+          throw new Error(`Server verify failed: ${errText}`);
         }
 
-        const data = await verifyRes.json();
+        const verifyData = await verifyRes.json();
+        console.log('[verifyBiometrics] Verify success', verifyData);
+
         onSuccessfulReauth();
-        notify('Success', 'success');
-        return { success: true, data };
+        notify('Authentication successful', 'success');
+        return { success: true, data: verifyData };
       });
+
     } catch (err) {
-      console.error('[verifyBiometrics] Attempt ' + attempts + ' failed', err);
-      if (attempts > maxRetries || !err.message.includes('Retryable')) {
-        notify(`Error: ${err.message}`, 'error');
-        switchViews(false); // PIN fallback
+      console.error(`[verifyBiometrics] Attempt ${attempts} failed`, err);
+      if (attempts > maxRetries || !err.message.includes('mismatch') && !err.message.includes('timeout')) {
+        notify(`Biometric error: ${err.message}`, 'error');
+        switchViews(false); // Fallback to PIN
         return { success: false, error: err.message };
       }
+      console.log(`[verifyBiometrics] Retryable error—attempt ${attempts + 1} with fresh fetch`);
     }
   }
+  
+  // Fallback after max retries
+  console.warn('[verifyBiometrics] Max retries exceeded—falling back to PIN');
+  switchViews(false);
+  return { success: false, error: 'Max retries exceeded' };
 }
+
+// Bind to bio button click (ensure fresh on click; add if not present)
+(function bindBioButtonFresh() {
+  const bioBtn = document.getElementById('bioBtn') || document.querySelector('.biometric-button') || document.querySelector('[data-bio="true"]');
+  if (bioBtn) {
+    bioBtn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      console.log('[Bio Button] Click detected—forcing fresh verifyBiometrics');
+      disableAllPrefetch(); // Double-check no prefetch
+      const session = await safeCall(getSession);
+      const uid = session?.user?.id || session?.user?.uid;
+      await verifyBiometrics(uid, 'reauth');
+    }, { once: false }); // Allow multiple clicks
+    console.log('[Bio Button] Fresh binding added');
+  } else {
+    // Fallback: Listen for custom event or modal open
+    document.addEventListener('biometric:trigger', async () => {
+      console.log('[Bio Event] Triggered—forcing fresh');
+      const session = await safeCall(getSession);
+      const uid = session?.user?.id || session?.user?.uid;
+      await verifyBiometrics(uid, 'reauth');
+    });
+  }
+})();
 
 
 // 🔹 Improved simulatePinEntry with verbose debug logs and Promise-based completion
