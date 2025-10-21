@@ -9810,6 +9810,98 @@ async function tryBiometricWithCachedOptions() {
         userHandle: assertion.response.userHandle ? bufToB64Url(assertion.response.userHandle) : null
       }
     };
+    // --- helper: normalize base64 => base64url (no padding) ---
+function normalizeB64Url(s) {
+  if (!s) return '';
+  // accept both base64 and base64url, convert to base64url without padding
+  s = s.replace(/\+/g, '-').replace(/\//g, '_');
+  s = s.replace(/=+$/, '');
+  return s;
+}
+
+// --- helper: extract challenge (base64url) from clientDataJSON of an assertion ---
+function getChallengeFromClientData(assertion) {
+  try {
+    const cd = assertion.response && assertion.response.clientDataJSON;
+    if (!cd) return null;
+    // cd may be an ArrayBuffer / Uint8Array
+    const bytes = new Uint8Array(cd instanceof ArrayBuffer ? cd : (cd.buffer || cd));
+    const text = new TextDecoder('utf-8').decode(bytes);
+    const parsed = JSON.parse(text);
+    // server usually emits challenge as base64url or base64. Keep original then normalize.
+    return normalizeB64Url(parsed.challenge || parsed.challenge || '');
+  } catch (e) {
+    console.warn('[webauthn] failed to decode clientDataJSON challenge', e);
+    return null;
+  }
+}
+
+// --- BEFORE posting verify: validate challenge still fresh on server ---
+// place this block right after building `payload` in bioVerifyAndFinalize(assertion)
+try {
+  // decode challenge from the assertion that our authenticator provided
+  const clientChallenge = getChallengeFromClientData(assertion);
+  if (!clientChallenge) {
+    // defensive: if we can't parse, abort to avoid sending a possibly invalid assertion
+    console.warn('[webauthn] could not decode client challenge; aborting verify to avoid stale assertion');
+    safeCall(notify, 'Biometric response could not be validated locally — please try again.', 'warn');
+    // optionally prefetch to prepare fresh challenge
+    try { invalidateAuthOptionsCache && invalidateAuthOptionsCache(); window.prefetchAuthOptions && window.prefetchAuthOptions(); } catch(e){}
+    return false;
+  }
+
+  // fetch the latest server options *without using the cached helper* so we are authoritative
+  const storedId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id') || null;
+  const uid = (await safeCall(getSession))?.user?.uid || (await safeCall(getSession))?.user?.id || null;
+  if (!uid || !storedId) {
+    console.warn('[webauthn] missing uid or credentialId while validating challenge');
+    // fall back to the normal flow (or notify)
+  } else {
+    // fetch fresh options from server (no cache)
+    const freshOptRes = await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/options', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' },
+      body: JSON.stringify({ userId: uid, credentialId: storedId, context: 'reauth' })
+    });
+
+    if (!freshOptRes || !freshOptRes.ok) {
+      // if the server fails to return options, be defensive: abort verify and inform user
+      console.warn('[webauthn] fresh options fetch failed', freshOptRes && freshOptRes.status);
+      safeCall(notify, 'Unable to confirm challenge with server — please try again.', 'error');
+      return false;
+    }
+
+    const freshOpts = await freshOptRes.json().catch(() => null);
+    const serverChallengeRaw = freshOpts && (freshOpts.challenge || freshOpts.challengeBase64 || null);
+    const serverChallenge = normalizeB64Url(serverChallengeRaw || '');
+
+    // If server challenge doesn't equal the one in clientDataJSON, the client assertion is stale
+    if (!serverChallenge || clientChallenge !== serverChallenge) {
+      console.warn('[webauthn] challenge mismatch — client used:', clientChallenge, 'server latest:', serverChallenge);
+      // Invalidate any cached options and warm new cache
+      try { invalidateAuthOptionsCache && invalidateAuthOptionsCache(); } catch (e) {}
+      try { window.__cachedAuthOptions = null; window.__cachedAuthOptionsFetchedAt = 0; } catch(e){}
+
+      // Ask the user to retry (authenticator saw an older challenge)
+      safeCall(notify, 'Biometric challenge expired — please try again.', 'warning', reauthAlert, reauthAlertMsg);
+
+      // prefetch fresh options to make the next attempt likely to succeed
+      try { window.prefetchAuthOptions && window.prefetchAuthOptions(); } catch(e){}
+
+      // Abort sending the stale assertion
+      return false;
+    }
+    // else: serverChallenge === clientChallenge => proceed to send verify payload
+  }
+} catch (err) {
+  console.error('[webauthn] error while validating client/server challenge', err);
+  // conservative fallback: don't send stale assertion
+  safeCall(notify, 'Unexpected error validating biometric response. Please try again.', 'error');
+  try { invalidateAuthOptionsCache && invalidateAuthOptionsCache(); window.prefetchAuthOptions && window.prefetchAuthOptions(); } catch(e){}
+  return false;
+}
+
 
     const session = await safeCall(getSession);
     const uid = session && session.user ? (session.user.uid || session.user.id) : null;
@@ -11130,7 +11222,6 @@ async function verifyBiometrics(uid, context = 'reauth') {
     return { success: false, error: err.message };
   }
 }
-window.verifyBiometrics = window.verifyBiometrics || verifyBiometrics;
 
 
 // 🔹 Improved simulatePinEntry with verbose debug logs and Promise-based completion
@@ -11700,171 +11791,6 @@ try { if (!window.disableBiometrics) window.disableBiometrics = disableBiometric
     }
     setTimeout(function(){ tryAttach(count+1); }, 200);
   })(0);
-
-})();
-
-/**
- * Patch: only consume cached WebAuthn options after server verify succeeds.
- * Insert this after your WebAuthn/security module (or at end of bundle).
- *
- * Behavior:
- *  - tryBiometricWithCachedOptions: acquires short cross-tab lock while calling
- *    navigator.credentials.get(), but does NOT mark cached options consumed.
- *  - verifyBiometrics: on successful server verify -> mark cached options consumed.
- *    on server error "No stored auth challenge" -> invalidate cached options (consume).
- *  - On navigator.credentials.get cancel (NotAllowedError/AbortError) -> do NOT consume.
- *
- * This reduces "No stored auth challenge" on second attempt while keeping single-use safety.
- */
-(function installConsumeAfterVerify() {
-  console.info('[webauthn-patch] installing consume-after-verify patch', { color:'#0ff', fontWeight:'bold' });
-  const LOCK_KEY = '__fg_webauthn_cached_lock';
-  const USED_KEY = '__fg_webauthn_cached_used_at';
-  const LOCK_TTL_MS = 5000;
-
-  function nowTs(){ return String(Date.now()); }
-  function setCrossTabLock(){
-    try{ localStorage.setItem(LOCK_KEY, nowTs()); window.__cachedAuthOptionsLock = true; window.__cachedAuthOptionsLockSince = Date.now(); }
-    catch(e){ window.__cachedAuthOptionsLock = true; window.__cachedAuthOptionsLockSince = Date.now(); }
-  }
-  function clearCrossTabLock(){
-    try{ localStorage.removeItem(LOCK_KEY); window.__cachedAuthOptionsLock = false; window.__cachedAuthOptionsLockSince = 0; }
-    catch(e){ window.__cachedAuthOptionsLock = false; window.__cachedAuthOptionsLockSince = 0; }
-  }
-  function isCrossTabLocked(){
-    try{
-      const v = localStorage.getItem(LOCK_KEY);
-      if(!v) return false;
-      const ts = parseInt(v,10);
-      if(Number.isNaN(ts)) return false;
-      if(Date.now() - ts > LOCK_TTL_MS){ try{ localStorage.removeItem(LOCK_KEY);}catch(e){}; return false; }
-      return true;
-    }catch(e){ return !!window.__cachedAuthOptionsLock; }
-  }
-  function invalidateCachedOptions(){
-    try{
-      window.__cachedAuthOptions = null;
-      window.__cachedAuthOptionsFetchedAt = 0;
-      try{ localStorage.setItem(USED_KEY, nowTs()); }catch(e){}
-      if(typeof window.invalidateAuthOptionsCache === 'function') {
-        try{ window.invalidateAuthOptionsCache(); }catch(e){}
-      }
-    }catch(e){}
-  }
-  function markCachedOptionsConsumed(){
-    try{
-      // server verified — mark consumed and clear
-      try{ window.__cachedAuthOptions._consumed = true; }catch(e){}
-      try{ localStorage.setItem(USED_KEY, nowTs()); }catch(e){}
-      window.__cachedAuthOptions = null;
-      window.__cachedAuthOptionsFetchedAt = 0;
-      if(typeof window.invalidateAuthOptionsCache === 'function'){
-        try{ window.invalidateAuthOptionsCache(); }catch(e){}
-      }
-    }catch(e){}
-  }
-
-  // Patch / override tryBiometricWithCachedOptions
-  async function tryBiometricWithCachedOptions_noConsume() {
-    try{
-      // If no cache or already consumed -> let caller fallback to fetch path
-      if(!window.__cachedAuthOptions) return { ok:false, reason:'no-cache' };
-      if(window.__cachedAuthOptions && window.__cachedAuthOptions._consumed) return { ok:false, reason:'cache-consumed' };
-      if(isCrossTabLocked()) return { ok:false, reason:'locked' };
-
-      // Build a safe copy
-      let raw = window.__cachedAuthOptions;
-      const publicKey = JSON.parse(JSON.stringify(raw));
-      // do some light conversions if helpers exist
-      try{
-        if(publicKey.challenge && typeof publicKey.challenge === 'string' && typeof window.fromBase64Url === 'function'){
-          publicKey.challenge = new Uint8Array(window.fromBase64Url(publicKey.challenge));
-        }
-        if(Array.isArray(publicKey.allowCredentials)){
-          publicKey.allowCredentials = publicKey.allowCredentials.map(c=>{
-            try{
-              if(typeof c.id === 'string' && typeof window.fromBase64Url === 'function'){
-                return { ...c, id: new Uint8Array(window.fromBase64Url(c.id)) };
-              }
-              return c;
-            }catch(e){ return c; }
-          });
-        }
-      }catch(e){ /* best-effort */ }
-
-      // Acquire lock so other tabs / prefetchers don't stomp while we're calling authenticator
-      setCrossTabLock();
-
-      try{
-        const assertion = await navigator.credentials.get({ publicKey });
-        // NOTE: intentionally do NOT mark consumed here; verify will mark on success.
-        // Release lock and return assertion to consumer.
-        clearCrossTabLock();
-        return { ok:true, assertion };
-      }catch(err){
-        // If user cancelled (NotAllowed/Abort), do NOT invalidate cache (let retry)
-        const isCancel = err && (err.name === 'NotAllowedError' || err.name === 'AbortError');
-        clearCrossTabLock();
-        return { ok:false, reason:'get-failed', error:err, cancelled:isCancel };
-      }
-    }catch(e){
-      try{ clearCrossTabLock(); }catch(_){}
-      return { ok:false, reason:'exception', error:e };
-    }
-  }
-
-  // Install or override global
-  try{
-    if(typeof window.tryBiometricWithCachedOptions === 'function'){
-      const orig = window.tryBiometricWithCachedOptions;
-      window.tryBiometricWithCachedOptions = async function patchedTry(...args){
-        // prefer the new conservative implementation
-        return await tryBiometricWithCachedOptions_noConsume.apply(this,args);
-      };
-    } else {
-      window.tryBiometricWithCachedOptions = tryBiometricWithCachedOptions_noConsume;
-    }
-    console.info('[webauthn-patch] installed tryBiometricWithCachedOptions_noConsume');
-  }catch(e){
-    console.warn('[webauthn-patch] failed to install tryBiometricWithCachedOptions', e);
-  }
-
-  // Patch verifyBiometrics to consume/invalidate cache only after server response
-  if(typeof window.verifyBiometrics === 'function'){
-    const origVerify = window.verifyBiometrics;
-    window.verifyBiometrics = async function patchedVerify(uid, context='reauth'){
-      // Call original verify but intercept the network verify step by wrapping fetch
-      // Simpler approach: call original verify then inspect outcome; if success => mark consumed
-      // If original verify throws with server text "No stored auth challenge" => invalidate cache.
-      try{
-        const result = await origVerify.apply(this, [uid, context]);
-        // origVerify returns { success: true, data } on success in your code
-        if(result && result.success){
-          console.debug('[webauthn-patch] verify success — marking cached options consumed');
-          try{ markCachedOptionsConsumed(); }catch(e){ console.warn('mark consume failed', e); }
-        }
-        return result;
-      }catch(err){
-        // If server returned an HTTP error with message "No stored auth challenge" we should clear cache
-        try{
-          const text = (err && err.message) ? err.message : '';
-          if(text && /no stored auth challenge/i.test(text)){
-            console.warn('[webauthn-patch] server returned No stored auth challenge — invalidating cached options');
-            try{ invalidateCachedOptions(); }catch(e){}
-          }
-        }catch(e){}
-        throw err;
-      }
-    };
-    console.info('[webauthn-patch] wrapped verifyBiometrics to consume cache only after verify success');
-  } else {
-    console.warn('[webauthn-patch] verifyBiometrics not found to patch — please ensure this snippet runs after your WebAuthn module');
-  }
-
-  // also export helpers so other code can call them if needed
-  window.__webauthn_consume_helpers = {
-    setCrossTabLock, clearCrossTabLock, invalidateCachedOptions, markCachedOptionsConsumed, isCrossTabLocked
-  };
 
 })();
 
