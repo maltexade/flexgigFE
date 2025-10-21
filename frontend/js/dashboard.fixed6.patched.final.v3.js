@@ -11,6 +11,74 @@ const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let __backHandler = null;
 
+// ---------------------- robust challenge normalizer (paste once, top-level) ----------------------
+function normalizeB64Url(s) {
+  if (!s && s !== 0) return '';
+  s = String(s);
+  s = s.replace(/\+/g, '-').replace(/\//g, '_');
+  s = s.replace(/=+$/, '');
+  return s;
+}
+
+function bytesToB64Url(u8) {
+  if (!u8 || !u8.length) return '';
+  var bin = '';
+  for (var i = 0; i < u8.length; i++) bin += String.fromCharCode(u8[i]);
+  return normalizeB64Url(btoa(bin));
+}
+
+function ensureUint8FromMaybeObject(val) {
+  if (val instanceof ArrayBuffer) return new Uint8Array(val);
+  if (ArrayBuffer.isView(val)) return new Uint8Array(val.buffer || val);
+  if (Array.isArray(val)) return new Uint8Array(val.map(n => Number(n) & 0xff));
+  if (val && typeof val === 'object') {
+    // handle { data: [...] }
+    if (Array.isArray(val.data)) return new Uint8Array(val.data.map(n => Number(n) & 0xff));
+    // handle numeric-key object {0: 143, 1: 32, ...}
+    var numericKeys = Object.keys(val).filter(k => /^\d+$/.test(k));
+    if (numericKeys.length) {
+      var max = Math.max.apply(null, numericKeys.map(Number));
+      var out = new Uint8Array(max + 1);
+      for (var k of numericKeys) {
+        var idx = Number(k);
+        var v = Number(val[k]);
+        out[idx] = Number.isFinite(v) ? (v & 0xff) : 0;
+      }
+      return out;
+    }
+  }
+  return null;
+}
+
+function challengeToB64Url(ch) {
+  if (ch === null || ch === undefined) return '';
+  // string path
+  if (typeof ch === 'string') {
+    // if looks like JSON numeric map, try parse then treat as object
+    var s = ch.trim();
+    if ((s[0] === '{' || s[0] === '[') && (s.indexOf(':') !== -1 || s.indexOf('[') === 0)) {
+      try {
+        var parsed = JSON.parse(s);
+        var u = ensureUint8FromMaybeObject(parsed);
+        if (u) return bytesToB64Url(u);
+      } catch (e) {/* ignore */}
+    }
+    // otherwise assume base64/base64url already
+    return normalizeB64Url(ch);
+  }
+  // object/array/typed array path
+  var u8 = ensureUint8FromMaybeObject(ch);
+  if (u8) return bytesToB64Url(u8);
+  // last resort: stringify then base64
+  try {
+    return normalizeB64Url(btoa(JSON.stringify(ch)));
+  } catch (e) {
+    return '';
+  }
+}
+// ---------------------- end normalizer ----------------------
+
+
 function showLoader() {
   const loader = document.getElementById('appLoader');
   if (!loader) return;
@@ -9574,20 +9642,38 @@ try {
       return;
     }
 
-    const freshOpts = await freshOptRes.json().catch(()=>null);
-    const serverChallengeRaw = freshOpts && (freshOpts.challenge || freshOpts.challengeBase64 || '');
-    const serverChallenge = normalizeB64Url(serverChallengeRaw || '');
+    // --- fetch fresh options already done; now robustly canonicalize server challenge ---
+const freshOpts = await freshOptRes.json().catch(() => null);
 
-    if (!serverChallenge || clientChallenge !== serverChallenge) {
-      console.warn('[webauthn] challenge mismatch — client used:', clientChallenge, 'server latest:', serverChallenge);
-      // invalidate cache and warm next attempt
-      try { invalidateAuthOptionsCache && invalidateAuthOptionsCache(); } catch(e){}
-      try { window.__cachedAuthOptions = null; window.__cachedAuthOptionsFetchedAt = 0; } catch(e){}
-      try { window.prefetchAuthOptions && window.prefetchAuthOptions(); } catch(e){}
+// Try several common challenge fields the server might use
+const rawFromServer = freshOpts && (
+  freshOpts.challenge ||
+  freshOpts.challengeBase64 ||
+  freshOpts.challengeBytes ||
+  freshOpts.challenge_raw ||
+  freshOpts.challengeValue ||
+  freshOpts.challengeData ||
+  null
+);
 
-      safeCall(notify, 'Biometric challenge expired — please try again.', 'warning', reauthAlert, reauthAlertMsg);
-      return; // abort the verify POST
-    }
+// convert to canonical base64url string
+const serverChallenge = challengeToB64Url(rawFromServer);
+
+// debug: show shape so we can confirm normalization (remove after testing)
+console.debug('[webauthn] clientChallenge:', clientChallenge, 'serverChallenge:', serverChallenge, 'serverRawType:', typeof rawFromServer, 'rawFromServer:', rawFromServer, 'freshOpts:', freshOpts);
+
+if (!serverChallenge || clientChallenge !== serverChallenge) {
+  console.warn('[webauthn] challenge mismatch — client used:', clientChallenge, 'server latest:', serverChallenge || rawFromServer);
+  // invalidate cache + warm next attempt
+  try { invalidateAuthOptionsCache && invalidateAuthOptionsCache(); } catch(e){}
+  try { window.__cachedAuthOptions = null; window.__cachedAuthOptionsFetchedAt = 0; } catch(e){}
+  try { window.prefetchAuthOptions && window.prefetchAuthOptions(); } catch(e){}
+
+  safeCall(notify, 'Biometric challenge expired — please try again.', 'warning', reauthAlert, reauthAlertMsg);
+  return false; // or return; (match the surrounding function control flow)
+}
+// else they match — proceed to verify POST
+
     // else: match -> continue to server verify
   }
 } catch (err) {
