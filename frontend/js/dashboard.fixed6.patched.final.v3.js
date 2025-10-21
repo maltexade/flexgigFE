@@ -9522,6 +9522,82 @@ async function tryBiometricWithCachedOptions() {
               userHandle: assertion.response.userHandle ? bufToB64Url(assertion.response.userHandle) : null
             }
           };
+          // ---------- START: challenge sanity-check (insert AFTER payload creation) ----------
+function normalizeB64Url(s) {
+  if (!s) return '';
+  s = String(s).replace(/\+/g, '-').replace(/\//g, '_');
+  s = s.replace(/=+$/, '');
+  return s;
+}
+function getChallengeFromClientData(assertion) {
+  try {
+    const cd = assertion.response && assertion.response.clientDataJSON;
+    if (!cd) return null;
+    const bytes = new Uint8Array(cd instanceof ArrayBuffer ? cd : (cd.buffer || cd));
+    const text = new TextDecoder('utf-8').decode(bytes);
+    const parsed = JSON.parse(text);
+    return normalizeB64Url(parsed.challenge || '');
+  } catch (e) {
+    console.warn('[webauthn] decode clientDataJSON failed', e);
+    return null;
+  }
+}
+
+try {
+  // decode challenge that the authenticator actually used
+  const clientChallenge = getChallengeFromClientData(assertion);
+  if (!clientChallenge) {
+    console.warn('[webauthn] could not decode client challenge; aborting to avoid stale assertion');
+    safeCall(notify, 'Biometric response could not be validated locally — please try again.', 'warn');
+    try { invalidateAuthOptionsCache && invalidateAuthOptionsCache(); window.prefetchAuthOptions && window.prefetchAuthOptions(); } catch(e){}
+    return;
+  }
+
+  // fetch authoritative latest options (no-cache)
+  const storedId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id') || localStorage.getItem('webauthn_cred') || null;
+  const sess = await safeCall(getSession);
+  const uid = sess && sess.user ? (sess.user.uid || sess.user.id) : null;
+  if (!uid || !storedId) {
+    console.warn('[webauthn] missing uid or credentialId when validating challenge; proceeding cautiously');
+  } else {
+    const freshOptRes = await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/options', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' },
+      body: JSON.stringify({ userId: uid, credentialId: storedId, context: 'reauth' })
+    }).catch(e => { console.warn('[webauthn] fresh options fetch failed', e); return null; });
+
+    if (!freshOptRes || !freshOptRes.ok) {
+      console.warn('[webauthn] fresh options fetch failed or non-OK', freshOptRes && freshOptRes.status);
+      safeCall(notify, 'Unable to confirm biometric challenge with server — please try again.', 'error');
+      try { window.prefetchAuthOptions && window.prefetchAuthOptions(); } catch(e){}
+      return;
+    }
+
+    const freshOpts = await freshOptRes.json().catch(()=>null);
+    const serverChallengeRaw = freshOpts && (freshOpts.challenge || freshOpts.challengeBase64 || '');
+    const serverChallenge = normalizeB64Url(serverChallengeRaw || '');
+
+    if (!serverChallenge || clientChallenge !== serverChallenge) {
+      console.warn('[webauthn] challenge mismatch — client used:', clientChallenge, 'server latest:', serverChallenge);
+      // invalidate cache and warm next attempt
+      try { invalidateAuthOptionsCache && invalidateAuthOptionsCache(); } catch(e){}
+      try { window.__cachedAuthOptions = null; window.__cachedAuthOptionsFetchedAt = 0; } catch(e){}
+      try { window.prefetchAuthOptions && window.prefetchAuthOptions(); } catch(e){}
+
+      safeCall(notify, 'Biometric challenge expired — please try again.', 'warning', reauthAlert, reauthAlertMsg);
+      return; // abort the verify POST
+    }
+    // else: match -> continue to server verify
+  }
+} catch (err) {
+  console.error('[webauthn] error while validating challenge', err);
+  safeCall(notify, 'Unexpected error validating biometric response. Please try again.', 'error');
+  try { invalidateAuthOptionsCache && invalidateAuthOptionsCache(); window.prefetchAuthOptions && window.prefetchAuthOptions(); } catch(e){}
+  return;
+}
+// ---------- END: challenge sanity-check ----------
+
 
           const session = await safeCall(getSession);
           const uid = session && session.user ? (session.user.uid || session.user.id) : null;
@@ -9915,7 +9991,7 @@ try {
     let verifyRes;
     try {
       verifyRes = await withLoader(async () => {
-        notify('Verifying fingerprint — logging you in...', 'info');
+        showSlideNotification('Verifying fingerprint — logging you in...', 'info');
         return await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/verify', {
           method: 'POST',
           credentials: 'include',
