@@ -10047,15 +10047,7 @@ async function bioVerifyAndFinalize(assertion) {
       }
     };
 
-    // normalize base64/base64url (no padding)
-    function normalizeB64Url(s) {
-      if (!s && s !== 0) return '';
-      s = String(s);
-      s = s.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/,'');
-      return s;
-    }
-
-    // extract challenge string (base64url) from clientDataJSON inside an assertion
+    // extract challenge string (base64url) from clientDataJSON
     function getChallengeFromClientData(assertion) {
       try {
         const cd = assertion.response && assertion.response.clientDataJSON;
@@ -10070,56 +10062,29 @@ async function bioVerifyAndFinalize(assertion) {
       }
     }
 
-    // Helpers to canonicalize various challenge shapes from server into base64url string
-    function ensureUint8FromMaybeObject(val) {
-      if (val === null || val === undefined) return null;
-      if (val instanceof ArrayBuffer) return new Uint8Array(val);
-      if (ArrayBuffer.isView(val)) return new Uint8Array(val.buffer || val);
-      if (val && Array.isArray(val.data)) return new Uint8Array(val.data);
-      if (Array.isArray(val)) return new Uint8Array(val.map(n => Number(n) & 0xff));
-      if (val && typeof val === 'object') {
-        const keys = Object.keys(val).filter(k => /^\d+$/.test(k)).map(k => parseInt(k,10));
-        if (keys.length) {
-          const max = Math.max(...keys);
-          const out = new Uint8Array(max + 1);
-          for (const k of keys) {
-            const n = Number(val[k]);
-            out[k] = Number.isFinite(n) ? (n & 0xff) : 0;
-          }
-          return out;
+    // fetch fresh options with no-cache
+    async function fetchFreshOptions(uid, storedId) {
+      try {
+        const res = await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/options', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' },
+          body: JSON.stringify({ userId: uid, credentialId: storedId, context: 'reauth' })
+        });
+        if (!res.ok) {
+          console.warn('[webauthn] fresh options fetch failed', res.status);
+          return null;
         }
+        return await res.json();
+      } catch (err) {
+        console.warn('[webauthn] fresh options fetch error', err);
+        return null;
       }
-      return null;
-    }
-    function bytesToB64Url(u8) {
-      if (!u8 || !u8.length) return '';
-      let bin = '';
-      for (let i=0;i<u8.length;i++) bin += String.fromCharCode(u8[i]);
-      return normalizeB64Url(btoa(bin));
-    }
-    function challengeToB64Url(ch) {
-      if (ch === null || ch === undefined) return '';
-      if (typeof ch === 'string') {
-        // if it looks like JSON array/object, try parse->uint8
-        const t = ch.trim();
-        if (t.startsWith('[') || t.startsWith('{')) {
-          try {
-            const parsed = JSON.parse(ch);
-            const u = ensureUint8FromMaybeObject(parsed);
-            if (u) return bytesToB64Url(u);
-          } catch(e){}
-        }
-        return normalizeB64Url(ch);
-      }
-      const u8 = ensureUint8FromMaybeObject(ch);
-      if (u8) return bytesToB64Url(u8);
-      try { return normalizeB64Url(btoa(JSON.stringify(ch))); } catch(e){ return ''; }
     }
 
-    // Immediate-get fallback (if helper not present). Returns { ok:true, assertion } or {ok:false}
+    // convert options to publicKey for navigator.credentials.get
     async function doImmediateGetFromFreshOpts(freshOpts) {
       try {
-        // convert freshOpts to a usable publicKey object
         const publicKey = {};
         if ('rpId' in freshOpts) publicKey.rpId = freshOpts.rpId;
         if ('userVerification' in freshOpts) publicKey.userVerification = freshOpts.userVerification;
@@ -10127,51 +10092,39 @@ async function bioVerifyAndFinalize(assertion) {
         if ('extensions' in freshOpts) publicKey.extensions = freshOpts.extensions;
 
         // challenge
-        let rawCh = freshOpts.challenge || freshOpts.challengeBase64 || freshOpts.challengeBytes || null;
-        if (rawCh === null || rawCh === undefined) {
-          // sometimes server returns base64 encoded in another field
-          rawCh = freshOpts.challenge_raw || freshOpts.challengeValue || freshOpts.challengeData || rawCh;
-        }
-        // ensure Uint8Array
-        const chU8 = ensureUint8FromMaybeObject(rawCh) || (function(s){
+        let rawCh = freshOpts.challenge || freshOpts.challengeBase64 || freshOpts.challengeBytes || freshOpts.challenge_raw || freshOpts.challengeValue || null;
+        const chU8 = ensureUint8FromMaybeObject(rawCh) || (typeof rawCh === 'string' ? (function(s){
           try {
-            if (!s && s !== 0) return null;
-            if (typeof s === 'string') {
-              // base64url -> base64 -> atob -> Uint8Array
-              let t = s.replace(/-/g,'+').replace(/_/g,'/');
-              while (t.length % 4) t += '=';
-              const bin = atob(t);
-              const out = new Uint8Array(bin.length);
-              for (let i=0;i<bin.length;i++) out[i] = bin.charCodeAt(i);
-              return out;
-            }
-          } catch(e){}
-          return null;
-        })(rawCh);
-
+            if (!s) return null;
+            let t = s.replace(/-/g,'+').replace(/_/g,'/');
+            while (t.length % 4) t += '=';
+            const bin = atob(t);
+            const out = new Uint8Array(bin.length);
+            for (let i=0;i<bin.length;i++) out[i] = bin.charCodeAt(i);
+            return out;
+          } catch(e) { return null; }
+        })(rawCh) : null);
         if (!chU8) {
-          console.warn('[webauthn] could not construct challenge Uint8Array for immediate get');
+          console.warn('[webauthn] could not construct challenge Uint8Array');
           return { ok: false };
         }
         publicKey.challenge = chU8;
 
-        // allowCredentials -> convert ids to Uint8Array where possible
+        // allowCredentials
         const rawAllow = Array.isArray(freshOpts.allowCredentials) ? freshOpts.allowCredentials : (freshOpts.allow || []);
         const allow = [];
-        for (let i=0;i<rawAllow.length;i++) {
-          const c = rawAllow[i];
+        for (let c of rawAllow) {
           if (!c) continue;
-          const item = { type: c.type || 'public-key' };
-          item.transports = c.transports || ['internal'];
+          const item = { type: c.type || 'public-key', transports: c.transports || ['internal'] };
           const idU8 = ensureUint8FromMaybeObject(c.id) || (typeof c.id === 'string' ? (function(s){
             try {
               let t = s.replace(/-/g,'+').replace(/_/g,'/');
-              while (t.length %4) t += '=';
+              while (t.length % 4) t += '=';
               const bin = atob(t);
               const out = new Uint8Array(bin.length);
               for (let j=0;j<bin.length;j++) out[j] = bin.charCodeAt(j);
               return out;
-            } catch(e){ return null; }
+            } catch(e) { return null; }
           })(c.id) : null);
           if (idU8) item.id = idU8;
           else item.id = c.id;
@@ -10179,108 +10132,98 @@ async function bioVerifyAndFinalize(assertion) {
         }
         publicKey.allowCredentials = allow;
 
-        // call authenticator
-        const newAssertion = await navigator.credentials.get({ publicKey });
-        return { ok: true, assertion: newAssertion };
+        // acquire lock to prevent prefetch interference
+        window.__cachedAuthOptionsLock = true;
+        window.__cachedAuthOptionsLockSince = Date.now();
+
+        try {
+          const newAssertion = await navigator.credentials.get({ publicKey });
+          return { ok: true, assertion: newAssertion };
+        } finally {
+          setTimeout(() => {
+            try { window.__cachedAuthOptionsLock = false; window.__cachedAuthOptionsLockSince = 0; } catch (e) {}
+          }, 80);
+        }
       } catch (err) {
         console.warn('[webauthn] immediate navigator.credentials.get failed', err);
         return { ok: false, error: err };
       }
     }
 
-    // --- BEGIN: validate client/server challenge and attempt immediate displacement if mismatch --- //
-    try {
-      const clientChallenge = getChallengeFromClientData(assertion);
-      if (!clientChallenge) {
-        console.warn('[webauthn] could not decode client challenge; aborting verify to avoid stale assertion');
-        safeCall(notify, 'Biometric response could not be validated locally — please try again.', 'warn');
-        try { invalidateAuthOptionsCache && invalidateAuthOptionsCache(); window.prefetchAuthOptions && window.prefetchAuthOptions(); } catch(e){}
-        return false;
-      }
-
-      const storedId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id') || null;
-      const uid = (await safeCall(getSession))?.user?.uid || (await safeCall(getSession))?.user?.id || null;
-      if (!uid || !storedId) {
-        console.warn('[webauthn] missing uid or credentialId while validating challenge');
-      } else {
-        const freshOptRes = await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/options', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' },
-          body: JSON.stringify({ userId: uid, credentialId: storedId, context: 'reauth' })
-        });
-
-        if (!freshOptRes || !freshOptRes.ok) {
-          console.warn('[webauthn] fresh options fetch failed', freshOptRes && freshOptRes.status);
-          safeCall(notify, 'Unable to confirm challenge with server — please try again.', 'error');
-          return false;
-        }
-
-        const freshOpts = await freshOptRes.json().catch(()=>null);
-
-        const rawFromServer = freshOpts && (freshOpts.challenge || freshOpts.challengeBase64 || freshOpts.challengeBytes || freshOpts.challenge_raw || freshOpts.challengeValue || null);
-        const serverChallenge = challengeToB64Url(rawFromServer);
-
-        console.debug('[webauthn] clientChallenge:', clientChallenge, 'serverChallenge:', serverChallenge, 'rawFromServer:', rawFromServer, 'freshOpts:', freshOpts);
-
-        if (!serverChallenge || clientChallenge !== serverChallenge) {
-          console.warn('[webauthn] challenge mismatch — client used:', clientChallenge, 'server latest:', serverChallenge);
-
-          // Try immediate re-get using helper if present
-          let immediateResult = null;
-          try {
-            if (typeof tryImmediateReauthWithFreshOptions === 'function') {
-              immediateResult = await tryImmediateReauthWithFreshOptions(freshOpts, 1);
-            } else {
-              immediateResult = await doImmediateGetFromFreshOpts(freshOpts);
-            }
-          } catch (err) {
-            console.warn('[webauthn] immediate re-get helper threw', err);
-            immediateResult = { ok: false, error: err };
-          }
-
-          if (immediateResult && immediateResult.ok && immediateResult.assertion) {
-            // got fresh assertion — re-run the verify flow with the new assertion (seamless)
-            try {
-              console.debug('[webauthn] immediate re-get succeeded: sending fresh assertion to verify');
-              return await bioVerifyAndFinalize(immediateResult.assertion);
-            } catch (err) {
-              console.error('[webauthn] verify with immediate assertion failed', err);
-              safeCall(notify, 'Biometric verification failed — please try again.', 'error');
-              return false;
-            }
-          }
-
-          // immediate re-get failed -> invalidate cache, prefetch, ask user to retry
-          try { invalidateAuthOptionsCache && invalidateAuthOptionsCache(); } catch(e){}
-          try { window.__cachedAuthOptions = null; window.__cachedAuthOptionsFetchedAt = 0; } catch(e){}
-          try { window.prefetchAuthOptions && window.prefetchAuthOptions(); } catch(e){}
-          safeCall(notify, 'Biometric challenge expired — please try again.', 'warning', reauthAlert, reauthAlertMsg);
-          return false;
-        }
-        // else: challenges match, proceed to verify
-      }
-    } catch (err) {
-      console.error('[webauthn] error while validating client/server challenge', err);
-      safeCall(notify, 'Unexpected error validating biometric response. Please try again.', 'error');
-      try { invalidateAuthOptionsCache && invalidateAuthOptionsCache(); window.prefetchAuthOptions && window.prefetchAuthOptions(); } catch(e){}
-      return false;
-    }
-    // --- END: challenge validation / immediate displacement attempt --- //
-
-    // proceed to server verify (bounded retry if server still complains)
+    // get session and credential
     const session = await safeCall(getSession);
-    const uid = session && session.user ? (session.user.uid || session.user.id) : null;
+    const uid = session?.user?.uid || session?.user?.id || null;
     if (!uid) {
       console.warn('[bio] no session uid found before verify');
       safeCall(notify, 'Unable to find your session. Please try again.', 'error');
       return false;
     }
+    const storedId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id') || null;
+    if (!storedId) {
+      console.warn('[bio] no stored credentialId');
+      safeCall(notify, 'No biometric credential found. Please use PIN.', 'error');
+      return false;
+    }
 
+    // verify with retry on challenge mismatch
+    let currentPayload = payload;
     let attempt = 0;
-    const maxAttempts = 2; // 1 initial + 1 retry if server returns explicit challenge-mismatch
+    const maxAttempts = 2; // initial + one auto-retry
+
     while (attempt < maxAttempts) {
       attempt++;
+
+      // client-side challenge validation (optional, but helps catch issues early)
+      if (attempt === 1) {
+        const clientChallenge = getChallengeFromClientData(assertion);
+        if (!clientChallenge) {
+          console.warn('[webauthn] could not decode client challenge');
+          safeCall(notify, 'Biometric response could not be validated locally.', 'error');
+          return false;
+        }
+
+        const freshOpts = await fetchFreshOptions(uid, storedId);
+        if (!freshOpts) {
+          console.warn('[webauthn] failed to fetch fresh options for client validation');
+          safeCall(notify, 'Unable to validate biometric response. Please try again.', 'error');
+          return false;
+        }
+
+        const rawFromServer = freshOpts.challenge || freshOpts.challengeBase64 || freshOpts.challengeBytes || freshOpts.challenge_raw || freshOpts.challengeValue || null;
+        const serverChallenge = challengeToB64Url(rawFromServer);
+
+        console.debug('[webauthn] clientChallenge:', clientChallenge, 'serverChallenge:', serverChallenge, 'rawFromServer:', rawFromServer);
+
+        if (!serverChallenge || clientChallenge !== serverChallenge) {
+          console.warn('[webauthn] client-side challenge mismatch — client:', clientChallenge, 'server:', serverChallenge);
+          // attempt immediate retry
+          const immediateResult = await doImmediateGetFromFreshOpts(freshOpts);
+          if (immediateResult.ok && immediateResult.assertion) {
+            console.debug('[webauthn] immediate retry succeeded; updating payload');
+            const newAssertion = immediateResult.assertion;
+            currentPayload = {
+              id: newAssertion.id,
+              rawId: bufToB64Url(newAssertion.rawId),
+              type: newAssertion.type,
+              response: {
+                authenticatorData: bufToB64Url(newAssertion.response.authenticatorData),
+                clientDataJSON: bufToB64Url(newAssertion.response.clientDataJSON),
+                signature: bufToB64Url(newAssertion.response.signature),
+                userHandle: newAssertion.response.userHandle ? bufToB64Url(newAssertion.response.userHandle) : null
+              }
+            };
+            // continue to verify with new payload
+          } else {
+            console.warn('[webauthn] immediate retry failed', immediateResult.error);
+            try { invalidateAuthOptionsCache && invalidateAuthOptionsCache(); window.prefetchAuthOptions && window.prefetchAuthOptions(); } catch(e) {}
+            safeCall(notify, 'Biometric authentication failed — please try again or use PIN.', 'error');
+            return false;
+          }
+        }
+        // else: challenges match, proceed to verify
+      }
+
+      // server verify
       let verifyRes;
       try {
         verifyRes = await withLoader(async () => {
@@ -10289,7 +10232,7 @@ async function bioVerifyAndFinalize(assertion) {
             method: 'POST',
             credentials: 'include',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ...payload, userId: uid })
+            body: JSON.stringify({ ...currentPayload, userId: uid })
           });
         });
       } catch (err) {
@@ -10304,102 +10247,81 @@ async function bioVerifyAndFinalize(assertion) {
         return false;
       }
 
-      // If server returned non-OK, try to detect explicit challenge mismatch message and attempt immediate retry
       if (!verifyRes.ok) {
-        const errText = await verifyRes.text().catch(()=>verifyRes.statusText || `HTTP ${verifyRes.status}`);
+        const errText = await verifyRes.text().catch(() => verifyRes.statusText || `HTTP ${verifyRes.status}`);
         console.warn('[bio] server responded non-OK:', verifyRes.status, errText);
 
-        // heuristics: server included expected/actual challenges or message like "Unexpected authentication response challenge"
-        const mismatchDetected = /challenge/i.test(errText) && /unexpected|mismatch|expected/i.test(errText);
-
+        // detect challenge mismatch
+        const mismatchDetected = /no stored challenge|challenge.*mismatch|unexpected.*challenge|invalid.*challenge/i.test(errText);
         if (mismatchDetected && attempt < maxAttempts) {
-          console.debug('[bio] server reported challenge mismatch; will attempt immediate displacement retry');
-
-          // fetch fresh options then immediate get and re-run verify with new assertion
-          try {
-            const storedId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id') || null;
-            const freshOptRes2 = await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/options', {
-              method: 'POST',
-              credentials: 'include',
-              headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' },
-              body: JSON.stringify({ userId: uid, credentialId: storedId, context: 'reauth' })
-            });
-            if (!freshOptRes2 || !freshOptRes2.ok) {
-              console.warn('[webauthn] fresh options fetch failed for retry', freshOptRes2 && freshOptRes2.status);
-              safeCall(notify, 'Unable to refresh biometric challenge — please try again.', 'error');
-              return false;
-            }
-            const freshOpts2 = await freshOptRes2.json().catch(()=>null);
-            let immediateResult2 = null;
-            try {
-              if (typeof tryImmediateReauthWithFreshOptions === 'function') immediateResult2 = await tryImmediateReauthWithFreshOptions(freshOpts2, 1);
-              else immediateResult2 = await doImmediateGetFromFreshOpts(freshOpts2);
-            } catch (e) {
-              console.warn('[webauthn] immediate re-get (retry) threw', e);
-              immediateResult2 = { ok: false, error: e };
-            }
-            if (immediateResult2 && immediateResult2.ok && immediateResult2.assertion) {
-              // replace payload with new assertion and loop to attempt verify again
-              const newAssertion = immediateResult2.assertion;
-              payload.id = newAssertion.id;
-              payload.rawId = bufToB64Url(newAssertion.rawId);
-              payload.type = newAssertion.type;
-              payload.response = {
+          console.debug('[bio] server reported challenge mismatch; attempting auto-retry');
+          const freshOpts = await fetchFreshOptions(uid, storedId);
+          if (!freshOpts) {
+            console.warn('[webauthn] failed to fetch fresh options for retry');
+            safeCall(notify, 'Unable to refresh biometric challenge. Please try again.', 'error');
+            return false;
+          }
+          const immediateResult = await doImmediateGetFromFreshOpts(freshOpts);
+          if (immediateResult.ok && immediateResult.assertion) {
+            console.debug('[webauthn] server-mismatch retry succeeded; updating payload');
+            const newAssertion = immediateResult.assertion;
+            currentPayload = {
+              id: newAssertion.id,
+              rawId: bufToB64Url(newAssertion.rawId),
+              type: newAssertion.type,
+              response: {
                 authenticatorData: bufToB64Url(newAssertion.response.authenticatorData),
                 clientDataJSON: bufToB64Url(newAssertion.response.clientDataJSON),
                 signature: bufToB64Url(newAssertion.response.signature),
                 userHandle: newAssertion.response.userHandle ? bufToB64Url(newAssertion.response.userHandle) : null
-              };
-              // continue loop to post the new payload
-              continue;
-            } else {
-              // immediate retry failed
-              try { invalidateAuthOptionsCache && invalidateAuthOptionsCache(); } catch(e){}
-              try { window.__cachedAuthOptions = null; window.__cachedAuthOptionsFetchedAt = 0; } catch(e){}
-              try { window.prefetchAuthOptions && window.prefetchAuthOptions(); } catch(e){}
-              safeCall(notify, 'Biometric challenge expired — please try again.', 'warning', reauthAlert, reauthAlertMsg);
-              return false;
-            }
-          } catch (err) {
-            console.error('[webauthn] retry flow error', err);
-            safeCall(notify, 'Biometric verification failed — please try again.', 'error');
+              }
+            };
+            continue; // retry verify with new payload
+          } else {
+            console.warn('[webauthn] server-mismatch retry failed', immediateResult.error);
+            try { invalidateAuthOptionsCache && invalidateAuthOptionsCache(); window.prefetchAuthOptions && window.prefetchAuthOptions(); } catch(e) {}
+            safeCall(notify, 'Biometric authentication failed — please try again or use PIN.', 'error');
             return false;
           }
         }
 
-        // other non-OK or mismatch not detected -> surface err and stop
-        safeCall(notify, 'Biometric verification failed: ' + (errText || 'Server error'), 'error');
+        // non-mismatch error or max attempts reached
+        safeCall(notify, `Biometric verification failed: ${errText || 'Server error'}`, 'error');
         return false;
       }
 
-      // parse success body
-      let verifyData = {};
+      // parse success
+      let verifyData;
       try {
-        verifyData = await verifyRes.json().catch(() => ({}));
+        verifyData = await verifyRes.json();
       } catch (err) {
         console.warn('[bio] failed to parse verify JSON', err);
-        verifyData = {};
+        safeCall(notify, 'Verification failed — invalid server response.', 'error');
+        return false;
       }
 
-      if (verifyData && verifyData.verified) {
+      if (verifyData?.verified) {
+        console.debug('[bio] verification successful');
         safeCall(__sec_getCurrentUser);
         safeCall(onSuccessfulReauth);
-        try { if (reauthModal) reauthModal.classList.add('hidden'); } catch(e){}
+        try { if (reauthModal) reauthModal.classList.add('hidden'); } catch(e) {}
         return true;
       } else {
         console.warn('[bio] verify returned ok but not verified', verifyData);
-        safeCall(notify, 'Biometric verification failed', 'error');
+        safeCall(notify, 'Biometric verification failed.', 'error');
         return false;
       }
-    } // end attempts loop
+    }
 
-    // fallback
-    safeCall(notify, 'Biometric verification failed', 'error');
+    // max attempts reached
+    console.warn('[bio] max retry attempts reached');
+    try { invalidateAuthOptionsCache && invalidateAuthOptionsCache(); window.prefetchAuthOptions && window.prefetchAuthOptions(); } catch(e) {}
+    safeCall(notify, 'Biometric authentication failed — please try again or use PIN.', 'error');
     return false;
 
   } catch (err) {
-    console.error('bioVerifyAndFinalize error', err);
-    safeCall(notify, 'Biometric verification error', 'error');
+    console.error('[bio] bioVerifyAndFinalize error', err);
+    safeCall(notify, 'Biometric verification error.', 'error');
     return false;
   }
 }
