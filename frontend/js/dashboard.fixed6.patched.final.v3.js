@@ -9948,9 +9948,92 @@ try {
       return false;
     }
 
-    const freshOpts = await freshOptRes.json().catch(() => null);
-    const serverChallengeRaw = freshOpts && (freshOpts.challenge || freshOpts.challengeBase64 || null);
-    const serverChallenge = normalizeB64Url(serverChallengeRaw || '');
+    // --- robust: convert various challenge shapes into a base64url string (no padding) ---
+function normalizeB64Url(s) {
+  if (!s) return '';
+  s = String(s).replace(/\+/g, '-').replace(/\//g, '_');
+  s = s.replace(/=+$/, '');
+  return s;
+}
+
+function bytesToB64Url(u8) {
+  if (!u8 || !u8.length) return '';
+  // build binary string then btoa
+  let bin = '';
+  for (let i = 0; i < u8.length; i++) bin += String.fromCharCode(u8[i]);
+  return normalizeB64Url(btoa(bin));
+}
+
+function ensureUint8FromMaybeObject(val) {
+  // handle ArrayBuffer / TypedArray
+  if (!val && val !== 0) return null;
+  if (val instanceof ArrayBuffer) return new Uint8Array(val);
+  if (ArrayBuffer.isView(val)) return new Uint8Array(val.buffer || val);
+
+  // handle { data: [...] }
+  if (val && Array.isArray(val.data)) return new Uint8Array(val.data);
+
+  // handle numeric-key object {0: 143, 1: 54, ...}
+  if (val && typeof val === 'object') {
+    const keys = Object.keys(val).filter(k => /^\d+$/.test(k)).map(k => parseInt(k, 10));
+    if (keys.length) {
+      const max = Math.max(...keys);
+      const out = new Uint8Array(max + 1);
+      for (const k of keys) {
+        const n = Number(val[k]);
+        out[k] = Number.isFinite(n) ? (n & 0xff) : 0;
+      }
+      return out;
+    }
+  }
+
+  // handle array of numbers
+  if (Array.isArray(val)) return new Uint8Array(val.map(n => Number(n) & 0xff));
+
+  return null;
+}
+
+function challengeToB64Url(ch) {
+  if (!ch && ch !== 0) return '';
+  // string path - assume base64 or base64url already
+  if (typeof ch === 'string') {
+    // if it looks like JSON with numeric keys, try parse fallback
+    if (ch.trim().startsWith('{') || ch.trim().startsWith('[')) {
+      try {
+        const parsed = JSON.parse(ch);
+        const u = ensureUint8FromMaybeObject(parsed);
+        if (u) return bytesToB64Url(u);
+      } catch (e) { /* ignore */ }
+    }
+    // otherwise treat as base64/base64url
+    return normalizeB64Url(ch);
+  }
+
+  // typed / numeric object path
+  const u8 = ensureUint8FromMaybeObject(ch);
+  if (u8) return bytesToB64Url(u8);
+
+  // last resort: stringify and base64 it (unlikely)
+  try {
+    const json = JSON.stringify(ch);
+    return normalizeB64Url(btoa(json));
+  } catch (e) {
+    return '';
+  }
+}
+
+// --- usage: after fetching freshOpts from server ---
+const freshOpts = await freshOptRes.json().catch(() => null);
+
+// pick common challenge fields server may use
+const rawFromServer = freshOpts && (freshOpts.challenge || freshOpts.challengeBase64 || freshOpts.challengeBytes || freshOpts.challenge_raw || freshOpts.challengeValue || null);
+
+// convert to canonical base64url string
+const serverChallenge = challengeToB64Url(rawFromServer);
+
+// debug (helps during testing)
+console.debug('[webauthn] clientChallenge:', clientChallenge, 'serverChallenge:', serverChallenge, 'serverRaw:', rawFromServer, 'freshOpts:', freshOpts);
+
 
     // If server challenge doesn't equal the one in clientDataJSON, the client assertion is stale
     if (!serverChallenge || clientChallenge !== serverChallenge) {
