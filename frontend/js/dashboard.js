@@ -11,6 +11,81 @@ const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let __backHandler = null;
 
+// ===== Sticky reauth bootstrap (drop near top of dashboard.js, BEFORE initFlow boot) =====
+(function ensurePersistentReauthBootstrap(){
+  try {
+    // If the cross-tab module exists, call its init now (defensive)
+    if (typeof initCrossTabReauth === 'function') {
+      try { initCrossTabReauth(); } catch(e) { console.warn('early initCrossTabReauth failed', e); }
+    }
+
+    // Small helper to attempt showing modal even if DOM isn't ready yet
+    const LOCAL_KEY = 'fg_reauth_required_v1';
+    function readLocalKey() {
+      try { return JSON.parse(localStorage.getItem(LOCAL_KEY) || 'null'); } catch(e){ return null; }
+    }
+
+    const stored = readLocalKey();
+    if (!stored) return;
+
+    // Try to show modal as soon as possible, but wait for DOM wiring if needed.
+    let attempts = 0;
+    const maxAttempts = 20;
+    const retryMs = 250;
+
+    const tryShow = async () => {
+      attempts++;
+      try {
+        // Prefer the local show helper if available
+        if (typeof showReauthModalLocal === 'function') {
+          showReauthModalLocal({ fromStorageObj: stored });
+          return;
+        }
+        // Otherwise prefer the higher-level API
+        if (window.__reauth && typeof window.__reauth.initReauthModal === 'function') {
+          // try to init and show
+          await window.__reauth.initReauthModal({ show: true, context: 'reauth' });
+          return;
+        }
+        // Fallback: dispatch storage event to trigger other wiring
+        window.dispatchEvent(new StorageEvent('storage', { key: LOCAL_KEY, newValue: JSON.stringify(stored) }));
+      } catch (e) {
+        // swallow and retry
+      }
+      if (attempts < maxAttempts) setTimeout(tryShow, retryMs);
+      else console.warn('ensurePersistentReauthBootstrap: giving up after attempts');
+    };
+
+    tryShow();
+
+    // When tab becomes visible, re-check local key and force show if present
+    document.addEventListener('visibilitychange', () => {
+      try {
+        if (document.visibilityState === 'visible') {
+          const s = readLocalKey();
+          if (s) {
+            try {
+              if (typeof showReauthModalLocal === 'function') showReauthModalLocal({ fromStorageObj: s });
+              else if (window.__reauth && typeof window.__reauth.initReauthModal === 'function') window.__reauth.initReauthModal({ show: true, context: 'reauth' });
+            } catch (e) {}
+          }
+        }
+      } catch (e) {}
+    }, { passive:true });
+
+    // Before unload: keep the key in place (defensive; localStorage persists anyway)
+    window.addEventListener('beforeunload', () => {
+      try {
+        const s = readLocalKey();
+        if (s) localStorage.setItem(LOCAL_KEY, JSON.stringify(s));
+      } catch (e) {}
+    });
+  } catch (err) {
+    console.warn('ensurePersistentReauthBootstrap failed', err);
+  }
+})();
+
+
 // ---------- helpers (add once near top-level) ----------
 function normalizeB64Url(s) {
   if (s === null || s === undefined) return '';
