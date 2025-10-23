@@ -127,45 +127,93 @@ async function tryImmediateReauthWithFreshOptions(freshOpts, attemptLimit = 1) {
 
 
 
-function showLoader() {
-  const loader = document.getElementById('appLoader');
-  if (!loader) return;
+// ---------- Loader (refcounted, idempotent) ----------
+(function () {
+  // loader refcount - number of active showLoader callers
+  let __loaderRefCount = 0;
+  let __loaderSavedState = null; // Map to hold saved disabled states
+  let __loaderBackHandlerInstalled = false;
 
-  loader.hidden = false;
-
-  // 🔹 Disable all interactive elements
-  document.querySelectorAll('button, input, select, textarea, a').forEach(el => {
-    el.setAttribute('data-prev-disabled', el.disabled);
-    el.disabled = true;
-  });
-
-  // 🔹 Lock back button
-  __backHandler = () => {
-    history.pushState(null, '', location.href);
-  };
-  window.addEventListener('popstate', __backHandler);
-  history.pushState(null, '', location.href);
-}
-
-function hideLoader() {
-  const loader = document.getElementById('appLoader');
-  if (!loader) return;
-
-  loader.hidden = true;
-
-  // 🔹 Restore original disabled state
-  document.querySelectorAll('[data-prev-disabled]').forEach(el => {
-    const prev = el.getAttribute('data-prev-disabled') === 'true';
-    el.disabled = prev;
-    el.removeAttribute('data-prev-disabled');
-  });
-
-  // 🔹 Unlock back button
-  if (__backHandler) {
-    window.removeEventListener('popstate', __backHandler);
-    __backHandler = null;
+  function _saveAndDisableInteractive() {
+    // Save only once (map keyed by element)
+    __loaderSavedState = new Map();
+    const els = Array.from(document.querySelectorAll('button, input, select, textarea, a'));
+    els.forEach(el => {
+      try {
+        // store boolean previous disabled state
+        __loaderSavedState.set(el, !!el.disabled);
+        // disable interactives
+        el.disabled = true;
+      } catch (e) { /* ignore elements that throw */ }
+    });
   }
-}
+
+  function _restoreInteractive() {
+    if (!__loaderSavedState) return;
+    try {
+      __loaderSavedState.forEach((wasDisabled, el) => {
+        try {
+          // restore previous boolean state
+          el.disabled = !!wasDisabled;
+        } catch (e) { /* ignore */ }
+      });
+    } finally {
+      __loaderSavedState = null;
+    }
+  }
+
+  window.showLoader = function showLoader() {
+    const loader = document.getElementById('appLoader');
+    if (!loader) return;
+    __loaderRefCount++;
+
+    // Only actually change DOM when refcount transitions 0 -> 1
+    if (__loaderRefCount === 1) {
+      loader.hidden = false;
+
+      // Save and disable interactive controls
+      _saveAndDisableInteractive();
+
+      // Lock back button (install popstate handler once)
+      if (!__loaderBackHandlerInstalled) {
+        __backHandler = function () {
+          history.pushState(null, '', location.href);
+        };
+        window.addEventListener('popstate', __backHandler);
+        history.pushState(null, '', location.href);
+        __loaderBackHandlerInstalled = true;
+      }
+    }
+  };
+
+  window.hideLoader = function hideLoader(forceReset = false) {
+    const loader = document.getElementById('appLoader');
+    if (!loader) return;
+
+    // allow callers to force-hide (useful in exceptional cases)
+    if (forceReset) {
+      __loaderRefCount = 0;
+    } else {
+      __loaderRefCount = Math.max(0, __loaderRefCount - 1);
+    }
+
+    // Only actually restore when refcount reaches 0
+    if (__loaderRefCount === 0) {
+      loader.hidden = true;
+
+      // restore saved states
+      _restoreInteractive();
+
+      // Remove back handler if installed
+      if (__loaderBackHandlerInstalled && typeof __backHandler === 'function') {
+        window.removeEventListener('popstate', __backHandler);
+        __backHandler = null;
+        __loaderBackHandlerInstalled = false;
+      }
+    }
+  };
+})();
+
 
 async function withLoader(task) {
   const start = Date.now();
@@ -9267,48 +9315,81 @@ async function handlePinCompletion() {
     }
 
     // Keyboard support: attach once
-    if (!pinView.__keydownHandler) {
-      console.log('Attaching keyboard handler');
-      pinView.__keydownHandler = (e) => {
-        console.log('Keydown in keypad:', e.key, 'pinView hidden?', pinView.classList.contains('hidden'));
-        if (pinView.classList.contains('hidden')) return;
-        if (/^[0-9]$/.test(e.key)) {
-          console.log('Keyboard digit:', e.key);
-          if (typeof inputDigit === 'function') {
-            try { inputDigit(e.key); } catch (err) {
-              console.error('Error in keyboard inputDigit:', err);
-            }
-            refreshInputsUI();
-          } else {
-            if (currentPin.length < 4) {
-              currentPin += e.key;
-              console.log('CurrentPin after keyboard add:', currentPin);
-              refreshInputsUI();
-              if (currentPin.length === 4) {
-                handlePinCompletion(); // Now defined
-              }
-            }
-          }
-        } else if (e.key === 'Backspace') {
-          console.log('Keyboard backspace');
-          if (typeof handleDelete === 'function') {
-            try { handleDelete(); } catch (err) {
-              console.error('Error in keyboard handleDelete:', err);
-            }
-          } else {
-            if (currentPin.length > 0) {
-              currentPin = currentPin.slice(0, -1);
-              console.log('CurrentPin after keyboard delete:', currentPin);
-            }
-            refreshInputsUI();
-          }
-        } else if (e.key === 'Enter') {
-          console.log('Keyboard enter');
-          handlePinCompletion(); // Now defined
-        }
-      };
-      document.addEventListener('keydown', pinView.__keydownHandler);
+    // Keyboard support: attach once (fixed — only active while modal truly visible)
+if (!pinView.__keydownHandler) {
+  console.log('Attaching keyboard handler (visibility-guarded)');
+
+  // Helper: is the reauth modal actually visible to the user?
+  function isReauthModalVisible() {
+    try {
+      if (!reauthModal) return false;
+      // if a manual flag exists, trust it (you set it when showing/hiding modal)
+      if (typeof reauthModalOpen !== 'undefined') {
+        if (reauthModalOpen) return true;
+        // if explicitly false, fast-return
+        if (!reauthModalOpen) return false;
+      }
+      // class-based hidden check
+      if (reauthModal.classList && reauthModal.classList.contains('hidden')) return false;
+      // style-based display check
+      const cs = getComputedStyle(reauthModal);
+      if (cs && (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0')) return false;
+      // layout check: offsetParent is null when element (or ancestor) display:none
+      if (reauthModal.offsetParent === null) return false;
+      return true;
+    } catch (err) {
+      // if anything goes wrong, be conservative and treat as not visible
+      return false;
     }
+  }
+
+  pinView.__keydownHandler = (e) => {
+    // Only handle keyboard when the modal is actually visible
+    if (!isReauthModalVisible()) return;
+
+    // If the active element is outside the modal, ignore to avoid hijacking global inputs
+    try {
+      const active = document.activeElement;
+      if (active && reauthModal && !reauthModal.contains(active)) {
+        // allow Enter if you specifically want it to submit when focus outside — currently we ignore
+        return;
+      }
+    } catch (err) {
+      // ignore and continue if safe checks fail
+    }
+
+    // Now handle digits/backspace/enter exactly as before
+    if (/^[0-9]$/.test(e.key)) {
+      if (typeof inputDigit === 'function') {
+        try { inputDigit(e.key); } catch (err) { /* swallow */ }
+        try { refreshInputsUI(); } catch (err) {}
+      } else {
+        if (currentPin.length < 4) {
+          currentPin += e.key;
+          try { refreshInputsUI(); } catch (err) {}
+          if (currentPin.length === 4) {
+            handlePinCompletion();
+          }
+        }
+      }
+    } else if (e.key === 'Backspace') {
+      if (typeof handleDelete === 'function') {
+        try { handleDelete(); } catch (err) {}
+      } else {
+        if (currentPin.length > 0) {
+          currentPin = currentPin.slice(0, -1);
+          try { refreshInputsUI(); } catch (err) {}
+        }
+      }
+    } else if (e.key === 'Enter') {
+      handlePinCompletion();
+    }
+  };
+
+  // attach once
+  document.addEventListener('keydown', pinView.__keydownHandler, true);
+}
+
 
     // initial render/reset
     console.log('Initial reset in initReauthKeypad');
@@ -9647,15 +9728,14 @@ async function tryBiometricWithCachedOptions() {
     };
 
     // Immediately show the "logging you in" message and loader so it appears on the first prompt
-    try { safeCall(notify, 'Verifying fingerprint — logging you in...', 'info', reauthAlert, reauthAlertMsg); } catch (e) { console.warn('[reauth] notify failed', e); }
-    await new Promise(r => setTimeout(r, 30));
-    try { showLoader(); } catch (e) { console.warn('[reauth] showLoader failed', e); }
+        // Notify user (so message appears immediately) and open modal BEFORE withLoader.
+    try { safeCall(notify, 'Verifying fingerprint — logging you in...', 'info', reauthAlert, reauthAlertMsg); } catch (e) { /* silent fallback */ }
 
-    // Open PIN modal and enable inputs so user has fallback while server verifies
+    // Open PIN modal and enable inputs so user has fallback while server verifies (do this before withLoader)
     try {
       if (typeof openPinModalForReauth === 'function') safeCall(openPinModalForReauth);
       else if (reauthModal && reauthModal.classList) reauthModal.classList.remove('hidden');
-    } catch (e) { console.warn('[reauth] openPinModalForReauth failed', e); }
+    } catch (e) { /* ignore modal open failure */ }
 
     try {
       if (typeof enableReauthInputs === 'function') enableReauthInputs();
@@ -9663,21 +9743,24 @@ async function tryBiometricWithCachedOptions() {
         const inputs = Array.from(document.querySelectorAll('.reauthpin-inputs input'));
         inputs.forEach(i => { try { i.disabled = false; } catch(e){} });
       }
-    } catch (e) { console.warn('[reauth] enableReauthInputs failed', e); }
+    } catch (e) { /* ignore */ }
 
     // Optionally simulate PIN entry so UI looks live while verification happens
-    try { if (typeof simulatePinEntry === 'function') simulatePinEntry({ stagger:0, expectedCount:4, fillAll:true }); } catch(e){ console.warn('[reauth] simulatePinEntry failed', e); }
+    try { if (typeof simulatePinEntry === 'function') simulatePinEntry({ stagger:0, expectedCount:4, fillAll:true }); } catch(e){ /* ignore */ }
 
-    // Send assertion to server for verification — server will accept any matching outstanding challenge.
+    // Send assertion to server for verification — only use withLoader (do NOT call showLoader manually)
     let verifyRes;
     try {
       verifyRes = await withLoader(async () => {
-        console.log('[reauth] posting /webauthn/auth/verify with cached assertion');
+        // withLoader will call showLoader() internally (refcounted in the fixed implementation).
         return await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/verify', {
           method: 'POST',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...payload, userId: (await safeCall(getSession))?.user?.uid || (await safeCall(getSession))?.user?.id || null })
+          body: JSON.stringify({
+            ...payload,
+            userId: (await safeCall(getSession))?.user?.uid || (await safeCall(getSession))?.user?.id || null
+          })
         });
       });
     } catch (err) {
@@ -9685,6 +9768,7 @@ async function tryBiometricWithCachedOptions() {
       safeCall(notify, 'Verification failed — network error. Please try again.', 'error', reauthAlert, reauthAlertMsg);
       return;
     }
+
 
     if (!verifyRes) {
       console.error('[reauth] verifyRes falsy after fetch');
@@ -9724,7 +9808,7 @@ async function tryBiometricWithCachedOptions() {
       console.debug('[reauth] verification successful');
       safeCall(__sec_getCurrentUser);
       safeCall(onSuccessfulReauth);
-      try { if (reauthModal) reauthModal.classList.add('hidden'); } catch(e){}
+      try { if (reauthModal) reauthModal.classList.add('hidden'); reauthModalOpen = false; } catch(e){}
       return;
     } else {
       console.warn('[reauth] verify returned ok but not verified', verifyData);
@@ -9757,7 +9841,7 @@ async function tryBiometricWithCachedOptions() {
   // --- Decide whether reauth is needed; if not, close and call success handler ---
   const reauthStatus = await shouldReauth(context);
   if (!reauthStatus.needsReauth) {
-    try { if (reauthModal) reauthModal.classList.add('hidden'); } catch (e) {}
+    try { if (reauthModal) reauthModal.classList.add('hidden'); reauthModalOpen = false; } catch (e) {}
     safeCall(onSuccessfulReauth);
     return true;
   }
@@ -9796,7 +9880,7 @@ async function tryBiometricWithCachedOptions() {
         }
         await safeCall(reAuthenticateWithPin, uidInfo.user.uid, pin, (success) => {
           if (success) {
-            try { if (reauthModal) reauthModal.classList.add('hidden'); } catch(e){}
+            try { if (reauthModal) reauthModal.classList.add('hidden'); reauthModalOpen = false; } catch(e){}
             resetReauthInputs();
             safeCall(__sec_getCurrentUser);
             safeCall(onSuccessfulReauth);
@@ -10113,7 +10197,7 @@ async function bioVerifyAndFinalize(assertion) {
         console.debug('[bio] verification successful');
         safeCall(__sec_getCurrentUser);
         safeCall(onSuccessfulReauth);
-        try { if (reauthModal) reauthModal.classList.add('hidden'); } catch(e) {}
+        try { if (reauthModal) reauthModal.classList.add('hidden'); reauthModalOpen = false; } catch(e) {}
         return true;
       } else {
         console.warn('[bio] verify returned ok but not verified', verifyData);
@@ -10184,8 +10268,8 @@ async function bioVerifyAndFinalize(assertion) {
   // modal show/hide and focus
   try {
     if (!show) {
-      try { if (reauthModal) reauthModal.classList.add('hidden'); } catch(e){}
-      try { if (promptModal) promptModal.classList.add('hidden'); } catch(e){}
+      try { if (reauthModal) reauthModal.classList.add('hidden'); reauthModalOpen = false; } catch(e){}
+      try { if (promptModal) promptModal.classList.add('hidden'); reauthModalOpen = false; } catch(e){}
       return true;
     }
 
@@ -11782,19 +11866,88 @@ async function showReauthModal(context = 'reauth') {
   }
 
   function onSuccessfulReauth() {
-    console.log('Reauth modal closed: inactivity resumed');
-    console.log('onSuccessfulReauth called');
-    reauthModalOpen = false; // Resume idle
-    localStorage.removeItem('reauthPending'); // Clear pending flag
+  try {
+    // mark modal closed
+    reauthModalOpen = false;
+
+    // Clear any pending reauth flag persisted in storage
+    try { localStorage.removeItem('reauthPending'); } catch (e) {}
+
+    // Ensure DOM refs are current
+    try { cacheDomRefs(); } catch (e) {}
+
+    // Hide the modals and clear accessibility/inert attributes
     try {
-      cacheDomRefs();
-      if (reauthModal) reauthModal.classList.add('hidden');
-      if (promptModal) promptModal.classList.add('hidden');
-    } catch (e) {
-      console.error('Error hiding modals on success:', e);
-    }
-    resetIdleTimer(); // Restart idle timer
+      if (reauthModal) {
+        reauthModal.classList.add('hidden');
+        // remove modal accessibility attributes set earlier
+        try { reauthModal.removeAttribute('aria-modal'); } catch (e) {}
+        try { reauthModal.removeAttribute('role'); } catch (e) {}
+        // restore inert / pointer-events
+        if ('inert' in HTMLElement.prototype) {
+          try { reauthModal.inert = false; } catch (e) {}
+        } else {
+          try { reauthModal.removeAttribute('aria-hidden'); reauthModal.style.pointerEvents = ''; } catch (e) {}
+        }
+      }
+    } catch (e) {}
+
+    try {
+      if (promptModal) {
+        promptModal.classList.add('hidden');
+        try { promptModal.removeAttribute('aria-hidden'); promptModal.style.pointerEvents = ''; } catch (e) {}
+      }
+    } catch (e) {}
+
+    // Turn off global reauth active state (removes keydown handler)
+    try { setReauthActive(false); } catch (e) {}
+
+    // Release any cached auth-options lock used during navigator.credentials.get
+    try {
+      if (window.__cachedAuthOptionsLock) {
+        window.__cachedAuthOptionsLock = false;
+        window.__cachedAuthOptionsLockSince = 0;
+      }
+    } catch (e) {}
+
+    // Clear any simulate-pin timers/intervals started while verifying
+    try {
+      if (window.__simulatePinInterval) {
+        clearInterval(window.__simulatePinInterval);
+        window.__simulatePinInterval = null;
+      }
+      if (window.__simulatePinTimeout) {
+        clearTimeout(window.__simulatePinTimeout);
+        window.__simulatePinTimeout = null;
+      }
+    } catch (e) {}
+
+    // Reset / clear PIN UI and re-enable inputs
+    try { if (typeof resetReauthInputs === 'function') resetReauthInputs(); } catch (e) {}
+    try { if (typeof disableReauthInputs === 'function') disableReauthInputs(false); } catch (e) {}
+
+    // Hide any loader that may be left showing
+    try { if (typeof hideLoader === 'function') hideLoader(); } catch (e) {}
+
+    // Restart the page idle timer
+    try { if (typeof resetIdleTimer === 'function') resetIdleTimer(); } catch (e) {}
+
+    // Optionally restore focus to main app (defensive)
+    try {
+      const appRoot = document.querySelector('main') || document.body;
+      if (appRoot && typeof appRoot.focus === 'function') appRoot.focus();
+    } catch (e) {}
+
+    // finished
+    return true;
+  } catch (err) {
+    // silent fail-safe; avoid console noise in prod
+    try { setReauthActive(false); } catch (e) {}
+    try { if (typeof resetIdleTimer === 'function') resetIdleTimer(); } catch (e) {}
+    return false;
   }
+}
+
 
   /* -----------------------
      Boot sequence
