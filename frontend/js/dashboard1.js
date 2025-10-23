@@ -959,349 +959,6 @@ const svgShapes = {
 };
 
 // --- MAIN EVENT LISTENERS ---
-
-// --- WebAuthn: 
-// --- WebAuthn conversion & caching helpers ---
-// Converts base64url strings to Uint8Array and ensures publicKey object is safe for navigator.credentials.get
-(function(){
-  function base64UrlToUint8Array(base64UrlString) {
-    if (!base64UrlString) return new Uint8Array();
-    let b64 = base64UrlString.replace(/-/g, '+').replace(/_/g, '/');
-    while (b64.length % 4) b64 += '=';
-    const binary = atob(b64);
-    const len = binary.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
-    return bytes;
-  }
-
-  function ensurePublicKeyArrayBuffers(publicKey) {
-    if (!publicKey || typeof publicKey !== 'object') return publicKey;
-    const pk = Object.assign({}, publicKey);
-    try {
-      if (typeof pk.challenge === 'string') {
-        pk.challenge = base64UrlToUint8Array(pk.challenge);
-      } else if (pk.challenge && pk.challenge instanceof ArrayBuffer) {
-        pk.challenge = new Uint8Array(pk.challenge);
-      }
-      if (Array.isArray(pk.allowCredentials)) {
-        pk.allowCredentials = pk.allowCredentials.map(function(c) {
-          const copy = Object.assign({}, c);
-          if (typeof copy.id === 'string') {
-            copy.id = base64UrlToUint8Array(copy.id);
-          } else if (copy.id && copy.id instanceof ArrayBuffer) {
-            copy.id = new Uint8Array(copy.id);
-          }
-          return copy;
-        });
-      }
-    } catch (e) {
-      console.warn('[webauthn] ensurePublicKeyArrayBuffers error', e);
-    }
-    return pk;
-  }
-
-  // Expose helpers globally for other code to use
-window.__webauthn_helpers = window.__webauthn_helpers || {};
-window.__webauthn_helpers.base64UrlToUint8Array = base64UrlToUint8Array;
-window.__webauthn_helpers.ensurePublicKeyArrayBuffers = ensurePublicKeyArrayBuffers;
-
-/* ---------- Patch getAuthOptionsWithCache ---------- */
-try {
-  if (typeof window.getAuthOptionsWithCache === 'function' && !window.__webauthn_getAuthPatched) {
-    window.__webauthn_getAuthPatched = true;
-    const _origGet = window.getAuthOptionsWithCache.bind(window);
-
-    window.getAuthOptionsWithCache = async function (opts = {}) {
-      try {
-        // Normalize options: accept opts.body, opts.userId, opts.credentialId
-        opts = opts || {};
-        let body = opts.body || {};
-
-        if (opts.userId) body.userId = opts.userId;
-        if (opts.credentialId) body.credentialId = opts.credentialId;
-
-        // Ensure userId is present
-        if (!body.userId) {
-          try {
-            const __sess =
-              typeof getSession === 'function'
-                ? await getSession()
-                : window.__cachedSession || null;
-            body.userId =
-              (__sess &&
-                __sess.user &&
-                (__sess.user.uid || __sess.user.id)) ||
-              localStorage.getItem('uid') ||
-              localStorage.getItem('userId') ||
-              body.userId ||
-              null;
-          } catch (e) {
-            console.warn('[WebAuthn] getSession fetch failed', e);
-          }
-        }
-
-        // Ensure credentialId and context
-        if (!body.credentialId)
-          body.credentialId =
-            localStorage.getItem('credentialId') || null;
-        if (!body.context) body.context = 'reauth';
-
-        // Call original getAuthOptionsWithCache
-        const raw = await _origGet({ body });
-
-        // Convert public key properties
-        const converted = ensurePublicKeyArrayBuffers(raw);
-        window.__cachedAuthOptions = converted;
-        return converted;
-      } catch (err) {
-        console.warn('[WebAuthn] patched getAuthOptionsWithCache failed', err);
-        throw err;
-      }
-    };
-  }
-} catch (e) {
-  console.warn('[webauthn] patch getAuthOptionsWithCache failed', e);
-}
-
-/* ---------- Patch prefetchAuthOptions ---------- */
-try {
-  if (typeof window.prefetchAuthOptions === 'function' && !window.__webauthn_prefetchPatched) {
-    window.__webauthn_prefetchPatched = true;
-    const _origPrefetch = window.prefetchAuthOptions.bind(window);
-
-    window.prefetchAuthOptions = async function (opts = {}) {
-      if (window.__prefetchInFlight) {
-        console.log('[WebAuthn] prefetch already in flight');
-        return;
-      }
-      window.__prefetchInFlight = true;
-
-      try {
-        const __psess =
-          typeof getSession === 'function'
-            ? await getSession()
-            : window.__cachedSession || null;
-        const __puid =
-          (__psess &&
-            __psess.user &&
-            (__psess.user.uid || __psess.user.id)) ||
-          localStorage.getItem('uid') ||
-          localStorage.getItem('userId') ||
-          null;
-
-        if (!__puid) {
-          console.log('[WebAuthn] prefetch skipping: no uid');
-          window.__prefetchInFlight = false;
-          return;
-        }
-
-        const raw = await _origPrefetch(opts);
-        const converted = ensurePublicKeyArrayBuffers(raw);
-        window.__cachedAuthOptions = converted;
-        return converted;
-      } catch (err) {
-        console.warn('[WebAuthn] patched prefetchAuthOptions failed', err);
-
-        // fallback direct fetch
-        try {
-          const apiBase =
-            window.__SEC_API_BASE ||
-            (typeof API_BASE !== 'undefined'
-              ? API_BASE
-              : 'https://api.flexgig.com.ng');
-          const url = apiBase + '/webauthn/auth/options';
-          const fetchImpl =
-            window.__webauthnFetchHelper ||
-            window.__origFetch ||
-            window.fetch;
-          const res = await fetchImpl(url, {
-            method: 'POST',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({}),
-            bypassWebauthnWrapper: true,
-          });
-          if (!res.ok)
-            throw new Error('Auth options fetch failed: ' + res.status);
-          const raw = await res.json();
-          const conv = ensurePublicKeyArrayBuffers(raw);
-          window.__cachedAuthOptions = conv;
-          return conv;
-        } catch (e2) {
-          console.warn('[WebAuthn] direct fetch fallback failed', e2);
-          throw e2;
-        }
-      } finally {
-        window.__prefetchInFlight = false;
-      }
-    };
-  }
-} catch (e) {
-  console.warn('[webauthn] patch prefetchAuthOptions failed', e);
-}
-
-/* ---------- Fallback helper ---------- */
-window.getConvertedAuthOptionsFallback =
-  window.getConvertedAuthOptionsFallback ||
-  (async function () {
-    if (window.__cachedAuthOptions) return window.__cachedAuthOptions;
-    try {
-      if (typeof window.getAuthOptionsWithCache === 'function') {
-        const o = await window.getAuthOptionsWithCache({});
-        return ensurePublicKeyArrayBuffers(o);
-      } else {
-        const apiBase =
-          window.__SEC_API_BASE ||
-          (typeof API_BASE !== 'undefined' ? API_BASE : '');
-        const fetchImpl =
-          window.__origFetch || window.fetch;
-        const res = await fetchImpl(apiBase + '/webauthn/auth/options', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({}),
-        });
-        if (!res.ok)
-          throw new Error('Auth options fetch failed: ' + res.status);
-        const raw = await res.json();
-        const conv = ensurePublicKeyArrayBuffers(raw);
-        window.__cachedAuthOptions = conv;
-        return conv;
-      }
-    } catch (e) {
-      console.warn('[webauthn] getConvertedAuthOptionsFallback failed', e);
-      throw e;
-    }
-  })();
-
-// getAuthOptionsWithCache (minimal safe helper) ---
-(function(){
-  const AUTH_OPTIONS_TTL = 30 * 1000; // 30s
-  function fromBase64UrlToBuffer(b64url){
-    let b = b64url.replace(/-/g,'+').replace(/_/g,'/');
-    while (b.length % 4) b += '=';
-    const str = atob(b);
-    const arr = new Uint8Array(str.length);
-    for (let i=0;i<str.length;i++) arr[i] = str.charCodeAt(i);
-    return arr.buffer;
-  }
-  function convertOptionsFromServer(publicKey) {
-    try {
-      if (!publicKey) return publicKey;
-      const clone = JSON.parse(JSON.stringify(publicKey));
-      if (clone.challenge && typeof clone.challenge === 'string') clone.challenge = fromBase64UrlToBuffer(clone.challenge);
-      if (Array.isArray(clone.allowCredentials)) {
-        clone.allowCredentials = clone.allowCredentials.map(function(c){
-          try { return Object.assign({}, c, { id: fromBase64UrlToBuffer(c.id) }); } catch(e){ return c; }
-        });
-      }
-      return clone;
-    } catch(e){ console.warn('[webauthn] convertOptionsFromServer', e); return publicKey; }
-  }
-  let _raw=null, _conv=null, _ts=0;
-  window.getAuthOptionsWithCache = window.getAuthOptionsWithCache || (async function(opts={}){
-    if (_conv && (Date.now()-_ts) <= AUTH_OPTIONS_TTL) return _conv;
-    const apiBase = (window.__SEC_API_BASE || (typeof API_BASE!=='undefined' ? API_BASE : ''));
-    const res = await __webauthnFetchHelper(`${apiBase}/webauthn/auth/options`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({})
-    });
-    if (!res.ok) throw new Error('Auth options fetch failed');
-    _raw = await res.json();
-    _conv = convertOptionsFromServer(_raw);
-    _ts = Date.now();
-    return _conv;
-  });
-  window.invalidateAuthOptionsCache = function(){ _raw=_conv=null; _ts=0; };
-})();
-
-// --- WebAuthn: centralized TTL-backed fetch for /webauthn/auth/options ---
-(function(){
-  const AUTH_OPTIONS_TTL = 30 * 1000; // 30s
-  function cacheAuthOptions(opts) { try { window.__cachedAuthOptions = opts || null; window.__cachedAuthOptionsFetchedAt = opts ? Date.now() : 0; } catch(e){} }
-  function cachedOptionsFresh() { try { return !!(window.__cachedAuthOptions && window.__cachedAuthOptionsFetchedAt && (Date.now() - window.__cachedAuthOptionsFetchedAt) <= AUTH_OPTIONS_TTL); } catch(e){ return false; } }
-  function fromBase64Url(b64url){ let b = b64url.replace(/-/g,'+').replace(/_/g,'/'); while (b.length % 4) b += '='; const str = atob(b); const arr = new Uint8Array(str.length); for (let i=0;i<str.length;i++) arr[i] = str.charCodeAt(i); return arr.buffer; }
-  function convertOptionsFromServer(publicKey) {
-    try {
-      if (!publicKey) return publicKey;
-      if (publicKey.challenge && typeof publicKey.challenge === 'string') publicKey.challenge = fromBase64Url(publicKey.challenge);
-      if (Array.isArray(publicKey.allowCredentials)) {
-        publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){ try { return Object.assign({}, c, { id: fromBase64Url(c.id) }); } catch(e){ return c; } });
-      }
-      return publicKey;
-    } catch (e) { console.warn('[webauthn] convertOptionsFromServer error', e); return publicKey; }
-  }
-  window.getAuthOptionsWithCache = window.getAuthOptionsWithCache || (async function({ credentialId=null, userId=null }={}){
-    if (cachedOptionsFresh()) { try { return JSON.parse(JSON.stringify(window.__cachedAuthOptions)); } catch(e){ return window.__cachedAuthOptions; } }
-    const apiBase = (window.__SEC_API_BASE || (typeof API_BASE!=='undefined' ? API_BASE : ''));
-    const url = `${apiBase}/webauthn/auth/options`;
-    const body = { credentialId: credentialId || (localStorage.getItem('credentialId') || null), userId: userId || (window.__webauthn_userId || null) };
-    const res = await (typeof window.__origFetch !== 'undefined' ? window.__origFetch(url, { method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }) : fetch(url, { method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }));
-    if (!res.ok) { const txt = await res.text().catch(()=> ''); throw new Error('Auth options fetch failed: '+(txt||res.status)); }
-    const opts = await res.json();
-    const converted = convertOptionsFromServer(opts);
-    cacheAuthOptions(converted);
-    try { return JSON.parse(JSON.stringify(converted)); } catch(e){ return converted; }
-  });
-  window.invalidateAuthOptionsCache = window.invalidateAuthOptionsCache || function(){ cacheAuthOptions(null); };
-  if (!window.prefetchAuthOptions) window.prefetchAuthOptions = async function(){ try { if (cachedOptionsFresh()) return; await window.getAuthOptionsWithCache({}); console.log('[webauthn] prefetchAuthOptions: cached'); } catch(e){ console.warn('[webauthn] prefetchAuthOptions failed', e); } };
-})();
-
-// --- Fetch wrapper: intercept direct fetch() calls to /webauthn/auth/options and return cached options ---
-(function(){
-  if (window.__webauthnFetchWrapped) return;
-  window.__webauthnFetchWrapped = true;
-  if (typeof window.fetch === 'function') {
-    window.__origFetch = window.fetch.bind(window);
-
-// WebAuthn safe fetch helper - ensures internal calls bypass the wrapper (with debug logging)
-(function(){
-  try{
-    if (window.__webauthnFetchHelper) return;
-    window.__webauthnFetchHelper = async function(url, opts){
-      opts = opts || {};
-      try { opts = Object.assign({}, opts); } catch(e) {}
-      if (!opts.method) opts.method = 'POST';
-      if (!opts.credentials) opts.credentials = 'include';
-      if (!opts.headers) opts.headers = {'Content-Type':'application/json'};
-      try { opts.bypassWebauthnWrapper = true; } catch(e) {}
-      // Debug logging for webauthn endpoints
-      try{
-        var urlStr = (typeof url === 'string') ? url : (url && url.url) || '';
-        if (urlStr && (urlStr.indexOf('/webauthn/auth/options') !== -1 || urlStr.indexOf('/webauthn/auth/options/discover') !== -1)) {
-          try {
-            var parsedBody = opts && opts.body ? (typeof opts.body === 'string' ? JSON.parse(opts.body) : opts.body) : null;
-            var uid = parsedBody && parsedBody.userId ? parsedBody.userId : (parsedBody && parsedBody.user && parsedBody.user.id ? parsedBody.user.id : null);
-            var cid = parsedBody && parsedBody.credentialId ? parsedBody.credentialId : null;
-            console.log('[WebAuthn Debug] Request to', urlStr, 'method=', opts.method, 'userId=', uid, 'credentialId=', cid, 'rawBody=', parsedBody);
-          } catch(e){ console.log('[WebAuthn Debug] Could not parse body for', urlStr, e); }
-        }
-      }catch(e){ console.warn('[webauthn] debug log failed', e); }
-      var fn = (window.__origFetch || window.fetch).bind(window);
-      return fn(url, opts);
-    };
-  }catch(e){ console.warn('[webauthn] helper install failed', e); }
-})();    window.fetch = async function(input, init){
-      try {
-        const url = (typeof input === 'string') ? input : (input && input.url) || '';
-        if (url && url.indexOf('/webauthn/auth/options') !== -1 && !(init && init.bypassWebauthnWrapper)) {
-          // try to parse credentialId/userId from body if present
-          let credentialId = null, userId = null;
-          try {
-            const b = init && init.body ? JSON.parse(init.body) : null;
-            if (b && typeof b === 'object') { credentialId = b.credentialId || null; userId = b.userId || null; }
-          } catch(e){}
-          const opts = await window.getAuthOptionsWithCache({ credentialId, userId });
-          return new Response(JSON.stringify(opts), { status: 200, headers: { 'Content-Type': 'application/json' } });
-        }
-      } catch(e){ console.warn('[webauthn] fetch wrapper error', e); }
-      return window.__origFetch(input, init);
-    };
-  }
-})();
 document.addEventListener('DOMContentLoaded', () => {
   const providerClasses = ['mtn', 'airtel', 'glo', 'ninemobile'];
   const serviceItems = document.querySelectorAll('.short-item');
@@ -1351,35 +1008,38 @@ document.addEventListener('DOMContentLoaded', () => {
 function formatNigeriaNumber(phone, isInitialDigit = false, isPaste = false) {
   try {
     if (!phone) {
+      console.warn('[WARN] formatNigeriaNumber: Empty phone input');
       return { value: '', cursorOffset: 0, valid: false };
     }
-    let cleaned = String(phone).replace(/[\s-]/g, '');
+    let cleaned = phone.replace(/[\s-]/g, '');
     let cursorOffset = 0;
-
-    if (isInitialDigit && ['7','8','9'].includes(cleaned[0])) {
+    if (isInitialDigit && ['7', '8', '9'].includes(cleaned[0])) {
       cleaned = '0' + cleaned;
       cursorOffset = 1;
     }
     if (cleaned.startsWith('234') || cleaned.startsWith('+234')) {
       cleaned = '0' + cleaned.slice(3);
     }
-    if (cleaned.length > 11) cleaned = cleaned.slice(0, 11);
-
-    // ALWAYS produce progressive formatting
-    let formatted;
-    if (cleaned.length <= 4) formatted = cleaned;
-    else if (cleaned.length <= 7) formatted = `${cleaned.slice(0,4)} ${cleaned.slice(4)}`;
-    else formatted = `${cleaned.slice(0,4)} ${cleaned.slice(4,7)} ${cleaned.slice(7)}`;
-
+    if (cleaned.length > 11) {
+      cleaned = cleaned.slice(0, 11);
+    }
     const isValid = cleaned.length === 11 && /^0[789][01]\d{8}$/.test(cleaned);
-
-    return { value: formatted, cursorOffset, valid: !!isValid };
+    if (!isValid) {
+      console.warn('[WARN] formatNigeriaNumber: Invalid phone number:', cleaned);
+      return { value: cleaned, cursorOffset, valid: false };
+    }
+    if (cleaned.length >= 4) {
+      if (cleaned.length <= 7) {
+        return { value: `${cleaned.slice(0, 4)} ${cleaned.slice(4)}`, cursorOffset, valid: true };
+      }
+      return { value: `${cleaned.slice(0, 4)} ${cleaned.slice(4, 7)} ${cleaned.slice(7)}`, cursorOffset, valid: true };
+    }
+    return { value: cleaned, cursorOffset, valid: cleaned.length === 11 };
   } catch (error) {
-    console.error('[ERROR] formatNigeriaNumber:', error);
+    console.error('[ERROR] formatNigeriaNumber:', error.message);
     return { value: '', cursorOffset: 0, valid: false };
   }
 }
-
 
   // --- VALIDATION HELPERS ---
   function isNigeriaMobile(val) {
@@ -8478,28 +8138,21 @@ setTimeout(() => {
   if (!bioBtn) return;
 
   // 🔸 Determine if biometrics enabled for login (client-side only)
-  // 🔸 Determine if biometrics enabled for login (client-side only)
-// Enable if explicit flag set OR a stored credential exists locally
-var _bioFlag = (
-  localStorage.getItem('biometricForLogin') ||
-  localStorage.getItem('__sec_bioLogin') ||
-  localStorage.getItem('security_bio_login') || ''
-).toLowerCase();
+ // enable biometric login if any known credential key is present OR explicit flag is true
+const storedCred = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id') || localStorage.getItem('webauthn_cred');
+const flag = (localStorage.getItem('biometricForLogin') ||
+              localStorage.getItem('__sec_bioLogin') ||
+              localStorage.getItem('security_bio_login') || '').toLowerCase();
 
-var _storedCred = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id') || localStorage.getItem('webauthn_cred') || '';
+const bioLoginEnabled = !!storedCred || ['true', '1', 'yes'].includes(flag);
 
-const bioLoginEnabled = !!_storedCred || ['true', '1', 'yes'].includes(_bioFlag);
+// Hide button if biometric not enabled
+bioBtn.style.display = bioLoginEnabled ? 'inline-flex' : 'none';
 
-
-
-
-  // Hide button if biometric not enabled
-  bioBtn.style.display = bioLoginEnabled ? 'inline-flex' : 'none';
   console.log(`[reauth] Biometric button visibility: ${bioLoginEnabled ? 'shown' : 'hidden'}`);
 
   if (bioBtn.__bound) return; // prevent double-binding
-  
-bioBtn.addEventListener('click', async () => {
+  bioBtn.addEventListener('click', async () => {
     console.log('[reauth] Biometric button clicked (PIN modal)');
 
     if (!bioLoginEnabled) {
@@ -8512,128 +8165,31 @@ bioBtn.addEventListener('click', async () => {
       return;
     }
 
-    // Show PIN/modal immediately (do not wait for any fetch)
-    try {
-      if (typeof openPinModal === 'function') {
-        openPinModal();
-      } else if (typeof showBiometricPanel === 'function') {
-        showBiometricPanel();
+    const session = await safeCall(getSession);
+    const uid = session?.user?.uid || session?.user?.id;
+    if (!uid) {
+      console.error('[reauth] No valid user ID for biometric reauth.');
+      if (typeof safeCall === 'function' && typeof notify === 'function') {
+        safeCall(notify, 'Session expired - please log in again', 'error');
+      } else {
+        console.error('Session expired - please log in again');
       }
-    } catch (e) {
-      console.warn('Failed to open PIN/modal immediately', e);
+      return;
     }
 
-    // Trigger prefetch (non-blocking)
-    try { window.prefetchAuthOptions && window.prefetchAuthOptions(); } catch(e){}
-
     try {
-      // Prepare publicKey options: prefer cached options for instant prompt
-      var publicKey = window.__cachedAuthOptions || null;
-      var storedId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
-
-      if (publicKey) {
-        // ensure allowCredentials includes stored id in ArrayBuffer form
-        if (!publicKey.allowCredentials || !publicKey.allowCredentials.length) {
-          try {
-            publicKey.allowCredentials = [{
-              type: 'public-key',
-              id: (window.fromBase64Url ? window.fromBase64Url(storedId) : (typeof fromBase64Url === 'function' ? fromBase64Url(storedId) : null)),
-              transports: ['internal']
-            }];
-          } catch (e) {
-            console.warn('Could not attach allowCredentials from storedId', e);
-          }
-        }
-      } else {
-        // No cached options - fetch now (will delay but UI already open)
-        var optRes = await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/options', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ credentialId: storedId, userId: (window.__webauthn_userId || null) })
-        });
-        if (!optRes.ok) {
-          var txt = await optRes.text();
-          throw new Error('Auth options fetch failed: ' + txt);
-        }
-        publicKey = await optRes.json();
-        if (publicKey.challenge) {
-          try { publicKey.challenge = (window.fromBase64Url ? window.fromBase64Url(publicKey.challenge) : fromBase64Url(publicKey.challenge)); } catch(e){}
-        }
-        if (Array.isArray(publicKey.allowCredentials)) {
-          try {
-            publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){ return Object.assign({}, c, { id: (window.fromBase64Url ? window.fromBase64Url(c.id) : fromBase64Url(c.id)) }); });
-          } catch(e){}
-        } else {
-          try {
-            publicKey.allowCredentials = [{
-              type: 'public-key',
-              id: (window.fromBase64Url ? window.fromBase64Url(storedId) : fromBase64Url(storedId)),
-              transports: ['internal']
-            }];
-          } catch(e){}
-        }
-      }
-
-      // Call navigator.credentials.get immediately within the user gesture
-      var assertion = await navigator.credentials.get({ publicKey: publicKey });
-      if (!assertion) {
-        throw new Error('No assertion returned');
-      }
-
-      // Build payload (convert ArrayBuffers to base64url)
-      function bufToB64Url(buf) {
-        return (window.toBase64Url ? window.toBase64Url(buf) : (function(b){
-          var bytes = new Uint8Array(b);
-          var str = '';
-          for (var i=0;i<bytes.length;i++) str += String.fromCharCode(bytes[i]);
-          return btoa(str).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
-        })(buf));
-      }
-
-      var payload = {
-        id: assertion.id,
-        rawId: bufToB64Url(assertion.rawId),
-        type: assertion.type,
-        response: {
-          authenticatorData: bufToB64Url(assertion.response.authenticatorData),
-          clientDataJSON: bufToB64Url(assertion.response.clientDataJSON),
-          signature: bufToB64Url(assertion.response.signature),
-          userHandle: assertion.response.userHandle ? bufToB64Url(assertion.response.userHandle) : null
-        }
-      };
-
-      // Now fetch session (user id) and send payload to server for verification
-      var session = await safeCall(getSession);
-      var uid = session && (session.user && (session.user.uid || session.user.id));
-
-      var verifyRes = await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/verify', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(Object.assign({}, payload, { userId: uid }))
-      });
-
-      var verifyData = {};
-      try { verifyData = await verifyRes.json(); } catch(e){ verifyData = { error: 'Invalid JSON' }; }
-
-      if (!verifyRes.ok) {
-        console.warn('[reauth] Biometric verification failed or server error', verifyData);
-        if (typeof safeCall === 'function' && typeof notify === 'function') safeCall(notify, 'Biometric verification failed', 'error');
-        return;
-      }
-
-      if (verifyData && verifyData.verified) {
-        console.log('[reauth] Biometric verification success', verifyData);
+      console.log('[reauth] Starting biometric verification for reauth...');
+      const result = await verifyBiometrics(uid, 'reauth');
+      if (result?.success) {
+        console.log('[reauth] Biometric verified successfully');
         if (typeof hideReauthModal === 'function') hideReauthModal();
         if (typeof onSuccessfulReauth === 'function') onSuccessfulReauth();
       } else {
-        console.warn('[reauth] Biometric verification failed or cancelled', verifyData);
+        console.warn('[reauth] Biometric verification failed or cancelled', result);
         if (typeof safeCall === 'function' && typeof notify === 'function') {
           safeCall(notify, 'Biometric verification failed', 'error');
         }
       }
-
     } catch (err) {
       console.error('[reauth] Biometric verification error:', err);
       if (typeof safeCall === 'function' && typeof notify === 'function') {
@@ -8641,7 +8197,6 @@ bioBtn.addEventListener('click', async () => {
       }
     }
   });
-
   bioBtn.__bound = true;
   console.log('[reauth] pinBiometricBtn bound successfully');
 }, 300);
@@ -8937,45 +8492,6 @@ bioBtn.addEventListener('click', async () => {
             try { if (switchToPin) switchToPin.click(); else switchViews(false); } catch (e) { console.error(e); }
           }
         })();
-
-
-// Immediate biometric click handler: show UI immediately, then trigger verify in background.
-// Replaces older handler that awaited server before showing UI.
-function __immediateBiometricClickHandler(e) {
-  try {
-    // Open PIN/modal or UI immediately if function exists
-    if (typeof openPinModal === 'function') {
-      try { openPinModal(); } catch (ignore) {}
-    } else if (typeof showBiometricPanel === 'function') {
-      try { showBiometricPanel(); } catch (ignore) {}
-    }
-  } catch (err) {
-    console.warn('Opening biometric UI failed', err);
-  }
-
-  // Start prefetch early (if not started)
-  try { window.prefetchAuthOptions && window.prefetchAuthOptions(); } catch(e) {}
-
-  // Trigger verification but don't block UI (user gesture is still active)
-  // We call verifyBiometrics and handle result asynchronously.
-  (async function() {
-    try {
-      const res = await verifyBiometrics();
-      // optional: handle result (e.g., close modal on success)
-      if (res && res.success) {
-        try { if (typeof closePinModal === 'function') closePinModal(); } catch(e) {}
-      } else {
-        // show error inside modal if available
-        try { safeCall(notify, 'Biometric auth failed', 'error'); } catch(e) {}
-      }
-    } catch (err) {
-      console.warn('verifyBiometrics error', err);
-    }
-  })();
-}
-
-
-
       } else {
         // Direct fallback to PIN if no biometric
         if (biometricView) biometricView.style.display = 'none';
@@ -9231,62 +8747,54 @@ async function registerBiometrics() {
    - Revokes server-side, clears local
    ----------------------- */
   // 🔹 NEW: Disable/Revoke Biometrics
-
 async function disableBiometrics() {
-  console.log('disableBiometrics (optimistic update) called');
-
-  try {
-    localStorage.removeItem('credentialId');
-    localStorage.removeItem('webauthn-cred-id');
-    localStorage.setItem('biometricForLogin', 'false');
-
-    try {
-      var bioBtn = document.getElementById('bioBtn') || document.querySelector('.biometric-button');
-      if (bioBtn) bioBtn.style.display = 'none';
-    } catch (e) { /* ignore UI errors */ }
-
-    safeCall(notify, 'Biometric disabled locally — revoking on server...', 'info');
-  } catch (e) {
-    console.warn('Local clear failed', e);
+  console.log('disableBiometrics called');
+  const storedId = localStorage.getItem('credentialId');
+  if (!storedId) {
+    console.log('disableBiometrics: No stored credentialId, nothing to revoke');
+    return { success: true };
   }
 
-  (async function(){
+  return withLoader(async () => {
     try {
-      var session = await safeCall(getSession);
-      var uid = session && (session.user && (session.user.id || session.user.uid));
+      const session = await safeCall(getSession);
+      const uid = session?.user?.id || session?.user?.uid;
       if (!uid) {
-        safeCall(notify, 'Could not revoke on server: missing session', 'error');
-        return;
+        console.error('disableBiometrics: no UID available');
+        safeCall(notify, 'Session error - please log in again', 'error');
+        setTimeout(() => window.location.href = '/', 1500);
+        return { success: false };
       }
 
-      var apiBase = window.__SEC_API_BASE || API_BASE || '';
+      const apiBase = window.__SEC_API_BASE || '';
 
-      var res = await fetch(apiBase + '/webauthn/authenticators/' + encodeURIComponent(uid) + '/revoke', {
+      const res = await fetch(`${apiBase}/webauthn/authenticators/${uid}/revoke`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ credentialId: null })
+        body: JSON.stringify({ credentialID: storedId })
       });
 
       if (!res.ok) {
-        var txt = await res.text();
-        console.error('[disableBiometrics] revoke failed', txt);
-        safeCall(notify, 'Server revoke failed: ' + (txt || res.statusText), 'error');
-        return;
+        const errText = await res.text().catch(() => '');
+        console.error('disableBiometrics: revoke failed', res.status, errText);
+        throw new Error(errText || `Revoke failed (${res.status})`);
       }
 
-      var data = await res.json();
-      safeCall(notify, 'Biometric revoked on server', 'success');
-      console.log('[disableBiometrics] revoke response', data);
+      const result = await res.json();
+      console.log('disableBiometrics: success', result);
+      safeCall(notify, 'Biometrics disabled successfully', 'success');
+      console.log('[DEBUG] About to remove credentialId (caller: disableBiometrics or toggle) at', new Date().toISOString());
+      localStorage.removeItem('credentialId');
+      return { success: true };
+
     } catch (err) {
-      console.error('[disableBiometrics] background revoke error', err);
-      safeCall(notify, 'Server revoke failed (network)', 'error');
+      console.error('disableBiometrics error:', err);
+      safeCall(notify, `Failed to disable biometrics: ${err.message || err}`, 'error');
+      return { success: false, error: err.message || 'Disable failed' };
     }
-  })();
-
-  return { success: true };
+  });
 }
-
 
 /* -----------------------
    bindBiometricSettings for role="switch" buttons
@@ -9374,7 +8882,7 @@ function bindBiometricSettings({
             safeCall(notify, res?.cancelled ? 'Setup cancelled' : 'Setup failed', 'info');
           }
         } else {
-          const res = disableBiometrics();  // Server revoke only here
+          const res = await disableBiometrics();  // Server revoke only here
           writeFlag('biometricsEnabled', false);
           writeFlag('biometricForLogin', false);  // Auto-disable children flags
           writeFlag('biometricForTx', false);
@@ -9743,217 +9251,157 @@ async function prefetchAuthOptionsFor(uid, context = 'reauth') {
    Verify Biometrics (debug)
    ----------------------- */
 // ---- verifyBiometrics ----
+async function verifyBiometrics(uid, context = 'reauth') {
+  console.log('%c[verifyBiometrics] CALLED', 'color:#0ff;font-weight:bold', { uid, context, origin: location.origin, time: new Date().toISOString() });
 
-
-// ===== Prefetch helpers & safe base64 helpers for biometric flow =====
-(function(){
-  if (!window.fromBase64Url) {
-    window.fromBase64Url = function (b64url) {
-      if (!b64url) return new ArrayBuffer(0);
-      b64url = b64url.replace(/-/g, '+').replace(/_/g, '/');
-      while (b64url.length % 4) b64url += '=';
-      const str = atob(b64url);
-      const arr = new Uint8Array(str.length);
-      for (let i = 0; i < str.length; i++) arr[i] = str.charCodeAt(i);
-      return arr.buffer;
-    };
-  }
-  if (!window.toBase64Url) {
-    window.toBase64Url = function (buffer) {
-      const bytes = new Uint8Array(buffer);
-      let str = '';
-      for (let i = 0; i < bytes.length; i++) str += String.fromCharCode(bytes[i]);
-      return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-    };
+  // --- Helper: base64url → ArrayBuffer ---
+  function base64urlToArrayBuffer(base64url) {
+    const padding = '='.repeat((4 - (base64url.length % 4)) % 4);
+    const base64 = (base64url + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const binary = atob(base64);
+    const len = binary.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes.buffer;
   }
 
-
-// ===== WebAuthn session init: cache userId for fast auth/options requests =====
-(function(){
-  (async function initWebAuthnSession(){
+  return withLoader(async () => {
     try {
-      // Try to get session early and cache user id for quick POST body
-      if (typeof getSession === 'function') {
-        var sess = await safeCall(getSession);
-        var uid = sess && sess.user && (sess.user.uid || sess.user.id);
-        if (uid) {
-          window.__webauthn_userId = uid;
-        }
-      }
-      // If we have a uid and a stored cred, prefetch options immediately
-      var stored = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
-      if ((window.__webauthn_userId) && stored) {
-        try { window.prefetchAuthOptions && window.prefetchAuthOptions(); } catch(e){}
-      }
-    } catch (e) {
-      console.warn('[initWebAuthnSession] failed', e);
-    }
-  })();
-})();
+      if (!('PublicKeyCredential' in window)) throw new Error('WebAuthn not supported');
+      if (!uid) throw new Error('No user ID');
 
+      const apiBase = window.__SEC_API_BASE || '';
 
-  window.prefetchAuthOptions = window.prefetchAuthOptions || (async function prefetchAuthOptions() {
-    try {
-      if (window.__prefetchInFlight) return;
-      window.__prefetchInFlight = true;
-
-      const storedId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
-      if (!storedId) {
-        window.__prefetchInFlight = false;
-        return;
+      // Retrieve stored credentialId if any
+      let stored = null;
+      try {
+        stored = localStorage.getItem('credentialId');
+      } catch (e) {
+        console.warn('[verifyBiometrics] localStorage read error', e);
       }
 
-      const res = await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/options', {
+      console.log('[verifyBiometrics] credentialId raw read:', stored, 'origin:', location.origin);
+
+      let usedEndpoint = '/webauthn/auth/options';
+      // if we have a stored credential id, send it so server will return allowCredentials
+      let body = stored
+        ? JSON.stringify({ userId: uid, credentialId: stored, context })
+        : JSON.stringify({ userId: uid, context });
+
+      console.log('[verifyBiometrics] Fetching options from:', `${apiBase}${usedEndpoint}`, 'body:', JSON.parse(body));
+      const optRes = await fetch(`${apiBase}${usedEndpoint}`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ credentialId: storedId, userId: (window.__webauthn_userId || null) })
+        body
       });
 
-      if (!res.ok) {
-        console.warn('[prefetchAuthOptions] options fetch not ok', await res.text());
-        window.__prefetchInFlight = false;
-        return;
+      if (!optRes.ok) {
+        const txt = await optRes.text();
+        throw new Error(`Options request failed: ${optRes.status} ${txt}`);
       }
 
-      const publicKey = await res.json();
+      let options = await optRes.json();
+      console.log('[verifyBiometrics] RAW server options:', options);
 
-      try {
-        if (publicKey.challenge) publicKey.challenge = window.fromBase64Url(publicKey.challenge);
-        if (Array.isArray(publicKey.allowCredentials)) {
-          publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){
-            return {
-              type: c.type || 'public-key',
-              transports: c.transports || ['internal'],
-              id: window.fromBase64Url(c.id)
-            };
-          });
-        }
-      } catch (e) {
-        console.warn('[prefetchAuthOptions] conversion error', e);
+      // --- Transform to correct types ---
+      const opts = structuredClone(options); // safe copy
+      if (typeof opts.challenge === 'string') {
+        opts.challenge = base64urlToArrayBuffer(opts.challenge);
       }
 
-      window.__cachedAuthOptions = publicKey;
-      window.__cachedAuthOptionsFetchedAt = Date.now();
-      console.log('[prefetchAuthOptions] cached auth options ready');
-    } catch (err) {
-      console.warn('[prefetchAuthOptions] failed', err);
-    } finally {
-      window.__prefetchInFlight = false;
-    }
-  });
-
-  try {
-    var bioBtnEl = document.getElementById('bioBtn') || document.querySelector('.biometric-button') || document.querySelector('[data-bio-button]');
-    if (bioBtnEl) {
-      bioBtnEl.addEventListener('pointerdown', function(){ window.prefetchAuthOptions(); });
-      bioBtnEl.addEventListener('mouseenter', function(){ window.prefetchAuthOptions(); });
-    }
-    if (localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id')) {
-      setTimeout(function(){ window.prefetchAuthOptions(); }, 200);
-    }
-  } catch (e) {
-    console.warn('bindPrefetchToBioBtn error', e);
-  }
-})();
-
-
-async function verifyBiometrics(uid, context) {
-  // Accept uid param: if provided use it, otherwise fallback to session
-  try{ var __vb_uid = (typeof arguments !== 'undefined' && arguments.length > 0 && arguments[0]) ? arguments[0] : null; if (!__vb_uid) { try { var __sess = (typeof getSession === 'function') ? await getSession() : (window.__cachedSession || null); __vb_uid = (__sess && __sess.user && (__sess.user.uid || __sess.user.id)) || localStorage.getItem('uid') || localStorage.getItem('userId') || null; } catch(e){} } } catch(e){}
-
-  if (context === undefined) context = 'reauth';
-  console.log('%c[verifyBiometrics] CALLED (cached-optimize)', 'color:#0ff;font-weight:bold');
-  return withLoader(async function(){
-    try {
-      var userId = uid;
-      if (!userId) {
-        var session = await safeCall(getSession);
-        userId = session && (session.user && (session.user.id || session.user.uid));
-      }
-      if (!userId) throw new Error('No user id available');
-
-      var publicKey = window.__cachedAuthOptions;
-      var maxCacheMs = 30 * 1000;
-      if (publicKey && window.__cachedAuthOptionsFetchedAt && ((Date.now() - window.__cachedAuthOptionsFetchedAt) > maxCacheMs)) {
-        publicKey = null;
-      }
-
-      if (!publicKey) {
-        console.log('[verifyBiometrics] no cached options - fetching from server');
-        var storedId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
-        var optRes = await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/options', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId: userId, credentialId: storedId })
-        });
-        if (!optRes.ok) {
-          var txt = await optRes.text();
-          throw new Error('Auth options fetch failed: ' + txt);
-        }
-        publicKey = await optRes.json();
-        if (publicKey.challenge) publicKey.challenge = window.fromBase64Url(publicKey.challenge);
-        if (Array.isArray(publicKey.allowCredentials)) {
-          publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){ return Object.assign({}, c, { id: window.fromBase64Url(c.id) }); });
-        } else {
-          var storedId2 = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
-          publicKey.allowCredentials = [{
-            type: 'public-key',
-            id: window.fromBase64Url(storedId2),
-            transports: ['internal']
-          }];
-        }
+      if (Array.isArray(opts.allowCredentials) && opts.allowCredentials.length > 0) {
+        opts.allowCredentials = opts.allowCredentials.map(c => ({
+          id: base64urlToArrayBuffer(c.id),
+          type: c.type,
+          transports: c.transports || ['internal'],
+        }));
+        console.log('[verifyBiometrics] Transformed allowCredentials:', opts.allowCredentials.map(a => ({ idLen: a.id.byteLength, type: a.type })));
       } else {
-        console.log('[verifyBiometrics] using cached options for immediate prompt');
+        console.warn('[verifyBiometrics] No allowCredentials (discoverable path)');
+        delete opts.allowCredentials;
       }
 
-      var assertion = await navigator.credentials.get({ publicKey: publicKey });
-      if (!assertion) throw new Error('No assertion returned from authenticator');
+      opts.userVerification = 'required';
+      opts.timeout = opts.timeout || 60000;
 
-      function bufferToBase64url(buf) {
-        return window.toBase64Url(buf);
+      // Log transformation summary
+      console.log('[verifyBiometrics] Final publicKey options summary:', {
+        challengeLen: opts.challenge.byteLength,
+        allowCredentials: opts.allowCredentials ? opts.allowCredentials.length : 'none',
+        rpId: opts.rpId,
+        userVerification: opts.userVerification,
+      });
+
+      // Confirm type conversion
+      if (opts.allowCredentials && opts.allowCredentials.length) {
+        console.log('[verifyBiometrics] ID type check (should be true):', opts.allowCredentials[0].id instanceof ArrayBuffer);
       }
 
-      var payload = {
+      // --- Try get() ---
+      let assertion = null;
+try {
+  const canUseConditional = await PublicKeyCredential.isConditionalMediationAvailable?.();
+  if (canUseConditional) {
+    console.log('[verifyBiometrics] Conditional mediation supported — trying silent auth');
+    assertion = await navigator.credentials.get({ publicKey: opts, mediation: 'conditional' });
+  } else {
+    console.log('[verifyBiometrics] Conditional mediation not available — showing prompt');
+    assertion = await navigator.credentials.get({ publicKey: opts });
+  }
+} catch (e) {
+  console.warn('[verifyBiometrics] Conditional check failed or user canceled:', e);
+  if (!assertion) {
+    assertion = await navigator.credentials.get({ publicKey: opts });
+  }
+}
+
+
+      // --- Prepare verification payload ---
+      const credential = {
         id: assertion.id,
-        rawId: bufferToBase64url(assertion.rawId),
+        rawId: bufferToBase64Url(assertion.rawId),
         type: assertion.type,
         response: {
-          authenticatorData: bufferToBase64url(assertion.response.authenticatorData),
-          clientDataJSON: bufferToBase64url(assertion.response.clientDataJSON),
-          signature: bufferToBase64url(assertion.response.signature),
-          userHandle: assertion.response.userHandle ? bufferToBase64url(assertion.response.userHandle) : null
+          clientDataJSON: bufferToBase64Url(assertion.response.clientDataJSON),
+          authenticatorData: bufferToBase64Url(assertion.response.authenticatorData),
+          signature: bufferToBase64Url(assertion.response.signature),
+          userHandle: assertion.response.userHandle ? bufferToBase64Url(assertion.response.userHandle) : null,
         }
       };
 
-      console.log('[verifyBiometrics] sending assertion payload to server');
-      var verifyRes = await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/verify', {
+      console.log('[verifyBiometrics] Processed assertion:', credential);
+
+      // --- Verify with server ---
+      const verifyRes = await fetch(`${apiBase}/webauthn/auth/verify`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(Object.assign({}, payload, { userId: uid }))
+        body: JSON.stringify({ userId: uid, credential, context })
       });
 
-      var verifyData = await verifyRes.json();
-
+      console.log('[verifyBiometrics] Server verify status:', verifyRes.status);
       if (!verifyRes.ok) {
-        safeCall(notify, 'Authentication failed', 'error');
-        console.error('[verifyBiometrics] server verify failed', verifyData);
-        return { success: false, verifyData: verifyData };
+        const txt = await verifyRes.text();
+        throw new Error(`Server verify failed: ${verifyRes.status} ${txt}`);
       }
 
-      safeCall(notify, verifyData.verified ? 'Authentication successful' : 'Authentication failed', verifyData.verified ? 'success' : 'error');
-      console.log('[verifyBiometrics] verifyData:', verifyData);
-      return { success: !!verifyData.verified, verifyData: verifyData };
+      const result = await verifyRes.json();
+      console.log('[verifyBiometrics] Verification success:', result);
+      showSlideNotification(notify, 'Biometric authentication successful!', 'success');
+      return { success: true, result };
+
     } catch (err) {
-      console.error('[verifyBiometrics] error', err);
-      safeCall(notify, 'Biometric auth error: ' + (err && err.message ? err.message : err), 'error');
-      return { success: false, error: (err && err.message) ? err.message : String(err) };
+      console.error('[verifyBiometrics] ERROR:', err);
+      const message = err.message || 'Verification failed';
+      if (err.name === 'NotAllowedError' || err.name === 'AbortError') {
+        return { success: false, error: message };
+      }
+      showSlideNotification(notify, `Verification failed: ${message}`, 'error');
+      return { success: false, error: message };
     }
   });
 }
-
 
 
 // Expose small debugging helpers to console
@@ -10234,407 +9682,31 @@ try { if (!window.disableBiometrics) window.disableBiometrics = disableBiometric
 
 })();
 
-  // ---- Stable non-destructive live phone formatter (safe to place anywhere) ----
-(function attachStablePhoneFormatter_Last(){
-  // do not mark global attached until we've actually attached
-  if (window.__phoneLiveFormatterInstalled) {
-    // already installed (but not necessarily attached to element)
-    return;
-  }
-  // mark installer so we don't run this setup twice
-  window.__phoneLiveFormatterInstalled = true;
-
-  function formatProgressiveNG(digits){
-    if (digits.length <= 4) return digits;
-    if (digits.length <= 7) return digits.replace(/(\d{4})(\d+)/, '$1 $2');
-    return digits.replace(/(\d{4})(\d{3})(\d+)/, '$1 $2 $3');
-  }
-
-  function getPhoneEl() {
-    return document.getElementById('phone-input');
-  }
-
-  function attachTo(el){
-    if (!el) return false;
-    // avoid re-attaching to the same element
-    if (el.__stableFormatterAttached) return true;
-    el.__stableFormatterAttached = true;
-
-    // now that we actually attached, set the global "attached" flag
-    try { window.__phoneLiveFormatterAttached = true; } catch(e){}
-    console.log('%c📱 Phone Formatter Active', 'color: lime; font-weight: bold;');
-
-    var composing = false;
-
-    el.addEventListener('compositionstart', function(){ composing = true; }, false);
-    el.addEventListener('compositionend', function(){ composing = false; scheduleFormat(); }, false);
-
-    var scheduled = null;
-    function scheduleFormat(){
-      if (composing) return;
-      if (scheduled) return;
-      scheduled = setTimeout(function(){
-        scheduled = null;
-        try { applyFormatting(el); } catch(err){ console.error('phone format err', err); }
-      }, 0);
-    }
-
-    function applyFormatting(inputEl){
-      var selStart = inputEl.selectionStart || 0;
-      var rawBefore = (inputEl.value.slice(0, selStart).match(/\d/g) || []).join('');
-      var allDigits = (inputEl.value.match(/\d/g) || []).join('');
-      var formatted = formatProgressiveNG(allDigits);
-
-      if (formatted === inputEl.value){
-        try{ inputEl.dataset.raw = allDigits; }catch(e){}
-        return;
-      }
-
-      inputEl.value = formatted;
-      try{ inputEl.dataset.raw = allDigits; }catch(e){}
-
-      var dcount = 0, newPos = 0;
-      if (rawBefore.length === 0) newPos = 0;
-      else {
-        for (var i=0;i<formatted.length;i++){
-          if (/\d/.test(formatted[i])) dcount++;
-          newPos = i + 1;
-          if (dcount >= rawBefore.length) break;
-        }
-      }
-      if (newPos > formatted.length) newPos = formatted.length;
-      try { inputEl.setSelectionRange(newPos, newPos); } catch(e){}
-    }
-
-    el.addEventListener('input', scheduleFormat, false);
-    el.addEventListener('blur', function(){ if(!composing) applyFormatting(el); }, false);
-
-    var watch = null;
-    el.addEventListener('focus', function(){
-      scheduleFormat();
-      if (watch) clearInterval(watch);
-      watch = setInterval(function(){
-        try {
-          var digits = (el.value.match(/\d/g) || []).join('');
-          var expected = formatProgressiveNG(digits);
-          if (expected !== el.value) applyFormatting(el);
-        } catch(e){}
-      }, 180);
-    }, false);
-
-    el.addEventListener('blur', function(){
-      if (watch){ clearInterval(watch); watch = null; }
-    }, false);
-
-    // If input element is replaced later, reattach to new one
-    var mo = new MutationObserver(function(muts){
-      muts.forEach(function(m){
-        m.addedNodes && Array.prototype.forEach.call(m.addedNodes, function(node){
-          if (node && node.id === 'phone-input' && node !== el){
-            try { attachTo(node); } catch(e){}
-          }
-        });
-      });
-    });
-    mo.observe(document.documentElement || document.body, { childList: true, subtree: true });
-
-    return true;
-  }
-
-  // Try attach immediately or wait a bit (safe on early script execution)
-  (function tryAttach(count){
-    var el = getPhoneEl();
-    if (el) { attachTo(el); return; }
-    if (count > 60) {
-      console.warn('Phone formatter: element #phone-input not found, giving up after attempts');
-      return;
-    }
-    setTimeout(function(){ tryAttach(count+1); }, 200);
-  })(0);
-
-})();
-
-
-})();
-
-
-/* ---------- WebAuthn: robust getAuthOptionsWithCache override + guarded prefetch ---------- */
-(function(){
-  try {
-    // Preserve originals if present
-    try { if (!window.__orig_getAuthOptionsWithCache && window.getAuthOptionsWithCache) window.__orig_getAuthOptionsWithCache = window.getAuthOptionsWithCache; } catch(e){}
-    try { if (!window.__orig_prefetchAuthOptions && window.prefetchAuthOptions) window.__orig_prefetchAuthOptions = window.prefetchAuthOptions; } catch(e){}
-
-    // Helper to safely read localStorage keys
-    function _readLocalStorageKeys(keys) {
-      for (var i=0;i<keys.length;i++){
-        try { var v = localStorage.getItem(keys[i]); if (v !== null && v !== undefined && v !== '') return v; } catch(e) {}
-      }
-      return null;
-    }
-
-    // Robust implementation that ensures userId/context and uses discover endpoint when needed.
-    window.getAuthOptionsWithCache = async function(args) {
-      args = args || {};
-      var apiBase = (typeof window.__webauthn_apiBase !== 'undefined') ? window.__webauthn_apiBase : 'https://api.flexgig.com.ng';
-      var body = args.body || {};
-      // Ensure userId exists; try common localStorage keys as fallback
-      if (!body.userId) {
-        var fallback = _readLocalStorageKeys(['userId','sessionUserId','session_user_id','flexgigUserId','uid','user_id','user.id']);
-        if (fallback) {
-          body.userId = fallback;
-        }
-      }
-      // If still no userId, try calling getSession() to get fresh session data
-      if (!body.userId) {
-        try {
-          if (typeof getSession === 'function') {
-            var sess = await getSession();
-            if (sess && sess.user && (sess.user.uid || sess.user.id)) {
-              body.userId = sess.user.uid || sess.user.id;
-            } else if (window.__session && window.__session.uid) {
-              body.userId = window.__session.uid;
-            }
-          }
-        } catch(e) {
-          console.warn('[WebAuthn] getSession fallback failed', e);
-        }
-      }
-      // Add context fallback
-      if (!body.context) body.context = 'reauth';
-      // Choose endpoint based on credentialId presence
-      if (!body.credentialId) {
-        try { body.credentialId = localStorage.getItem('credentialId') || undefined; } catch(e) {}
-      }
-      var endpoint = (body.credentialId) ? '/webauthn/auth/options' : '/webauthn/auth/options/discover';
-      var url = apiBase + endpoint;
-
-      // Log and hint if missing critical fields
-      if (!body.userId) {
-        console.warn('[WebAuthn Debug] No userId present when calling auth options. Attempting discover endpoint. localStorage keys checked.');
-      }
-      if (!body.credentialId) {
-        console.log('[WebAuthn Debug] No credentialId provided; using discover endpoint');
-      }
-
-      // Deduplicate concurrent calls for same key
-      window.__webauthn_inflight = window.__webauthn_inflight || {};
-      var inflightKey = endpoint + '|' + (body.userId || '') + '|' + (body.credentialId || '');
-      if (window.__webauthn_inflight[inflightKey]) {
-        console.log('[WebAuthn] awaiting existing inflight request for', inflightKey);
-        return window.__webauthn_inflight[inflightKey];
-      }
-
-      var promise = (async function(){
-        try {
-          console.log('[WebAuthn Debug] Fetching', url, 'with body:', JSON.stringify(body), 'userId:', body.userId, 'credentialId:', body.credentialId);
-          var opts = { method: 'POST', credentials: 'include', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body), bypassWebauthnWrapper: true };
-          // Use helper to ensure bypass flag and logging
-          var res = (typeof window.__webauthnFetchHelper === 'function') ? await window.__webauthnFetchHelper(url, opts) : await (window.__origFetch || window.fetch).call(window, url, opts);
-          var data = null;
-          var text = null;
-          try { text = await res.text(); data = text ? JSON.parse(text) : null; } catch(e) { try { data = text; } catch(e2) { data = null; } }
-          if (!res.ok) {
-            console.error('[WebAuthn Debug] Server response not ok', res.status, data);
-            // If server returned JSON with message, include it in error
-            var msg = (data && data.message) ? (' - ' + data.message) : '';
-            throw new Error('Auth options fetch failed: ' + res.status + msg);
-          }
-          // Return parsed data
-          return data;
-        } catch (err) {
-          console.error('[webauthn] getAuthOptionsWithCache error', err);
-          throw err;
-        }
-      })();
-
-      window.__webauthn_inflight[inflightKey] = promise;
-      try {
-        var result = await promise;
-        return result;
-      } finally {
-        try { delete window.__webauthn_inflight[inflightKey]; } catch(e) {}
-      }
-    };
-
-    // Guarded prefetchAuthOptions that prevents overlapping calls and uses the new getAuthOptionsWithCache.
-    window.prefetchAuthOptions = (function(){
-      var isFetching = false;
-      var lastResult = null;
-      return async function(args){
-        args = args || {};
-        if (isFetching) {
-          console.log('[WebAuthn] Skipping prefetch, already in progress');
-          return lastResult;
-        }
-        isFetching = true;
-        try {
-          // If original existed, prefer calling it (it may have caching/side-effects)
-          if (typeof window.__orig_prefetchAuthOptions === 'function') {
-            lastResult = await window.__orig_prefetchAuthOptions(args);
-            return lastResult;
-          } else {
-            lastResult = await window.getAuthOptionsWithCache(args);
-            return lastResult;
-          }
-        } catch (e) {
-          console.error('[webauthn] prefetchAuthOptions failed', e);
-          throw e;
-        } finally {
-          isFetching = false;
-        }
-      };
-    })();
-
-    console.log('[WebAuthn] Robust getAuthOptionsWithCache and guarded prefetchAuthOptions installed.');
-  } catch (e) {
-    console.error('[WebAuthn] Failed to install robust overrides', e);
-  }
-})();
 
 
 
 
 
-/* ---------- UX-friendly WebAuthn session helper & biometric button handler (v5) ---------- */
-(function(){
-  try{
-    // don't install twice
-    if (window.__webauthn_v5_installed) return;
-    window.__webauthn_v5_installed = true;
 
-    // Warm session when modal opens by wrapping showReauthModal if available
-    try {
-      if (typeof window.showReauthModal === 'function') {
-        var __orig_showReauthModal = window.showReauthModal;
-        window.showReauthModal = function() {
-          try {
-            // start warming session non-blocking
-            if (!window.__cachedSessionPromise) {
-              try { window.__cachedSessionPromise = getSession().then(s=>{ window.__cachedSession = s; return s; }).catch(()=>null); } catch(e){}
-            }
-          } catch(e){ console.warn('[webauthn v5] warmSessionOnModalOpen failed', e); }
-          return __orig_showReauthModal.apply(this, arguments);
-        };
-      }
-    } catch(e){ console.warn('[webauthn v5] wrap showReauthModal failed', e); }
 
-    // Helper: get cached session quickly or wait briefly
-    window.getCachedOrFastSession = async function(timeoutMs){
-      timeoutMs = (typeof timeoutMs === 'number') ? timeoutMs : 400;
-      try {
-        if (window.__cachedSession) return window.__cachedSession;
-        if (!window.__cachedSessionPromise) {
-          try { window.__cachedSessionPromise = getSession().then(s=>{ window.__cachedSession = s; return s; }).catch(()=>null); } catch(e){ window.__cachedSessionPromise = Promise.resolve(null); }
-        }
-        // Race cachedSessionPromise vs timeout
-        var race = await Promise.race([ window.__cachedSessionPromise, new Promise(resolve=>setTimeout(()=>resolve(null), timeoutMs)) ]);
-        if (race) { window.__cachedSession = race; return race; }
-        return null;
-      } catch(e){ console.warn('[webauthn v5] getCachedOrFastSession error', e); return null; }
-    };
+  
 
-    // Core biometric click handler with immediate UI feedback
-    window.onBiometricButtonClick = async function(event){
-      try {
-        event && event.preventDefault && event.preventDefault();
-        var target = event && (event.currentTarget || event.target);
 
-        // UI feedback: add loading class if element exists
-        try {
-          if (target) {
-            target.__webauthn_prev_disabled = target.disabled === true;
-            target.__webauthn_prev_text = target.textContent;
-            target.classList && target.classList.add('is-loading');
-            try { target.disabled = true; } catch(e){}
-          }
-        } catch(e){}
 
-        // Try fast cached session
-        var session = await window.getCachedOrFastSession(400);
-        var uid = (session && session.user && (session.user.uid || session.user.id)) || localStorage.getItem('uid') || localStorage.getItem('userId') || null;
+    
 
-        if (!uid) {
-          // Wait a bit longer (up to 2000ms) for authoritative session while keeping spinner
-          try {
-            var longWait = await Promise.race([ (window.__cachedSessionPromise = window.__cachedSessionPromise || getSession().then(s=>{window.__cachedSession=s;return s}).catch(()=>null)), new Promise(resolve=>setTimeout(()=>resolve(null),2000)) ]);
-            uid = (longWait && longWait.user && (longWait.user.uid || longWait.user.id)) || uid || localStorage.getItem('uid') || localStorage.getItem('userId') || null;
-          } catch(e){ console.warn('[webauthn v5] long session wait failed', e); }
-        }
 
-        if (uid) {
-          console.log('[webauthn v5] Using uid for verify:', uid);
-          // call verifyBiometrics with uid; prefer global function then window.verifyBiometrics
-          var vb = (typeof verifyBiometrics === 'function') ? verifyBiometrics : (window.verifyBiometrics || null);
-          if (vb) {
-            try { await vb(uid, 'reauth'); } catch(e){ console.error('[webauthn v5] verifyBiometrics error', e); throw e; }
-          } else {
-            console.warn('[webauthn v5] verifyBiometrics not found; falling back to getAuthOptionsWithCache and manual flow');
-            try {
-              await window.getAuthOptionsWithCache({ userId: uid, body: { userId: uid } });
-            } catch(e){ console.error('[webauthn v5] fallback verify flow failed', e); throw e; }
-          }
-        } else {
-          // No uid after waiting -> use discover flow (non-blocking UX)
-          console.warn('[webauthn v5] uid not available quickly — using discover flow');
-          try {
-            var vb2 = (typeof verifyBiometrics === 'function') ? verifyBiometrics : (window.verifyBiometrics || null);
-            if (vb2) {
-              await vb2(null, 'reauth');
-            } else {
-              await window.getAuthOptionsWithCache({ body: { context: 'reauth' } });
-            }
-          } catch(e){ console.error('[webauthn v5] discover fallback failed', e); throw e; }
-        }
-      } catch(err) {
-        console.error('[webauthn v5] onBiometricButtonClick error', err);
-        try { safeCall && safeCall(notify, 'Biometric error: ' + (err && err.message || err), 'error'); } catch(e){}
-      } finally {
-        // remove UI feedback
-        try {
-          if (target) {
-            target.classList && target.classList.remove('is-loading');
-            try { target.disabled = !!target.__webauthn_prev_disabled; } catch(e){}
-          }
-        } catch(e){}
-      }
-    };
 
-    // Delegated click listener: intercept common biometric button triggers
-    document.addEventListener('click', function(evt){
-      try {
-        var t = evt.target;
-        // find nearest element (button) up the tree
-        var el = t;
-        var depth = 0;
-        while (el && depth < 6 && el.nodeType === 1) {
-          var txt = (el.textContent || '').toLowerCase().trim();
-          var id = (el.id || '').toLowerCase();
-          var cls = (el.className || '').toString().toLowerCase();
-          var dataAction = (el.getAttribute && el.getAttribute('data-action')) || '';
-          dataAction = (dataAction || '').toLowerCase();
-          if (id === 'biobtn' || cls.indexOf('biometric') !== -1 || cls.indexOf('bio') !== -1 || dataAction === 'fingerprint' || txt === 'fingerprint' || txt.indexOf('fingerprint') !== -1) {
-            // prevent double-wiring: if element has attribute data-webauthn-bound, let existing handler run
-            if (el.getAttribute && el.getAttribute('data-webauthn-bound') === 'true') { return; }
-            // mark and call handler
-            try { el.setAttribute && el.setAttribute('data-webauthn-bound','true'); } catch(e){}
-            // Call our handler and prevent default browser action
-            evt.preventDefault && evt.preventDefault();
-            evt.stopPropagation && evt.stopPropagation();
-            setTimeout(function(){ window.onBiometricButtonClick({ currentTarget: el, target: el, preventDefault: function(){}, stopPropagation: function(){} }); }, 0);
-            return;
-          }
-          el = el.parentElement;
-          depth++;
-        }
-      } catch(e){ /* ignore */ }
-    }, true);
 
-    console.log('[webauthn v5] UX-friendly biometric handler installed.');
-  } catch(e){
-    console.error('[webauthn v5] installation failed', e);
-  }
-})(); 
 
-/* ---------- End patch v5 ---------- */
+
+
+
+
+
+  // Watch your steps
 });
+
+
+
+
