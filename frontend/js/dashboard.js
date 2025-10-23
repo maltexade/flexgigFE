@@ -9033,6 +9033,7 @@ function openForgetPinFlow() {
     } catch (e) {}
     return undefined;
   }
+  window.safeCall = window.safeCall || safeCall; // expose globally if needed
 
   // Cached DOM refs — (re)cached when needed
   let reauthModal,
@@ -9074,6 +9075,7 @@ function openForgetPinFlow() {
     yesBtn = safeQuery('yesActiveBtn');
     console.log('Cached refs - pinView:', !!pinView, 'deleteReauthKey:', !!deleteReauthKey);
   }
+  window.cacheDomRefs = window.cacheDomRefs || cacheDomRefs; // expose if needed
 
     // --------------------
   // PIN state (shared)
