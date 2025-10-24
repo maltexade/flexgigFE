@@ -9495,8 +9495,25 @@ if (!pinView.__keydownHandler) {
 
 
 async function initReauthModal({ show = false, context = 'reauth' } = {}) {
+
+console.debug('BOOT LOG: initReauthModal start (show=' + String(show) + ')'); // at top of initReauthModal
+
   console.debug('initReauthModal called', { show, context });
   cacheDomRefs();
+
+  // Defensive: if localStorage indicates reauth pending, force show and avoid hiding on boot.
+// Place this at the top of initReauthModal(...)
+try {
+  const LOCAL_KEY = 'fg_reauth_required_v1';
+  const pending = localStorage.getItem(LOCAL_KEY);
+  if (pending && (typeof show === 'undefined' || show === false)) {
+    console.debug('initReauthModal: local reauth pending -> forcing show');
+    show = true;
+  }
+} catch (e) {
+  /* ignore localStorage errors */
+}
+
 
   // helper: safe parse userData or build from session
   async function buildUser() {
@@ -12006,6 +12023,7 @@ async function showReauthModal(context = 'reauth') {
 
   // on load: if localStorage says reauth required show modal.
   async function initCrossTabReauth() {
+    console.debug('BOOT LOG: initCrossTabReauth init'); // at top of initCrossTabReauth
     window.addEventListener('storage', onStorageEvent, false);
     if (bc) bc.onmessage = onBroadcastMessage;
 
@@ -12275,6 +12293,7 @@ async function showReauthModal(context = 'reauth') {
      Boot sequence
      ----------------------- */
   (async function initFlow() {
+    console.debug('BOOT LOG: initFlow starting'); // at initFlow start
     console.log('initFlow started');
     try {
       await initReauthModal({ show: false });
@@ -12437,6 +12456,27 @@ try { if (!window.disableBiometrics) window.disableBiometrics = disableBiometric
   })(0);
 
 })();
+
+// Ensure modal reappears on reload/back-forward (pageshow) and on visibility changes.
+// Put near the bottom of dashboard.js (after initCrossTabReauth / bootstrap)
+(function attachPageshowRecheck(){
+  const LOCAL_KEY = 'fg_reauth_required_v1';
+  function recheckShow() {
+    try {
+      const raw = localStorage.getItem(LOCAL_KEY);
+      if (!raw) return;
+      const obj = JSON.parse(raw);
+      console.debug('pageshow/visibility recheck: forcing reauth modal show', obj);
+      try { showReauthModalLocal && showReauthModalLocal({ fromStorageObj: obj }); } catch (e) { console.warn('pageshow showReauthModalLocal failed', e); }
+    } catch (e) {}
+  }
+
+  window.addEventListener('pageshow', recheckShow, { passive: true });
+  window.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') recheckShow();
+  }, { passive: true });
+})();
+
 
 
 })();
