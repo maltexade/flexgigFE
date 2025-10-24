@@ -12563,16 +12563,60 @@ try { if (!window.disableBiometrics) window.disableBiometrics = disableBiometric
 
 // Ensure modal reappears on reload/back-forward (pageshow) and on visibility changes.
 // Put near the bottom of dashboard.js (after initCrossTabReauth / bootstrap)
-(function attachPageshowRecheck(){
+// REPLACEMENT SNIPPET: Replace the existing attachPageshowRecheck() block in dashboard.js
+// Root cause: the previous pageshow re-check attempted to call `showReauthModalLocal`
+// which is scoped inside the cross-tab IIFE and not exposed globally. On reload that
+// left the reauth modal hidden. This snippet uses the exposed APIs (window.__reauth / fgReauth)
+// and falls back to legacy functions if necessary.
+
+(function attachPageshowRecheck_fixed(){
   const LOCAL_KEY = 'fg_reauth_required_v1';
-  function recheckShow() {
+
+  async function recheckShow() {
     try {
       const raw = localStorage.getItem(LOCAL_KEY);
       if (!raw) return;
-      const obj = JSON.parse(raw);
-      console.debug('pageshow/visibility recheck: forcing reauth modal show', obj);
-      try { showReauthModalLocal && showReauthModalLocal({ fromStorageObj: obj }); } catch (e) { console.warn('pageshow showReauthModalLocal failed', e); }
-    } catch (e) {}
+      let obj = null;
+      try { obj = JSON.parse(raw); } catch (e) { obj = { token: raw, ts: Date.now(), reason: 'unknown' }; }
+
+      console.debug('pageshow/visibility recheck: re-opening reauth modal (found local key)', obj);
+
+      // Prefer the exported reauth API if available
+      if (window.__reauth && typeof window.__reauth.showReauthModal === 'function') {
+        try {
+          // call showReauthModal in a best-effort way; it accepts either a context string or options
+          await window.__reauth.showReauthModal('reauth');
+          return;
+        } catch (e) {
+          console.warn('window.__reauth.showReauthModal failed', e);
+        }
+      }
+
+      // Fallback: ask canonical cross-tab module to show (best-effort)
+      if (window.fgReauth && typeof window.fgReauth.requireReauth === 'function') {
+        try {
+          window.fgReauth.requireReauth(obj.reason || 'pageshow');
+          return;
+        } catch (e) {
+          console.warn('window.fgReauth.requireReauth failed', e);
+        }
+      }
+
+      // Last fallback: if a local helper was somehow left in scope, call it
+      if (typeof showReauthModalLocal === 'function') {
+        try {
+          showReauthModalLocal({ fromStorageObj: obj });
+          return;
+        } catch (e) {
+          console.warn('showReauthModalLocal call failed', e);
+        }
+      }
+
+      // If none are available, leave a debug message (no destructive action)
+      console.warn('No reauth-show API available on pageshow. Reauth modal could not be re-opened automatically.');
+    } catch (err) {
+      console.error('pageshow recheck error', err);
+    }
   }
 
   window.addEventListener('pageshow', recheckShow, { passive: true });
