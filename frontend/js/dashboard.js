@@ -85,6 +85,33 @@ let __backHandler = null;
   }
 })();
 
+// ---------- Helpers (paste near other helper functions) ----------
+function isCanonicalReauthPending() {
+  console.log('❄️❄️❄️ isCanonicalReauthPending check');
+  try {
+    return !!JSON.parse(localStorage.getItem('fg_reauth_required_v1') || 'null');
+  } catch (e) {
+    return false;
+  }
+}
+
+function clearCanonicalReauthFlag() {
+  console.log('clearCanonicalReauthFlag called');
+  try {
+    // prefer the cross-tab/server API if available (fire-and-forget)
+    if (window.fgReauth && typeof window.fgReauth.completeReauth === 'function') {
+      try {
+        const p = window.fgReauth.completeReauth();
+        if (p && typeof p.then === 'function') p.catch(() => {/* swallow */});
+      } catch (e) { /* ignore call errors */ }
+    }
+  } catch (e) {}
+  try { localStorage.removeItem('fg_reauth_required_v1'); } catch (e) {}
+  try { localStorage.removeItem('reauthPending'); } catch (e) {} // legacy
+}
+
+
+
 
 // ---------- helpers (add once near top-level) ----------
 function normalizeB64Url(s) {
@@ -9899,16 +9926,24 @@ async function tryBiometricWithCachedOptions() {
     }
 
     if (verifyData && verifyData.verified) {
-      console.debug('[reauth] verification successful');
-      safeCall(__sec_getCurrentUser);
-      safeCall(onSuccessfulReauth);
-      try { if (reauthModal) reauthModal.classList.add('hidden'); reauthModalOpen = false; } catch(e){}
-      return;
-    } else {
-      console.warn('[reauth] verify returned ok but not verified', verifyData);
-      safeCall(notify, 'Biometric verification failed', 'error', reauthAlert, reauthAlertMsg);
-      return;
-    }
+  console.debug('[reauth] verification successful');
+
+  // refresh user state
+  safeCall(__sec_getCurrentUser);
+
+  // clear canonical flag (fire-and-forget) so other tabs see completion
+  try { clearCanonicalReauthFlag(); } catch (e) {}
+
+  // run your normal success cleanup (synchronous)
+  safeCall(onSuccessfulReauth);
+
+  return;
+} else {
+  console.warn('[reauth] verify returned ok but not verified', verifyData);
+  safeCall(notify, 'Biometric verification failed', 'error', reauthAlert, reauthAlertMsg);
+  return;
+}
+
   });
 
   bioBtn.__bound = true;
@@ -9934,11 +9969,13 @@ async function tryBiometricWithCachedOptions() {
 
   // --- Decide whether reauth is needed; if not, close and call success handler ---
   const reauthStatus = await shouldReauth(context);
-  if (!reauthStatus.needsReauth) {
-    try { if (reauthModal) reauthModal.classList.add('hidden'); reauthModalOpen = false; } catch (e) {}
-    safeCall(onSuccessfulReauth);
-    return true;
-  }
+if (!reauthStatus.needsReauth) {
+  // server/client agree no reauth needed — clear canonical flag and run success handler.
+  try { clearCanonicalReauthFlag(); } catch (e) {}
+  safeCall(onSuccessfulReauth);
+  return true;
+}
+
 
   // FORCE PIN VIEW (you requested no view switching)
   try {
@@ -9973,16 +10010,22 @@ async function tryBiometricWithCachedOptions() {
           return;
         }
         await safeCall(reAuthenticateWithPin, uidInfo.user.uid, pin, (success) => {
-          if (success) {
-            try { if (reauthModal) reauthModal.classList.add('hidden'); reauthModalOpen = false; } catch(e){}
-            resetReauthInputs();
-            safeCall(__sec_getCurrentUser);
-            safeCall(onSuccessfulReauth);
-          } else {
-            resetReauthInputs();
-            safeCall(notify, 'PIN authentication failed', 'error', reauthAlert, reauthAlertMsg);
-          }
-        });
+  if (success) {
+    // reset UI quickly
+    resetReauthInputs();
+    safeCall(__sec_getCurrentUser);
+
+    // clear canonical flag (fire-and-forget) before running onSuccessfulReauth
+    try { clearCanonicalReauthFlag(); } catch (e) {}
+
+    // run final success cleanup
+    safeCall(onSuccessfulReauth);
+  } else {
+    resetReauthInputs();
+    safeCall(notify, 'PIN authentication failed', 'error', reauthAlert, reauthAlertMsg);
+  }
+});
+
       });
       pinView.__reauthSubmitBound = true;
     }
@@ -10306,18 +10349,27 @@ async function bioVerifyAndFinalize(assertion) {
     try { safeCall(onSuccessfulReauth); } catch (e) { /* ignore */ }
 
     // Ensure modal and reauth flags are cleared in this tab
-    try {
-      if (reauthModal) {
-        reauthModal.classList.add('hidden');
-        // remove modal accessibility attributes defensively
-        try { reauthModal.removeAttribute('aria-modal'); } catch (e) {}
-        try { reauthModal.removeAttribute('role'); } catch (e) {}
+   try {
+  if (!isCanonicalReauthPending()) {
+    if (reauthModal) {
+      reauthModal.classList.add('hidden');
+      try { reauthModal.removeAttribute('aria-modal'); } catch (e) {}
+      try { reauthModal.removeAttribute('role'); } catch (e) {}
+      if ('inert' in HTMLElement.prototype) {
+        try { reauthModal.inert = false; } catch (e) {}
+      } else {
+        try { reauthModal.removeAttribute('aria-hidden'); reauthModal.style.pointerEvents = ''; } catch (e) {}
       }
-      reauthModalOpen = false;
-      try { setReauthActive(false); } catch (e) {}
-    } catch (e) {
-      console.warn('[bio] error while hiding reauth modal', e);
     }
+    reauthModalOpen = false;
+    try { setReauthActive(false); } catch (e) {}
+  } else {
+    console.debug('[reauth] skip hiding modal because canonical flag is present');
+  }
+} catch (e) {
+  console.warn('[bio] error while hiding reauth modal', e);
+}
+
 
     // Hide loader (force reset to be safe in edge cases)
     try {
@@ -10402,10 +10454,16 @@ async function bioVerifyAndFinalize(assertion) {
   // modal show/hide and focus
   try {
     if (!show) {
-      try { if (reauthModal) reauthModal.classList.add('hidden'); reauthModalOpen = false; } catch(e){}
-      try { if (promptModal) promptModal.classList.add('hidden'); reauthModalOpen = false; } catch(e){}
-      return true;
-    }
+  // If canonical key says reauth pending, do not hide on boot.
+  if (isCanonicalReauthPending()) {
+    console.debug('initReauthModal: skip hide because canonical reauth pending');
+    return true;
+  }
+  try { if (reauthModal) reauthModal.classList.add('hidden'); reauthModalOpen = false; } catch(e){}
+  try { if (promptModal) promptModal.classList.add('hidden'); } catch(e){}
+  return true;
+}
+
 
     try { localStorage.setItem('reauthPending', Date.now().toString()); } catch(e){}
 
@@ -11944,16 +12002,29 @@ async function showReauthModal(context = 'reauth') {
 
   // hide the modal UI in this tab
   function hideReauthModalLocal() {
-    try {
-      if (typeof onSuccessfulReauth === 'function') {
-        onSuccessfulReauth();
+  try {
+    // clear canonical flag first (fire-and-forget)
+    try { clearCanonicalReauthFlag(); } catch(e) {}
+
+    // prefer standard success flow (which will also perform guarded hide)
+    if (typeof onSuccessfulReauth === 'function') {
+      try { onSuccessfulReauth(); } catch(e) { /* swallow */ }
+    } else {
+      // fallback: only hide if canonical flag not present
+      if (!isCanonicalReauthPending()) {
+        try { if (reauthModal) reauthModal.classList.add('hidden'); } catch(e) {}
+        try { setReauthActive(false); } catch(e) {}
       } else {
-        if (reauthModal) reauthModal.classList.add('hidden');
-        try { setReauthActive(false); } catch(e){}
+        console.debug('hideReauthModalLocal: skip hide because canonical flag remains');
       }
-      try { localStorage.removeItem('fg_reauth_active_tab'); } catch(e){}
-    } catch (e) {}
+    }
+
+    try { localStorage.removeItem('fg_reauth_active_tab'); } catch(e) {}
+  } catch (e) {
+    console.warn('hideReauthModalLocal error', e);
   }
+}
+
 
   // When reauth is required: set local + server (server optional)
   async function requireReauth(reason) {
@@ -12205,35 +12276,62 @@ async function showReauthModal(context = 'reauth') {
     await showInactivityPrompt();
   }
 
-  function onSuccessfulReauth() {
+function onSuccessfulReauth() {
   try {
-    // mark modal closed
+    // mark modal closed locally
     reauthModalOpen = false;
 
-    // Clear any pending reauth flag persisted in storage
+    // Try to call cross-tab/server complete API but DON'T wait for it (fire-and-forget).
+    // This keeps the function synchronous while still attempting the proper cleanup.
+    try {
+      if (window.fgReauth && typeof window.fgReauth.completeReauth === 'function') {
+        try {
+          const maybePromise = window.fgReauth.completeReauth();
+          // if it returned a promise, consume errors silently (best-effort)
+          if (maybePromise && typeof maybePromise.then === 'function') {
+            maybePromise.catch(() => {/* ignore network errors here */});
+          }
+        } catch (e) { /* ignore call errors */ }
+      }
+    } catch (e) { /* ignore */ }
+
+    // Synchronously clear the authoritative reauth flag so UI/hide logic is consistent
+    try { localStorage.removeItem('fg_reauth_required_v1'); } catch (e) {}
+    // also remove any legacy/alternate key
     try { localStorage.removeItem('reauthPending'); } catch (e) {}
 
     // Ensure DOM refs are current
     try { cacheDomRefs(); } catch (e) {}
 
-    // Hide the modals and clear accessibility/inert attributes
-    try {
-      if (reauthModal) {
-        reauthModal.classList.add('hidden');
-        // remove modal accessibility attributes set earlier
-        try { reauthModal.removeAttribute('aria-modal'); } catch (e) {}
-        try { reauthModal.removeAttribute('role'); } catch (e) {}
-        // restore inert / pointer-events
-        if ('inert' in HTMLElement.prototype) {
-          try { reauthModal.inert = false; } catch (e) {}
-        } else {
-          try { reauthModal.removeAttribute('aria-hidden'); reauthModal.style.pointerEvents = ''; } catch (e) {}
-        }
+    // Helper to detect if canonical key still indicates pending (defensive)
+    function isCanonicalReauthPending() {
+      try {
+        return !!JSON.parse(localStorage.getItem('fg_reauth_required_v1') || 'null');
+      } catch (e) {
+        return false;
       }
-    } catch (e) {}
+    }
+
+    // Hide the modals and clear accessibility/inert attributes (only if canonical flag not present)
+    try {
+      if (!isCanonicalReauthPending()) {
+        if (reauthModal) {
+          reauthModal.classList.add('hidden');
+          try { reauthModal.removeAttribute('aria-modal'); } catch (e) {}
+          try { reauthModal.removeAttribute('role'); } catch (e) {}
+          if ('inert' in HTMLElement.prototype) {
+            try { reauthModal.inert = false; } catch (e) {}
+          } else {
+            try { reauthModal.removeAttribute('aria-hidden'); reauthModal.style.pointerEvents = ''; } catch (e) {}
+          }
+        }
+      } else {
+        console.debug('onSuccessfulReauth (sync): canonical reauth flag still present — skipping hide');
+      }
+    } catch (e) { /* swallow UI hide errors */ }
 
     try {
-      if (promptModal) {
+      if (promptModal && !isCanonicalReauthPending()) {
         promptModal.classList.add('hidden');
         try { promptModal.removeAttribute('aria-hidden'); promptModal.style.pointerEvents = ''; } catch (e) {}
       }
@@ -12281,12 +12379,13 @@ async function showReauthModal(context = 'reauth') {
     // finished
     return true;
   } catch (err) {
-    // silent fail-safe; avoid console noise in prod
+    // silent fail-safe; ensure reauth active state turned off and idle timer restarted
     try { setReauthActive(false); } catch (e) {}
     try { if (typeof resetIdleTimer === 'function') resetIdleTimer(); } catch (e) {}
     return false;
   }
 }
+
 
 
   /* -----------------------
@@ -12296,7 +12395,12 @@ async function showReauthModal(context = 'reauth') {
     console.debug('BOOT LOG: initFlow starting'); // at initFlow start
     console.log('initFlow started');
     try {
-      await initReauthModal({ show: false });
+      {
+  let pending = false;
+  try { pending = !!JSON.parse(localStorage.getItem('fg_reauth_required_v1') || 'null'); } catch(e) {}
+  await initReauthModal({ show: pending });
+}
+
     } catch (e) {
       console.error('Error in initReauthModal boot:', e);
     }
