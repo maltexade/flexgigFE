@@ -9581,23 +9581,25 @@ if (!pinView.__keydownHandler) {
 
 
 async function initReauthModal({ show = false, context = 'reauth' } = {}) {
-  console.debug('BOOT LOG: initReauthModal start (show=' + String(show) + ')'); // at top of initReauthModal
+
+console.debug('BOOT LOG: initReauthModal start (show=' + String(show) + ')'); // at top of initReauthModal
 
   console.debug('initReauthModal called', { show, context });
   cacheDomRefs();
 
   // Defensive: if localStorage indicates reauth pending, force show and avoid hiding on boot.
-  // Place this at the top of initReauthModal(...)
-  try {
-    const LOCAL_KEY = 'fg_reauth_required_v1';
-    const pending = localStorage.getItem(LOCAL_KEY);
-    if (pending && (typeof show === 'undefined' || show === false)) {
-      console.debug('initReauthModal: local reauth pending -> forcing show');
-      show = true;
-    }
-  } catch (e) {
-    /* ignore localStorage errors */
+// Place this at the top of initReauthModal(...)
+try {
+  const LOCAL_KEY = 'fg_reauth_required_v1';
+  const pending = localStorage.getItem(LOCAL_KEY);
+  if (pending && (typeof show === 'undefined' || show === false)) {
+    console.debug('initReauthModal: local reauth pending -> forcing show');
+    show = true;
   }
+} catch (e) {
+  /* ignore localStorage errors */
+}
+
 
   // helper: safe parse userData or build from session
   async function buildUser() {
@@ -9665,421 +9667,425 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
 
   // Synchronously attempt biometric auth using cached options (must be user gesture)
   // Replace tryBiometricWithCachedOptions with this version
-  async function tryBiometricWithCachedOptions() {
-    // Prefer a cached publicKey object
-    const raw = window.__cachedAuthOptions || null;
-    if (!raw) return { ok: false, reason: 'no-cache' };
+async function tryBiometricWithCachedOptions() {
+  // Prefer a cached publicKey object
+  const raw = window.__cachedAuthOptions || null;
+  if (!raw) return { ok: false, reason: 'no-cache' };
 
-    // helpers --------------------------------------------------------------
-    const storedId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id') || localStorage.getItem('webauthn_cred') || '';
+  // helpers --------------------------------------------------------------
+  const storedId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id') || localStorage.getItem('webauthn_cred') || '';
 
-    function base64UrlToUint8(s) {
-      if (!s) return null;
-      try {
-        // prefer app helpers if present
-        if (typeof window.idToUint8 === 'function') return window.idToUint8(s);
-        if (typeof window.fromBase64Url === 'function') {
-          const v = window.fromBase64Url(s);
-          return (v instanceof Uint8Array) ? v : new Uint8Array(v);
-        }
-        // fallback decode base64url -> atob -> Uint8Array
-        const pad = (4 - (s.length % 4)) % 4;
-        const base64 = s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat(pad);
-        const bin = atob(base64);
-        const out = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-        return out;
-      } catch (e) {
-        console.warn('[tryBiometricWithCachedOptions] base64UrlToUint8 failed', e);
-        return null;
+  function base64UrlToUint8(s) {
+    if (!s) return null;
+    try {
+      // prefer app helpers if present
+      if (typeof window.idToUint8 === 'function') return window.idToUint8(s);
+      if (typeof window.fromBase64Url === 'function') {
+        const v = window.fromBase64Url(s);
+        return (v instanceof Uint8Array) ? v : new Uint8Array(v);
       }
-    }
-
-    function numericObjectToUint8(obj) {
-      try {
-        // detect numeric-key shaped objects like {0:143,1:209,...}
-        const keys = Object.keys(obj);
-        if (!keys.length) return null;
-        // find the maximum numeric index
-        let max = -1;
-        for (let k of keys) {
-          const n = parseInt(k, 10);
-          if (!Number.isNaN(n)) max = Math.max(max, n);
-        }
-        if (max < 0) return null;
-        const out = new Uint8Array(max + 1);
-        for (let i = 0; i <= max; i++) out[i] = typeof obj[i] === 'number' ? obj[i] & 0xff : 0;
-        return out;
-      } catch (e) {
-        return null;
-      }
-    }
-
-    function ensureUint8(value) {
-      if (!value) return null;
-      // already typed
-      if (value instanceof Uint8Array) return value;
-      if (value instanceof ArrayBuffer) return new Uint8Array(value);
-      if (ArrayBuffer.isView(value) && value.buffer) return new Uint8Array(value.buffer, value.byteOffset || 0, value.byteLength || value.length);
-      if (typeof value === 'string') return base64UrlToUint8(value);
-      // node-ish object like { data: [...] }
-      try {
-        if (value && Array.isArray(value.data)) return new Uint8Array(value.data);
-      } catch (e) {}
-      // numeric-key object
-      try {
-        const conv = numericObjectToUint8(value);
-        if (conv) return conv;
-      } catch (e) {}
+      // fallback decode base64url -> atob -> Uint8Array
+      const pad = (4 - (s.length % 4)) % 4;
+      const base64 = s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat(pad);
+      const bin = atob(base64);
+      const out = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+      return out;
+    } catch (e) {
+      console.warn('[tryBiometricWithCachedOptions] base64UrlToUint8 failed', e);
       return null;
-    }
-
-    // Build a fresh publicKey object explicitly (avoid Object.assign on raw)
-    const publicKey = {};
-    // copy primitive top-level props that matter
-    if ('rpId' in raw) publicKey.rpId = raw.rpId;
-    if ('timeout' in raw) publicKey.timeout = raw.timeout;
-    if ('userVerification' in raw) publicKey.userVerification = raw.userVerification;
-    if ('extensions' in raw) publicKey.extensions = raw.extensions;
-
-    // convert challenge (string, numeric-object, ArrayBuffer, Uint8Array)
-    try {
-      const ch = ensureUint8(raw.challenge);
-      if (ch) {
-        publicKey.challenge = ch;
-      } else if (raw.challenge && typeof raw.challenge === 'object') {
-        // if it's unexpectedly shaped, try numeric-object conversion
-        const n = numericObjectToUint8(raw.challenge);
-        if (n) publicKey.challenge = n;
-        else publicKey.challenge = raw.challenge; // will be caught by validation below
-      } else {
-        // last resort: attempt base64url from string
-        publicKey.challenge = (typeof raw.challenge === 'string') ? base64UrlToUint8(raw.challenge) : raw.challenge;
-      }
-    } catch (e) {
-      console.warn('[tryBiometricWithCachedOptions] challenge conversion failed', e);
-      publicKey.challenge = null;
-    }
-
-    // normalize allowCredentials -> ensure id is Uint8Array where possible
-    try {
-      const rawAllow = Array.isArray(raw.allowCredentials) ? raw.allowCredentials : [];
-      const allow = [];
-
-      for (let i = 0; i < rawAllow.length; i++) {
-        const c = rawAllow[i];
-        if (!c) continue;
-        const item = {};
-        item.type = c.type || 'public-key';
-        item.transports = c.transports || (c.transports === undefined ? ['internal'] : c.transports);
-        const idBuf = ensureUint8(c.id) || (typeof c.id === 'string' ? base64UrlToUint8(c.id) : null);
-        if (idBuf) item.id = idBuf;
-        else item.id = c.id; // keep as-is if we can't convert (fallback)
-        allow.push(item);
-      }
-
-      // ensure storedId present as a typed id if allow is empty or doesn't match
-      if ((!allow || allow.length === 0) && storedId) {
-        const idBuf = ensureUint8(storedId);
-        if (idBuf) allow.push({ type: 'public-key', id: idBuf, transports: ['internal'] });
-      } else if (storedId && allow.length) {
-        // best-effort ensure storedId is in allow
-        try {
-          const idBuf = ensureUint8(storedId);
-          if (idBuf) {
-            let found = false;
-            for (const a of allow) {
-              const aId = ensureUint8(a.id);
-              if (!aId) continue;
-              if (aId.length === idBuf.length) {
-                let eq = true;
-                for (let j = 0; j < aId.length; j++) if (aId[j] !== idBuf[j]) { eq = false; break; }
-                if (eq) { found = true; break; }
-              }
-            }
-            if (!found) allow.unshift({ type: 'public-key', id: idBuf, transports: ['internal'] });
-          }
-        } catch (e) { /* ignore equality errors */ }
-      }
-
-      publicKey.allowCredentials = allow;
-    } catch (e) {
-      console.warn('[tryBiometricWithCachedOptions] allowCredentials normalization failed', e);
-      publicKey.allowCredentials = raw.allowCredentials || [];
-    }
-
-    // sanity check: challenge must be ArrayBuffer/Uint8Array
-    if (!publicKey.challenge || !(publicKey.challenge instanceof Uint8Array || publicKey.challenge instanceof ArrayBuffer || (ArrayBuffer.isView(publicKey.challenge) && publicKey.challenge.buffer))) {
-      console.warn('[tryBiometricWithCachedOptions] invalid challenge type after conversion', publicKey.challenge);
-      return { ok: false, reason: 'bad-challenge', debug: publicKey.challenge };
-    }
-
-    // Acquire the in-use lock so prefetch won't update server challenge while we are calling the authenticator.
-    window.__cachedAuthOptionsLock = true;
-    window.__cachedAuthOptionsLockSince = Date.now();
-
-    try {
-      // Call the authenticator with the prepared publicKey object
-      const assertion = await navigator.credentials.get({ publicKey });
-      return { ok: true, assertion };
-    } catch (err) {
-      console.warn('navigator.credentials.get failed with cached options', err);
-      return { ok: false, reason: 'get-failed', error: err };
-    } finally {
-      // release lock after a short grace window to avoid immediate prefetch racing
-      setTimeout(() => {
-        try { window.__cachedAuthOptionsLock = false; window.__cachedAuthOptionsLockSince = 0; } catch (e) {}
-      }, 80);
     }
   }
 
+  function numericObjectToUint8(obj) {
+    try {
+      // detect numeric-key shaped objects like {0:143,1:209,...}
+      const keys = Object.keys(obj);
+      if (!keys.length) return null;
+      // find the maximum numeric index
+      let max = -1;
+      for (let k of keys) {
+        const n = parseInt(k, 10);
+        if (!Number.isNaN(n)) max = Math.max(max, n);
+      }
+      if (max < 0) return null;
+      const out = new Uint8Array(max + 1);
+      for (let i = 0; i <= max; i++) out[i] = typeof obj[i] === 'number' ? obj[i] & 0xff : 0;
+      return out;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function ensureUint8(value) {
+    if (!value) return null;
+    // already typed
+    if (value instanceof Uint8Array) return value;
+    if (value instanceof ArrayBuffer) return new Uint8Array(value);
+    if (ArrayBuffer.isView(value) && value.buffer) return new Uint8Array(value.buffer, value.byteOffset || 0, value.byteLength || value.length);
+    if (typeof value === 'string') return base64UrlToUint8(value);
+    // node-ish object like { data: [...] }
+    try {
+      if (value && Array.isArray(value.data)) return new Uint8Array(value.data);
+    } catch (e) {}
+    // numeric-key object
+    try {
+      const conv = numericObjectToUint8(value);
+      if (conv) return conv;
+    } catch (e) {}
+    return null;
+  }
+
+  // Build a fresh publicKey object explicitly (avoid Object.assign on raw)
+  const publicKey = {};
+  // copy primitive top-level props that matter
+  if ('rpId' in raw) publicKey.rpId = raw.rpId;
+  if ('timeout' in raw) publicKey.timeout = raw.timeout;
+  if ('userVerification' in raw) publicKey.userVerification = raw.userVerification;
+  if ('extensions' in raw) publicKey.extensions = raw.extensions;
+
+  // convert challenge (string, numeric-object, ArrayBuffer, Uint8Array)
+  try {
+    const ch = ensureUint8(raw.challenge);
+    if (ch) {
+      publicKey.challenge = ch;
+    } else if (raw.challenge && typeof raw.challenge === 'object') {
+      // if it's unexpectedly shaped, try numeric-object conversion
+      const n = numericObjectToUint8(raw.challenge);
+      if (n) publicKey.challenge = n;
+      else publicKey.challenge = raw.challenge; // will be caught by validation below
+    } else {
+      // last resort: attempt base64url from string
+      publicKey.challenge = (typeof raw.challenge === 'string') ? base64UrlToUint8(raw.challenge) : raw.challenge;
+    }
+  } catch (e) {
+    console.warn('[tryBiometricWithCachedOptions] challenge conversion failed', e);
+    publicKey.challenge = null;
+  }
+
+  // normalize allowCredentials -> ensure id is Uint8Array where possible
+  try {
+    const rawAllow = Array.isArray(raw.allowCredentials) ? raw.allowCredentials : [];
+    const allow = [];
+
+    for (let i = 0; i < rawAllow.length; i++) {
+      const c = rawAllow[i];
+      if (!c) continue;
+      const item = {};
+      item.type = c.type || 'public-key';
+      item.transports = c.transports || (c.transports === undefined ? ['internal'] : c.transports);
+      const idBuf = ensureUint8(c.id) || (typeof c.id === 'string' ? base64UrlToUint8(c.id) : null);
+      if (idBuf) item.id = idBuf;
+      else item.id = c.id; // keep as-is if we can't convert (fallback)
+      allow.push(item);
+    }
+
+    // ensure storedId present as a typed id if allow is empty or doesn't match
+    if ((!allow || allow.length === 0) && storedId) {
+      const idBuf = ensureUint8(storedId);
+      if (idBuf) allow.push({ type: 'public-key', id: idBuf, transports: ['internal'] });
+    } else if (storedId && allow.length) {
+      // best-effort ensure storedId is in allow
+      try {
+        const idBuf = ensureUint8(storedId);
+        if (idBuf) {
+          let found = false;
+          for (const a of allow) {
+            const aId = ensureUint8(a.id);
+            if (!aId) continue;
+            if (aId.length === idBuf.length) {
+              let eq = true;
+              for (let j = 0; j < aId.length; j++) if (aId[j] !== idBuf[j]) { eq = false; break; }
+              if (eq) { found = true; break; }
+            }
+          }
+          if (!found) allow.unshift({ type: 'public-key', id: idBuf, transports: ['internal'] });
+        }
+      } catch (e) { /* ignore equality errors */ }
+    }
+
+    publicKey.allowCredentials = allow;
+  } catch (e) {
+    console.warn('[tryBiometricWithCachedOptions] allowCredentials normalization failed', e);
+    publicKey.allowCredentials = raw.allowCredentials || [];
+  }
+
+  // sanity check: challenge must be ArrayBuffer/Uint8Array
+  if (!publicKey.challenge || !(publicKey.challenge instanceof Uint8Array || publicKey.challenge instanceof ArrayBuffer || (ArrayBuffer.isView(publicKey.challenge) && publicKey.challenge.buffer))) {
+    console.warn('[tryBiometricWithCachedOptions] invalid challenge type after conversion', publicKey.challenge);
+    return { ok: false, reason: 'bad-challenge', debug: publicKey.challenge };
+  }
+
+  // Acquire the in-use lock so prefetch won't update server challenge while we are calling the authenticator.
+  window.__cachedAuthOptionsLock = true;
+  window.__cachedAuthOptionsLockSince = Date.now();
+
+  try {
+    // Call the authenticator with the prepared publicKey object
+    const assertion = await navigator.credentials.get({ publicKey });
+    return { ok: true, assertion };
+  } catch (err) {
+    console.warn('navigator.credentials.get failed with cached options', err);
+    return { ok: false, reason: 'get-failed', error: err };
+  } finally {
+    // release lock after a short grace window to avoid immediate prefetch racing
+    setTimeout(() => {
+      try { window.__cachedAuthOptionsLock = false; window.__cachedAuthOptionsLockSince = 0; } catch (e) {}
+    }, 80);
+  }
+}
+
+
   // Attach biometric click handler for the PIN modal's biometric button
-  // ----- Corrected implementation: Fixed syntax/logic in guard condition and cached getSession -----
-  (function bindPinBiometricBtn() {
-    const bioBtn = document.getElementById('pinBiometricBtn');
-    if (!bioBtn) return;
+// Attach biometric click handler for the PIN modal's biometric button
+// ----- Corrected implementation: Fixed syntax/logic in guard condition and cached getSession -----
+(function bindPinBiometricBtn() {
+  const bioBtn = document.getElementById('pinBiometricBtn');
+  if (!bioBtn) return;
 
-    // Determine local enablement: require both a stored credential and enabled flag
-    const flagVal = (localStorage.getItem('biometricForLogin') || localStorage.getItem('__sec_bioLogin') || localStorage.getItem('security_bio_login') || '').toLowerCase();
-    const storedCred = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id') || localStorage.getItem('webauthn_cred') || '';
-    const webAuthnSupported = ('PublicKeyCredential' in window);
-    const bioLoginEnabled = webAuthnSupported && (!!storedCred) && (['true','1','yes'].includes(flagVal) || !!storedCred);
+  // Determine local enablement: require both a stored credential and enabled flag
+  const flagVal = (localStorage.getItem('biometricForLogin') || localStorage.getItem('__sec_bioLogin') || localStorage.getItem('security_bio_login') || '').toLowerCase();
+  const storedCred = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id') || localStorage.getItem('webauthn_cred') || '';
+  const webAuthnSupported = ('PublicKeyCredential' in window);
+  const bioLoginEnabled = webAuthnSupported && (!!storedCred) && (['true','1','yes'].includes(flagVal) || !!storedCred);
 
-    // Show/hide button based on concrete presence
-    try { bioBtn.style.display = bioLoginEnabled ? 'inline-flex' : 'none'; } catch (e) {}
-    console.debug('[reauth] Biometric button visibility:', bioLoginEnabled);
+  // Show/hide button based on concrete presence
+  try { bioBtn.style.display = bioLoginEnabled ? 'inline-flex' : 'none'; } catch (e) {}
+  console.debug('[reauth] Biometric button visibility:', bioLoginEnabled);
 
-    if (bioBtn.__bound) {
-      attachPrefetchOnGesture(bioBtn);
+  if (bioBtn.__bound) {
+    attachPrefetchOnGesture(bioBtn);
+    return;
+  }
+
+  // warm cache on gesture so first click can work
+  attachPrefetchOnGesture(bioBtn);
+
+  // minimal util: buffer -> base64url
+  function bufToB64Url(buf) {
+    return (window.toBase64Url ? window.toBase64Url(buf) : (function(b){
+      var bytes = new Uint8Array(b);
+      var str = '';
+      for (var i=0;i<bytes.length;i++) str += String.fromCharCode(bytes[i]);
+      return btoa(str).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+    })(buf));
+  }
+
+  bioBtn.addEventListener('click', async (ev) => {
+    ev.preventDefault();
+    console.debug('[reauth] pinBiometricBtn clicked');
+
+    // Quick guard: ensure biometric flag and credential exist
+    const storedCredNow = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id') || localStorage.getItem('webauthn_cred') || '';
+    let biomKey = 'biometricsEnabled';
+    try {
+      if (typeof __sec_KEYS !== 'undefined' && __sec_KEYS && __sec_KEYS.biom) {
+        biomKey = __sec_KEYS.biom;
+      }
+    } catch (e) {
+      console.warn('[reauth] __sec_KEYS access error, using default key');
+    }
+    const biomFlagRaw = localStorage.getItem(biomKey) || '';
+    const biomFlagNow = biomFlagRaw.toString().toLowerCase();
+    const biometricForLoginFlag = (localStorage.getItem('biometricForLogin') || '').toLowerCase();
+    const hasStoredCred = !!storedCredNow;
+    const isBiometricForLoginEnabled = ['true','1','yes'].includes(biometricForLoginFlag);
+    const isBiometricsEnabled = ['true','1','yes'].includes(biomFlagNow);
+
+    if (!hasStoredCred || !isBiometricForLoginEnabled || !isBiometricsEnabled) {
+      console.warn('[reauth] biometric not enabled or no credential', {
+        hasStoredCred,
+        isBiometricForLoginEnabled,
+        isBiometricsEnabled
+      });
+      if (typeof safeCall === 'function' && typeof notify === 'function') {
+        safeCall(notify, 'Biometric login not available — use PIN', 'warn', reauthAlert, reauthAlertMsg);
+      }
       return;
     }
 
-    // warm cache on gesture so first click can work
-    attachPrefetchOnGesture(bioBtn);
-
-    // minimal util: buffer -> base64url
-    function bufToB64Url(buf) {
-      return (window.toBase64Url ? window.toBase64Url(buf) : (function(b){
-        var bytes = new Uint8Array(b);
-        var str = '';
-        for (var i=0;i<bytes.length;i++) str += String.fromCharCode(bytes[i]);
-        return btoa(str).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
-      })(buf));
+    // Try synchronous cached option path first (keeps user gesture)
+    const cachedAttempt = await tryBiometricWithCachedOptions();
+    if (!cachedAttempt.ok) {
+      // fallback: ensure prefetch warmed and instruct user to try again / use PIN
+      try { window.prefetchAuthOptions && window.prefetchAuthOptions(); } catch(e){}
+      if (typeof safeCall === 'function' && typeof notify === 'function') {
+        safeCall(notify, 'Preparing biometric auth — please try again (or use PIN)', 'info', reauthAlert, reauthAlertMsg);
+      }
+      // focus PIN input as convenience
+      try {
+        const firstInput = getReauthInputs()[0];
+        if (firstInput && typeof firstInput.focus === 'function') firstInput.focus();
+      } catch(e){}
+      return;
     }
 
-    bioBtn.addEventListener('click', async (ev) => {
-      ev.preventDefault();
-      console.debug('[reauth] pinBiometricBtn clicked');
-
-      // Quick guard: ensure biometric flag and credential exist
-      const storedCredNow = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id') || localStorage.getItem('webauthn_cred') || '';
-      let biomKey = 'biometricsEnabled';
-      try {
-        if (typeof __sec_KEYS !== 'undefined' && __sec_KEYS && __sec_KEYS.biom) {
-          biomKey = __sec_KEYS.biom;
-        }
-      } catch (e) {
-        console.warn('[reauth] __sec_KEYS access error, using default key');
+    // We have a single assertion from the authenticator — DO NOT prompt again.
+    const assertion = cachedAttempt.assertion;
+    const payload = {
+      id: assertion.id,
+      rawId: bufToB64Url(assertion.rawId),
+      type: assertion.type,
+      response: {
+        authenticatorData: bufToB64Url(assertion.response.authenticatorData),
+        clientDataJSON: bufToB64Url(assertion.response.clientDataJSON),
+        signature: bufToB64Url(assertion.response.signature),
+        userHandle: assertion.response.userHandle ? bufToB64Url(assertion.response.userHandle) : null
       }
-      const biomFlagRaw = localStorage.getItem(biomKey) || '';
-      const biomFlagNow = biomFlagRaw.toString().toLowerCase();
-      const biometricForLoginFlag = (localStorage.getItem('biometricForLogin') || '').toLowerCase();
-      const hasStoredCred = !!storedCredNow;
-      const isBiometricForLoginEnabled = ['true','1','yes'].includes(biometricForLoginFlag);
-      const isBiometricsEnabled = ['true','1','yes'].includes(biomFlagNow);
+    };
 
-      if (!hasStoredCred || !isBiometricForLoginEnabled || !isBiometricsEnabled) {
-        console.warn('[reauth] biometric not enabled or no credential', {
-          hasStoredCred,
-          isBiometricForLoginEnabled,
-          isBiometricsEnabled
-        });
-        if (typeof safeCall === 'function' && typeof notify === 'function') {
-          safeCall(notify, 'Biometric login not available — use PIN', 'warn', reauthAlert, reauthAlertMsg);
-        }
-        return;
+    // Immediately show the "logging you in" message and loader so it appears on the first prompt
+    // Notify user (so message appears immediately) and open modal BEFORE withLoader.
+    try {
+      if (typeof safeCall === 'function' && typeof notify === 'function') {
+        safeCall(notify, 'Verifying fingerprint — logging you in...', 'info', reauthAlert, reauthAlertMsg);
       }
+    } catch (e) { /* silent fallback */ }
 
-      // Try synchronous cached option path first (keeps user gesture)
-      const cachedAttempt = await tryBiometricWithCachedOptions();
-      if (!cachedAttempt.ok) {
-        // fallback: ensure prefetch warmed and instruct user to try again / use PIN
-        try { window.prefetchAuthOptions && window.prefetchAuthOptions(); } catch(e){}
-        if (typeof safeCall === 'function' && typeof notify === 'function') {
-          safeCall(notify, 'Preparing biometric auth — please try again (or use PIN)', 'info', reauthAlert, reauthAlertMsg);
-        }
-        // focus PIN input as convenience
-        try {
-          const firstInput = getReauthInputs()[0];
-          if (firstInput && typeof firstInput.focus === 'function') firstInput.focus();
-        } catch(e){}
-        return;
+    // Open PIN modal and enable inputs so user has fallback while server verifies (do this before withLoader)
+    try {
+      if (typeof openPinModalForReauth === 'function') {
+        safeCall(openPinModalForReauth);
+      } else if (reauthModal && reauthModal.classList) {
+        reauthModal.classList.remove('hidden');
       }
+    } catch (e) { /* ignore modal open failure */ }
 
-      // We have a single assertion from the authenticator — DO NOT prompt again.
-      const assertion = cachedAttempt.assertion;
-      const payload = {
-        id: assertion.id,
-        rawId: bufToB64Url(assertion.rawId),
-        type: assertion.type,
-        response: {
-          authenticatorData: bufToB64Url(assertion.response.authenticatorData),
-          clientDataJSON: bufToB64Url(assertion.response.clientDataJSON),
-          signature: bufToB64Url(assertion.response.signature),
-          userHandle: assertion.response.userHandle ? bufToB64Url(assertion.response.userHandle) : null
-        }
-      };
-
-      // Immediately show the "logging you in" message and loader so it appears on the first prompt
-      // Notify user (so message appears immediately) and open modal BEFORE withLoader.
-      try {
-        if (typeof safeCall === 'function' && typeof notify === 'function') {
-          safeCall(notify, 'Verifying fingerprint — logging you in...', 'info', reauthAlert, reauthAlertMsg);
-        }
-      } catch (e) { /* silent fallback */ }
-
-      // Open PIN modal and enable inputs so user has fallback while server verifies (do this before withLoader)
-      try {
-        if (typeof openPinModalForReauth === 'function') {
-          safeCall(openPinModalForReauth);
-        } else if (reauthModal && reauthModal.classList) {
-          reauthModal.classList.remove('hidden');
-        }
-      } catch (e) { /* ignore modal open failure */ }
-
-      try {
-        if (typeof enableReauthInputs === 'function') {
-          enableReauthInputs();
-        } else {
-          const inputs = Array.from(document.querySelectorAll('.reauthpin-inputs input'));
-          inputs.forEach(i => { try { i.disabled = false; } catch(e){} });
-        }
-      } catch (e) { /* ignore */ }
-
-      // Optionally simulate PIN entry so UI looks live while verification happens
-      try {
-        if (typeof simulatePinEntry === 'function') {
-          simulatePinEntry({ stagger:0, expectedCount:4, fillAll:true });
-        }
-      } catch(e){ /* ignore */ }
-
-      // Cache session data to avoid double call
-      let sessionData = null;
-      try {
-        sessionData = await safeCall(getSession);
-      } catch (e) {
-        console.warn('[reauth] getSession error during biometrics', e);
-      }
-      const userId = sessionData?.user?.uid || sessionData?.user?.id || null;
-
-      // Send assertion to server for verification — only use withLoader (do NOT call showLoader manually)
-      let verifyRes;
-      try {
-        verifyRes = await withLoader(async () => {
-          // withLoader will call showLoader() internally (refcounted in the fixed implementation).
-          return await fetch((window.__SEC_API_BASE || (typeof API_BASE !== 'undefined' ? API_BASE : '')) + '/webauthn/auth/verify', {
-            method: 'POST',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              ...payload,
-              userId: userId
-            })
-          });
-        });
-      } catch (err) {
-        console.error('[reauth] network/withLoader error during verify', err);
-        if (typeof safeCall === 'function' && typeof notify === 'function') {
-          safeCall(notify, 'Verification failed — network error. Please try again.', 'error', reauthAlert, reauthAlertMsg);
-        }
-        return;
-      }
-
-      if (!verifyRes) {
-        console.error('[reauth] verifyRes falsy after fetch');
-        if (typeof safeCall === 'function' && typeof notify === 'function') {
-          safeCall(notify, 'Verification failed — no response from server.', 'error', reauthAlert, reauthAlertMsg);
-        }
-        return;
-      }
-
-      if (!verifyRes.ok) {
-        const errText = await verifyRes.text().catch(() => verifyRes.statusText || `HTTP ${verifyRes.status}`);
-        console.warn('[reauth] server responded non-OK:', verifyRes.status, errText);
-
-        // Do NOT trigger a second navigator.credentials.get() here.
-        // Let the server-side last-N challenge logic handle race conditions.
-        // Inform the user and allow manual retry / PIN fallback.
-        const mismatchDetected = /no stored challenge|challenge.*mismatch|unexpected.*challenge|invalid.*challenge/i.test(errText);
-        if (mismatchDetected) {
-          console.debug('[reauth] challenge mismatch reported by server; not re-prompting authenticator (single prompt policy)');
-          if (typeof safeCall === 'function' && typeof notify === 'function') {
-            safeCall(notify, 'Biometric challenge expired — please try your fingerprint again or use PIN.', 'warning', reauthAlert, reauthAlertMsg);
-          }
-        } else {
-          if (typeof safeCall === 'function' && typeof notify === 'function') {
-            safeCall(notify, `Biometric verification failed: ${errText || 'Server error'}`, 'error', reauthAlert, reauthAlertMsg);
-          }
-        }
-        try { 
-          if (typeof invalidateAuthOptionsCache === 'function') invalidateAuthOptionsCache(); 
-          if (window.prefetchAuthOptions) window.prefetchAuthOptions(); 
-        } catch(e){}
-        return;
-      }
-
-      // parse success
-      let verifyData;
-      try {
-        verifyData = await verifyRes.json().catch(() => ({}));
-      } catch (err) {
-        console.warn('[reauth] failed to parse verify JSON', err);
-        if (typeof safeCall === 'function' && typeof notify === 'function') {
-          safeCall(notify, 'Verification failed — invalid server response.', 'error', reauthAlert, reauthAlertMsg);
-        }
-        return;
-      }
-
-      if (verifyData && verifyData.verified) {
-        console.log('[DEBUG] Biometrics verification successful');
-        console.debug('[reauth] verification successful');
-        try {
-          if (typeof safeCall === 'function' && typeof __sec_getCurrentUser === 'function') {
-            safeCall(__sec_getCurrentUser);
-          }
-        } catch (e) {
-          console.warn('[reauth] __sec_getCurrentUser error', e);
-        }
-        try {
-          // 1. Call onSuccessfulReauth to clear flags, reset timers, and handle session state
-          if (typeof onSuccessfulReauth === 'function') {
-            await onSuccessfulReauth();
-          }
-          // 2. Call guardedHideReauthModal to safely hide the modal only if flags are cleared
-          if (typeof guardedHideReauthModal === 'function') {
-            await guardedHideReauthModal();
-          }
-          console.log('[DEBUG] Reauth modal hidden after successful biometrics verification');
-        } catch (err) {
-          console.warn('[reauth] Post-biometrics verification error', err);
-          // Optionally show an error to the user
-          if (typeof safeCall === 'function' && typeof notify === 'function') {
-            safeCall(notify, 'Error completing authentication. Please try again.', 'error', reauthAlert, reauthAlertMsg);
-          }
-        }
-        return;
+    try {
+      if (typeof enableReauthInputs === 'function') {
+        enableReauthInputs();
       } else {
-        console.warn('[reauth] verify returned ok but not verified', verifyData);
-        if (typeof safeCall === 'function' && typeof notify === 'function') {
-          safeCall(notify, 'Biometric verification failed', 'error', reauthAlert, reauthAlertMsg);
-        }
-        return;
+        const inputs = Array.from(document.querySelectorAll('.reauthpin-inputs input'));
+        inputs.forEach(i => { try { i.disabled = false; } catch(e){} });
       }
-    });
+    } catch (e) { /* ignore */ }
 
-    bioBtn.__bound = true;
-    console.debug('[reauth] pinBiometricBtn bound');
-  })();
+    // Optionally simulate PIN entry so UI looks live while verification happens
+    try {
+      if (typeof simulatePinEntry === 'function') {
+        simulatePinEntry({ stagger:0, expectedCount:4, fillAll:true });
+      }
+    } catch(e){ /* ignore */ }
+
+    // Cache session data to avoid double call
+    let sessionData = null;
+    try {
+      sessionData = await safeCall(getSession);
+    } catch (e) {
+      console.warn('[reauth] getSession error during biometrics', e);
+    }
+    const userId = sessionData?.user?.uid || sessionData?.user?.id || null;
+
+    // Send assertion to server for verification — only use withLoader (do NOT call showLoader manually)
+    let verifyRes;
+    try {
+      verifyRes = await withLoader(async () => {
+        // withLoader will call showLoader() internally (refcounted in the fixed implementation).
+        return await fetch((window.__SEC_API_BASE || (typeof API_BASE !== 'undefined' ? API_BASE : '')) + '/webauthn/auth/verify', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...payload,
+            userId: userId
+          })
+        });
+      });
+    } catch (err) {
+      console.error('[reauth] network/withLoader error during verify', err);
+      if (typeof safeCall === 'function' && typeof notify === 'function') {
+        safeCall(notify, 'Verification failed — network error. Please try again.', 'error', reauthAlert, reauthAlertMsg);
+      }
+      return;
+    }
+
+    if (!verifyRes) {
+      console.error('[reauth] verifyRes falsy after fetch');
+      if (typeof safeCall === 'function' && typeof notify === 'function') {
+        safeCall(notify, 'Verification failed — no response from server.', 'error', reauthAlert, reauthAlertMsg);
+      }
+      return;
+    }
+
+    if (!verifyRes.ok) {
+      const errText = await verifyRes.text().catch(() => verifyRes.statusText || `HTTP ${verifyRes.status}`);
+      console.warn('[reauth] server responded non-OK:', verifyRes.status, errText);
+
+      // Do NOT trigger a second navigator.credentials.get() here.
+      // Let the server-side last-N challenge logic handle race conditions.
+      // Inform the user and allow manual retry / PIN fallback.
+      const mismatchDetected = /no stored challenge|challenge.*mismatch|unexpected.*challenge|invalid.*challenge/i.test(errText);
+      if (mismatchDetected) {
+        console.debug('[reauth] challenge mismatch reported by server; not re-prompting authenticator (single prompt policy)');
+        if (typeof safeCall === 'function' && typeof notify === 'function') {
+          safeCall(notify, 'Biometric challenge expired — please try your fingerprint again or use PIN.', 'warning', reauthAlert, reauthAlertMsg);
+        }
+      } else {
+        if (typeof safeCall === 'function' && typeof notify === 'function') {
+          safeCall(notify, `Biometric verification failed: ${errText || 'Server error'}`, 'error', reauthAlert, reauthAlertMsg);
+        }
+      }
+      try { 
+        if (typeof invalidateAuthOptionsCache === 'function') invalidateAuthOptionsCache(); 
+        if (window.prefetchAuthOptions) window.prefetchAuthOptions(); 
+      } catch(e){}
+      return;
+    }
+
+    // parse success
+    let verifyData;
+    try {
+      verifyData = await verifyRes.json().catch(() => ({}));
+    } catch (err) {
+      console.warn('[reauth] failed to parse verify JSON', err);
+      if (typeof safeCall === 'function' && typeof notify === 'function') {
+        safeCall(notify, 'Verification failed — invalid server response.', 'error', reauthAlert, reauthAlertMsg);
+      }
+      return;
+    }
+
+    if (verifyData && verifyData.verified) {
+      console.log('[DEBUG] Biometrics verification successful');
+      console.debug('[reauth] verification successful');
+      try {
+        if (typeof safeCall === 'function' && typeof __sec_getCurrentUser === 'function') {
+          safeCall(__sec_getCurrentUser);
+        }
+      } catch (e) {
+        console.warn('[reauth] __sec_getCurrentUser error', e);
+      }
+      try {
+        // 1. Call onSuccessfulReauth to clear flags, reset timers, and handle session state
+        if (typeof onSuccessfulReauth === 'function') {
+          await onSuccessfulReauth();
+        }
+        // 2. Call guardedHideReauthModal to safely hide the modal only if flags are cleared
+        if (typeof guardedHideReauthModal === 'function') {
+          await guardedHideReauthModal();
+        }
+        console.log('[DEBUG] Reauth modal hidden after successful biometrics verification');
+      } catch (err) {
+        console.warn('[reauth] Post-biometrics verification error', err);
+        // Optionally show an error to the user
+        if (typeof safeCall === 'function' && typeof notify === 'function') {
+          safeCall(notify, 'Error completing authentication. Please try again.', 'error', reauthAlert, reauthAlertMsg);
+        }
+      }
+      return;
+    } else {
+      console.warn('[reauth] verify returned ok but not verified', verifyData);
+      if (typeof safeCall === 'function' && typeof notify === 'function') {
+        safeCall(notify, 'Biometric verification failed', 'error', reauthAlert, reauthAlertMsg);
+      }
+      return;
+    }
+  });
+
+  bioBtn.__bound = true;
+  console.debug('[reauth] pinBiometricBtn bound');
+})();
+
+
 
   // --- VISUALS: set display name and avatar safely ---
   try {
@@ -10094,34 +10100,34 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
         reauthAvatar.style.display = 'none';
       }
     }
-  } catch (e) { 
-    console.warn('avatar/name set failed', e); 
-  }
+  } catch (e) { console.warn('avatar/name set failed', e); }
 
   // --- Decide whether reauth is needed; if not, close and call success handler ---
-  // ----- Updated implementation with proper reauth flow -----
-  const reauthStatus = await shouldReauth(context);
-  if (!reauthStatus.needsReauth) {
-    console.log('[DEBUG] No reauth needed; proceeding with success flow');
-    try {
-      // 1. Call onSuccessfulReauth to clear flags, reset timers, and handle session state (no payload needed here)
-      if (typeof onSuccessfulReauth === 'function') {
-        await onSuccessfulReauth();
-      }
-      // 2. Call guardedHideReauthModal to safely hide the modal only if flags are cleared
-      if (typeof guardedHideReauthModal === 'function') {
-        await guardedHideReauthModal();
-      }
-      console.log('[DEBUG] Reauth modal hidden (no reauth needed)');
-    } catch (err) {
-      console.warn('[reauth] Post-reauth check success error', err);
-      // Optionally show an error to the user, but continue (non-fatal)
-      if (typeof showBanner === 'function') {
-        showBanner('Authentication completed, but an internal error occurred. Please refresh if issues persist.');
-      }
+// ----- Updated implementation with proper reauth flow -----
+const reauthStatus = await shouldReauth(context);
+if (!reauthStatus.needsReauth) {
+  console.log('[DEBUG] No reauth needed; proceeding with success flow');
+  try {
+    // 1. Call onSuccessfulReauth to clear flags, reset timers, and handle session state (no payload needed here)
+    if (typeof onSuccessfulReauth === 'function') {
+      await onSuccessfulReauth();
     }
-    return true;
+    // 2. Call guardedHideReauthModal to safely hide the modal only if flags are cleared
+    if (typeof guardedHideReauthModal === 'function') {
+      await guardedHideReauthModal();
+    }
+    console.log('[DEBUG] Reauth modal hidden (no reauth needed)');
+  } catch (err) {
+    console.warn('[reauth] Post-reauth check success error', err);
+    // Optionally show an error to the user, but continue (non-fatal)
+    if (typeof showBanner === 'function') {
+      showBanner('Authentication completed, but an internal error occurred. Please refresh if issues persist.');
+    }
   }
+  return true;
+}
+
+
 
   // FORCE PIN VIEW (you requested no view switching)
   try {
@@ -10129,16 +10135,10 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
     if (pinView) pinView.style.display = 'block';
     if (switchToBiometric) switchToBiometric.style.display = 'none';
     if (switchToPin) switchToPin.style.display = 'none';
-  } catch (e) { 
-    console.warn('force pin view failed', e); 
-  }
+  } catch (e) { console.warn('force pin view failed', e); }
 
   // Resume lockout if any
-  try { 
-    if (typeof resumeLockoutIfAny === 'function') {
-      resumeLockoutIfAny(); 
-    }
-  } catch (e){}
+  try { typeof resumeLockoutIfAny === 'function' && resumeLockoutIfAny(); } catch (e){}
 
   // Bind PIN inputs & submit
   try {
@@ -10152,67 +10152,34 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
         const inputs = getReauthInputs();
         const pin = inputs.map(i => i.value).join('');
         if (!/^\d{4}$/.test(pin)) {
-          if (typeof safeCall === 'function' && typeof notify === 'function') {
-            safeCall(notify, 'Invalid PIN', 'error', reauthAlert, reauthAlertMsg);
-          }
+          safeCall(notify, 'Invalid PIN', 'error', reauthAlert, reauthAlertMsg);
           return;
         }
         const uidInfo = await safeCall(__sec_getCurrentUser) || {};
         if (!uidInfo || !uidInfo.user || !uidInfo.user.uid) {
-          if (typeof safeCall === 'function' && typeof notify === 'function') {
-            safeCall(notify, 'Session error', 'error', reauthAlert, reauthAlertMsg);
-          }
+          safeCall(notify, 'Session error', 'error', reauthAlert, reauthAlertMsg);
           setTimeout(() => window.location.href = '/', 1500);
           return;
         }
         await safeCall(reAuthenticateWithPin, uidInfo.user.uid, pin, async (success) => {
-          if (success) {
-            console.log('[DEBUG] PIN verification successful');
-            try {
-              // Call __sec_getCurrentUser early if needed for session refresh
-              if (typeof safeCall === 'function' && typeof __sec_getCurrentUser === 'function') {
-                safeCall(__sec_getCurrentUser);
-              }
-              // 1. Call onSuccessfulReauth to clear flags, reset timers, and handle session state
-              if (typeof onSuccessfulReauth === 'function') {
-                await onSuccessfulReauth();
-              }
-              // Reset inputs after successful reauth (part of cleanup)
-              if (typeof resetReauthInputs === 'function') {
-                resetReauthInputs();
-              }
-              // 2. Call guardedHideReauthModal to safely hide the modal only if flags are cleared
-              if (typeof guardedHideReauthModal === 'function') {
-                await guardedHideReauthModal();
-              }
-              console.log('[DEBUG] Reauth modal hidden after successful PIN verification');
-            } catch (err) {
-              console.warn('[reauth] Post-PIN verification error', err);
-              // Optionally show an error to the user
-              if (typeof safeCall === 'function' && typeof notify === 'function') {
-                safeCall(notify, 'Error completing authentication. Please try again.', 'error', reauthAlert, reauthAlertMsg);
-              }
-              // Ensure inputs are reset even on error
-              if (typeof resetReauthInputs === 'function') {
-                resetReauthInputs();
-              }
-            }
-          } else {
-            // Failure path: Reset inputs and notify user
-            if (typeof resetReauthInputs === 'function') {
-              resetReauthInputs();
-            }
-            if (typeof safeCall === 'function' && typeof notify === 'function') {
-              safeCall(notify, 'PIN authentication failed', 'error', reauthAlert, reauthAlertMsg);
-            }
-          }
-        });
+  if (success) {
+    resetReauthInputs();
+    safeCall(__sec_getCurrentUser);
+    try { await Promise.resolve(onSuccessfulReauth && onSuccessfulReauth()); } catch (err) {
+      console.warn('[reauth] onSuccessfulReauth failed', err);
+    }
+    await guardedHideReauthModal();
+  } else {
+    resetReauthInputs();
+    safeCall(notify, 'PIN authentication failed', 'error', reauthAlert, reauthAlertMsg);
+  }
+});
+
+
       });
       pinView.__reauthSubmitBound = true;
     }
-  } catch (e) { 
-    console.error('PIN bind error', e); 
-  }
+  } catch (e) { console.error('PIN bind error', e); }
 
   // delete key binding (unchanged)
   try {
@@ -10231,9 +10198,7 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
       });
       deleteReauthKey.__bound = true;
     }
-  } catch (e) { 
-    console.warn('delete key bind failed', e); 
-  }
+  } catch (e) { console.warn('delete key bind failed', e); }
 
   // Bind biometric verify button (manual fallback that triggers prefetch + opt to retry)
   try {
@@ -10257,29 +10222,7 @@ async function initReauthModal({ show = false, context = 'reauth' } = {}) {
       verifyBiometricBtn.__bound = true;
       console.debug('verifyBiometricBtn bound');
     }
-  } catch (e) { 
-    console.warn('verifyBiometricBtn bind failed', e); 
-  }
-
-  // If show is true, show the modal
-  if (show) {
-    try {
-      reauthModal.classList.remove('hidden');
-      reauthModal.setAttribute('aria-modal', 'true');
-      reauthModal.setAttribute('role', 'dialog');
-      reauthModalOpen = true;
-      try { setReauthActive(true); } catch (e) {}
-      // Focus first input or button
-      const firstInput = getReauthInputs()[0];
-      if (firstInput && firstInput.focus) firstInput.focus();
-      else if (bioBtn && bioBtn.focus) bioBtn.focus();
-    } catch (e) {
-      console.error('show modal failed', e);
-    }
-  }
-
-  return true;
-
+  } catch (e) { console.warn('verifyBiometricBtn bind failed', e); }
 
 // helper to post verification payload to server (used by verify button path)
 // ----- Updated implementation with proper reauth flow -----
