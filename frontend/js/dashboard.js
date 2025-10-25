@@ -994,6 +994,8 @@ async function handleBioToggle(e) {
   }
 }
 
+const IDLE_TIME = 15 * 1000; // 10 min in prod
+
 // After getSession succeeds
 // After getSession succeeds (now cache-first)
 async function onDashboardLoad() {
@@ -9191,8 +9193,6 @@ function openForgetPinFlow() {
   }
 
   // Helper: Safely disable/enable keypad during processing
-  const localDelete = pinView.querySelector('#deleteReauthKey');
-    console.log('Local delete found:', !!localDelete);
     const keypadButtons = Array.from(document.querySelectorAll('.pin-keypad button'));
 function toggleKeypadProcessing(disabled) {
   console.log('toggleKeypadProcessing:', disabled);
@@ -9379,7 +9379,8 @@ async function handlePinCompletion() {
     const inputs = getReauthInputs(); // four readonly inputs in your HTML
     const keypadButtons = pinView.querySelectorAll('.reauthpin-keypad button');
     console.log('Keypad buttons found:', keypadButtons.length);
-    
+    const localDelete = pinView.querySelector('#deleteReauthKey');
+    console.log('Local delete found:', !!localDelete);
 
     // If already bound, just reset display (no re-binding)
     if (pinView.__keypadBound) {
@@ -11329,7 +11330,6 @@ document.addEventListener('DOMContentLoaded', () => {
    Inactivity logic (Mobile + Desktop)
    ----------------------- */
 let idleTimeout = null;
-const IDLE_TIME = 15 * 1000; // 10 min in prod
 const PROMPT_TIMEOUT = 5000;
 const PROMPT_AUTO_CLOSE = true;
 let lastActive = Date.now();
