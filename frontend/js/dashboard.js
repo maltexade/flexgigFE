@@ -12232,6 +12232,10 @@ async function showReauthModal(context = 'reauth') {
   try {
     if (!promptModal || !yesBtn) {
       console.log('No promptModal or yesBtn, opening PIN reauth modal (inactivity)');
+      // NEW: Set persistent flag before showing modal
+      if (window.fgReauth && typeof window.fgReauth.requireReauth === 'function') {
+        try { await window.fgReauth.requireReauth('inactivity'); } catch (e) { console.warn('Failed to set reauth flag', e); }
+      }
       // Use initReauthModal to force PIN view (do not auto-invoke biometrics)
       try { await initReauthModal({ show: true, context: 'reauth' }); } catch (e) { console.error('initReauthModal failed', e); }
       return;
@@ -12289,6 +12293,10 @@ async function showReauthModal(context = 'reauth') {
             promptModal.classList.add('hidden');
             try { yesBtn.removeEventListener('click', yesHandler); } catch (e) {}
             document.removeEventListener('keydown', escHandler);
+            // NEW: Set persistent flag on auto-close (lock)
+            if (window.fgReauth && typeof window.fgReauth.requireReauth === 'function') {
+              try { await window.fgReauth.requireReauth('inactivity'); } catch (e) { console.warn('Failed to set reauth flag', e); }
+            }
             // Open PIN modal on inactivity auto-close (prevent immediate biometric)
             try { await initReauthModal({ show: true, context: 'reauth' }); } catch (e) { console.error('initReauthModal failed (auto-close)', e); }
           }
