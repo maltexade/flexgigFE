@@ -9380,6 +9380,9 @@ async function handlePinCompletion() {
     const keypadButtons = pinView.querySelectorAll('.reauthpin-keypad button');
     console.log('Keypad buttons found:', keypadButtons.length);
     const localDelete = pinView.querySelector('#deleteReauthKey');
+    // after: const localDelete = pinView.querySelector('#deleteReauthKey');
+deleteReauthKey = localDelete; // expose to module/global so other helpers can use it
+
     console.log('Local delete found:', !!localDelete);
 
     // If already bound, just reset display (no re-binding)
