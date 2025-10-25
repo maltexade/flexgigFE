@@ -10,6 +10,11 @@ const { createClient } = supabase;
 const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let __backHandler = null;
+// Ensure shared UI refs / flags are declared before any functions use them
+let reauthModal = null;
+let promptModal = null;
+let reauthModalOpen = false;
+
 
 // Replace the existing guardedHideReauthModal function in dashboard.js with this version.
 // This removes the call to onSuccessfulReauth() inside guardedHideReauthModal to break the circular dependency.
