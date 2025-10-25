@@ -11,6 +11,52 @@ const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let __backHandler = null;
 
+// Guarded hide: await your async onSuccessfulReauth and only hide UI if canonical flag cleared.
+// Use this everywhere instead of calling reauthModal.classList.add('hidden') directly.
+async function guardedHideReauthModal() {
+  try {
+    // call the app's success flow (may be async)
+    if (typeof onSuccessfulReauth === 'function') {
+      try { await Promise.resolve(onSuccessfulReauth()); } catch (err) { console.warn('[reauth] onSuccessfulReauth error', err); }
+    }
+
+    // helper that reads canonical server/local flag
+    function _isCanonicalPending() {
+      try { return !!JSON.parse(localStorage.getItem('fg_reauth_required_v1') || 'null'); } catch (e) { return false; }
+    }
+
+    // only hide UI if canonical flag (fg_reauth_required_v1) is not present
+    if (!_isCanonicalPending()) {
+      try {
+        if (reauthModal) {
+          reauthModal.classList.add('hidden');
+          try { reauthModal.removeAttribute('aria-modal'); } catch (e) {}
+          try { reauthModal.removeAttribute('role'); } catch (e) {}
+          if ('inert' in HTMLElement.prototype) {
+            try { reauthModal.inert = false; } catch (e) {}
+          } else {
+            try { reauthModal.removeAttribute('aria-hidden'); reauthModal.style.pointerEvents = ''; } catch (e) {}
+          }
+        }
+        if (promptModal) {
+          try { promptModal.classList.add('hidden'); promptModal.removeAttribute('aria-hidden'); promptModal.style.pointerEvents = ''; } catch (e) {}
+        }
+        reauthModalOpen = false;
+        try { setReauthActive(false); } catch(e) {}
+        try { localStorage.removeItem('fg_reauth_active_tab'); } catch(e) {}
+      } catch (e) {
+        console.warn('[reauth] guardedHideReauthModal UI hide error', e);
+      }
+    } else {
+      console.debug('[reauth] guardedHideReauthModal: canonical flag still present; skipping hide');
+    }
+  } catch (err) {
+    console.warn('[reauth] guardedHideReauthModal unexpected error', err);
+    try { setReauthActive(false); } catch(e){}
+  }
+}
+
+
 // ===== Sticky reauth bootstrap (drop near top of dashboard.js, BEFORE initFlow boot) =====
 (function ensurePersistentReauthBootstrap(){
   try {
@@ -9927,17 +9973,16 @@ async function tryBiometricWithCachedOptions() {
 
     if (verifyData && verifyData.verified) {
   console.debug('[reauth] verification successful');
-
-  // refresh user state
   safeCall(__sec_getCurrentUser);
-
-  // clear canonical flag (fire-and-forget) so other tabs see completion
-  try { clearCanonicalReauthFlag(); } catch (e) {}
-
-  // run your normal success cleanup (synchronous)
-  safeCall(onSuccessfulReauth);
-
+  // await the success handler and then use guarded hide
+  try {
+    await Promise.resolve(onSuccessfulReauth && onSuccessfulReauth());
+  } catch (err) {
+    console.warn('[reauth] onSuccessfulReauth failed', err);
+  }
+  await guardedHideReauthModal();
   return;
+
 } else {
   console.warn('[reauth] verify returned ok but not verified', verifyData);
   safeCall(notify, 'Biometric verification failed', 'error', reauthAlert, reauthAlertMsg);
@@ -9970,11 +10015,15 @@ async function tryBiometricWithCachedOptions() {
   // --- Decide whether reauth is needed; if not, close and call success handler ---
   const reauthStatus = await shouldReauth(context);
 if (!reauthStatus.needsReauth) {
-  // server/client agree no reauth needed — clear canonical flag and run success handler.
-  try { clearCanonicalReauthFlag(); } catch (e) {}
-  safeCall(onSuccessfulReauth);
+  try {
+    await Promise.resolve(onSuccessfulReauth && onSuccessfulReauth());
+  } catch (err) {
+    console.warn('[reauth] onSuccessfulReauth failed', err);
+  }
+  await guardedHideReauthModal();
   return true;
 }
+
 
 
   // FORCE PIN VIEW (you requested no view switching)
@@ -10009,22 +10058,20 @@ if (!reauthStatus.needsReauth) {
           setTimeout(() => window.location.href = '/', 1500);
           return;
         }
-        await safeCall(reAuthenticateWithPin, uidInfo.user.uid, pin, (success) => {
+        await safeCall(reAuthenticateWithPin, uidInfo.user.uid, pin, async (success) => {
   if (success) {
-    // reset UI quickly
     resetReauthInputs();
     safeCall(__sec_getCurrentUser);
-
-    // clear canonical flag (fire-and-forget) before running onSuccessfulReauth
-    try { clearCanonicalReauthFlag(); } catch (e) {}
-
-    // run final success cleanup
-    safeCall(onSuccessfulReauth);
+    try { await Promise.resolve(onSuccessfulReauth && onSuccessfulReauth()); } catch (err) {
+      console.warn('[reauth] onSuccessfulReauth failed', err);
+    }
+    await guardedHideReauthModal();
   } else {
     resetReauthInputs();
     safeCall(notify, 'PIN authentication failed', 'error', reauthAlert, reauthAlertMsg);
   }
 });
+
 
       });
       pinView.__reauthSubmitBound = true;
@@ -10451,18 +10498,22 @@ async function bioVerifyAndFinalize(assertion) {
   // keypad init
   try { initReauthKeypad && initReauthKeypad(); } catch (e) { console.warn('initReauthKeypad failed', e); }
 
-  // modal show/hide and focus
-  try {
-    if (!show) {
-  // If canonical key says reauth pending, do not hide on boot.
-  if (isCanonicalReauthPending()) {
-    console.debug('initReauthModal: skip hide because canonical reauth pending');
+  // modal show/hide and focus (inside initReauthModal)
+try {
+  if (!show) {
+    // If canonical key says reauth pending, do not hide on boot.
+    if (isCanonicalReauthPending()) {
+      console.debug('initReauthModal: skip hide because canonical reauth pending');
+      return true;
+    }
+
+    try { if (reauthModal) reauthModal.classList.add('hidden'); } catch (e) {}
+    reauthModalOpen = false;
+
+    try { if (promptModal) promptModal.classList.add('hidden'); } catch (e) {}
     return true;
   }
-  try { if (reauthModal) reauthModal.classList.add('hidden'); reauthModalOpen = false; } catch(e){}
-  try { if (promptModal) promptModal.classList.add('hidden'); } catch(e){}
-  return true;
-}
+
 
 
     try { localStorage.setItem('reauthPending', Date.now().toString()); } catch(e){}
@@ -12003,27 +12054,13 @@ async function showReauthModal(context = 'reauth') {
   // hide the modal UI in this tab
   function hideReauthModalLocal() {
   try {
-    // clear canonical flag first (fire-and-forget)
-    try { clearCanonicalReauthFlag(); } catch(e) {}
-
-    // prefer standard success flow (which will also perform guarded hide)
-    if (typeof onSuccessfulReauth === 'function') {
-      try { onSuccessfulReauth(); } catch(e) { /* swallow */ }
-    } else {
-      // fallback: only hide if canonical flag not present
-      if (!isCanonicalReauthPending()) {
-        try { if (reauthModal) reauthModal.classList.add('hidden'); } catch(e) {}
-        try { setReauthActive(false); } catch(e) {}
-      } else {
-        console.debug('hideReauthModalLocal: skip hide because canonical flag remains');
-      }
-    }
-
-    try { localStorage.removeItem('fg_reauth_active_tab'); } catch(e) {}
-  } catch (e) {
-    console.warn('hideReauthModalLocal error', e);
-  }
+    // prefer the canonical async success flow + guarded hide
+    (async () => {
+      try { await guardedHideReauthModal(); } catch (e) { console.warn('[reauth] hideReauthModalLocal guard error', e); }
+    })();
+  } catch (e) { console.warn('[reauth] hideReauthModalLocal error', e); }
 }
+
 
 
   // When reauth is required: set local + server (server optional)
