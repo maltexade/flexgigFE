@@ -9197,7 +9197,7 @@ function openForgetPinFlow() {
 function toggleKeypadProcessing(disabled) {
   console.log('toggleKeypadProcessing:', disabled);
   keypadButtons.forEach(btn => { btn.disabled = disabled; btn.style.opacity = disabled ? '0.5' : '1'; });
-  if (localDelete) { localDelete.disabled = disabled; localDelete.style.opacity = disabled ? '0.5' : '1'; }
+  if (deleteReauthKey) { deleteReauthKey.disabled = disabled; deleteReauthKey.style.opacity = disabled ? '0.5' : '1'; }
   const inputs = getReauthInputs();
   inputs.forEach(i => { i.disabled = disabled; });
 }
@@ -9528,9 +9528,9 @@ function refreshInputsUI() {
     });
 
     // Delete key explicit click (if separate)
-    if (localDelete) {
+    if (deleteReauthKey) {
       console.log('Setting up explicit delete click');
-      localDelete.onclick = () => {
+      deleteReauthKey.onclick = () => {
         console.log('Explicit delete clicked');
         if (typeof handleDelete === 'function') {
           try { handleDelete(); } catch (e) {
