@@ -9191,6 +9191,7 @@ function openForgetPinFlow() {
   }
 
   // Helper: Safely disable/enable keypad during processing
+    const keypadButtons = Array.from(document.querySelectorAll('.pin-keypad button'));
 function toggleKeypadProcessing(disabled) {
   console.log('toggleKeypadProcessing:', disabled);
   keypadButtons.forEach(btn => { btn.disabled = disabled; btn.style.opacity = disabled ? '0.5' : '1'; });
