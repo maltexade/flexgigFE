@@ -9190,18 +9190,41 @@ function openForgetPinFlow() {
     return [];
   }
 
+  // Helper: Safely disable/enable keypad during processing
+function toggleKeypadProcessing(disabled) {
+  console.log('toggleKeypadProcessing:', disabled);
+  keypadButtons.forEach(btn => { btn.disabled = disabled; btn.style.opacity = disabled ? '0.5' : '1'; });
+  if (localDelete) { localDelete.disabled = disabled; localDelete.style.opacity = disabled ? '0.5' : '1'; }
+  const inputs = getReauthInputs();
+  inputs.forEach(i => { i.disabled = disabled; });
+}
+
 // PIN completion handler (server verification)
 // ----- Updated implementation with proper reauth flow -----
 async function handlePinCompletion() {
   console.log('handlePinCompletion started (new robust flow)');
-  if (processing) { console.log('Already processing'); return; }
+  if (processing) {
+    console.log('Already processing — ignoring');
+    return;
+  }
   const pin = currentPin;
   if (!/^\d{4}$/.test(pin)) {
+    console.log('Invalid PIN length:', pin.length);
     showTopNotifier('PIN must be 4 digits', 'error');
     return;
   }
+
+  // Visual lock + processing flag
   processing = true;
-  return withLoader(async () => {
+  toggleKeypadProcessing(true);  // Disable UI immediately (opacity/pointer-events etc.)
+
+  // Timeout wrapper: Force unlock after 30s
+  const timeoutPromise = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('Reauth timeout')), 30000)
+  );
+
+  // Primary work wrapped by withLoader
+  const workPromise = withLoader(async () => {
     try {
       const session = await safeCall(getSession) || {};
       const userId = session.user?.id || session.user?.uid || localStorage.getItem('userId');
@@ -9244,10 +9267,9 @@ async function handlePinCompletion() {
           try { localStorage.removeItem('pin_lockout_until'); } catch(e){}
         } catch(e) {
           console.warn('Post-PIN verification error', e);
-          // Optionally show an error to the user
           showTopNotifier('Error completing authentication. Please try again.', 'error');
         }
-        processing = false;
+        // successful completion - nothing else to do here
         return;
       }
 
@@ -9261,10 +9283,8 @@ async function handlePinCompletion() {
       // Special handling by code
       switch (serverCode) {
         case 'INCORRECT_PIN_ATTEMPT': {
-          // meta.attemptsLeft expected from server
           const left = meta?.attemptsLeft ?? null;
           showTopNotifier(left ? `Incorrect PIN — ${left} attempt(s) left` : (payload?.message || 'Incorrect PIN'), 'error');
-          // small shake animation on inputs (optional)
           const wrap = document.querySelector('.reauthpin-inputs');
           if (wrap) {
             wrap.classList.add('fg-shake');
@@ -9274,7 +9294,6 @@ async function handlePinCompletion() {
         }
         case 'TOO_MANY_ATTEMPTS':
         case 'TOO_MANY_ATTEMPTS_EMAIL': {
-          // server should include lockoutUntil in meta.lockoutUntil or we can check Retry-After header
           let untilIso = meta?.lockoutUntil || null;
           if (!untilIso) {
             const ra = res.headers.get('Retry-After');
@@ -9284,7 +9303,6 @@ async function handlePinCompletion() {
             }
           }
           if (untilIso) {
-            // persist and show countdown
             persistLockout(untilIso);
             disableReauthInputs(true);
             showTopNotifier(payload?.message || 'Too many incorrect PINs — locked', 'error', { autoHide: false, countdownUntil: untilIso });
@@ -9294,14 +9312,11 @@ async function handlePinCompletion() {
           break;
         }
         case 'PIN_ENTRY_LIMIT_EXCEEDED': {
-          // final path: instruct user to use Forget PIN flow
           showTopNotifier(payload?.message || 'PIN entry limit reached — use Forget PIN', 'error', { autoHide: false });
-          // call forget-pin handler to open modal (client flow)
           setTimeout(() => openForgetPinFlow(), 800);
           break;
         }
         default: {
-          // fallback generic message
           showTopNotifier(payload?.message || serverMsg || 'PIN verification failed', 'error');
         }
       }
@@ -9311,21 +9326,43 @@ async function handlePinCompletion() {
         if (typeof resetReauthInputs === 'function') resetReauthInputs();
         currentPin = '';
       } else {
-        // locked -> persist lockout (if server provided lockout meta)
         if (meta?.lockoutUntil) {
           persistLockout(meta.lockoutUntil);
           disableReauthInputs(true);
         }
       }
+
     } catch (err) {
       console.error('handlePinCompletion network/error', err);
       showTopNotifier('Network error. Please try again.', 'error');
       if (typeof resetReauthInputs === 'function') resetReauthInputs();
-    } finally {
-      processing = false;
     }
+    // NOTE: do NOT set processing = false here — top-level finally will handle unlocking
   });
+
+  // Race the work against the timeout so we always run final cleanup
+  return Promise.race([timeoutPromise, workPromise])
+    .then((result) => {
+      console.log('handlePinCompletion resolved:', !!result);
+      // If you want to handle a meaningful result, do it here.
+      return result;
+    })
+    .catch((err) => {
+      console.error('handlePinCompletion timed out or errored:', err);
+      // Timeout case or thrown error — show a helpful message and clear inputs
+      showTopNotifier(err?.message === 'Reauth timeout' ? 'Request timed out — please try again' : 'Request failed — please try again', 'error');
+      if (typeof resetReauthInputs === 'function') resetReauthInputs();
+      currentPin = '';
+      // Re-throw if upstream needs to know about the error, or swallow it to keep UI simple.
+      // throw err;
+    })
+    .finally(() => {
+      console.log('handlePinCompletion finally: unlocking');
+      processing = false;
+      toggleKeypadProcessing(false);  // Re-enable UI
+    });
 }
+
 
     function initReauthKeypad() {
     console.log('initReauthKeypad started');
@@ -9357,30 +9394,44 @@ async function handlePinCompletion() {
 
     // Helper: refresh inputs UI from global currentPin (if your code uses it),
     // or just use inputs' own values (if your handlers update them).
-    function refreshInputsUI() {
-      console.log('refreshInputsUI called, currentPin:', currentPin);
-      // If existing updatePinInputs() is available, prefer it
-      if (typeof updatePinInputs === 'function') {
-        try { 
-          console.log('Calling existing updatePinInputs');
-          updatePinInputs(); 
-          return; 
-        } catch (e) {
-          console.error('Error in updatePinInputs:', e);
-        }
-      }
-      // fallback: draw masked digits from global currentPin
-      inputs.forEach((inp, idx) => {
-        if (currentPin && idx < currentPin.length) {
-          inp.value = '•';
-          inp.classList.add('filled');
-        } else {
-          inp.value = '';
-          inp.classList.remove('filled');
-        }
-      });
-      console.log('UI refreshed for inputs');
+    // Helper: refresh inputs UI from global currentPin (debounced to avoid spam)
+function refreshInputsUI() {
+  console.log('refreshInputsUI called, currentPin:', currentPin, 'inputs length:', inputs.length);
+  
+  // DEBOUNCE: Ignore if called <50ms ago (prevents rapid-type spam)
+  if (pinView.__lastRefresh && (Date.now() - pinView.__lastRefresh) < 50) {
+    console.log('refreshInputsUI debounced (too soon)');
+    return;
+  }
+  pinView.__lastRefresh = Date.now();
+
+  // ALWAYS USE FALLBACK: Ignore existing updatePinInputs() to avoid clearing bug
+  // (If you fix your app's updatePinInputs later, uncomment the if-block below)
+  /*
+  if (typeof updatePinInputs === 'function') {
+    try { 
+      console.log('Calling existing updatePinInputs');
+      updatePinInputs(); 
+      return; 
+    } catch (e) {
+      console.error('Error in updatePinInputs:', e);
     }
+  }
+  */
+  
+  // Fallback: draw masked digits from currentPin
+  inputs.forEach((inp, idx) => {
+    console.log(`Updating input ${idx}: value='${inp.value}', setting to ${currentPin && idx < currentPin.length ? '•' : ''}`);
+    if (currentPin && idx < currentPin.length) {
+      inp.value = '•';
+      inp.classList.add('filled');
+    } else {
+      inp.value = '';
+      inp.classList.remove('filled');
+    }
+  });
+  console.log('UI refreshed for inputs (fallback masking)');
+}
 
     // Button click wiring (overwrite handlers to avoid stacking)
     keypadButtons.forEach((btn, index) => {
@@ -10603,9 +10654,14 @@ async function bioVerifyAndFinalize(assertion) {
   } catch (e) { console.warn('logout/forget setup failed', e); }
 
   // keypad init
-  try { initReauthKeypad && initReauthKeypad(); } catch (e) { console.warn('initReauthKeypad failed', e); }
+// keypad init (guarded)
+if (!pinView || pinView.__keypadBound) {
+  console.log('Skipping keypad init (already bound or no pinView)');
+} else {
+  try { initReauthKeypad(); } catch (e) { console.warn('initReauthKeypad failed', e); }
+}
 
-  // modal show/hide and focus (inside initReauthModal)
+// modal show/hide and focus (inside initReauthModal)
 try {
   if (!show) {
   // If canonical key says reauth pending, do not hide on boot.
