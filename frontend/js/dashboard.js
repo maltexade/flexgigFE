@@ -41,9 +41,16 @@ async function guardedHideReauthModal() {
             try { reauthModal.removeAttribute('aria-hidden'); reauthModal.style.pointerEvents = ''; } catch (e) {}
           }
         }
-        if (promptModal) {
-          try { promptModal.classList.add('hidden'); promptModal.removeAttribute('aria-hidden'); promptModal.style.pointerEvents = ''; } catch (e) {}
+                // safe access to the DOM element; avoid referencing a possibly undeclared variable
+        const _pm = (typeof document !== 'undefined') ? document.getElementById('promptModal') : null;
+        if (_pm) {
+          try {
+            _pm.classList.add('hidden');
+            _pm.removeAttribute('aria-hidden');
+            _pm.style.pointerEvents = '';
+          } catch (e) {}
         }
+
         reauthModalOpen = false;
         try { setReauthActive(false); } catch(e) {}
         try { localStorage.removeItem('fg_reauth_active_tab'); } catch(e) {}
@@ -10596,18 +10603,25 @@ async function bioVerifyAndFinalize(assertion) {
   // modal show/hide and focus (inside initReauthModal)
 try {
   if (!show) {
-    // If canonical key says reauth pending, do not hide on boot.
-    if (isCanonicalReauthPending()) {
-      console.debug('initReauthModal: skip hide because canonical reauth pending');
-      return true;
-    }
-
-    try { if (reauthModal) reauthModal.classList.add('hidden'); } catch (e) {}
-    reauthModalOpen = false;
-
-    try { if (promptModal) promptModal.classList.add('hidden'); } catch (e) {}
+  // If canonical key says reauth pending, do not hide on boot.
+  if (isCanonicalReauthPending()) {
+    console.debug('initReauthModal: skip hide because canonical reauth pending');
     return true;
   }
+
+  // safe DOM lookup for reauthModal
+  const _rm = (typeof document !== 'undefined') ? document.getElementById('reauthModal') : null;
+  try { if (_rm) _rm.classList.add('hidden'); } catch (e) {}
+
+  reauthModalOpen = false;
+
+  // safe DOM lookup for promptModal (avoid referencing promptModal binding)
+  const _pm = (typeof document !== 'undefined') ? document.getElementById('promptModal') : null;
+  try { if (_pm) _pm.classList.add('hidden'); } catch (e) {}
+
+  return true;
+}
+
 
 
 
@@ -12563,10 +12577,16 @@ async function onSuccessfulReauth() {
             try { reauthModal.removeAttribute('aria-hidden'); reauthModal.style.pointerEvents = ''; } catch (e) {}
           }
         }
-        if (promptModal) {
-          promptModal.classList.add('hidden');
-          try { promptModal.removeAttribute('aria-hidden'); promptModal.style.pointerEvents = ''; } catch (e) {}
-        }
+        // simple and safe: don't touch the promptModal binding, read from the DOM
+const _pm = (typeof document !== 'undefined') ? document.getElementById('promptModal') : null;
+if (_pm) {
+  try {
+    _pm.classList.add('hidden');
+    _pm.removeAttribute('aria-hidden');
+    _pm.style.pointerEvents = '';
+  } catch (e) { /* ignore DOM errors */ }
+}
+
         reauthModalOpen = false;
       } else {
         console.debug('[reauth] canonical still present — not hiding modal locally');
