@@ -4903,20 +4903,45 @@ function __fg_pin_clearAllInputs() {
   window.notify = window.notify || notify;
 
   // Get user ID from Supabase
-  async function getUid() {
+  // Robust getUid: never throws for "no user yet" — returns null when no signed-in user
+async function getUid({ waitForSession = true, waitMs = 500 } = {}) {
   try {
-    let session = window.__cachedSession || await getSession();  // Use global cache if ready
-    if (!session?.user?.uid) {
-      console.warn('[PIN] getUid: No user yet—retrying session...');
-      session = await getSession();  // Retry once
-      if (!session?.user?.uid) throw new Error('No signed-in user');
+    // Prefer safeCall(getSession) if available
+    let session = null;
+    try {
+      session = await safeCall(getSession);
+    } catch (e) {
+      session = null;
     }
-    return session.user.uid;
+
+    // If no session and a global session promise exists, await it briefly (helps on first load races)
+    if (!session && waitForSession && typeof getOrCreateSessionPromise === 'function') {
+      try {
+        // Wait for the global session promise but with a small timeout so we don't hang forever
+        const p = getOrCreateSessionPromise();
+        session = await Promise.race([
+          p,
+          new Promise(resolve => setTimeout(() => resolve(null), waitMs))
+        ]);
+      } catch (e) {
+        session = null;
+      }
+    }
+
+    const uid = session?.user?.uid || session?.user?.id || localStorage.getItem('userId') || null;
+    if (!uid) {
+      // Prefer returning null (callers should check) rather than throwing
+      console.debug('[PIN] getUid: No user yet — returning null (not throwing).');
+      return null;
+    }
+    return { uid };
   } catch (err) {
-    console.error('[PIN] getUid error', err);
-    throw err;
+    // Unexpected error — log and return null so callers don't get unhandled rejections
+    console.error('[PIN] getUid unexpected error (returning null):', err);
+    return null;
   }
 }
+
 
   // Find stored PIN in Supabase
   async function findStoredPin(uid) {
