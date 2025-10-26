@@ -489,45 +489,32 @@ window.__fg_currentBanner = window.__fg_currentBanner || {
 };
 
 // Helper: Force-hide banner only if it's a transient network/error one (preserves real broadcasts)
-// Enhanced: Suppress + flush for zero-flash
 function hideReauthBannerIfPresent() {
   try {
     const state = window.__fg_currentBanner || {};
     const msg = String(state.message || '').toLowerCase().trim();
-    const isTransientError = 
-      msg.includes('network') || 
-      msg.includes('status check failed') || 
-      msg.includes('retrying') || 
+    const isTransientError =
+      msg.includes('network') ||
+      msg.includes('status check failed') ||
+      msg.includes('retrying') ||
       msg.includes('reauth') ||
       msg.includes('error') ||
       !state.serverId;
 
     if (isTransientError && !state.sticky && !state.clientSticky) {
-      console.log('[DEBUG] Force-hiding transient banner + suppressing next show');
-      
-      // NEW: Suppress any immediate re-show (e.g., from queued pollStatus)
-      window.__suppressNextBannerShow = true;
-      setTimeout(() => { window.__suppressNextBannerShow = false; }, 50);  // Short window for races
-      
-      hideBanner(true);
-      
-      // NEW: Force DOM flush to prevent micro-flicker
-      requestAnimationFrame(() => {
-        const STATUS_BANNER = document.getElementById('status-banner');
-        if (STATUS_BANNER && STATUS_BANNER.classList.contains('hidden')) {
-          STATUS_BANNER.style.display = 'none';  // Extra: Hide from flow
-          setTimeout(() => { STATUS_BANNER.style.display = ''; }, 100);  // Restore for future
-        }
-      });
-      
-      window.dispatchEvent(new CustomEvent('fg:reauth-success'));
+      console.log('[DEBUG] Force-hiding transient network/error banner early (pre-modal close)');
+      hideBanner(true); // Force=true overrides persistence for these only
+
+      // Note: removed the window.dispatchEvent('fg:reauth-success') here intentionally.
+      // The canonical reauth success paths should be the only places that dispatch that event.
     } else {
-      console.debug('[DEBUG] Banner not transient—skipping');
+      console.debug('[DEBUG] Banner present but not a transient network/reauth error; preserving it.');
     }
   } catch (e) {
     console.warn('[hideReauthBannerIfPresent] error', e);
   }
 }
+
 
 
 // 🚀 Global banner helpers
@@ -550,22 +537,6 @@ function showBanner(msg, opts = {}) {
   // opts: { type: 'info'|'error'|'warning', persistent: boolean, serverId: any, clientSticky: boolean }
   const STATUS_BANNER = document.getElementById('status-banner');
   if (!STATUS_BANNER) return;
-       // NEW: Suppress during reauth success window (ignores transients only)
-     if (window.__suppressNextBannerShow) {
-       const msgLower = String(msg || '').toLowerCase().trim();
-       const isTransient = 
-         msgLower.includes('network') || 
-         msgLower.includes('status check failed') || 
-         msgLower.includes('retrying') || 
-         msgLower.includes('reauth') ||
-         msgLower.includes('error') ||
-         !opts.serverId;  // No serverId? Transient
-       
-       if (isTransient && !opts.persistent && !opts.clientSticky) {
-         console.debug('[DEBUG] Suppressing transient banner show during reauth success');
-         return;  // No-op: Don't show
-       }
-     }
   setBannerMessage(msg, 1);
   STATUS_BANNER.classList.remove('hidden');
 
@@ -1260,6 +1231,15 @@ if (biometricsEnabled) {
 
   // Replace existing pollStatus() implementation with this:
 async function pollStatus() {
+  // --- SUPPRESS TRANSIENT BANNERS RIGHT AFTER REAUTH ---
+// prevents brief "Network / status check failed" flashes immediately after a successful reauth
+const lastReauth = parseInt(localStorage.getItem('fg_last_reauth_ts') || '0', 10) || 0;
+const REAUTH_SUPPRESS_MS = 700; // tune (700ms works well in most cases)
+const justReauthed = (Date.now() - lastReauth) < REAUTH_SUPPRESS_MS;
+if (justReauthed) {
+  console.debug('pollStatus: running shortly after reauth — suppressing transient banners for', REAUTH_SUPPRESS_MS, 'ms');
+}
+
   try {
     const apiBase = (window.__SEC_API_BASE || (typeof API_BASE !== 'undefined' ? API_BASE : ''));
     const url = apiBase ? `${apiBase}/api/status` : '/api/status';
@@ -1294,10 +1274,16 @@ async function pollStatus() {
       } else {
         // Generic non-ok -> show transient network message, but do not override sticky client/server broadcast
         if (!(window.__fg_currentBanner?.sticky || window.__fg_currentBanner?.clientSticky)) {
-          showBanner('Network / status check failed. Retrying...', { type: 'warning' });
-        } else {
-          console.debug('Network error; preserving sticky banner');
-        }
+  if (!justReauthed) {
+    showBanner('Network / status check failed. Retrying...', { type: 'warning' });
+  } else {
+    // Suppress the transient banner because we just reauthed — avoid the millisecond flash.
+    console.debug('pollStatus: suppressed transient network banner right after reauth');
+  }
+} else {
+  console.debug('Network error; preserving sticky banner');
+}
+
       }
       return;
     }
@@ -9514,10 +9500,25 @@ async function handlePinCompletion() {
             if (typeof hideTinyReauthNotice === 'function') {
               try { hideTinyReauthNotice(); } catch (e) {}
             }
-            try { window.dispatchEvent(new CustomEvent('fg:reauth-success', { detail: { method: 'pin' } })); } catch (e) {}
-            if (typeof pollStatus === 'function') {
-              try { pollStatus(); } catch (e) { console.warn('pollStatus after reauth failed', e); }
-            }
+            try {
+  if (typeof hideTinyReauthNotice === 'function') {
+    try { hideTinyReauthNotice(); } catch (e) {}
+  }
+
+  // Record a short-lived "just reauthed" stamp and dispatch the canonical event.
+  try {
+    localStorage.setItem('fg_last_reauth_ts', String(Date.now()));
+    window.dispatchEvent(new CustomEvent('fg:reauth-success', { detail: { method: 'pin' } }));
+  } catch (e) {
+    console.warn('[post-reauth] dispatch or localStorage set failed', e);
+  }
+
+  // DO NOT call pollStatus() directly here. Let the fg:reauth-success handler (which is debounced)
+  // call pollStatus() after a short delay so the server/session has time to settle.
+} catch (e) {
+  console.warn('[post-reauth] UI refresh failed', e);
+}
+
           } catch (e) {
             console.warn('post-PIN success UI refresh failed', e);
           }
@@ -12172,11 +12173,25 @@ async function verifyBiometrics(uid, context = 'reauth') {
             try { hideTinyReauthNotice(); } catch (e) {}
           }
           // dispatch event so other modules can react
-          try { window.dispatchEvent(new CustomEvent('fg:reauth-success')); } catch (e) {}
-          // immediate server check (do not await; it's OK to run in background)
-          if (typeof pollStatus === 'function') {
-            try { pollStatus(); } catch (e) { console.warn('pollStatus call after reauth failed', e); }
-          }
+          try {
+  if (typeof hideTinyReauthNotice === 'function') {
+    try { hideTinyReauthNotice(); } catch (e) {}
+  }
+
+  // Record a short-lived "just reauthed" stamp and dispatch the canonical event.
+  try {
+    localStorage.setItem('fg_last_reauth_ts', String(Date.now()));
+    window.dispatchEvent(new CustomEvent('fg:reauth-success', { detail: { method: 'biometrics' } }));
+  } catch (e) {
+    console.warn('[post-reauth] dispatch or localStorage set failed', e);
+  }
+
+  // DO NOT call pollStatus() directly here. Let the fg:reauth-success handler (which is debounced)
+  // call pollStatus() after a short delay so the server/session has time to settle.
+} catch (e) {
+  console.warn('[post-reauth] UI refresh failed', e);
+}
+
         } catch (e) {
           console.warn('[verifyBiometrics] post-success UI refresh failed', e);
         }
