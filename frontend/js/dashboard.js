@@ -488,6 +488,39 @@ window.__fg_currentBanner = window.__fg_currentBanner || {
   message: ''          // current visible message
 };
 
+// optimistic hide helpers
+window.__fg_optimistic = window.__fg_optimistic || { hidBanner: false, prevMessage: null };
+
+function tryOptimisticHideBanner() {
+  try {
+    const s = window.__fg_currentBanner || {};
+    // Only optimistic-hide when NOT sticky and NOT clientSticky
+    if (s.sticky || s.clientSticky) return false;
+    // Save existing message so we can restore if needed
+    window.__fg_optimistic.prevMessage = s.message || null;
+    hideBanner(true); // force hide (force param will bypass sticky check)
+    window.__fg_optimistic.hidBanner = true;
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function restoreOptimisticBanner(fallbackMessage) {
+  try {
+    if (!window.__fg_optimistic.hidBanner) return false;
+    // If server provided a fallback message, show it; else restore previous
+    const msg = fallbackMessage || window.__fg_optimistic.prevMessage || 'Reauthentication required';
+    // Show with a short-lived flag (non-sticky) — server poll will reconcile soon
+    showBanner(msg, { persistent: false });
+    // clear optimistic state
+    window.__fg_optimistic.hidBanner = false;
+    window.__fg_optimistic.prevMessage = null;
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
 
 
 // 🚀 Global banner helpers
@@ -9405,6 +9438,9 @@ async function handlePinCompletion() {
   processing = true;
   toggleKeypadProcessing(true);  // Disable UI immediately (opacity/pointer-events etc.)
 
+  // Optimistically hide the reauth banner if allowed
+  try { if (typeof tryOptimisticHideBanner === 'function') tryOptimisticHideBanner(); } catch (e) { /* swallow */ }
+
   // Timeout wrapper: Force unlock after 30s
   const timeoutPromise = new Promise((_, reject) =>
     setTimeout(() => reject(new Error('Reauth timeout')), 30000)
@@ -9415,7 +9451,11 @@ async function handlePinCompletion() {
     try {
       const session = await safeCall(getSession) || {};
       const userId = session.user?.id || session.user?.uid || localStorage.getItem('userId');
-      if (!userId) throw new Error('No user ID');
+      if (!userId) {
+        // restore optimistic banner when we cannot get user id
+        try { if (typeof restoreOptimisticBanner === 'function') restoreOptimisticBanner('No user session'); } catch(e){}
+        throw new Error('No user ID');
+      }
 
       const res = await fetch('https://api.flexgig.com.ng/api/reauth-pin', {
         method: 'POST',
@@ -9466,9 +9506,19 @@ async function handlePinCompletion() {
             console.warn('post-PIN success UI refresh failed', e);
           }
 
+          // Clear optimistic flags if any
+          try {
+            if (window.__fg_optimistic) {
+              window.__fg_optimistic.hidBanner = false;
+              window.__fg_optimistic.prevMessage = null;
+            }
+          } catch(e){}
+
         } catch(e) {
           console.warn('Post-PIN verification error', e);
           showTopNotifier('Error completing authentication. Please try again.', 'error');
+          // restore optimistic banner (post-success error)
+          try { if (typeof restoreOptimisticBanner === 'function') restoreOptimisticBanner('Error completing authentication'); } catch(e){}
         }
         // successful completion - nothing else to do here
         return;
@@ -9480,6 +9530,9 @@ async function handlePinCompletion() {
       const meta = payload && payload.meta ? payload.meta : {};
 
       console.warn('PIN verify server error', { status: res.status, code: serverCode, msg: serverMsg, meta });
+
+      // Restore optimistic banner with server message (so user sees authoritative info)
+      try { if (typeof restoreOptimisticBanner === 'function') restoreOptimisticBanner(serverMsg); } catch(e){}
 
       // Special handling by code
       switch (serverCode) {
@@ -9535,6 +9588,8 @@ async function handlePinCompletion() {
 
     } catch (err) {
       console.error('handlePinCompletion network/error', err);
+      // restore optimistic banner on network error
+      try { if (typeof restoreOptimisticBanner === 'function') restoreOptimisticBanner(err.message || 'Network error'); } catch(e){}
       showTopNotifier('Network error. Please try again.', 'error');
       if (typeof resetReauthInputs === 'function') resetReauthInputs();
     }
@@ -9554,6 +9609,8 @@ async function handlePinCompletion() {
       showTopNotifier(err?.message === 'Reauth timeout' ? 'Request timed out — please try again' : 'Request failed — please try again', 'error');
       if (typeof resetReauthInputs === 'function') resetReauthInputs();
       currentPin = '';
+      // Restore optimistic banner on overall failure
+      try { if (typeof restoreOptimisticBanner === 'function') restoreOptimisticBanner(err.message || 'Request failed'); } catch(e){}
       // Re-throw if upstream needs to know about the error, or swallow it to keep UI simple.
       // throw err;
     })
@@ -9563,6 +9620,7 @@ async function handlePinCompletion() {
       toggleKeypadProcessing(false);  // Re-enable UI
     });
 }
+
 
 
 
@@ -12028,6 +12086,7 @@ async function verifyBiometrics(uid, context = 'reauth') {
     if (!optRes.ok) {
       const errText = await optRes.text();
       console.error('[verifyBiometrics] Options fetch failed', optRes.status, errText);
+      // No optimistic hide to restore here because it hasn't been hidden yet
       throw new Error(`Options fetch failed: ${errText}`);
     }
 
@@ -12045,9 +12104,18 @@ async function verifyBiometrics(uid, context = 'reauth') {
     publicKey.userVerification = 'required';
     publicKey.timeout = 60000;
 
+    // Optimistic hide: hide banner immediately before user authenticates (if allowed)
+    try {
+      if (typeof tryOptimisticHideBanner === 'function') tryOptimisticHideBanner();
+    } catch (e) { /* swallow */ }
+
     // Prompt user for biometrics
     const assertion = await navigator.credentials.get({ publicKey });
-    if (!assertion) throw new Error('No assertion from authenticator');
+    if (!assertion) {
+      // Restore banner because user didn't complete auth
+      try { if (typeof restoreOptimisticBanner === 'function') restoreOptimisticBanner('Biometric authentication cancelled'); } catch(e){}
+      throw new Error('No assertion from authenticator');
+    }
 
     // Show loader during verify
     return await withLoader(async () => {
@@ -12075,6 +12143,8 @@ async function verifyBiometrics(uid, context = 'reauth') {
       if (!verifyRes.ok) {
         const errText = await verifyRes.text();
         console.error('[verifyBiometrics] Verify failed', verifyRes.status, errText);
+        // restore optimistic banner with server message
+        try { if (typeof restoreOptimisticBanner === 'function') restoreOptimisticBanner(errText || 'Authentication failed'); } catch(e){}
         throw new Error(`Server verify failed: ${errText}`);
       }
 
@@ -12086,7 +12156,7 @@ async function verifyBiometrics(uid, context = 'reauth') {
       try {
         // 1. Call onSuccessfulReauth to clear flags, reset timers, and handle session state
         if (typeof onSuccessfulReauth === 'function') {
-          await onSuccessfulReauth();
+          await onSuccessfulReauth(verifyData);
         }
         // 2. Call guardedHideReauthModal to safely hide the modal only if flags are cleared
         if (typeof guardedHideReauthModal === 'function') {
@@ -12101,13 +12171,10 @@ async function verifyBiometrics(uid, context = 'reauth') {
 
         // --- NEW: Immediately refresh status/UI but preserve sticky broadcasts ---
         try {
-          // hide any tiny reauth hint (non-destructive)
           if (typeof hideTinyReauthNotice === 'function') {
             try { hideTinyReauthNotice(); } catch (e) {}
           }
-          // dispatch event so other modules can react
-          try { window.dispatchEvent(new CustomEvent('fg:reauth-success')); } catch (e) {}
-          // immediate server check (do not await; it's OK to run in background)
+          try { window.dispatchEvent(new CustomEvent('fg:reauth-success', { detail: { method: 'biometric' } })); } catch (e) {}
           if (typeof pollStatus === 'function') {
             try { pollStatus(); } catch (e) { console.warn('pollStatus call after reauth failed', e); }
           }
@@ -12115,9 +12182,15 @@ async function verifyBiometrics(uid, context = 'reauth') {
           console.warn('[verifyBiometrics] post-success UI refresh failed', e);
         }
 
+        // Clear optimistic flags if any
+        try {
+          if (window.__fg_optimistic) {
+            window.__fg_optimistic.hidBanner = false;
+            window.__fg_optimistic.prevMessage = null;
+          }
+        } catch(e){}
       } catch (err) {
         console.warn('[reauth] Post-biometrics verification error in verifyBiometrics', err);
-        // Optionally show an error to the user
         if (typeof notify === 'function') {
           notify('Error completing authentication. Please try again.', 'error');
         }
@@ -12126,6 +12199,8 @@ async function verifyBiometrics(uid, context = 'reauth') {
     });
   } catch (err) {
     console.error('[verifyBiometrics] Error', err);
+    // Restore optimistic banner if we had hidden it
+    try { if (typeof restoreOptimisticBanner === 'function') restoreOptimisticBanner(err.message || 'Biometric error'); } catch(e){}
     if (typeof notify === 'function') {
       notify(`Biometric error: ${err.message}`, 'error');
     }
@@ -12134,6 +12209,7 @@ async function verifyBiometrics(uid, context = 'reauth') {
     return { success: false, error: err.message };
   }
 }
+
 
 
 // 🔹 Improved simulatePinEntry with verbose debug logs and Promise-based completion
