@@ -480,6 +480,13 @@ async function withLoader(task) {
 })();
 
 
+// banner state (used to prevent pollStatus from stomping intentional broadcasts)
+window.__fg_currentBanner = window.__fg_currentBanner || {
+  id: null,            // server-provided notification id (if any)
+  sticky: false,       // true = server asked that this not be auto-cleared
+  clientSticky: false, // true = client/admin intentionally set a sticky broadcast
+  message: ''          // current visible message
+};
 
 
 
@@ -487,7 +494,7 @@ async function withLoader(task) {
 // Put this in your JS file (replace old showBanner)
 
 function setBannerMessage(msg, repeatTimes = 6) {
-  const repeated = msg.repeat(repeatTimes);
+  const repeated = String(msg).repeat(repeatTimes);
   document.querySelectorAll('.banner-msg').forEach(el => {
     el.textContent = repeated;
   });
@@ -499,17 +506,48 @@ function setBannerMessage(msg, repeatTimes = 6) {
   }
 }
 
-function showBanner(msg) {
+function showBanner(msg, opts = {}) {
+  // opts: { type: 'info'|'error'|'warning', persistent: boolean, serverId: any, clientSticky: boolean }
   const STATUS_BANNER = document.getElementById('status-banner');
   if (!STATUS_BANNER) return;
-  setBannerMessage(msg, 1); // Ensure long repeat for scrolling
+  setBannerMessage(msg, 1);
   STATUS_BANNER.classList.remove('hidden');
+
+  // Update global banner state
+  try {
+    window.__fg_currentBanner = window.__fg_currentBanner || { id: null, sticky: false, clientSticky: false, message: '' };
+    window.__fg_currentBanner.message = String(msg || '');
+    window.__fg_currentBanner.sticky = !!opts.persistent;
+    window.__fg_currentBanner.id = opts.serverId || window.__fg_currentBanner.id || null;
+    // If caller explicitly marks it clientSticky, set that (admin/manual broadcasts)
+    if (opts.clientSticky) window.__fg_currentBanner.clientSticky = true;
+    // If serverId provided and not clientSticky, ensure clientSticky is false (server banner)
+    if (opts.serverId && !opts.clientSticky) window.__fg_currentBanner.clientSticky = false;
+  } catch (e) { /* swallow */ }
 }
 
-function hideBanner() {
+function hideBanner(force = false) {
+  // If a sticky banner is present, do not hide unless force === true
+  try {
+    const state = window.__fg_currentBanner || {};
+    if (!force && (state.sticky || state.clientSticky)) {
+      // preserve sticky banner
+      return;
+    }
+  } catch (e) { /* ignore */ }
+
   const STATUS_BANNER = document.getElementById('status-banner');
   if (STATUS_BANNER) STATUS_BANNER.classList.add('hidden');
+
+  try {
+    // clear state only when forced or not sticky
+    if (force || !(window.__fg_currentBanner?.sticky || window.__fg_currentBanner?.clientSticky)) {
+      window.__fg_currentBanner = { id: null, sticky: false, clientSticky: false, message: '' };
+      localStorage.removeItem('active_broadcast_id');
+    }
+  } catch (e) {}
 }
+
 
 // close button
 document.addEventListener('click', (e) => {
@@ -1116,6 +1154,43 @@ if (biometricsEnabled) {
   } else {
     console.warn('setupInactivity not available - skipping');
   }
+  // --------------------------
+// React to successful reauth
+// --------------------------
+(function(){
+  // Debounce so multiple reauth-success events in quick succession don't spam pollStatus
+  let __fg_reauth_timer = null;
+  const __fg_reauth_debounce_ms = 350; // small delay to allow server to finalize session state
+
+  window.addEventListener('fg:reauth-success', (ev) => {
+    try {
+      // Hide tiny reauth hint if present (non-destructive)
+      if (typeof hideTinyReauthNotice === 'function') {
+        try { hideTinyReauthNotice(); } catch (e) { /* swallow */ }
+      }
+
+      // Debounced immediate status refresh (so UI updates right away)
+      if (__fg_reauth_timer) clearTimeout(__fg_reauth_timer);
+      __fg_reauth_timer = setTimeout(() => {
+        __fg_reauth_timer = null;
+        try {
+          if (typeof pollStatus === 'function') {
+            // call pollStatus (it is banner-aware and will preserve sticky broadcasts)
+            pollStatus();
+          }
+        } catch (e) {
+          console.warn('fg:reauth-success -> pollStatus failed', e);
+        }
+      }, __fg_reauth_debounce_ms);
+
+      // Also give other modules a chance to react (backwards-compat)
+      // some modules may listen for this event directly
+    } catch (err) {
+      console.warn('fg:reauth-success handler error', err);
+    }
+  }, { passive: true });
+})();
+
 
   // Your existing inactivity check...
   const last = parseInt(localStorage.getItem('lastActive')) || 0;
@@ -1134,53 +1209,89 @@ async function pollStatus() {
     const url = apiBase ? `${apiBase}/api/status` : '/api/status';
     const res = await fetch(url, { credentials: 'include' });
 
+    // Try parse server JSON for helpful fields (server should return JSON on 423 too)
+    let body = null;
+    try { body = await res.json(); } catch (e) { body = null; }
+
     if (!res.ok) {
-      // Try parse server JSON for helpful fields (e.g. reauthRequired)
-      let body = null;
-      try { body = await res.json(); } catch(e) { body = null; }
-
-      console.warn('pollStatus: non-ok', res.status, body || await res.text().catch(()=>''), res.status);
-
-      // If 423 (Locked / requires reauth) we should show the reauth prompt/banner.
+      // 423 = locked / needs reauth
       if (res.status === 423) {
-        if (body && body.reauthRequired) {
-          // Show reauth UI / banner
-          showBanner(body.message || 'Reauthentication required', { type: 'error', persistent: true });
-          // Optionally open the reauth modal immediately:
+        const msg = (body && (body.message || body.error)) ? (body.message || body.error) : 'Reauthentication required';
+        // If a sticky banner (server or client) is present, preserve it and only surface a subtle reauth hint
+        if ((window.__fg_currentBanner?.sticky) || (window.__fg_currentBanner?.clientSticky)) {
+          // keep main banner, and show a small non-destructive notice (implement showTinyReauthNotice if you want)
           if (typeof initReauthModal === 'function') {
-            try { initReauthModal({ show: true, context: 'reauth' }); } catch(e) {}
+            try { initReauthModal({ show: true, context: 'reauth' }); } catch (e) {}
+          }
+          if (typeof showTinyReauthNotice === 'function') {
+            try { showTinyReauthNotice(msg); } catch (e) {}
+          } else {
+            console.debug('Reauth required (preserving sticky banner):', msg);
           }
         } else {
-          showBanner('Account locked — reauthentication required', { type: 'error', persistent: true });
+          // No sticky banner, show full persistent reauth banner
+          showBanner(msg, { persistent: true, serverId: body?.id || null });
+          if (typeof initReauthModal === 'function') {
+            try { initReauthModal({ show: true, context: 'reauth' }); } catch (e) {}
+          }
         }
       } else {
-        // Generic non-ok: show transient network message
-        showBanner('Network / status check failed. Retrying...', { type: 'warning' });
+        // Generic non-ok -> show transient network message, but do not override sticky client/server broadcast
+        if (!(window.__fg_currentBanner?.sticky || window.__fg_currentBanner?.clientSticky)) {
+          showBanner('Network / status check failed. Retrying...', { type: 'warning' });
+        } else {
+          console.debug('Network error; preserving sticky banner');
+        }
       }
-      return; // exit early on non-ok
+      return;
     }
 
     // OK path
-    let data = null;
-    try { data = await res.json(); } catch (e) { data = null; }
-
-    // If API says service up, remove any banner
-    if (data && (data.status === 'up' || data.ok === true)) {
-      hideBanner(); // Remove banner immediately
-      // If there is a status.message to present (like a 'down' message), show it
-      if (data.status === 'down' && data.message) {
-        showBanner(data.message, { type: 'error', persistent: true });
+    const data = body || {};
+    // If server explicitly sends an active notification object (preferred)
+    if (data.notification) {
+      const notif = data.notification;
+      // If the currently visible banner matches the server notification id, update only message if changed
+      if (window.__fg_currentBanner?.id && String(window.__fg_currentBanner.id) === String(notif.id)) {
+        if (window.__fg_currentBanner.message !== notif.message) {
+          showBanner(notif.message || '', { persistent: !!notif.sticky, serverId: notif.id });
+        }
+        // keep visible
+        return;
       }
-    } else {
-      // fallback: hide banner if server didn't indicate problem
+
+      // If clientSticky (admin broadcast), preserve it
+      if (window.__fg_currentBanner?.clientSticky) {
+        console.debug('Server has notification but preserving client-sticky banner');
+        return;
+      }
+
+      // Otherwise replace with server notification
+      showBanner(notif.message || '', { persistent: !!notif.sticky, serverId: notif.id });
+      window.__fg_currentBanner.id = notif.id;
+      window.__fg_currentBanner.sticky = !!notif.sticky;
+      window.__fg_currentBanner.clientSticky = false;
+      localStorage.setItem('active_broadcast_id', notif.id);
+      return;
+    }
+
+    // No server notification -> only clear banner if not sticky (server or client)
+    if (!(window.__fg_currentBanner?.sticky || window.__fg_currentBanner?.clientSticky)) {
       hideBanner();
+    } else {
+      console.debug('No server notification; preserving sticky banner');
     }
 
   } catch (err) {
     console.error('pollStatus network error', err);
-    showBanner('Network error while checking status — retrying', { type: 'warning' });
+    if (!(window.__fg_currentBanner?.sticky || window.__fg_currentBanner?.clientSticky)) {
+      showBanner('Network error while checking status — retrying', { type: 'warning' });
+    } else {
+      console.debug('Network error — preserved sticky banner');
+    }
   }
 }
+
 
 
 
@@ -9316,6 +9427,20 @@ async function handlePinCompletion() {
           if (typeof resetReauthInputs === 'function') resetReauthInputs();
           // clear any stored lockout
           try { localStorage.removeItem('pin_lockout_until'); } catch(e){}
+
+          // --- NEW: immediately refresh UI but preserve sticky broadcasts ---
+          try {
+            if (typeof hideTinyReauthNotice === 'function') {
+              try { hideTinyReauthNotice(); } catch (e) {}
+            }
+            try { window.dispatchEvent(new CustomEvent('fg:reauth-success', { detail: { method: 'pin' } })); } catch (e) {}
+            if (typeof pollStatus === 'function') {
+              try { pollStatus(); } catch (e) { console.warn('pollStatus after reauth failed', e); }
+            }
+          } catch (e) {
+            console.warn('post-PIN success UI refresh failed', e);
+          }
+
         } catch(e) {
           console.warn('Post-PIN verification error', e);
           showTopNotifier('Error completing authentication. Please try again.', 'error');
@@ -9413,6 +9538,7 @@ async function handlePinCompletion() {
       toggleKeypadProcessing(false);  // Re-enable UI
     });
 }
+
 
 
     function initReauthKeypad() {
@@ -11881,7 +12007,7 @@ async function verifyBiometrics(uid, context = 'reauth') {
     }
 
     const publicKey = await optRes.json();
-    console.log('[verifyBiometrics] Fresh options received', { challenge: publicKey.challenge.slice(0, 10) + '...', allowCredCount: publicKey.allowCredentials?.length || 0 });
+    console.log('[verifyBiometrics] Fresh options received', { challenge: publicKey.challenge?.slice?.(0, 10) + '...', allowCredCount: publicKey.allowCredentials?.length || 0 });
 
     // Convert base64url to buffers (using your fromBase64Url helper)
     publicKey.challenge = fromBase64Url(publicKey.challenge);
@@ -11942,10 +12068,28 @@ async function verifyBiometrics(uid, context = 'reauth') {
           await guardedHideReauthModal();
         }
         console.log('[DEBUG] Reauth modal hidden after successful biometrics verification in verifyBiometrics');
+
         // Notify user of success
         if (typeof notify === 'function') {
           notify('Authentication successful', 'success');
         }
+
+        // --- NEW: Immediately refresh status/UI but preserve sticky broadcasts ---
+        try {
+          // hide any tiny reauth hint (non-destructive)
+          if (typeof hideTinyReauthNotice === 'function') {
+            try { hideTinyReauthNotice(); } catch (e) {}
+          }
+          // dispatch event so other modules can react
+          try { window.dispatchEvent(new CustomEvent('fg:reauth-success')); } catch (e) {}
+          // immediate server check (do not await; it's OK to run in background)
+          if (typeof pollStatus === 'function') {
+            try { pollStatus(); } catch (e) { console.warn('pollStatus call after reauth failed', e); }
+          }
+        } catch (e) {
+          console.warn('[verifyBiometrics] post-success UI refresh failed', e);
+        }
+
       } catch (err) {
         console.warn('[reauth] Post-biometrics verification error in verifyBiometrics', err);
         // Optionally show an error to the user
@@ -11965,6 +12109,7 @@ async function verifyBiometrics(uid, context = 'reauth') {
     return { success: false, error: err.message };
   }
 }
+
 
 // 🔹 Improved simulatePinEntry with verbose debug logs and Promise-based completion
 // ---- REPLACE existing simulatePinEntry(...) with this improved version ----
