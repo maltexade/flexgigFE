@@ -489,6 +489,7 @@ window.__fg_currentBanner = window.__fg_currentBanner || {
 };
 
 // Helper: Force-hide banner only if it's a transient network/error one (preserves real broadcasts)
+// Enhanced: Suppress + flush for zero-flash
 function hideReauthBannerIfPresent() {
   try {
     const state = window.__fg_currentBanner || {};
@@ -497,18 +498,31 @@ function hideReauthBannerIfPresent() {
       msg.includes('network') || 
       msg.includes('status check failed') || 
       msg.includes('retrying') || 
-      msg.includes('reauth') ||  // Covers 423 if it lingers
+      msg.includes('reauth') ||
       msg.includes('error') ||
-      !state.serverId;  // No serverId? Likely client-generated transient
+      !state.serverId;
 
-    // Also skip if it's explicitly sticky (real broadcast)
     if (isTransientError && !state.sticky && !state.clientSticky) {
-      console.log('[DEBUG] Force-hiding transient network/error banner early (pre-modal close)');
-      hideBanner(true);  // Force=true overrides persistence for these only
-      // Optional: Early event dispatch for reactivity
+      console.log('[DEBUG] Force-hiding transient banner + suppressing next show');
+      
+      // NEW: Suppress any immediate re-show (e.g., from queued pollStatus)
+      window.__suppressNextBannerShow = true;
+      setTimeout(() => { window.__suppressNextBannerShow = false; }, 50);  // Short window for races
+      
+      hideBanner(true);
+      
+      // NEW: Force DOM flush to prevent micro-flicker
+      requestAnimationFrame(() => {
+        const STATUS_BANNER = document.getElementById('status-banner');
+        if (STATUS_BANNER && STATUS_BANNER.classList.contains('hidden')) {
+          STATUS_BANNER.style.display = 'none';  // Extra: Hide from flow
+          setTimeout(() => { STATUS_BANNER.style.display = ''; }, 100);  // Restore for future
+        }
+      });
+      
       window.dispatchEvent(new CustomEvent('fg:reauth-success'));
     } else {
-      console.debug('[DEBUG] Banner present but sticky/real—skipping early hide');
+      console.debug('[DEBUG] Banner not transient—skipping');
     }
   } catch (e) {
     console.warn('[hideReauthBannerIfPresent] error', e);
@@ -536,6 +550,22 @@ function showBanner(msg, opts = {}) {
   // opts: { type: 'info'|'error'|'warning', persistent: boolean, serverId: any, clientSticky: boolean }
   const STATUS_BANNER = document.getElementById('status-banner');
   if (!STATUS_BANNER) return;
+       // NEW: Suppress during reauth success window (ignores transients only)
+     if (window.__suppressNextBannerShow) {
+       const msgLower = String(msg || '').toLowerCase().trim();
+       const isTransient = 
+         msgLower.includes('network') || 
+         msgLower.includes('status check failed') || 
+         msgLower.includes('retrying') || 
+         msgLower.includes('reauth') ||
+         msgLower.includes('error') ||
+         !opts.serverId;  // No serverId? Transient
+       
+       if (isTransient && !opts.persistent && !opts.clientSticky) {
+         console.debug('[DEBUG] Suppressing transient banner show during reauth success');
+         return;  // No-op: Don't show
+       }
+     }
   setBannerMessage(msg, 1);
   STATUS_BANNER.classList.remove('hidden');
 
