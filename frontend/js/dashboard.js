@@ -1127,20 +1127,36 @@ if (biometricsEnabled) {
   const STATUS_BANNER = document.getElementById('status-banner');
   const BANNER_MSG = document.querySelector('.banner-msg');
 
-  async function pollStatus() {
-    try {
-      const res = await fetch('/api/status', { credentials: 'include' });
-      if (!res.ok) throw new Error('Status fetch failed');
-      const { status, message } = await res.json();
-      if (status === 'down' && message) {
-        showBanner(message);
-      } else {
-        hideBanner();
-      }
-    } catch (err) {
-      showBanner('Network downtime detected. Retrying...');
+  // Replace existing pollStatus() implementation with this:
+async function pollStatus() {
+  try {
+    // use configured API base (fallback to API_BASE if defined)
+    const apiBase = (window.__SEC_API_BASE || typeof API_BASE !== 'undefined' ? (window.__SEC_API_BASE || API_BASE) : '');
+    const url = apiBase ? `${apiBase}/api/status` : '/api/status';
+    const res = await fetch(url, { credentials: 'include' });
+
+    if (!res.ok) {
+      // not-ok (4xx/5xx) — try to handle gracefully
+      const txt = await res.text().catch(()=>'');
+      console.warn('pollStatus: non-ok', res.status, txt);
+      throw new Error('Status fetch failed');
     }
+
+    // safe parse
+    let data = null;
+    try { data = await res.json(); } catch (e) { data = null; }
+
+    if (data && data.status === 'down' && data.message) {
+      showBanner(data.message);
+    } else {
+      hideBanner();
+    }
+  } catch (err) {
+    // friendly fallback UI / retry hint
+    showBanner('Network downtime detected. Retrying...');
   }
+}
+
 
   // Subscribe to Supabase Realtime channel for instant updates
   const channel = supabaseClient.channel('network-status');
@@ -1155,15 +1171,21 @@ if (biometricsEnabled) {
     })
     .subscribe((status) => {
       console.log('[DEBUG] Realtime subscription status:', status);
-      if (status === 'SUBSCRIBED') {
-        // Optional: Fetch initial status via API if needed
-        fetch(`${window.__SEC_API_BASE}/api/status`, { credentials: 'include' })
-          .then(res => res.json())
-          .then(data => {
-            if (data.status === 'down' && data.message) showBanner(data.message);
-          })
-          .catch(() => showBanner('Network issue detected. Checking...'));
-      }
+      // inside subscription .subscribe((status) => { ... })
+if (status === 'SUBSCRIBED') {
+  const apiBase = (window.__SEC_API_BASE || API_BASE || '');
+  const url = apiBase ? `${apiBase}/api/status` : '/api/status';
+  fetch(url, { credentials: 'include' })
+    .then(res => res.ok ? res.json() : Promise.reject(new Error('status-fetch failed')))
+    .then(data => {
+      if (data && data.status === 'down' && data.message) showBanner(data.message);
+    })
+    .catch(err => {
+      // still show a friendly fallback to user, but avoid console noise in prod if you prefer
+      showBanner('Network issue detected. Checking...');
+    });
+}
+
     });
 
   // Network listeners (fallback for offline)
