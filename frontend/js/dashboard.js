@@ -1130,32 +1130,58 @@ if (biometricsEnabled) {
   // Replace existing pollStatus() implementation with this:
 async function pollStatus() {
   try {
-    // use configured API base (fallback to API_BASE if defined)
-    const apiBase = (window.__SEC_API_BASE || typeof API_BASE !== 'undefined' ? (window.__SEC_API_BASE || API_BASE) : '');
+    const apiBase = (window.__SEC_API_BASE || (typeof API_BASE !== 'undefined' ? API_BASE : ''));
     const url = apiBase ? `${apiBase}/api/status` : '/api/status';
     const res = await fetch(url, { credentials: 'include' });
 
     if (!res.ok) {
-      // not-ok (4xx/5xx) — try to handle gracefully
-      const txt = await res.text().catch(()=>'');
-      console.warn('pollStatus: non-ok', res.status, txt);
-      throw new Error('Status fetch failed');
+      // Try parse server JSON for helpful fields (e.g. reauthRequired)
+      let body = null;
+      try { body = await res.json(); } catch(e) { body = null; }
+
+      console.warn('pollStatus: non-ok', res.status, body || await res.text().catch(()=>''), res.status);
+
+      // If 423 (Locked / requires reauth) we should show the reauth prompt/banner.
+      if (res.status === 423) {
+        if (body && body.reauthRequired) {
+          // Show reauth UI / banner
+          showBanner(body.message || 'Reauthentication required', { type: 'error', persistent: true });
+          // Optionally open the reauth modal immediately:
+          if (typeof initReauthModal === 'function') {
+            try { initReauthModal({ show: true, context: 'reauth' }); } catch(e) {}
+          }
+        } else {
+          showBanner('Account locked — reauthentication required', { type: 'error', persistent: true });
+        }
+      } else {
+        // Generic non-ok: show transient network message
+        showBanner('Network / status check failed. Retrying...', { type: 'warning' });
+      }
+      return; // exit early on non-ok
     }
 
-    // safe parse
+    // OK path
     let data = null;
     try { data = await res.json(); } catch (e) { data = null; }
 
-    if (data && data.status === 'down' && data.message) {
-      showBanner(data.message);
+    // If API says service up, remove any banner
+    if (data && (data.status === 'up' || data.ok === true)) {
+      hideBanner(); // Remove banner immediately
+      // If there is a status.message to present (like a 'down' message), show it
+      if (data.status === 'down' && data.message) {
+        showBanner(data.message, { type: 'error', persistent: true });
+      }
     } else {
+      // fallback: hide banner if server didn't indicate problem
       hideBanner();
     }
+
   } catch (err) {
-    // friendly fallback UI / retry hint
-    showBanner('Network downtime detected. Retrying...');
+    console.error('pollStatus network error', err);
+    showBanner('Network error while checking status — retrying', { type: 'warning' });
   }
 }
+
 
 
   // Subscribe to Supabase Realtime channel for instant updates
