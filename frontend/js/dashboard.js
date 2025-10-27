@@ -1158,38 +1158,41 @@ if (biometricsEnabled) {
 // React to successful reauth
 // --------------------------
 (function(){
-  // Debounce so multiple reauth-success events in quick succession don't spam pollStatus
   let __fg_reauth_timer = null;
-  const __fg_reauth_debounce_ms = 350; // small delay to allow server to finalize session state
+  const __fg_reauth_debounce_ms = 600; // slightly larger debounce to allow server to settle
+  // Short-circuit: do not start a new poll if one started recently
+  const MIN_REAUTH_POLL_MS = 700;
+  let __fg_last_reauth_poll = 0;
 
   window.addEventListener('fg:reauth-success', (ev) => {
     try {
-      // Hide tiny reauth hint if present (non-destructive)
       if (typeof hideTinyReauthNotice === 'function') {
         try { hideTinyReauthNotice(); } catch (e) { /* swallow */ }
       }
 
-      // Debounced immediate status refresh (so UI updates right away)
       if (__fg_reauth_timer) clearTimeout(__fg_reauth_timer);
       __fg_reauth_timer = setTimeout(() => {
         __fg_reauth_timer = null;
+        const now = Date.now();
+        if (now - __fg_last_reauth_poll < MIN_REAUTH_POLL_MS) {
+          console.debug('fg:reauth-success: recent poll already run — skipping immediate poll');
+          return;
+        }
+        __fg_last_reauth_poll = now;
         try {
           if (typeof pollStatus === 'function') {
-            // call pollStatus (it is banner-aware and will preserve sticky broadcasts)
             pollStatus();
           }
         } catch (e) {
           console.warn('fg:reauth-success -> pollStatus failed', e);
         }
       }, __fg_reauth_debounce_ms);
-
-      // Also give other modules a chance to react (backwards-compat)
-      // some modules may listen for this event directly
     } catch (err) {
       console.warn('fg:reauth-success handler error', err);
     }
   }, { passive: true });
 })();
+
 
 
   // Your existing inactivity check...
@@ -1203,7 +1206,13 @@ if (biometricsEnabled) {
   const BANNER_MSG = document.querySelector('.banner-msg');
 
   // Replace existing pollStatus() implementation with this:
-async function pollStatus() {
+// --- pollStatus concurrency guard / throttle (insert once at top-level) ---
+window.__fg_poll_inflight = window.__fg_poll_inflight || null;
+window.__fg_last_poll_ts = window.__fg_last_poll_ts || 0;
+const FG_POLL_MIN_MS = 600; // min spacing between polls (tune as needed)
+
+// Move your existing pollStatus body into this internal function:
+async function _pollStatus_internal() {
   try {
     const apiBase = (window.__SEC_API_BASE || (typeof API_BASE !== 'undefined' ? API_BASE : ''));
     const url = apiBase ? `${apiBase}/api/status` : '/api/status';
@@ -1307,7 +1316,7 @@ async function pollStatus() {
 
   } catch (err) {
     // fetch threw (network, CORS, etc.)
-    console.error('pollStatus network error (suppressed banner)', err);
+    console.debug('pollStatus network error (suppressed banner)', err);
     // If a server-origin banner is active, preserve it; otherwise do nothing (no transient banner).
     if (window.__fg_currentBanner?.serverId) {
       console.debug('pollStatus: network error but server banner active — preserved.');
@@ -1316,6 +1325,38 @@ async function pollStatus() {
     // otherwise intentionally silence network errors here (per your requirement)
   }
 }
+
+// Wrapper that dedupes concurrent calls and throttles frequent calls.
+// Replace the original top-level pollStatus with this wrapper (keeps same name)
+async function pollStatus() {
+  const now = Date.now();
+
+  // If there's an in-flight poll, return its promise (dedupe)
+  if (window.__fg_poll_inflight) {
+    console.debug('pollStatus: deduping to existing in-flight request');
+    return window.__fg_poll_inflight;
+  }
+
+  // Enforce a small min interval (avoid bursts e.g., immediate + debounce)
+  if (now - (window.__fg_last_poll_ts || 0) < FG_POLL_MIN_MS) {
+    console.debug('pollStatus: called too soon after last poll — skipping (throttle)');
+    return Promise.resolve();
+  }
+
+  // create and store in-flight promise
+  window.__fg_poll_inflight = (async () => {
+    try {
+      const res = await _pollStatus_internal();
+      return res;
+    } finally {
+      window.__fg_last_poll_ts = Date.now();
+      window.__fg_poll_inflight = null;
+    }
+  })();
+
+  return window.__fg_poll_inflight;
+}
+
 
 
 
@@ -1336,18 +1377,19 @@ async function pollStatus() {
       console.log('[DEBUG] Realtime subscription status:', status);
       // inside subscription .subscribe((status) => { ... })
 if (status === 'SUBSCRIBED') {
-  const apiBase = (window.__SEC_API_BASE || API_BASE || '');
-  const url = apiBase ? `${apiBase}/api/status` : '/api/status';
-  fetch(url, { credentials: 'include' })
-    .then(res => res.ok ? res.json() : Promise.reject(new Error('status-fetch failed')))
-    .then(data => {
-      if (data && data.status === 'down' && data.message) showBanner(data.message);
-    })
-    .catch(err => {
-      // still show a friendly fallback to user, but avoid console noise in prod if you prefer
-      showBanner('Network issue detected. Checking...');
-    });
+  // Use canonical pollStatus() so banner/state logic is centralized,
+  // and to avoid duplicate fetches or transient banners.
+  try {
+    if (typeof pollStatus === 'function') {
+      // fire-and-forget is fine because pollStatus returns a promise and is deduped.
+      pollStatus();
+      // if you need to wait for it to complete, use: await pollStatus();
+    }
+  } catch (e) {
+    console.debug('realtime SUBSCRIBED -> pollStatus failed', e);
+  }
 }
+
 
     });
 
@@ -9484,10 +9526,13 @@ async function handlePinCompletion() {
             if (typeof hideTinyReauthNotice === 'function') {
               try { hideTinyReauthNotice(); } catch (e) {}
             }
-            try { window.dispatchEvent(new CustomEvent('fg:reauth-success', { detail: { method: 'pin' } })); } catch (e) {}
-            if (typeof pollStatus === 'function') {
-              try { pollStatus(); } catch (e) { console.warn('pollStatus after reauth failed', e); }
-            }
+            try {
+  // dispatch canonical event and let the fg:reauth-success handler trigger the debounced poll.
+  window.dispatchEvent(new CustomEvent('fg:reauth-success', { detail: { method: 'pin' } }));
+} catch (e) {
+  console.debug('verifyBiometrics: dispatch fg:reauth-success failed', e);
+}
+
           } catch (e) {
             console.warn('post-PIN success UI refresh failed', e);
           }
@@ -12132,11 +12177,13 @@ async function verifyBiometrics(uid, context = 'reauth') {
             try { hideTinyReauthNotice(); } catch (e) {}
           }
           // dispatch event so other modules can react
-          try { window.dispatchEvent(new CustomEvent('fg:reauth-success')); } catch (e) {}
-          // immediate server check (do not await; it's OK to run in background)
-          if (typeof pollStatus === 'function') {
-            try { pollStatus(); } catch (e) { console.warn('pollStatus call after reauth failed', e); }
-          }
+          try {
+  // dispatch canonical event and let the fg:reauth-success handler trigger the debounced poll.
+  window.dispatchEvent(new CustomEvent('fg:reauth-success', { detail: { method: 'biometrics' } }));
+} catch (e) {
+  console.debug('verifyBiometrics: dispatch fg:reauth-success failed', e);
+}
+
         } catch (e) {
           console.warn('[verifyBiometrics] post-success UI refresh failed', e);
         }
