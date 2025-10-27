@@ -1210,101 +1210,71 @@ async function pollStatus() {
 
     const res = await fetch(url, { credentials: 'include' });
 
-    // Attempt to parse JSON body only when content-type looks like JSON and there is a body.
+    // Try parse JSON when appropriate
     let body = null;
     try {
-      const ct = res.headers.get && res.headers.get('content-type');
+      const ct = res.headers && typeof res.headers.get === 'function' ? res.headers.get('content-type') : null;
       if (res.status !== 204 && ct && ct.toLowerCase().includes('application/json')) {
         body = await res.json();
       }
     } catch (e) {
-      // ignore JSON parse errors, treat body as null
-      console.debug('pollStatus: failed to parse JSON body', e);
+      console.debug('pollStatus: JSON parse failed', e);
       body = null;
     }
 
-    // Non-OK responses ----------------------------------------------------
+    // If server returns non-OK ------------------------------------------------
     if (!res.ok) {
-      // 423: server requests reauthentication / locked state
-      if (res.status === 423) {
-        const msg = (body && (body.message || body.error)) ? (body.message || body.error) : 'Reauthentication required';
-
-        // If a sticky banner is present (server-side sticky or client sticky), preserve it.
-        if ((window.__fg_currentBanner?.sticky) || (window.__fg_currentBanner?.clientSticky)) {
-          // preserve main banner, but optionally surface a tiny reauth hint
-          try {
-            if (typeof initReauthModal === 'function') {
-              initReauthModal({ show: true, context: 'reauth' });
-            }
-          } catch (e) { console.debug('initReauthModal failed', e); }
-
-          try {
-            if (typeof showTinyReauthNotice === 'function') {
-              showTinyReauthNotice(msg);
-            } else {
-              console.debug('Reauth required (preserving sticky banner):', msg);
-            }
-          } catch (e) { console.debug('showTinyReauthNotice failed', e); }
-        } else {
-          // No sticky banner present: show a full persistent reauth banner and optionally open modal
-          try {
-            showBanner(msg, { persistent: true, serverId: body?.id || null });
-          } catch (e) { console.warn('showBanner failed for 423', e); }
-
-          try {
-            if (typeof initReauthModal === 'function') {
-              initReauthModal({ show: true, context: 'reauth' });
-            }
-          } catch (e) { console.debug('initReauthModal failed', e); }
-        }
-
+      // If there's an ACTIVE server banner already, preserve it and do nothing.
+      if (window.__fg_currentBanner?.serverId) {
+        console.debug('pollStatus: non-OK response but server banner active — preserving server banner. status=', res.status);
         return;
       }
 
-      // Generic non-OK: show transient network message unless a sticky banner exists.
-      if (!(window.__fg_currentBanner?.sticky || window.__fg_currentBanner?.clientSticky)) {
+      // No server active banner: DO NOT show transient network / reauth banners from pollStatus.
+      // Optionally open the reauth modal *silently* when 423 is returned (no banner).
+      if (res.status === 423) {
+        console.debug('pollStatus: 423 returned (reauth required) — not showing banner. initReauthModal may be invoked.');
         try {
-          showBanner('Network / status check failed. Retrying...', { type: 'warning' });
+          if (typeof initReauthModal === 'function') {
+            // Open modal but do NOT call showBanner; this keeps UI focused on server-driven banners.
+            initReauthModal({ show: true, context: 'reauth' });
+          }
         } catch (e) {
-          console.warn('showBanner failed for network error', e);
+          console.debug('pollStatus: initReauthModal failed', e);
         }
       } else {
-        console.debug('Network error; preserving sticky banner');
+        console.debug('pollStatus: non-OK response (not 423) — suppressed transient banner. status=', res.status);
       }
-
       return;
     }
 
-    // OK (2xx) path -------------------------------------------------------
+    // OK path -----------------------------------------------------------------
     const data = body || {};
 
-    // Server explicitly supplies a "notification" object (preferred)
-    // Accept both { notification: {...} } and { notification: [ {...} ] } (take first)
+    // If server explicitly supplies a "notification" object (preferred)
     if (data.notification) {
       const notif = Array.isArray(data.notification) ? (data.notification[0] || null) : data.notification;
 
       if (notif) {
-        // If currently visible banner matches server notification id, update only when message changed
+        // If current banner matches server notification id -> update message only if changed
         if (window.__fg_currentBanner?.id && String(window.__fg_currentBanner.id) === String(notif.id)) {
           if (window.__fg_currentBanner.message !== notif.message) {
             try {
               showBanner(notif.message || '', { persistent: !!notif.sticky, serverId: notif.id });
-            } catch (e) { console.warn('showBanner update failed', e); }
+            } catch (e) { console.warn('pollStatus: showBanner update failed', e); }
           }
-          // leave it visible
-          return;
+          return; // keep visible
         }
 
-        // If there's a clientSticky (admin override), preserve it
+        // If there's a clientSticky banner (admin override), preserve it and do not replace
         if (window.__fg_currentBanner?.clientSticky) {
-          console.debug('Server has notification but preserving client-sticky banner');
+          console.debug('pollStatus: server notification present but preserving client-sticky banner');
           return;
         }
 
         // Otherwise show/replace banner with server notification
         try {
           showBanner(notif.message || '', { persistent: !!notif.sticky, serverId: notif.id });
-          // normalize __fg_currentBanner state
           window.__fg_currentBanner = window.__fg_currentBanner || {};
           window.__fg_currentBanner.id = notif.id;
           window.__fg_currentBanner.sticky = !!notif.sticky;
@@ -1313,35 +1283,38 @@ async function pollStatus() {
             try { localStorage.setItem('active_broadcast_id', String(notif.id)); } catch (e) {}
           }
         } catch (e) {
-          console.warn('showBanner failed for server notification', e);
+          console.warn('pollStatus: showBanner failed for server notification', e);
         }
-
         return;
       }
     }
 
-    // No server notification -> clear banner only if not sticky (server or client)
+    // No server notification provided -----------------------------------------
+    // If a server-origin banner is active, preserve it (don't hide or override).
+    if (window.__fg_currentBanner?.serverId) {
+      console.debug('pollStatus: no notification returned but server banner is active — preserving it');
+      return;
+    }
+
+    // Otherwise (no server banner) -> clear banner only if it's not sticky (server or client)
     if (!(window.__fg_currentBanner?.sticky || window.__fg_currentBanner?.clientSticky)) {
       try {
         hideBanner();
       } catch (e) {
-        console.warn('hideBanner failed', e);
+        console.warn('pollStatus: hideBanner failed', e);
       }
     } else {
-      console.debug('No server notification; preserving sticky banner');
+      console.debug('pollStatus: no server notification and banner is sticky — preserving it');
     }
+
   } catch (err) {
-    // Entire fetch failed (network, CORS, etc.)
-    console.error('pollStatus network error', err);
-    if (!(window.__fg_currentBanner?.sticky || window.__fg_currentBanner?.clientSticky)) {
-      try {
-        showBanner('Network error while checking status — retrying', { type: 'warning' });
-      } catch (e) {
-        console.warn('showBanner failed for pollStatus catch', e);
-      }
-    } else {
-      console.debug('Network error — preserved sticky banner');
+    // Fetch threw (network, CORS, etc.). If a server banner is active, preserve it; else suppress showing any banner.
+    console.error('pollStatus network error (suppressed banner)', err);
+    if (window.__fg_currentBanner?.serverId) {
+      console.debug('pollStatus: network error but server banner active — preserved.');
+      return;
     }
+    // Do not call showBanner here. We intentionally suppress transient network banners.
   }
 }
 
