@@ -7675,6 +7675,7 @@ document.querySelectorAll('.contact-box').forEach((box) => {
 
   /* Helpers */
   // Replace existing __sec_setChecked with this
+// Replace existing __sec_setChecked with this improved version
 const __sec_setChecked = (el, v) => {
   __sec_log.d('setChecked called for el:', el?.id || 'unknown', 'value:', v);
   if (!el) return;
@@ -7698,19 +7699,25 @@ const __sec_setChecked = (el, v) => {
         el.classList.add('inactive');
         el.classList.remove('active');
       }
-      // also maintain small dataset flag for other code paths
+      // also maintain dataset flag for other code paths
       el.dataset.active = boolV ? 'true' : 'false';
     } catch (err) {
       __sec_log.w('setChecked: class toggling failed', err);
     }
 
-    __sec_log.d('setChecked applied:', el.getAttribute('aria-checked'), 'classList:', el.classList.contains('active') ? 'active' : 'inactive');
+    __sec_log.d('setChecked applied:', {
+      aria: el.getAttribute('aria-checked'),
+      checked: (el instanceof HTMLInputElement) ? el.checked : undefined,
+      classActive: !!(el.classList && el.classList.contains && el.classList.contains('active'))
+    });
   } catch (err) {
     __sec_log.e('setChecked top-level error', err);
   }
 };
 
+
   // Replace existing __sec_isChecked with this robust reader
+// Replace existing __sec_isChecked with this robust reader
 const __sec_isChecked = (el) => {
   if (!el) return false;
   try {
@@ -7737,7 +7744,9 @@ const __sec_isChecked = (el) => {
   }
 };
 
+
   // Replace existing __sec_toggleSwitch with this
+// Replace existing __sec_toggleSwitch with this
 function __sec_toggleSwitch(el, forced) {
   __sec_log.d('toggleSwitch entry:', { el: el?.id || 'unknown', forced });
   if (!el) { 
@@ -7763,6 +7772,7 @@ function __sec_toggleSwitch(el, forced) {
     return false;
   }
 }
+
 
 
   /* UI lock helpers for async ops */
@@ -8035,6 +8045,7 @@ function __sec_setBiometrics(parentOn, animate = true) {
 
 /* If both child switches are off, turn the parent off */
 // ----------------- Debounced __sec_beDisableParentIfChildrenOff (drop-in) -----------------
+// Replace existing __sec_maybeDisableParentIfChildrenOff with this debounced version
 // Replace existing __sec_maybeDisableParentIfChildrenOff with this debounced version
 let __sec_maybeDisableTimer = null;
 function __sec_maybeDisableParentIfChildrenOff() {
