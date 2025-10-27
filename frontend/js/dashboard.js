@@ -11653,50 +11653,102 @@ function bindBiometricSettings({
   }
 
   function writeFlag(key, val) {
-    localStorage.setItem(key, val ? 'true' : 'false');
+  // persist the legacy boolean key (true/false)
+  try { localStorage.setItem(key, val ? 'true' : 'false'); } catch (e) { console.warn('writeFlag: legacy write failed', e); }
+
+  // if secure namespaced keys exist, mirror the values there as well
+  // __sec_KEYS may not be defined at early load; guard it
+  try {
+    if (window.__sec_KEYS && typeof window.__sec_KEYS === 'object') {
+      if (key === 'biometricsEnabled' && __sec_KEYS.biom) {
+        localStorage.setItem(__sec_KEYS.biom, val ? '1' : '0');
+      } else if (key === 'biometricForLogin' && __sec_KEYS.bioLogin) {
+        localStorage.setItem(__sec_KEYS.bioLogin, val ? '1' : '0');
+      } else if (key === 'biometricForTx' && __sec_KEYS.bioTx) {
+        localStorage.setItem(__sec_KEYS.bioTx, val ? '1' : '0');
+      }
+    }
+  } catch (e) {
+    console.warn('writeFlag: secure-ns write failed', e);
   }
+
+  // Immediately update UI in this tab (storage event doesn't fire in same tab)
+  try { if (typeof syncFromStorage === 'function') setTimeout(syncFromStorage, 0); } catch (e) {}
+}
+
 
   function setSwitch(btn, on) {
-    btn.setAttribute('aria-checked', on ? 'true' : 'false');
-    btn.classList.toggle('active', on);
-  }
+  if (!btn) return;
+  // avoid noisy reflows if already in desired state
+  const current = btn.getAttribute('aria-checked') === 'true';
+  if (current === Boolean(on)) return;
+
+  btn.setAttribute('aria-checked', on ? 'true' : 'false');
+  btn.classList.toggle('active', !!on);
+  btn.classList.toggle('inactive', !on);
+
+  // if this is the parent switch, adjust the options container
+  try {
+    const id = btn.id || '';
+    if (id === 'biometricsSwitch') {
+      const opts = document.getElementById('biometricsOptions');
+      if (opts) opts.hidden = !on;
+    }
+  } catch (e) {}
+
+  // small hook for other modules to react immediately
+  try {
+    btn.dispatchEvent(new CustomEvent('fg:switch-changed', { detail: { id: btn.id, checked: !!on }, bubbles: true }));
+  } catch (e) {}
+}
+
 
   function syncFromStorage() {
-  // Merge both key namespaces: if any indicates enabled, treat as enabled
-  const secureBiom = localStorage.getItem(__sec_KEYS && __sec_KEYS.biom ? __sec_KEYS.biom : '') === '1';
+  // defensive: ensure __sec_KEYS exists shape
+  const secKeys = (window.__sec_KEYS && typeof window.__sec_KEYS === 'object') ? window.__sec_KEYS : { biom:'', bioLogin:'', bioTx:'' };
+
+  const secureBiom = secKeys.biom ? localStorage.getItem(secKeys.biom) === '1' : false;
   const legacyBiom = readFlag('biometricsEnabled');
   const enabled = secureBiom || legacyBiom;
 
-  // Ensure both namespaces reflect the merged truth
   try {
-    localStorage.setItem(__sec_KEYS.biom, enabled ? '1' : '0');
+    if (secKeys.biom) localStorage.setItem(secKeys.biom, enabled ? '1' : '0');
     localStorage.setItem('biometricsEnabled', enabled ? 'true' : 'false');
-  } catch (e) {
-    console.warn('syncFromStorage: storage write failed', e);
-  }
+  } catch (e) { console.warn('syncFromStorage: write failed', e); }
 
   setSwitch(parent, enabled);
   setOptionsVisible(enabled);
 
   if (enabled) {
-    const secureLogin = localStorage.getItem(__sec_KEYS.bioLogin) === '1';
-    const secureTx = localStorage.getItem(__sec_KEYS.bioTx) === '1';
+    const secureLogin = secKeys.bioLogin ? localStorage.getItem(secKeys.bioLogin) === '1' : false;
+    const secureTx = secKeys.bioTx ? localStorage.getItem(secKeys.bioTx) === '1' : false;
+
     const login = secureLogin || readFlag('biometricForLogin');
     const tx = secureTx || readFlag('biometricForTx');
-    setSwitch(childLogin, login);
-    setSwitch(childTx, tx);
+
     // persist merged children flags into both namespaces
     try {
-      localStorage.setItem(__sec_KEYS.bioLogin, login ? '1' : '0');
-      localStorage.setItem(__sec_KEYS.bioTx, tx ? '1' : '0');
+      if (secKeys.bioLogin) localStorage.setItem(secKeys.bioLogin, login ? '1' : '0');
+      if (secKeys.bioTx) localStorage.setItem(secKeys.bioTx, tx ? '1' : '0');
       localStorage.setItem('biometricForLogin', login ? 'true' : 'false');
       localStorage.setItem('biometricForTx', tx ? 'true' : 'false');
-    } catch(e) { __sec_log.e('syncFromStorage child persist failed', e); }
+    } catch(e) { console.warn('syncFromStorage child persist failed', e); }
+
+    setSwitch(childLogin, login);
+    setSwitch(childTx, tx);
   } else {
+    // parent disabled -> force children off in UI + storage
     setSwitch(childLogin, false);
     setSwitch(childTx, false);
+    try {
+      if (secKeys.bioLogin) localStorage.setItem(secKeys.bioLogin, '0');
+      if (secKeys.bioTx) localStorage.setItem(secKeys.bioTx, '0');
+      localStorage.setItem('biometricForLogin', 'false');
+      localStorage.setItem('biometricForTx', 'false');
+    } catch(e) {}
   }
 }
+
 
 
   // Replace your existing handleParentToggle with this version.
@@ -11809,40 +11861,91 @@ async function handleParentToggle(wantOn) {
   }
 }
 
+function maybeDisableParentIfChildrenOff() {
+  try {
+    const p = document.getElementById('biometricsSwitch');
+    const c1 = document.getElementById('bioLoginSwitch');
+    const c2 = document.getElementById('bioTxSwitch');
+
+    if (!p || !c1 || !c2) return false;
+
+    const loginOn = c1.getAttribute('aria-checked') === 'true';
+    const txOn    = c2.getAttribute('aria-checked') === 'true';
+
+    // If both children are OFF and parent is ON -> auto-disable parent (and clear credential)
+    const parentOn = p.getAttribute('aria-checked') === 'true';
+    if (!loginOn && !txOn && parentOn) {
+      // Use canonical parent flow if available so server state & cleanup run
+      if (typeof handleParentToggle === 'function') {
+        // call the disable path (server + local cleanup)
+        // Use next tick to avoid re-entrancy inside click handlers
+        setTimeout(() => { try { handleParentToggle(false); } catch (e) { console.warn('handleParentToggle(false) failed', e); } }, 0);
+      } else {
+        // fallback: local-only cleanup
+        writeFlag('biometricsEnabled', false);
+        try { localStorage.removeItem('credentialId'); } catch (e) {}
+        setSwitch(p, false);
+        const opts = document.getElementById('biometricsOptions');
+        if (opts) opts.hidden = true;
+        safeCall(notify, 'Biometrics disabled because all options were turned off', 'info');
+      }
+      return true;
+    }
+    return false;
+  } catch (e) {
+    console.warn('maybeDisableParentIfChildrenOff error', e);
+    return false;
+  }
+}
 
 
   // 🔹 FIXED Child handler: Pure client-side flag toggle (NO server, NO verify, NO prompt)
   function bindChild(btn, key, label) {
-    if (!btn || btn.__bioBound) return;
+  if (!btn || btn.__bioBound) return;
 
-    btn.addEventListener('click', (e) => {
+  btn.addEventListener('click', (e) => {
+    e.preventDefault();
+    const cur = btn.getAttribute('aria-checked') === 'true';
+    const wantOn = !cur;
+
+    // Gate: Require parent enabled (auto-trigger if off)
+    if (wantOn && !readFlag('biometricsEnabled')) {
+      safeCall(notify, `${label} requires biometrics enabled first`, 'info');
+      // try enabling parent via the canonical flow:
+      if (typeof handleParentToggle === 'function') {
+        handleParentToggle(true);
+      }
+      return;
+    }
+
+    // Update UI immediately
+    setSwitch(btn, wantOn);
+
+    // Persist to both namespaces via writeFlag helper (now mirrors secure keys)
+    writeFlag(key, wantOn);
+
+    // Extra: if toggled OFF, check the "two children off => disable parent" rule
+    // run asynchronously to let immediate UI settle
+    setTimeout(() => {
+      try { maybeDisableParentIfChildrenOff(); } catch (err) { console.warn('maybeDisableParentIfChildrenOff failed', err); }
+    }, 0);
+
+    console.log(`[bio] ${key} toggled to ${wantOn ? 'ON' : 'OFF'} (local only)`);
+    safeCall(notify, `${label} biometrics ${wantOn ? 'enabled' : 'disabled'}`, wantOn ? 'success' : 'info');
+  });
+
+  btn.addEventListener('keydown', (e) => {
+    if (e.key === ' ' || e.key === 'Enter') {
       e.preventDefault();
-      const cur = btn.getAttribute('aria-checked') === 'true';
-      const wantOn = !cur;
+      btn.click();
+    }
+  });
 
-      // Gate: Require parent enabled (auto-trigger if off)
-      if (wantOn && !readFlag('biometricsEnabled')) {
-        safeCall(notify, `${label} requires biometrics enabled first`, 'info');
-        handleParentToggle(true);  // Auto-enables parent (server call here, not child)
-        return;
-      }
+  btn.__bioBound = true;
+}
 
-      // 🔹 PURE CLIENT-SIDE: Instant flag toggle/save (no server/verify)
-      setSwitch(btn, wantOn);
-      writeFlag(key, wantOn);
-      console.log(`[bio] ${key} toggled to ${wantOn ? 'ON' : 'OFF'} (local only)`);
-      safeCall(notify, `${label} biometrics ${wantOn ? 'enabled' : 'disabled'}`, wantOn ? 'success' : 'info');
-    });
 
-    btn.addEventListener('keydown', (e) => {
-      if (e.key === ' ' || e.key === 'Enter') {
-        e.preventDefault();
-        btn.click();
-      }
-    });
 
-    btn.__bioBound = true;
-  }
 
   // Wire parent
   if (!parent.__bioBound) {
