@@ -1210,7 +1210,7 @@ async function pollStatus() {
 
     const res = await fetch(url, { credentials: 'include' });
 
-    // Try parse JSON when appropriate
+    // Try to parse JSON body if content-type indicates JSON (do this even if !res.ok)
     let body = null;
     try {
       const ct = res.headers && typeof res.headers.get === 'function' ? res.headers.get('content-type') : null;
@@ -1222,57 +1222,46 @@ async function pollStatus() {
       body = null;
     }
 
-    // If server returns non-OK ------------------------------------------------
-    if (!res.ok) {
-      // If there's an ACTIVE server banner already, preserve it and do nothing.
+    // Consider 423 as "processable" for notification purposes
+    const isLocked = res.status === 423;
+    const treatAsProcessable = res.ok || isLocked;
+
+    if (!treatAsProcessable) {
+      // Non-OK and not 423 -> do nothing visible (we intentionally suppress transient banners).
+      // If there is an active server banner, preserve it and return.
       if (window.__fg_currentBanner?.serverId) {
-        console.debug('pollStatus: non-OK response but server banner active — preserving server banner. status=', res.status);
+        console.debug('pollStatus: non-OK and no server banner active — preserving server banner if any. status=', res.status);
         return;
       }
-
-      // No server active banner: DO NOT show transient network / reauth banners from pollStatus.
-      // Optionally open the reauth modal *silently* when 423 is returned (no banner).
-      if (res.status === 423) {
-        console.debug('pollStatus: 423 returned (reauth required) — not showing banner. initReauthModal may be invoked.');
-        try {
-          if (typeof initReauthModal === 'function') {
-            // Open modal but do NOT call showBanner; this keeps UI focused on server-driven banners.
-            initReauthModal({ show: true, context: 'reauth' });
-          }
-        } catch (e) {
-          console.debug('pollStatus: initReauthModal failed', e);
-        }
-      } else {
-        console.debug('pollStatus: non-OK response (not 423) — suppressed transient banner. status=', res.status);
-      }
+      console.debug('pollStatus: non-OK (not 423) — suppressed banner. status=', res.status);
       return;
     }
 
-    // OK path -----------------------------------------------------------------
+    // At this point res.ok OR res.status===423 (locked)
     const data = body || {};
 
-    // If server explicitly supplies a "notification" object (preferred)
+    // If server provides a notification object (preferred) — accept it even on 423
     if (data.notification) {
       const notif = Array.isArray(data.notification) ? (data.notification[0] || null) : data.notification;
 
       if (notif) {
-        // If current banner matches server notification id -> update message only if changed
+        // If currently visible banner matches the server notification id, update only if message changed.
         if (window.__fg_currentBanner?.id && String(window.__fg_currentBanner.id) === String(notif.id)) {
           if (window.__fg_currentBanner.message !== notif.message) {
             try {
               showBanner(notif.message || '', { persistent: !!notif.sticky, serverId: notif.id });
-            } catch (e) { console.warn('pollStatus: showBanner update failed', e); }
+            } catch (e) { console.warn('showBanner update failed', e); }
           }
-          return; // keep visible
+          return; // leave visible
         }
 
-        // If there's a clientSticky banner (admin override), preserve it and do not replace
+        // If clientSticky (admin override) exists, preserve and do not replace
         if (window.__fg_currentBanner?.clientSticky) {
           console.debug('pollStatus: server notification present but preserving client-sticky banner');
           return;
         }
 
-        // Otherwise show/replace banner with server notification
+        // Otherwise replace or show banner with notification (works for 200 and 423)
         try {
           showBanner(notif.message || '', { persistent: !!notif.sticky, serverId: notif.id });
           window.__fg_currentBanner = window.__fg_currentBanner || {};
@@ -1289,32 +1278,42 @@ async function pollStatus() {
       }
     }
 
-    // No server notification provided -----------------------------------------
-    // If a server-origin banner is active, preserve it (don't hide or override).
+    // No notification provided in body:
+    // - If server banner is active, preserve it (do not clear on locked)
     if (window.__fg_currentBanner?.serverId) {
-      console.debug('pollStatus: no notification returned but server banner is active — preserving it');
+      console.debug('pollStatus: no notification returned but server banner active — preserving it (locked or ok).');
       return;
     }
 
-    // Otherwise (no server banner) -> clear banner only if it's not sticky (server or client)
-    if (!(window.__fg_currentBanner?.sticky || window.__fg_currentBanner?.clientSticky)) {
+    // If we got a 423 and there is no server banner, we can optionally open the reauth modal silently.
+    if (isLocked) {
+      console.debug('pollStatus: 423 returned and no server banner active — optionally initReauthModal (no banner shown).');
       try {
-        hideBanner();
+        if (typeof initReauthModal === 'function') {
+          initReauthModal({ show: true, context: 'reauth' }); // remove this if you want fully silent locked handling
+        }
       } catch (e) {
-        console.warn('pollStatus: hideBanner failed', e);
+        console.debug('pollStatus: initReauthModal failed', e);
       }
+      return;
+    }
+
+    // No server notification and not locked -> hide banner only if it's not sticky
+    if (!(window.__fg_currentBanner?.sticky || window.__fg_currentBanner?.clientSticky)) {
+      try { hideBanner(); } catch (e) { console.warn('hideBanner failed', e); }
     } else {
       console.debug('pollStatus: no server notification and banner is sticky — preserving it');
     }
 
   } catch (err) {
-    // Fetch threw (network, CORS, etc.). If a server banner is active, preserve it; else suppress showing any banner.
+    // fetch threw (network, CORS, etc.)
     console.error('pollStatus network error (suppressed banner)', err);
+    // If a server-origin banner is active, preserve it; otherwise do nothing (no transient banner).
     if (window.__fg_currentBanner?.serverId) {
       console.debug('pollStatus: network error but server banner active — preserved.');
       return;
     }
-    // Do not call showBanner here. We intentionally suppress transient network banners.
+    // otherwise intentionally silence network errors here (per your requirement)
   }
 }
 
