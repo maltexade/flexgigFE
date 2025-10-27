@@ -488,33 +488,6 @@ window.__fg_currentBanner = window.__fg_currentBanner || {
   message: ''          // current visible message
 };
 
-// Helper: Force-hide banner only if it's a transient network/error one (preserves real broadcasts)
-function hideReauthBannerIfPresent() {
-  try {
-    const state = window.__fg_currentBanner || {};
-    const msg = String(state.message || '').toLowerCase().trim();
-    const isTransientError =
-      msg.includes('network') ||
-      msg.includes('status check failed') ||
-      msg.includes('retrying') ||
-      msg.includes('reauth') ||
-      msg.includes('error') ||
-      !state.serverId;
-
-    if (isTransientError && !state.sticky && !state.clientSticky) {
-      console.log('[DEBUG] Force-hiding transient network/error banner early (pre-modal close)');
-      hideBanner(true); // Force=true overrides persistence for these only
-
-      // Note: removed the window.dispatchEvent('fg:reauth-success') here intentionally.
-      // The canonical reauth success paths should be the only places that dispatch that event.
-    } else {
-      console.debug('[DEBUG] Banner present but not a transient network/reauth error; preserving it.');
-    }
-  } catch (e) {
-    console.warn('[hideReauthBannerIfPresent] error', e);
-  }
-}
-
 
 
 // 🚀 Global banner helpers
@@ -1231,108 +1204,147 @@ if (biometricsEnabled) {
 
   // Replace existing pollStatus() implementation with this:
 async function pollStatus() {
-  // --- SUPPRESS TRANSIENT BANNERS RIGHT AFTER REAUTH ---
-// prevents brief "Network / status check failed" flashes immediately after a successful reauth
-const lastReauth = parseInt(localStorage.getItem('fg_last_reauth_ts') || '0', 10) || 0;
-const REAUTH_SUPPRESS_MS = 700; // tune (700ms works well in most cases)
-const justReauthed = (Date.now() - lastReauth) < REAUTH_SUPPRESS_MS;
-if (justReauthed) {
-  console.debug('pollStatus: running shortly after reauth — suppressing transient banners for', REAUTH_SUPPRESS_MS, 'ms');
-}
-
   try {
     const apiBase = (window.__SEC_API_BASE || (typeof API_BASE !== 'undefined' ? API_BASE : ''));
     const url = apiBase ? `${apiBase}/api/status` : '/api/status';
+
     const res = await fetch(url, { credentials: 'include' });
 
-    // Try parse server JSON for helpful fields (server should return JSON on 423 too)
+    // Attempt to parse JSON body only when content-type looks like JSON and there is a body.
     let body = null;
-    try { body = await res.json(); } catch (e) { body = null; }
+    try {
+      const ct = res.headers.get && res.headers.get('content-type');
+      if (res.status !== 204 && ct && ct.toLowerCase().includes('application/json')) {
+        body = await res.json();
+      }
+    } catch (e) {
+      // ignore JSON parse errors, treat body as null
+      console.debug('pollStatus: failed to parse JSON body', e);
+      body = null;
+    }
 
+    // Non-OK responses ----------------------------------------------------
     if (!res.ok) {
-      // 423 = locked / needs reauth
+      // 423: server requests reauthentication / locked state
       if (res.status === 423) {
         const msg = (body && (body.message || body.error)) ? (body.message || body.error) : 'Reauthentication required';
-        // If a sticky banner (server or client) is present, preserve it and only surface a subtle reauth hint
+
+        // If a sticky banner is present (server-side sticky or client sticky), preserve it.
         if ((window.__fg_currentBanner?.sticky) || (window.__fg_currentBanner?.clientSticky)) {
-          // keep main banner, and show a small non-destructive notice (implement showTinyReauthNotice if you want)
-          if (typeof initReauthModal === 'function') {
-            try { initReauthModal({ show: true, context: 'reauth' }); } catch (e) {}
-          }
-          if (typeof showTinyReauthNotice === 'function') {
-            try { showTinyReauthNotice(msg); } catch (e) {}
-          } else {
-            console.debug('Reauth required (preserving sticky banner):', msg);
-          }
+          // preserve main banner, but optionally surface a tiny reauth hint
+          try {
+            if (typeof initReauthModal === 'function') {
+              initReauthModal({ show: true, context: 'reauth' });
+            }
+          } catch (e) { console.debug('initReauthModal failed', e); }
+
+          try {
+            if (typeof showTinyReauthNotice === 'function') {
+              showTinyReauthNotice(msg);
+            } else {
+              console.debug('Reauth required (preserving sticky banner):', msg);
+            }
+          } catch (e) { console.debug('showTinyReauthNotice failed', e); }
         } else {
-          // No sticky banner, show full persistent reauth banner
-          showBanner(msg, { persistent: true, serverId: body?.id || null });
-          if (typeof initReauthModal === 'function') {
-            try { initReauthModal({ show: true, context: 'reauth' }); } catch (e) {}
-          }
+          // No sticky banner present: show a full persistent reauth banner and optionally open modal
+          try {
+            showBanner(msg, { persistent: true, serverId: body?.id || null });
+          } catch (e) { console.warn('showBanner failed for 423', e); }
+
+          try {
+            if (typeof initReauthModal === 'function') {
+              initReauthModal({ show: true, context: 'reauth' });
+            }
+          } catch (e) { console.debug('initReauthModal failed', e); }
+        }
+
+        return;
+      }
+
+      // Generic non-OK: show transient network message unless a sticky banner exists.
+      if (!(window.__fg_currentBanner?.sticky || window.__fg_currentBanner?.clientSticky)) {
+        try {
+          showBanner('Network / status check failed. Retrying...', { type: 'warning' });
+        } catch (e) {
+          console.warn('showBanner failed for network error', e);
         }
       } else {
-        // Generic non-ok -> show transient network message, but do not override sticky client/server broadcast
-        if (!(window.__fg_currentBanner?.sticky || window.__fg_currentBanner?.clientSticky)) {
-  if (!justReauthed) {
-    showBanner('Network / status check failed. Retrying...', { type: 'warning' });
-  } else {
-    // Suppress the transient banner because we just reauthed — avoid the millisecond flash.
-    console.debug('pollStatus: suppressed transient network banner right after reauth');
-  }
-} else {
-  console.debug('Network error; preserving sticky banner');
-}
-
+        console.debug('Network error; preserving sticky banner');
       }
+
       return;
     }
 
-    // OK path
+    // OK (2xx) path -------------------------------------------------------
     const data = body || {};
-    // If server explicitly sends an active notification object (preferred)
+
+    // Server explicitly supplies a "notification" object (preferred)
+    // Accept both { notification: {...} } and { notification: [ {...} ] } (take first)
     if (data.notification) {
-      const notif = data.notification;
-      // If the currently visible banner matches the server notification id, update only message if changed
-      if (window.__fg_currentBanner?.id && String(window.__fg_currentBanner.id) === String(notif.id)) {
-        if (window.__fg_currentBanner.message !== notif.message) {
-          showBanner(notif.message || '', { persistent: !!notif.sticky, serverId: notif.id });
+      const notif = Array.isArray(data.notification) ? (data.notification[0] || null) : data.notification;
+
+      if (notif) {
+        // If currently visible banner matches server notification id, update only when message changed
+        if (window.__fg_currentBanner?.id && String(window.__fg_currentBanner.id) === String(notif.id)) {
+          if (window.__fg_currentBanner.message !== notif.message) {
+            try {
+              showBanner(notif.message || '', { persistent: !!notif.sticky, serverId: notif.id });
+            } catch (e) { console.warn('showBanner update failed', e); }
+          }
+          // leave it visible
+          return;
         }
-        // keep visible
+
+        // If there's a clientSticky (admin override), preserve it
+        if (window.__fg_currentBanner?.clientSticky) {
+          console.debug('Server has notification but preserving client-sticky banner');
+          return;
+        }
+
+        // Otherwise show/replace banner with server notification
+        try {
+          showBanner(notif.message || '', { persistent: !!notif.sticky, serverId: notif.id });
+          // normalize __fg_currentBanner state
+          window.__fg_currentBanner = window.__fg_currentBanner || {};
+          window.__fg_currentBanner.id = notif.id;
+          window.__fg_currentBanner.sticky = !!notif.sticky;
+          window.__fg_currentBanner.clientSticky = false;
+          if (notif.id != null) {
+            try { localStorage.setItem('active_broadcast_id', String(notif.id)); } catch (e) {}
+          }
+        } catch (e) {
+          console.warn('showBanner failed for server notification', e);
+        }
+
         return;
       }
-
-      // If clientSticky (admin broadcast), preserve it
-      if (window.__fg_currentBanner?.clientSticky) {
-        console.debug('Server has notification but preserving client-sticky banner');
-        return;
-      }
-
-      // Otherwise replace with server notification
-      showBanner(notif.message || '', { persistent: !!notif.sticky, serverId: notif.id });
-      window.__fg_currentBanner.id = notif.id;
-      window.__fg_currentBanner.sticky = !!notif.sticky;
-      window.__fg_currentBanner.clientSticky = false;
-      localStorage.setItem('active_broadcast_id', notif.id);
-      return;
     }
 
-    // No server notification -> only clear banner if not sticky (server or client)
+    // No server notification -> clear banner only if not sticky (server or client)
     if (!(window.__fg_currentBanner?.sticky || window.__fg_currentBanner?.clientSticky)) {
-      hideBanner();
+      try {
+        hideBanner();
+      } catch (e) {
+        console.warn('hideBanner failed', e);
+      }
     } else {
       console.debug('No server notification; preserving sticky banner');
     }
-
   } catch (err) {
+    // Entire fetch failed (network, CORS, etc.)
     console.error('pollStatus network error', err);
     if (!(window.__fg_currentBanner?.sticky || window.__fg_currentBanner?.clientSticky)) {
-      showBanner('Network error while checking status — retrying', { type: 'warning' });
+      try {
+        showBanner('Network error while checking status — retrying', { type: 'warning' });
+      } catch (e) {
+        console.warn('showBanner failed for pollStatus catch', e);
+      }
     } else {
       console.debug('Network error — preserved sticky banner');
     }
   }
 }
+
 
 
 
@@ -9500,25 +9512,10 @@ async function handlePinCompletion() {
             if (typeof hideTinyReauthNotice === 'function') {
               try { hideTinyReauthNotice(); } catch (e) {}
             }
-            try {
-  if (typeof hideTinyReauthNotice === 'function') {
-    try { hideTinyReauthNotice(); } catch (e) {}
-  }
-
-  // Record a short-lived "just reauthed" stamp and dispatch the canonical event.
-  try {
-    localStorage.setItem('fg_last_reauth_ts', String(Date.now()));
-    window.dispatchEvent(new CustomEvent('fg:reauth-success', { detail: { method: 'pin' } }));
-  } catch (e) {
-    console.warn('[post-reauth] dispatch or localStorage set failed', e);
-  }
-
-  // DO NOT call pollStatus() directly here. Let the fg:reauth-success handler (which is debounced)
-  // call pollStatus() after a short delay so the server/session has time to settle.
-} catch (e) {
-  console.warn('[post-reauth] UI refresh failed', e);
-}
-
+            try { window.dispatchEvent(new CustomEvent('fg:reauth-success', { detail: { method: 'pin' } })); } catch (e) {}
+            if (typeof pollStatus === 'function') {
+              try { pollStatus(); } catch (e) { console.warn('pollStatus after reauth failed', e); }
+            }
           } catch (e) {
             console.warn('post-PIN success UI refresh failed', e);
           }
@@ -10357,9 +10354,6 @@ async function tryBiometricWithCachedOptions() {
       return;
     }
 
-
-    hideReauthBannerIfPresent();
-
     // parse success
     let verifyData;
     try {
@@ -10430,8 +10424,6 @@ async function tryBiometricWithCachedOptions() {
     }
   } catch (e) { console.warn('avatar/name set failed', e); }
 
-  hideReauthBannerIfPresent();
-
   // --- Decide whether reauth is needed; if not, close and call success handler ---
 // ----- Updated implementation with proper reauth flow -----
 const reauthStatus = await shouldReauth(context);
@@ -10491,7 +10483,6 @@ if (!reauthStatus.needsReauth) {
           setTimeout(() => window.location.href = '/', 1500);
           return;
         }
-        hideReauthBannerIfPresent();
         await safeCall(reAuthenticateWithPin, uidInfo.user.uid, pin, async (success) => {
   if (success) {
     resetReauthInputs();
@@ -10829,8 +10820,6 @@ async function bioVerifyAndFinalize(assertion) {
 
           // Refresh current user & run your success flows
           try { safeCall(__sec_getCurrentUser); } catch (e) { /* ignore */ }
-
-          hideReauthBannerIfPresent();
 
           // 1. Call onSuccessfulReauth to clear flags, reset timers, and handle session state
           if (typeof onSuccessfulReauth === 'function') {
@@ -12143,8 +12132,6 @@ async function verifyBiometrics(uid, context = 'reauth') {
         throw new Error(`Server verify failed: ${errText}`);
       }
 
-      hideReauthBannerIfPresent();
-
       const verifyData = await verifyRes.json();
       console.log('[verifyBiometrics] Verify success', verifyData);
 
@@ -12173,25 +12160,11 @@ async function verifyBiometrics(uid, context = 'reauth') {
             try { hideTinyReauthNotice(); } catch (e) {}
           }
           // dispatch event so other modules can react
-          try {
-  if (typeof hideTinyReauthNotice === 'function') {
-    try { hideTinyReauthNotice(); } catch (e) {}
-  }
-
-  // Record a short-lived "just reauthed" stamp and dispatch the canonical event.
-  try {
-    localStorage.setItem('fg_last_reauth_ts', String(Date.now()));
-    window.dispatchEvent(new CustomEvent('fg:reauth-success', { detail: { method: 'biometrics' } }));
-  } catch (e) {
-    console.warn('[post-reauth] dispatch or localStorage set failed', e);
-  }
-
-  // DO NOT call pollStatus() directly here. Let the fg:reauth-success handler (which is debounced)
-  // call pollStatus() after a short delay so the server/session has time to settle.
-} catch (e) {
-  console.warn('[post-reauth] UI refresh failed', e);
-}
-
+          try { window.dispatchEvent(new CustomEvent('fg:reauth-success')); } catch (e) {}
+          // immediate server check (do not await; it's OK to run in background)
+          if (typeof pollStatus === 'function') {
+            try { pollStatus(); } catch (e) { console.warn('pollStatus call after reauth failed', e); }
+          }
         } catch (e) {
           console.warn('[verifyBiometrics] post-success UI refresh failed', e);
         }
@@ -12447,8 +12420,6 @@ async function showReauthModal(context = 'reauth') {
     if (!reauthStatus.needsReauth) {
       console.log('showReauthModal: no reauth required - calling success handler');
       try {
-
-        hideReauthBannerIfPresent();
         // 1. Call onSuccessfulReauth to clear flags, reset timers, and handle session state
         if (typeof onSuccessfulReauth === 'function') {
           await onSuccessfulReauth();
@@ -12476,8 +12447,6 @@ async function showReauthModal(context = 'reauth') {
         if (success) {
           console.log('showReauthModal: biometric success');
           try {
-
-            hideReauthBannerIfPresent();
             // 1. Call onSuccessfulReauth to clear flags, reset timers, and handle session state
             if (typeof onSuccessfulReauth === 'function') {
               await onSuccessfulReauth();
