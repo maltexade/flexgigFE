@@ -548,6 +548,129 @@ function hideBanner(force = false) {
   } catch (e) {}
 }
 
+// idempotent, robust broadcast subscription that also fetches current state on subscribe
+let __fg_broadcast_channel = null;
+
+function safeUnsubscribeChannel() {
+  try {
+    if (__fg_broadcast_channel && typeof __fg_broadcast_channel.unsubscribe === 'function') {
+      __fg_broadcast_channel.unsubscribe().catch(() => {});
+    }
+  } catch (e) { /* ignore */ }
+  __fg_broadcast_channel = null;
+}
+
+function setupBroadcastSubscription(force = false) {
+  try {
+    // If already subscribed and not forced, do nothing
+    if (__fg_broadcast_channel && !force) return __fg_broadcast_channel;
+
+    // Unsubscribe previous channel if any
+    safeUnsubscribeChannel();
+
+    // Create a fresh channel: keep same topic you used
+    __fg_broadcast_channel = supabaseClient.channel('public:broadcasts');
+
+    // Helper: centralize showing logic so we consistently persist serverId
+    function applyBroadcastRow(row) {
+      if (!row) return;
+      const now = new Date();
+      const startsOk = !row.starts_at || new Date(row.starts_at) <= now;
+      const notExpired = !row.expire_at || new Date(row.expire_at) > now;
+      if (row.active && startsOk && notExpired) {
+        const id = row.id != null ? String(row.id) : null;
+        // Use same contract as pollStatus: set serverId and persist active id
+        try {
+          showBanner(row.message || '', { persistent: !!row.sticky, serverId: id });
+        } catch (e) { console.warn('applyBroadcastRow showBanner failed', e); }
+        try { 
+          if (id != null) localStorage.setItem('active_broadcast_id', String(id));
+          localStorage.setItem('active_broadcast_ts', String(Date.now()));
+          window.__fg_currentBanner = window.__fg_currentBanner || {};
+          window.__fg_currentBanner.serverId = id;
+          window.__fg_currentBanner.id = id;
+          window.__fg_currentBanner.message = row.message || '';
+          window.__fg_currentBanner.sticky = !!row.sticky;
+          window.__fg_currentBanner.clientSticky = false;
+        } catch (e) {}
+      } else {
+        const showingId = localStorage.getItem('active_broadcast_id');
+        if (showingId && String(showingId) === String(row.id)) {
+          hideBanner();
+          try {
+            localStorage.removeItem('active_broadcast_id');
+            localStorage.removeItem('active_broadcast_ts');
+            if (window.__fg_currentBanner) {
+              delete window.__fg_currentBanner.serverId;
+              delete window.__fg_currentBanner.id;
+            }
+          } catch (e) {}
+        }
+      }
+    }
+
+    __fg_broadcast_channel
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'broadcasts' }, (payload) => {
+        console.log('[BROADCAST INSERT]', payload);
+        applyBroadcastRow(payload.new);
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'broadcasts' }, (payload) => {
+        console.log('[BROADCAST UPDATE]', payload);
+        applyBroadcastRow(payload.new);
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'broadcasts' }, (payload) => {
+        console.log('[BROADCAST DELETE]', payload);
+        const showingId = localStorage.getItem('active_broadcast_id');
+        if (showingId && String(showingId) === String(payload.old.id)) {
+          hideBanner();
+          try {
+            localStorage.removeItem('active_broadcast_id');
+            localStorage.removeItem('active_broadcast_ts');
+            if (window.__fg_currentBanner) {
+              delete window.__fg_currentBanner.serverId;
+              delete window.__fg_currentBanner.id;
+            }
+          } catch (e) {}
+        }
+      })
+      .subscribe((status) => {
+        console.log('[BROADCAST SUBSCRIBE STATUS]', status);
+        if (status === 'SUBSCRIBED') {
+          // IMPORTANT: Immediately fetch authoritative current broadcast(s) for this new subscriber.
+          // Prefer calling your pollStatus() (which is already authoritative and deduped)
+          if (typeof pollStatus === 'function') {
+            try {
+              // run fire-and-forget; wrapper dedupes
+              pollStatus();
+            } catch (e) { console.debug('setupBroadcastSubscription: pollStatus failed', e); }
+          } else {
+            // Fallback: request a direct endpoint that returns active broadcasts.
+            (async () => {
+              try {
+                const apiBase = (window.__SEC_API_BASE || (typeof API_BASE !== 'undefined' ? API_BASE : ''));
+                const url = apiBase ? `${apiBase}/api/broadcasts/active` : '/api/broadcasts/active';
+                const res = await fetch(url, { credentials: 'include', cache: 'no-store' });
+                if (res.ok) {
+                  const json = await res.json();
+                  // accept either a single row or array
+                  const row = Array.isArray(json) ? json[0] : json;
+                  if (row) applyBroadcastRow(row);
+                }
+              } catch (e) { console.debug('setupBroadcastSubscription: fallback active fetch failed', e); }
+            })();
+          }
+        }
+      });
+
+    return __fg_broadcast_channel;
+  } catch (err) {
+    console.warn('setupBroadcastSubscription failed', err);
+    safeUnsubscribeChannel();
+    return null;
+  }
+}
+
+
 
 // close button
 document.addEventListener('click', (e) => {
@@ -1702,48 +1825,6 @@ function handleBroadcast(payload) {
       });
     }
   }
-}
-
-
-
-
-function setupBroadcastSubscription() {
-  function handleBroadcastRow(row) {
-    if (!row) return;
-    const now = new Date();
-    const startsOk = !row.starts_at || new Date(row.starts_at) <= now;
-    const notExpired = !row.expire_at || new Date(row.expire_at) > now;
-    if (row.active && startsOk && notExpired) {
-      showBanner(row.message || '');
-      localStorage.setItem('active_broadcast_id', row.id);
-    } else {
-      const showingId = localStorage.getItem('active_broadcast_id');
-      if (showingId && String(showingId) === String(row.id)) {
-        hideBanner();
-        localStorage.removeItem('active_broadcast_id');
-      }
-    }
-  }
-
-  supabaseClient
-    .channel('public:broadcasts')
-    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'broadcasts' }, (payload) => {
-      console.log('[BROADCAST INSERT]', payload);
-      handleBroadcastRow(payload.new);
-    })
-    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'broadcasts' }, (payload) => {
-      console.log('[BROADCAST UPDATE]', payload);
-      handleBroadcastRow(payload.new);
-    })
-    .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'broadcasts' }, (payload) => {
-      console.log('[BROADCAST DELETE]', payload);
-      const showingId = localStorage.getItem('active_broadcast_id');
-      if (showingId && String(showingId) === String(payload.old.id)) {
-        hideBanner();
-        localStorage.removeItem('active_broadcast_id');
-      }
-    })
-    .subscribe();
 }
 
 
