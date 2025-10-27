@@ -1035,6 +1035,75 @@ async function handleBioToggle(e) {
 
 const IDLE_TIME = 15 * 1000; // 10 min in prod
 
+// === Safety shim: ensure pollStatus exists (place this near top, before onDashboardLoad runs) ===
+if (typeof pollStatus === 'undefined') {
+  // keep minimal global guards
+  window.__fg_poll_inflight = window.__fg_poll_inflight || null;
+  window.__fg_last_poll_ts = window.__fg_last_poll_ts || 0;
+  window.FG_POLL_MIN_MS = window.FG_POLL_MIN_MS || 600;
+
+  window.pollStatus = async function pollStatus() {
+    const now = Date.now();
+
+    // dedupe in-flight
+    if (window.__fg_poll_inflight) {
+      console.debug('pollStatus shim: reusing in-flight');
+      return window.__fg_poll_inflight;
+    }
+
+    // throttle
+    if (now - (window.__fg_last_poll_ts || 0) < (window.FG_POLL_MIN_MS || 600)) {
+      console.debug('pollStatus shim: called too soon — skipping');
+      return Promise.resolve();
+    }
+
+    window.__fg_poll_inflight = (async () => {
+      try {
+        if (typeof _pollStatus_internal === 'function') {
+          // preferred: call your internal implementation
+          return await _pollStatus_internal();
+        }
+
+        // fallback: simple processable fetch (keeps UI stable until real implementation available)
+        try {
+          const apiBase = (window.__SEC_API_BASE || (typeof API_BASE !== 'undefined' ? API_BASE : ''));
+          const url = apiBase ? `${apiBase}/api/status` : '/api/status';
+          const res = await fetch(url, { credentials: 'include', cache: 'no-store' });
+          let body = null;
+          try {
+            const ct = res.headers && typeof res.headers.get === 'function' ? res.headers.get('content-type') : null;
+            if (res.status !== 204 && ct && ct.toLowerCase().includes('application/json')) {
+              body = await res.json();
+            }
+          } catch (e) { /* ignore parse */ }
+
+          if (body && body.notification) {
+            const notif = Array.isArray(body.notification) ? (body.notification[0] || null) : body.notification;
+            if (notif) {
+              try {
+                showBanner(notif.message || '', { persistent: !!notif.sticky, serverId: notif.id });
+                window.__fg_currentBanner = window.__fg_currentBanner || {};
+                window.__fg_currentBanner.serverId = notif.id;
+                localStorage.setItem('active_broadcast_id', String(notif.id));
+              } catch (e) { console.warn('pollStatus shim: showBanner failed', e); }
+            }
+          }
+          return res;
+        } catch (e) {
+          console.debug('pollStatus shim: fallback fetch failed', e);
+          return null;
+        }
+      } finally {
+        window.__fg_last_poll_ts = Date.now();
+        window.__fg_poll_inflight = null;
+      }
+    })();
+
+    return window.__fg_poll_inflight;
+  };
+}
+
+
 // After getSession succeeds
 // After getSession succeeds (now cache-first)
 async function onDashboardLoad() {
