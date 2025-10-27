@@ -814,6 +814,7 @@ async function getSession() {
       localStorage.setItem('userData', JSON.stringify(userData));
       // Still store convenient user bits
       localStorage.setItem('userEmail', user.email || '');
+      localStorage.setItem('userId', user.uid || user.id || '');
       localStorage.setItem('firstName', firstName);
       localStorage.setItem('username', user.username || '');
       localStorage.setItem('phoneNumber', user.phoneNumber || '');
@@ -9481,9 +9482,16 @@ async function handlePinCompletion() {
   // Primary work wrapped by withLoader
   const workPromise = withLoader(async () => {
     try {
-      const session = await safeCall(getSession) || {};
-      const userId = session.user?.id || session.user?.uid || localStorage.getItem('userId');
-      if (!userId) throw new Error('No user ID');
+      // Use the robust helper that waits briefly for session load if needed.
+const uidInfo = await getUid({ waitForSession: true, waitMs: 1200 }) || {};
+const userId = uidInfo?.uid || localStorage.getItem('userId') || null;
+if (!userId) {
+  // Graceful handling instead of throwing — session still loading; ask user to retry
+  console.warn('handlePinCompletion: userId not available yet (session loading).');
+  showTopNotifier('Session still loading — please try PIN again in a moment', 'error');
+  return; // unlock handled in finally
+}
+
 
       const res = await fetch('https://api.flexgig.com.ng/api/reauth-pin', {
         method: 'POST',
