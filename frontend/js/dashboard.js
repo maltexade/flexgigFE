@@ -7674,29 +7674,96 @@ document.querySelectorAll('.contact-box').forEach((box) => {
   window.__sec_KEYS = window.__sec_KEYS || __sec_KEYS; // expose for debugging
 
   /* Helpers */
-  const __sec_setChecked = (el, v) => { 
-    __sec_log.d('setChecked called for el:', el?.id || 'unknown', 'value:', v);
-    if (!el) return; 
-    el.setAttribute('aria-checked', v ? 'true' : 'false');
-    __sec_log.d('setChecked applied:', el.getAttribute('aria-checked'));
-  };
-  const __sec_isChecked = (el) => { 
-    const checked = !!el && el.getAttribute('aria-checked') === 'true';
-    __sec_log.d('isChecked for el:', el?.id || 'unknown', 'result:', checked);
-    return checked;
-  };
-  function __sec_toggleSwitch(el, forced) {
-    __sec_log.d('toggleSwitch entry:', { el: el?.id || 'unknown', forced });
-    if (!el) { 
-      __sec_log.w('toggleSwitch: no element'); 
-      return false; 
+  // Replace existing __sec_setChecked with this
+const __sec_setChecked = (el, v) => {
+  __sec_log.d('setChecked called for el:', el?.id || 'unknown', 'value:', v);
+  if (!el) return;
+  try {
+    const boolV = !!v;
+
+    // If it's a native input checkbox/radio, keep the native checked property in sync
+    if (el instanceof HTMLInputElement && (el.type === 'checkbox' || el.type === 'radio')) {
+      try { el.checked = boolV; } catch (err) { __sec_log.w('setChecked: failed to set .checked', err); }
     }
+
+    // aria state
+    try { el.setAttribute('aria-checked', boolV ? 'true' : 'false'); } catch (err) { __sec_log.w('setChecked: aria set failed', err); }
+
+    // Visual classes expected elsewhere ('active' / 'inactive')
+    try {
+      if (boolV) {
+        el.classList.add('active');
+        el.classList.remove('inactive');
+      } else {
+        el.classList.add('inactive');
+        el.classList.remove('active');
+      }
+      // also maintain small dataset flag for other code paths
+      el.dataset.active = boolV ? 'true' : 'false';
+    } catch (err) {
+      __sec_log.w('setChecked: class toggling failed', err);
+    }
+
+    __sec_log.d('setChecked applied:', el.getAttribute('aria-checked'), 'classList:', el.classList.contains('active') ? 'active' : 'inactive');
+  } catch (err) {
+    __sec_log.e('setChecked top-level error', err);
+  }
+};
+
+  // Replace existing __sec_isChecked with this robust reader
+const __sec_isChecked = (el) => {
+  if (!el) return false;
+  try {
+    // Prefer native checked for inputs
+    if (el instanceof HTMLInputElement && (el.type === 'checkbox' || el.type === 'radio')) {
+      const c = !!el.checked;
+      __sec_log.d('isChecked (input) for', el.id || 'unknown', c);
+      return c;
+    }
+    // Fallback: aria-checked attribute
+    const aria = el.getAttribute && el.getAttribute('aria-checked');
+    if (aria === 'true' || aria === 'false') {
+      const c = aria === 'true';
+      __sec_log.d('isChecked (aria) for', el.id || 'unknown', c);
+      return c;
+    }
+    // Last fallback: CSS class presence
+    const hasActive = el.classList && el.classList.contains && el.classList.contains('active');
+    __sec_log.d('isChecked (class fallback) for', el.id || 'unknown', hasActive);
+    return !!hasActive;
+  } catch (err) {
+    __sec_log.e('isChecked error', err);
+    return false;
+  }
+};
+
+  // Replace existing __sec_toggleSwitch with this
+function __sec_toggleSwitch(el, forced) {
+  __sec_log.d('toggleSwitch entry:', { el: el?.id || 'unknown', forced });
+  if (!el) { 
+    __sec_log.w('toggleSwitch: no element'); 
+    return false; 
+  }
+  try {
     const cur = __sec_isChecked(el);
     const next = (typeof forced === 'boolean') ? forced : !cur;
+    // Apply the visual + attribute change
     __sec_setChecked(el, next);
     __sec_log.d('toggleSwitch exit:', { cur, next });
+    // emit a small custom event so any other listeners update too (defensive)
+    try {
+      const ev = new CustomEvent('sec:switch-change', { detail: { id: el.id, checked: next } });
+      el.dispatchEvent(ev);
+    } catch (evErr) {
+      __sec_log.d('toggleSwitch: event dispatch failed', evErr);
+    }
     return next;
+  } catch (err) {
+    __sec_log.e('toggleSwitch error', err);
+    return false;
   }
+}
+
 
   /* UI lock helpers for async ops */
   function __sec_setBusy(el, busy = true) {
@@ -7967,33 +8034,33 @@ function __sec_setBiometrics(parentOn, animate = true) {
 
 
 /* If both child switches are off, turn the parent off */
-// ----------------- Debounced __sec_maybeDisableParentIfChildrenOff (drop-in) -----------------
+// ----------------- Debounced __sec_beDisableParentIfChildrenOff (drop-in) -----------------
+// Replace existing __sec_maybeDisableParentIfChildrenOff with this debounced version
 let __sec_maybeDisableTimer = null;
 function __sec_maybeDisableParentIfChildrenOff() {
   __sec_log.d('maybeDisableParentIfChildrenOff entry (debounced)');
 
-  // Debounce transient state changes (ms)
-  const DEBOUNCE_MS = 200;
+  const DEBOUNCE_MS = 200; // adjust if you prefer longer
 
   if (__sec_maybeDisableTimer) clearTimeout(__sec_maybeDisableTimer);
   __sec_maybeDisableTimer = setTimeout(() => {
     try {
-      if (!__sec_parentSwitch) {
-        __sec_log.w('maybeDisableParentIfChildrenOff: parent missing');
-        return;
+      if (!__sec_parentSwitch) { 
+        __sec_log.w('maybeDisableParentIfChildrenOff: parent missing'); 
+        return; 
       }
-      if (!__sec_bioLogin || !__sec_bioTx) {
-        __sec_log.w('maybeDisableParentIfChildrenOff: children missing');
-        return;
+      if (!__sec_bioLogin || !__sec_bioTx) { 
+        __sec_log.w('maybeDisableParentIfChildrenOff: children missing'); 
+        return; 
       }
 
       const loginOn = __sec_isChecked(__sec_bioLogin);
       const txOn = __sec_isChecked(__sec_bioTx);
       __sec_log.d('maybeDisableParentIfChildrenOff: children state', { loginOn, txOn });
 
+      // If both children OFF and parent currently ON => flip parent OFF
       if (!loginOn && !txOn && __sec_isChecked(__sec_parentSwitch)) {
         __sec_log.i('Both biometric children off — turning parent OFF (debounced)');
-        // Use existing setter if available (will handle server/local persist)
         if (typeof __sec_setBiometrics === 'function') {
           try {
             __sec_setBiometrics(false, true);
@@ -8003,12 +8070,12 @@ function __sec_maybeDisableParentIfChildrenOff() {
             try {
               localStorage.setItem(__sec_KEYS.biom, '0');
               localStorage.setItem('biometricsEnabled', 'false');
-            } catch (ee) { __sec_log.e('maybeDisableParentIfChildrenOff: fallback storage failed', ee); }
+            } catch (ee) { __sec_log.e('maybeDisableParentIfChildrenOff: persist fallback failed', ee); }
             if (__sec_parentSwitch) __sec_setChecked(__sec_parentSwitch, false);
             if (__sec_bioOptions) { __sec_bioOptions.classList.remove('show'); __sec_bioOptions.hidden = true; }
           }
         } else {
-          // Fallback if the helper is missing in some builds
+          // fallback: update storage + UI
           try {
             localStorage.setItem(__sec_KEYS.biom, '0');
             localStorage.setItem('biometricsEnabled', 'false');
@@ -8026,6 +8093,7 @@ function __sec_maybeDisableParentIfChildrenOff() {
     }
   }, DEBOUNCE_MS);
 }
+
 
 
 async function reconcileBiometricState() {
