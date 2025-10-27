@@ -1685,139 +1685,161 @@ if (status === 'SUBSCRIBED') {
 // 🔹 Biometric UI Restoration (runs on load to persist state across reloads)
 // 🔹 Biometric UI Restoration (targets SETTINGS toggle: #biometricsSwitch + subs)
 // 🔹 Biometric UI Restoration (with tighter guards + default subs on)
+// ----------------- Fixed restoreBiometricUI (drop-in replacement) -----------------
 async function restoreBiometricUI() {
   const biometricsEnabled = localStorage.getItem('biometricsEnabled') === 'true';
   const credentialId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
   const hasPin = localStorage.getItem('hasPin') === 'true';
-  
-  // 🔹 Default subs ON if bio enabled but unset (UX: logical default)
-  let bioForLogin = localStorage.getItem('biometricForLogin') === 'true';
-  let bioForTx = localStorage.getItem('biometricForTx') === 'true';
-  if (biometricsEnabled && (!bioForLogin || !bioForTx)) {
-    bioForLogin = true;
-    bioForTx = true;
-    localStorage.setItem('biometricForLogin', 'true');
-    localStorage.setItem('biometricForTx', 'true');
-    console.log('[DEBUG-UI] Defaulted subs to ON for enabled bio');
+
+  // Read sub-flags preserving explicit false values; default only when key is missing (null)
+  let bioForLogin = (localStorage.getItem('biometricForLogin') === 'true');
+  let bioForTx = (localStorage.getItem('biometricForTx') === 'true');
+
+  if (biometricsEnabled) {
+    // Only default to ON for *unset* keys (first-time enable). Preserve explicit 'false'.
+    const rawLogin = localStorage.getItem('biometricForLogin');
+    const rawTx = localStorage.getItem('biometricForTx');
+    if (rawLogin === null) {
+      localStorage.setItem('biometricForLogin', 'true');
+      bioForLogin = true;
+    }
+    if (rawTx === null) {
+      localStorage.setItem('biometricForTx', 'true');
+      bioForTx = true;
+    }
+  } else {
+    // Parent disabled: ensure children flags are false (keeps legacy code paths consistent)
+    localStorage.setItem('biometricForLogin', 'false');
+    localStorage.setItem('biometricForTx', 'false');
+    bioForLogin = false;
+    bioForTx = false;
   }
 
-  // 🔹 DEBUG: Log inputs (remove after testing)
-  console.log('[DEBUG-UI] restoreBiometricUI inputs:', { 
-    enabled: biometricsEnabled, 
-    hasCred: !!credentialId, 
-    hasPin, 
-    bioForLogin, 
-    bioForTx 
+  // Debug trace (useful while testing)
+  console.log('[DEBUG-UI] restoreBiometricUI inputs:', {
+    enabled: biometricsEnabled,
+    hasCred: !!credentialId,
+    hasPin,
+    bioForLogin,
+    bioForTx
   });
 
   // Helper: Apply state to a switch button (aria + classes)
   function applySwitchState(btn, checked) {
     if (!btn) return;
-    btn.setAttribute('aria-checked', checked.toString());
-    if (checked) {
-      btn.classList.add('active');
-      btn.classList.remove('inactive');
-    } else {
-      btn.classList.add('inactive');
-      btn.classList.remove('active');
+    try {
+      btn.setAttribute('aria-checked', String(!!checked));
+      if (checked) {
+        btn.classList.add('active');
+        btn.classList.remove('inactive');
+      } else {
+        btn.classList.add('inactive');
+        btn.classList.remove('active');
+      }
+    } catch (e) {
+      console.warn('applySwitchState failed', e);
     }
   }
 
   // Helper: Apply full state (main toggle + subs + subgroup)
   function applyFullState() {
-    // Main toggle: #biometricsSwitch
     const mainSwitch = document.getElementById('biometricsSwitch');
     if (!mainSwitch) {
       console.warn('[WARN-UI] Main switch (#biometricsSwitch) not found');
-      return false;  // Signal failure
+      return false; // signal failure (observer fallback expects a boolean)
     }
 
-    // 🔹 DEBUG: Log found (remove after testing)
-    console.log('[DEBUG-UI] Found main switch:', mainSwitch.id);
-
+    // Case A: biometrics enabled AND credential present -> normal ON state
     if (biometricsEnabled && credentialId) {
-      // ✅ Enabled + Credential: Activate main, show subs, sync sub-states
       applySwitchState(mainSwitch, true);
       const subgroup = document.getElementById('biometricsOptions');
       if (subgroup) subgroup.hidden = false;
-      
-      // Sub-switches (if subgroup visible)
+
       applySwitchState(document.getElementById('bioLoginSwitch'), bioForLogin);
       applySwitchState(document.getElementById('bioTxSwitch'), bioForTx);
-      
-      console.log('[DEBUG-UI] Applied ACTIVE state (with subs ON)');
+
+      console.log('[DEBUG-UI] Applied ACTIVE state (with subs)');
+
+      // keep the setup CTA hidden if present
+      const setupCta = document.getElementById('biometricsSetupCta');
+      if (setupCta) setupCta.hidden = true;
+
+    // Case B: biometrics flagged enabled but NO credential -> treat as NOT available until setup
     } else if (biometricsEnabled && !credentialId) {
-      // ⚠️ Enabled but no cred: Warning on main (prompt re-setup), hide subs
-      applySwitchState(mainSwitch, true);  // Keep "on" but warn
-      const subgroup = document.getElementById('biometricsOptions');
-      if (subgroup) subgroup.hidden = true;
-      safeCall(notify, 'Biometrics enabled but credential missing — tap to re-setup', 'warning');
-      console.warn('[WARN-UI] Applied WARNING state (missing cred)');
-    } else {
-      // ❌ Disabled/No Setup: Deactivate main, hide subs
+      // Rather than showing parent as "on" while children are unusable (confusing),
+      // present the main switch as OFF and show a setup CTA so user re-registers.
       applySwitchState(mainSwitch, false);
       const subgroup = document.getElementById('biometricsOptions');
       if (subgroup) subgroup.hidden = true;
-      console.log('[DEBUG-UI] Applied INACTIVE state');
+
+      const setupCta = document.getElementById('biometricsSetupCta');
+      if (setupCta) {
+        setupCta.hidden = false;
+        // Optionally focus or attach click behavior externally
+      }
+
+      safeCall && safeCall(notify, 'Biometrics appear unregistered on this device — please set up biometrics to enable options.', 'info');
+      console.warn('[WARN-UI] biometricsEnabled true but credential missing; showing as OFF until setup');
+
+    // Case C: biometrics not enabled -> OFF state, children hidden
+    } else {
+      applySwitchState(mainSwitch, false);
+      const subgroup = document.getElementById('biometricsOptions');
+      if (subgroup) subgroup.hidden = true;
+      const setupCta = document.getElementById('biometricsSetupCta');
+      if (setupCta) setupCta.hidden = true;
+      console.log('[DEBUG-UI] Applied INACTIVE state (bio disabled)');
     }
 
-    // Re-attach events if needed (tight guards: skip if not function)
+    // Re-attach main/sub handlers defensively (if not attached already)
     if (!mainSwitch.__eventsAttached) {
       if (typeof handleBioToggle === 'function') {
-        mainSwitch.addEventListener('click', handleBioToggle);
-      } else {
-        console.warn('[DEBUG-UI] handleBioToggle not defined — skipping main attachment');
+        try { mainSwitch.addEventListener('click', handleBioToggle); } catch (e) {}
       }
       mainSwitch.__eventsAttached = true;
-      
-      // Sub-handlers (only if defined)
-      const loginSwitch = document.getElementById('bioLoginSwitch');
-      if (loginSwitch && !loginSwitch.__eventsAttached && typeof handleBioLoginToggle === 'function') {
-        loginSwitch.addEventListener('click', handleBioLoginToggle);
-        loginSwitch.__eventsAttached = true;
-      } else if (loginSwitch) {
-        console.warn('[DEBUG-UI] handleBioLoginToggle not defined — skipping login sub attachment');
-      }
-      
-      const txSwitch = document.getElementById('bioTxSwitch');
-      if (txSwitch && !txSwitch.__eventsAttached && typeof handleBioTxToggle === 'function') {
-        txSwitch.addEventListener('click', handleBioTxToggle);
-        txSwitch.__eventsAttached = true;
-      } else if (txSwitch) {
-        console.warn('[DEBUG-UI] handleBioTxToggle not defined — skipping tx sub attachment');
-      }
     }
 
-    // 🔹 DEBUG: Log final states (remove after testing)
+    const loginSwitch = document.getElementById('bioLoginSwitch');
+    if (loginSwitch && !loginSwitch.__eventsAttached) {
+      if (typeof handleBioLoginToggle === 'function') {
+        try { loginSwitch.addEventListener('click', handleBioLoginToggle); } catch (e) {}
+      }
+      loginSwitch.__eventsAttached = true;
+    }
+
+    const txSwitch = document.getElementById('bioTxSwitch');
+    if (txSwitch && !txSwitch.__eventsAttached) {
+      if (typeof handleBioTxToggle === 'function') {
+        try { txSwitch.addEventListener('click', handleBioTxToggle); } catch (e) {}
+      }
+      txSwitch.__eventsAttached = true;
+    }
+
+    // Final debug
     console.log('[DEBUG-UI] Final main aria-checked:', mainSwitch.getAttribute('aria-checked'));
     console.log('[DEBUG-UI] Subgroup hidden:', document.getElementById('biometricsOptions')?.hidden);
 
-    return true;  // Success
+    return true;
   }
 
-  // Immediate apply (if elements exist)
-  if (applyFullState()) {
-    return;  // Done!
-  }
+  // Immediate apply (if DOM ready)
+  if (applyFullState()) return;
 
-  // 🔹 Observer for dynamic load
-  console.log('[DEBUG-UI] Starting observer for settings buttons...');
+  // If main switch not present yet, observe DOM until it appears (like your original)
   const observer = new MutationObserver((mutations) => {
-    if (applyFullState()) {
-      observer.disconnect();  // Stop once applied
-    }
+    if (applyFullState()) observer.disconnect();
   });
-
   observer.observe(document.body, { childList: true, subtree: true });
-  
-  // Fallback timeout (5s max)
+
+  // Safety timeout (stop after 5s)
   setTimeout(() => {
     observer.disconnect();
     if (!document.getElementById('biometricsSwitch')) {
-      console.error('[ERROR-UI] Settings toggle (#biometricsSwitch) never found — check dashboard.html');
+      console.error('[ERROR-UI] Settings toggle (#biometricsSwitch) never found — check markup');
     }
   }, 5000);
 }
+
 
 // 🚀 Setup broadcast subscription
 function handleBroadcast(payload) {
@@ -7945,31 +7967,66 @@ function __sec_setBiometrics(parentOn, animate = true) {
 
 
 /* If both child switches are off, turn the parent off */
+// ----------------- Debounced __sec_maybeDisableParentIfChildrenOff (drop-in) -----------------
+let __sec_maybeDisableTimer = null;
 function __sec_maybeDisableParentIfChildrenOff() {
-  __sec_log.d('maybeDisableParentIfChildrenOff entry');
-  try {
-    if (!__sec_parentSwitch) { 
-      __sec_log.w('maybeDisableParentIfChildrenOff: parent missing'); 
-      return; 
+  __sec_log.d('maybeDisableParentIfChildrenOff entry (debounced)');
+
+  // Debounce transient state changes (ms)
+  const DEBOUNCE_MS = 200;
+
+  if (__sec_maybeDisableTimer) clearTimeout(__sec_maybeDisableTimer);
+  __sec_maybeDisableTimer = setTimeout(() => {
+    try {
+      if (!__sec_parentSwitch) {
+        __sec_log.w('maybeDisableParentIfChildrenOff: parent missing');
+        return;
+      }
+      if (!__sec_bioLogin || !__sec_bioTx) {
+        __sec_log.w('maybeDisableParentIfChildrenOff: children missing');
+        return;
+      }
+
+      const loginOn = __sec_isChecked(__sec_bioLogin);
+      const txOn = __sec_isChecked(__sec_bioTx);
+      __sec_log.d('maybeDisableParentIfChildrenOff: children state', { loginOn, txOn });
+
+      if (!loginOn && !txOn && __sec_isChecked(__sec_parentSwitch)) {
+        __sec_log.i('Both biometric children off — turning parent OFF (debounced)');
+        // Use existing setter if available (will handle server/local persist)
+        if (typeof __sec_setBiometrics === 'function') {
+          try {
+            __sec_setBiometrics(false, true);
+          } catch (e) {
+            __sec_log.e('maybeDisableParentIfChildrenOff: __sec_setBiometrics threw', e);
+            // fallback: update storage + UI
+            try {
+              localStorage.setItem(__sec_KEYS.biom, '0');
+              localStorage.setItem('biometricsEnabled', 'false');
+            } catch (ee) { __sec_log.e('maybeDisableParentIfChildrenOff: fallback storage failed', ee); }
+            if (__sec_parentSwitch) __sec_setChecked(__sec_parentSwitch, false);
+            if (__sec_bioOptions) { __sec_bioOptions.classList.remove('show'); __sec_bioOptions.hidden = true; }
+          }
+        } else {
+          // Fallback if the helper is missing in some builds
+          try {
+            localStorage.setItem(__sec_KEYS.biom, '0');
+            localStorage.setItem('biometricsEnabled', 'false');
+          } catch (e) { __sec_log.e('maybeDisableParentIfChildrenOff fallback storage failed', e); }
+          if (__sec_parentSwitch) __sec_setChecked(__sec_parentSwitch, false);
+          if (__sec_bioOptions) { __sec_bioOptions.classList.remove('show'); __sec_bioOptions.hidden = true; }
+        }
+      } else {
+        __sec_log.d('maybeDisableParentIfChildrenOff: no action needed');
+      }
+    } catch (err) {
+      __sec_log.e('maybeDisableParentIfChildrenOff error', err);
+    } finally {
+      __sec_log.d('maybeDisableParentIfChildrenOff exit');
     }
-    if (!__sec_bioLogin || !__sec_bioTx) { 
-      __sec_log.w('maybeDisableParentIfChildrenOff: children missing'); 
-      return; 
-    }
-    const loginOn = __sec_isChecked(__sec_bioLogin);
-    const txOn = __sec_isChecked(__sec_bioTx);
-    __sec_log.d('maybeDisableParentIfChildrenOff: children state', { loginOn, txOn });
-    if (!loginOn && !txOn && __sec_isChecked(__sec_parentSwitch)) {
-      __sec_log.i('Both biometric children off — turning parent OFF');
-      __sec_setBiometrics(false, true);
-    } else {
-      __sec_log.d('maybeDisableParentIfChildrenOff: no action needed');
-    }
-  } catch (err) {
-    __sec_log.e('maybeDisableParentIfChildrenOff error', err);
-  }
-  __sec_log.d('maybeDisableParentIfChildrenOff exit');
+  }, DEBOUNCE_MS);
 }
+
 
 async function reconcileBiometricState() {
   __sec_log.d('reconcileBiometricState entry');
