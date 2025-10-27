@@ -680,7 +680,7 @@ document.addEventListener('click', (e) => {
 // Fetch active broadcasts on load and show the first applicable one
 async function fetchActiveBroadcasts() {
   try {
-    const res = await fetch(`${window.__SEC_API_BASE || ''}/api/broadcasts/active`, { credentials: 'include' });
+    const res = await fetch(`${window.__SEC_API_BASE || ''}/api/broadcasts/active?_${Date.now()}`, { credentials: 'include', cache: 'no-store' });
     if (!res.ok) {
       console.warn('[BCAST] /api/broadcasts/active returned', res.status);
       return [];
@@ -1245,6 +1245,15 @@ async function onDashboardLoad() {
 
   // Then background refresh
   await getSession(); // This will update if needed
+  // after await getSession();
+try {
+  // make sure we always get fresh server data (avoid 304/caching)
+  const broadcasts = await fetchActiveBroadcasts(); // this already shows banner & sets active_broadcast_id
+  console.debug('[BCAST] fetchActiveBroadcasts returned', broadcasts.length);
+} catch (err) {
+  console.warn('[BCAST] fetchActiveBroadcasts failed at login', err);
+}
+
 
   // Securely sync PIN/bio flags to storage on load
   try {
@@ -1593,6 +1602,9 @@ if (status === 'SUBSCRIBED') {
       // fire-and-forget is fine because pollStatus returns a promise and is deduped.
       pollStatus();
       // if you need to wait for it to complete, use: await pollStatus();
+      try { fetchActiveBroadcasts().catch(e => console.warn('[BCAST] fetch on SUBSCRIBED failed', e)); }
+    catch (e) { console.warn('[BCAST] fetchActiveBroadcasts threw', e); }
+
     }
   } catch (e) {
     console.debug('realtime SUBSCRIBED -> pollStatus failed', e);
