@@ -1206,19 +1206,15 @@ if (biometricsEnabled) {
   const STATUS_BANNER = document.getElementById('status-banner');
   const BANNER_MSG = document.querySelector('.banner-msg');
 
-  // Replace existing pollStatus() implementation with this:
-// --- pollStatus concurrency guard / throttle (insert once at top-level) ---
-window.__fg_poll_inflight = window.__fg_poll_inflight || null;
-window.__fg_last_poll_ts = window.__fg_last_poll_ts || 0;
-const FG_POLL_MIN_MS = 600; // min spacing between polls (tune as needed)
-
-// Move your existing pollStatus body into this internal function:
+// --- improved pollStatus that persistently preserves server broadcasts ---
+// Assumes the wrapper dedupe/throttle is in place (FG_POLL_MIN_MS / inflight guard).
 async function _pollStatus_internal() {
   try {
     const apiBase = (window.__SEC_API_BASE || (typeof API_BASE !== 'undefined' ? API_BASE : ''));
     const url = apiBase ? `${apiBase}/api/status` : '/api/status';
 
-    const res = await fetch(url, { credentials: 'include' });
+    // Force fresh response to avoid 304 / cache surprises when broadcasts are added/removed.
+    const res = await fetch(url, { credentials: 'include', cache: 'no-store' });
 
     // Try to parse JSON body if content-type indicates JSON (do this even if !res.ok)
     let body = null;
@@ -1232,36 +1228,57 @@ async function _pollStatus_internal() {
       body = null;
     }
 
-    // Consider 423 as "processable" for notification purposes
+    // Treat 423 as processable for notification purposes.
     const isLocked = res.status === 423;
     const treatAsProcessable = res.ok || isLocked;
 
     if (!treatAsProcessable) {
-      // Non-OK and not 423 -> do nothing visible (we intentionally suppress transient banners).
-      // If there is an active server banner, preserve it and return.
-      if (window.__fg_currentBanner?.serverId) {
-        console.debug('pollStatus: non-OK and no server banner active — preserving server banner if any. status=', res.status);
+      // If there is an active server-origin broadcast, preserve it and return.
+      if (window.__fg_currentBanner?.serverId || window.__fg_currentBanner?.id || localStorage.getItem('active_broadcast_id')) {
+        console.debug('pollStatus: non-OK but server broadcast active — preserving it. status=', res.status);
         return;
       }
       console.debug('pollStatus: non-OK (not 423) — suppressed banner. status=', res.status);
       return;
     }
 
-    // At this point res.ok OR res.status===423 (locked)
+    // At this point res.ok OR res.status === 423
     const data = body || {};
 
-    // If server provides a notification object (preferred) — accept it even on 423
+    // If server explicitly supplies a "notification" object (preferred)
     if (data.notification) {
       const notif = Array.isArray(data.notification) ? (data.notification[0] || null) : data.notification;
 
       if (notif) {
-        // If currently visible banner matches the server notification id, update only if message changed.
-        if (window.__fg_currentBanner?.id && String(window.__fg_currentBanner.id) === String(notif.id)) {
-          if (window.__fg_currentBanner.message !== notif.message) {
+        const notifId = notif.id != null ? String(notif.id) : null;
+
+        // If currently visible banner matches server notification id, update only if message changed.
+        if ((window.__fg_currentBanner?.serverId && String(window.__fg_currentBanner.serverId) === notifId)
+            || (window.__fg_currentBanner?.id && String(window.__fg_currentBanner.id) === notifId)
+            || (localStorage.getItem('active_broadcast_id') && String(localStorage.getItem('active_broadcast_id')) === notifId)
+        ) {
+          // same server broadcast; update message if changed
+          if (window.__fg_currentBanner?.message !== notif.message) {
             try {
-              showBanner(notif.message || '', { persistent: !!notif.sticky, serverId: notif.id });
+              showBanner(notif.message || '', { persistent: !!notif.sticky, serverId: notifId });
+              // also normalize local state
+              window.__fg_currentBanner = window.__fg_currentBanner || {};
+              window.__fg_currentBanner.message = notif.message || '';
             } catch (e) { console.warn('showBanner update failed', e); }
+          } else {
+            // nothing changed; keep visible
           }
+
+          // ensure we persist the server origin marker
+          try {
+            window.__fg_currentBanner = window.__fg_currentBanner || {};
+            window.__fg_currentBanner.serverId = notifId;
+            window.__fg_currentBanner.id = notifId;
+            window.__fg_currentBanner.sticky = !!notif.sticky;
+            localStorage.setItem('active_broadcast_id', notifId);
+            localStorage.setItem('active_broadcast_ts', String(Date.now()));
+          } catch (e) { /* non-fatal */ }
+
           return; // leave visible
         }
 
@@ -1271,15 +1288,19 @@ async function _pollStatus_internal() {
           return;
         }
 
-        // Otherwise replace or show banner with notification (works for 200 and 423)
+        // Otherwise show/replace banner with server notification
         try {
-          showBanner(notif.message || '', { persistent: !!notif.sticky, serverId: notif.id });
+          showBanner(notif.message || '', { persistent: !!notif.sticky, serverId: notifId });
+          // normalize __fg_currentBanner state immediately and persist
           window.__fg_currentBanner = window.__fg_currentBanner || {};
-          window.__fg_currentBanner.id = notif.id;
+          window.__fg_currentBanner.id = notifId;
+          window.__fg_currentBanner.serverId = notifId;
+          window.__fg_currentBanner.message = notif.message || '';
           window.__fg_currentBanner.sticky = !!notif.sticky;
           window.__fg_currentBanner.clientSticky = false;
-          if (notif.id != null) {
-            try { localStorage.setItem('active_broadcast_id', String(notif.id)); } catch (e) {}
+          if (notifId != null) {
+            try { localStorage.setItem('active_broadcast_id', String(notifId)); } catch (e) {}
+            try { localStorage.setItem('active_broadcast_ts', String(Date.now())); } catch (e) {}
           }
         } catch (e) {
           console.warn('pollStatus: showBanner failed for server notification', e);
@@ -1288,19 +1309,42 @@ async function _pollStatus_internal() {
       }
     }
 
+    // If server explicitly indicates a removal/clear for a known active id:
+    // Some servers may implement a "notification_cleared_for" or "notification_removed" field.
+    // Respect it if present:
+    if (data.notification_cleared_for || data.notification_removed_for) {
+      const clearedId = String(data.notification_cleared_for || data.notification_removed_for);
+      const activeId = String(localStorage.getItem('active_broadcast_id') || window.__fg_currentBanner?.serverId || window.__fg_currentBanner?.id || '');
+      if (clearedId && activeId && clearedId === activeId) {
+        // server explicitly cleared this broadcast — clear locally
+        try {
+          hideBanner();
+          localStorage.removeItem('active_broadcast_id');
+          localStorage.removeItem('active_broadcast_ts');
+          window.__fg_currentBanner = window.__fg_currentBanner || {};
+          delete window.__fg_currentBanner.serverId;
+          delete window.__fg_currentBanner.id;
+        } catch (e) { console.warn('pollStatus: clearing server broadcast failed', e); }
+        return;
+      } else {
+        // cleared other id — ignore
+      }
+    }
+
     // No notification provided in body:
-    // - If server banner is active, preserve it (do not clear on locked)
-    if (window.__fg_currentBanner?.serverId) {
-      console.debug('pollStatus: no notification returned but server banner active — preserving it (locked or ok).');
+    // If a server-origin broadcast is active (persisted), preserve it.
+    const persistedActive = localStorage.getItem('active_broadcast_id');
+    if (window.__fg_currentBanner?.serverId || window.__fg_currentBanner?.id || persistedActive) {
+      console.debug('pollStatus: no notification in response but server broadcast is known/persisted — preserving it.');
       return;
     }
 
-    // If we got a 423 and there is no server banner, we can optionally open the reauth modal silently.
+    // If we got a 423 and there is no server banner, optionally open reauth modal silently.
     if (isLocked) {
       console.debug('pollStatus: 423 returned and no server banner active — optionally initReauthModal (no banner shown).');
       try {
         if (typeof initReauthModal === 'function') {
-          initReauthModal({ show: true, context: 'reauth' }); // remove this if you want fully silent locked handling
+          initReauthModal({ show: true, context: 'reauth' }); // remove or keep per your UX choice
         }
       } catch (e) {
         console.debug('pollStatus: initReauthModal failed', e);
@@ -1308,9 +1352,11 @@ async function _pollStatus_internal() {
       return;
     }
 
-    // No server notification and not locked -> hide banner only if it's not sticky
+    // No server notification and not locked -> hide banner only if it's not sticky (server or client)
     if (!(window.__fg_currentBanner?.sticky || window.__fg_currentBanner?.clientSticky)) {
-      try { hideBanner(); } catch (e) { console.warn('hideBanner failed', e); }
+      try {
+        hideBanner();
+      } catch (e) { console.warn('hideBanner failed', e); }
     } else {
       console.debug('pollStatus: no server notification and banner is sticky — preserving it');
     }
@@ -1319,44 +1365,14 @@ async function _pollStatus_internal() {
     // fetch threw (network, CORS, etc.)
     console.debug('pollStatus network error (suppressed banner)', err);
     // If a server-origin banner is active, preserve it; otherwise do nothing (no transient banner).
-    if (window.__fg_currentBanner?.serverId) {
-      console.debug('pollStatus: network error but server banner active — preserved.');
+    if (window.__fg_currentBanner?.serverId || window.__fg_currentBanner?.id || localStorage.getItem('active_broadcast_id')) {
+      console.debug('pollStatus: network error but server broadcast active — preserved.');
       return;
     }
     // otherwise intentionally silence network errors here (per your requirement)
   }
 }
 
-// Wrapper that dedupes concurrent calls and throttles frequent calls.
-// Replace the original top-level pollStatus with this wrapper (keeps same name)
-async function pollStatus() {
-  const now = Date.now();
-
-  // If there's an in-flight poll, return its promise (dedupe)
-  if (window.__fg_poll_inflight) {
-    console.debug('pollStatus: deduping to existing in-flight request');
-    return window.__fg_poll_inflight;
-  }
-
-  // Enforce a small min interval (avoid bursts e.g., immediate + debounce)
-  if (now - (window.__fg_last_poll_ts || 0) < FG_POLL_MIN_MS) {
-    console.debug('pollStatus: called too soon after last poll — skipping (throttle)');
-    return Promise.resolve();
-  }
-
-  // create and store in-flight promise
-  window.__fg_poll_inflight = (async () => {
-    try {
-      const res = await _pollStatus_internal();
-      return res;
-    } finally {
-      window.__fg_last_poll_ts = Date.now();
-      window.__fg_poll_inflight = null;
-    }
-  })();
-
-  return window.__fg_poll_inflight;
-}
 
 
 
