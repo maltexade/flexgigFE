@@ -5010,6 +5010,7 @@ async function getUid({ waitForSession = true, waitMs = 500 } = {}) {
     return null;
   }
 }
+window.getUid = window.getUid || getUid;
 
 
   // Find stored PIN in Supabase
