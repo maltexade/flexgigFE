@@ -1741,6 +1741,7 @@ if (status === 'SUBSCRIBED') {
 // 🔹 Biometric UI Restoration (with tighter guards + default subs on)
 // ----------------- Fixed restoreBiometricUI (drop-in replacement) -----------------
 // 🔹 Fixed Biometric UI Restoration (parent follows children rule)
+// ----------------- Fixed restoreBiometricUI (handles reload correctly) -----------------
 async function restoreBiometricUI() {
     const biometricsEnabled = localStorage.getItem('biometricsEnabled') === 'true';
     const credentialId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
@@ -1769,9 +1770,10 @@ async function restoreBiometricUI() {
         
         // 🔥 CRITICAL: If both children are OFF, force parent OFF
         if (!bioForLogin && !bioForTx) {
-            console.log('[DEBUG-UI] Both children OFF -> forcing parent OFF');
+            console.log('[DEBUG-UI] Both children OFF on reload -> forcing parent OFF');
             localStorage.setItem('biometricsEnabled', 'false');
-            biometricsEnabled = false; // Update local var
+            // Update local var so UI reflects this
+            biometricsEnabled = false;
         }
     } else {
         // Parent disabled: ensure children flags are false
