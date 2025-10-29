@@ -10576,30 +10576,25 @@ async function tryBiometricWithCachedOptions() {
 
   // Helper: Check if biometrics are properly enabled
   function isBiometricLoginEnabled() {
-    // Check WebAuthn support
     const webAuthnSupported = ('PublicKeyCredential' in window);
     if (!webAuthnSupported) return false;
 
-    // Check credential exists
     const storedCred = localStorage.getItem('credentialId') || 
                        localStorage.getItem('webauthn-cred-id') || 
                        localStorage.getItem('webauthn_cred') || '';
     if (!storedCred) return false;
 
-    // Check main biometrics enabled flag (from security modal)
     const biomKey = (window.__sec_KEYS && window.__sec_KEYS.biom) || 'biometricsEnabled';
     const mainBiomFlag = localStorage.getItem(biomKey);
     const isBiomEnabled = mainBiomFlag === '1' || mainBiomFlag === 'true';
     if (!isBiomEnabled) return false;
 
-    // Check biometric-for-login flag (child toggle)
     const bioLoginKey = (window.__sec_KEYS && window.__sec_KEYS.bioLogin) || 'biometricForLogin';
     const bioLoginFlag = localStorage.getItem(bioLoginKey) || 
                          localStorage.getItem('__sec_bioLogin') || 
                          localStorage.getItem('security_bio_login') || '';
     const isBioLoginEnabled = ['true', '1', 'yes'].includes(bioLoginFlag.toLowerCase());
 
-    // All three must be true: WebAuthn supported, credential exists, and both flags enabled
     return isBioLoginEnabled;
   }
 
@@ -10619,7 +10614,6 @@ async function tryBiometricWithCachedOptions() {
     return;
   }
 
-  // warm cache on gesture so first click can work
   attachPrefetchOnGesture(bioBtn);
 
   // minimal util: buffer -> base64url
@@ -10636,7 +10630,7 @@ async function tryBiometricWithCachedOptions() {
     ev.preventDefault();
     console.debug('[reauth] pinBiometricBtn clicked');
 
-    // Re-check enablement at click time (live check)
+    // Re-check enablement at click time
     if (!isBiometricLoginEnabled()) {
       console.warn('[reauth] biometric not fully enabled at click time', {
         hasCredential: !!(localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id')),
@@ -10649,15 +10643,49 @@ async function tryBiometricWithCachedOptions() {
       return;
     }
 
-    // Try synchronous cached option path first (keeps user gesture)
+    // 🔥 SHOW LOADER + UI FEEDBACK IMMEDIATELY (before bio prompt)
+    showLoader(); // Instant!
+    
+    try {
+      if (typeof safeCall === 'function' && typeof notify === 'function') {
+        safeCall(notify, 'Touch your fingerprint sensor...', 'info', reauthAlert, reauthAlertMsg);
+      }
+    } catch (e) {}
+
+    // Open PIN modal and simulate entry BEFORE biometric prompt
+    try {
+      if (typeof openPinModalForReauth === 'function') {
+        safeCall(openPinModalForReauth);
+      } else if (reauthModal && reauthModal.classList) {
+        reauthModal.classList.remove('hidden');
+      }
+    } catch (e) {}
+
+    try {
+      if (typeof enableReauthInputs === 'function') {
+        enableReauthInputs();
+      } else {
+        const inputs = Array.from(document.querySelectorAll('.reauthpin-inputs input'));
+        inputs.forEach(i => { try { i.disabled = false; } catch(e){} });
+      }
+    } catch (e) {}
+
+    // 🔥 SIMULATE PIN ENTRY IMMEDIATELY (shows instant feedback)
+    try {
+      if (typeof simulatePinEntry === 'function') {
+        simulatePinEntry({ stagger:0, expectedCount:4, fillAll:true });
+      }
+    } catch(e) {}
+
+    // Now try biometric authentication (user sees loader already)
     const cachedAttempt = await tryBiometricWithCachedOptions();
+    
     if (!cachedAttempt.ok) {
-      // fallback: ensure prefetch warmed and instruct user to try again / use PIN
+      hideLoader(); // Hide on failure
       try { window.prefetchAuthOptions && window.prefetchAuthOptions(); } catch(e){}
       if (typeof safeCall === 'function' && typeof notify === 'function') {
         safeCall(notify, 'Preparing biometric auth – please try again (or use PIN)', 'info', reauthAlert, reauthAlertMsg);
       }
-      // focus PIN input as convenience
       try {
         const firstInput = getReauthInputs()[0];
         if (firstInput && typeof firstInput.focus === 'function') firstInput.focus();
@@ -10665,7 +10693,13 @@ async function tryBiometricWithCachedOptions() {
       return;
     }
 
-    // We have a single assertion from the authenticator – DO NOT prompt again.
+    // Update message after successful bio scan
+    try {
+      if (typeof safeCall === 'function' && typeof notify === 'function') {
+        safeCall(notify, 'Verifying fingerprint – logging you in...', 'info', reauthAlert, reauthAlertMsg);
+      }
+    } catch (e) {}
+
     const assertion = cachedAttempt.assertion;
     const payload = {
       id: assertion.id,
@@ -10679,39 +10713,7 @@ async function tryBiometricWithCachedOptions() {
       }
     };
 
-    // Immediately show the "logging you in" message and loader so it appears on the first prompt
-    try {
-      if (typeof safeCall === 'function' && typeof notify === 'function') {
-        safeCall(notify, 'Verifying fingerprint – logging you in...', 'info', reauthAlert, reauthAlertMsg);
-      }
-    } catch (e) { /* silent fallback */ }
-
-    // Open PIN modal and enable inputs so user has fallback while server verifies
-    try {
-      if (typeof openPinModalForReauth === 'function') {
-        safeCall(openPinModalForReauth);
-      } else if (reauthModal && reauthModal.classList) {
-        reauthModal.classList.remove('hidden');
-      }
-    } catch (e) { /* ignore modal open failure */ }
-
-    try {
-      if (typeof enableReauthInputs === 'function') {
-        enableReauthInputs();
-      } else {
-        const inputs = Array.from(document.querySelectorAll('.reauthpin-inputs input'));
-        inputs.forEach(i => { try { i.disabled = false; } catch(e){} });
-      }
-    } catch (e) { /* ignore */ }
-
-    // Optionally simulate PIN entry so UI looks live while verification happens
-    try {
-      if (typeof simulatePinEntry === 'function') {
-        simulatePinEntry({ stagger:0, expectedCount:4, fillAll:true });
-      }
-    } catch(e){ /* ignore */ }
-
-    // Cache session data to avoid double call
+    // Cache session data
     let sessionData = null;
     try {
       sessionData = await safeCall(getSession);
@@ -10720,22 +10722,21 @@ async function tryBiometricWithCachedOptions() {
     }
     const userId = sessionData?.user?.uid || sessionData?.user?.id || null;
 
-    // Send assertion to server for verification
+    // 🔥 NO withLoader() wrapper - loader already showing!
     let verifyRes;
     try {
-      verifyRes = await withLoader(async () => {
-        return await fetch((window.__SEC_API_BASE || (typeof API_BASE !== 'undefined' ? API_BASE : '')) + '/webauthn/auth/verify', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            ...payload,
-            userId: userId
-          })
-        });
+      verifyRes = await fetch((window.__SEC_API_BASE || (typeof API_BASE !== 'undefined' ? API_BASE : '')) + '/webauthn/auth/verify', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...payload,
+          userId: userId
+        })
       });
     } catch (err) {
-      console.error('[reauth] network/withLoader error during verify', err);
+      console.error('[reauth] network error during verify', err);
+      hideLoader(); // Clean up
       if (typeof safeCall === 'function' && typeof notify === 'function') {
         safeCall(notify, 'Verification failed – network error. Please try again.', 'error', reauthAlert, reauthAlertMsg);
       }
@@ -10744,6 +10745,7 @@ async function tryBiometricWithCachedOptions() {
 
     if (!verifyRes) {
       console.error('[reauth] verifyRes falsy after fetch');
+      hideLoader();
       if (typeof safeCall === 'function' && typeof notify === 'function') {
         safeCall(notify, 'Verification failed – no response from server.', 'error', reauthAlert, reauthAlertMsg);
       }
@@ -10753,10 +10755,11 @@ async function tryBiometricWithCachedOptions() {
     if (!verifyRes.ok) {
       const errText = await verifyRes.text().catch(() => verifyRes.statusText || `HTTP ${verifyRes.status}`);
       console.warn('[reauth] server responded non-OK:', verifyRes.status, errText);
+      hideLoader();
 
       const mismatchDetected = /no stored challenge|challenge.*mismatch|unexpected.*challenge|invalid.*challenge/i.test(errText);
       if (mismatchDetected) {
-        console.debug('[reauth] challenge mismatch reported by server; not re-prompting authenticator');
+        console.debug('[reauth] challenge mismatch reported by server');
         if (typeof safeCall === 'function' && typeof notify === 'function') {
           safeCall(notify, 'Biometric challenge expired – please try your fingerprint again or use PIN.', 'warning', reauthAlert, reauthAlertMsg);
         }
@@ -10772,12 +10775,13 @@ async function tryBiometricWithCachedOptions() {
       return;
     }
 
-    // parse success
+    // Parse success
     let verifyData;
     try {
       verifyData = await verifyRes.json().catch(() => ({}));
     } catch (err) {
       console.warn('[reauth] failed to parse verify JSON', err);
+      hideLoader();
       if (typeof safeCall === 'function' && typeof notify === 'function') {
         safeCall(notify, 'Verification failed – invalid server response.', 'error', reauthAlert, reauthAlertMsg);
       }
@@ -10787,6 +10791,8 @@ async function tryBiometricWithCachedOptions() {
     if (verifyData && verifyData.verified) {
       console.log('[DEBUG] Biometrics verification successful');
       console.debug('[reauth] verification successful');
+      
+      // Keep loader visible during cleanup
       try {
         if (typeof safeCall === 'function' && typeof __sec_getCurrentUser === 'function') {
           safeCall(__sec_getCurrentUser);
@@ -10794,6 +10800,7 @@ async function tryBiometricWithCachedOptions() {
       } catch (e) {
         console.warn('[reauth] __sec_getCurrentUser error', e);
       }
+      
       try {
         if (typeof onSuccessfulReauth === 'function') {
           await onSuccessfulReauth();
@@ -10807,10 +10814,13 @@ async function tryBiometricWithCachedOptions() {
         if (typeof safeCall === 'function' && typeof notify === 'function') {
           safeCall(notify, 'Error completing authentication. Please try again.', 'error', reauthAlert, reauthAlertMsg);
         }
+      } finally {
+        hideLoader(); // Always hide at the end
       }
       return;
     } else {
       console.warn('[reauth] verify returned ok but not verified', verifyData);
+      hideLoader();
       if (typeof safeCall === 'function' && typeof notify === 'function') {
         safeCall(notify, 'Biometric verification failed', 'error', reauthAlert, reauthAlertMsg);
       }
