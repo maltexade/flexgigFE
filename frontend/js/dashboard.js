@@ -10682,6 +10682,23 @@ async function tryBiometricWithCachedOptions() {
     
     if (!cachedAttempt.ok) {
       hideLoader(); // Hide on failure
+      
+      // 🔥 Clear simulated PIN on failure
+      try {
+        if (typeof clearReauthInputs === 'function') {
+          clearReauthInputs();
+        } else {
+          // Fallback: manually clear inputs
+          const inputs = Array.from(document.querySelectorAll('.reauthpin-inputs input'));
+          inputs.forEach(i => { 
+            try { 
+              i.value = ''; 
+              i.classList.remove('filled');
+            } catch(e){} 
+          });
+        }
+      } catch(e) {}
+      
       try { window.prefetchAuthOptions && window.prefetchAuthOptions(); } catch(e){}
       if (typeof safeCall === 'function' && typeof notify === 'function') {
         safeCall(notify, 'Preparing biometric auth – please try again (or use PIN)', 'info', reauthAlert, reauthAlertMsg);
@@ -10737,6 +10754,22 @@ async function tryBiometricWithCachedOptions() {
     } catch (err) {
       console.error('[reauth] network error during verify', err);
       hideLoader(); // Clean up
+      
+      // 🔥 Clear simulated PIN
+      try {
+        if (typeof clearReauthInputs === 'function') {
+          clearReauthInputs();
+        } else {
+          const inputs = Array.from(document.querySelectorAll('.reauthpin-inputs input'));
+          inputs.forEach(i => { 
+            try { 
+              i.value = ''; 
+              i.classList.remove('filled');
+            } catch(e){} 
+          });
+        }
+      } catch(e) {}
+      
       if (typeof safeCall === 'function' && typeof notify === 'function') {
         safeCall(notify, 'Verification failed – network error. Please try again.', 'error', reauthAlert, reauthAlertMsg);
       }
@@ -10746,6 +10779,22 @@ async function tryBiometricWithCachedOptions() {
     if (!verifyRes) {
       console.error('[reauth] verifyRes falsy after fetch');
       hideLoader();
+      
+      // 🔥 Clear simulated PIN
+      try {
+        if (typeof clearReauthInputs === 'function') {
+          clearReauthInputs();
+        } else {
+          const inputs = Array.from(document.querySelectorAll('.reauthpin-inputs input'));
+          inputs.forEach(i => { 
+            try { 
+              i.value = ''; 
+              i.classList.remove('filled');
+            } catch(e){} 
+          });
+        }
+      } catch(e) {}
+      
       if (typeof safeCall === 'function' && typeof notify === 'function') {
         safeCall(notify, 'Verification failed – no response from server.', 'error', reauthAlert, reauthAlertMsg);
       }
@@ -10756,6 +10805,21 @@ async function tryBiometricWithCachedOptions() {
       const errText = await verifyRes.text().catch(() => verifyRes.statusText || `HTTP ${verifyRes.status}`);
       console.warn('[reauth] server responded non-OK:', verifyRes.status, errText);
       hideLoader();
+
+      // 🔥 Clear simulated PIN
+      try {
+        if (typeof clearReauthInputs === 'function') {
+          clearReauthInputs();
+        } else {
+          const inputs = Array.from(document.querySelectorAll('.reauthpin-inputs input'));
+          inputs.forEach(i => { 
+            try { 
+              i.value = ''; 
+              i.classList.remove('filled');
+            } catch(e){} 
+          });
+        }
+      } catch(e) {}
 
       const mismatchDetected = /no stored challenge|challenge.*mismatch|unexpected.*challenge|invalid.*challenge/i.test(errText);
       if (mismatchDetected) {
@@ -10782,6 +10846,22 @@ async function tryBiometricWithCachedOptions() {
     } catch (err) {
       console.warn('[reauth] failed to parse verify JSON', err);
       hideLoader();
+      
+      // 🔥 Clear simulated PIN
+      try {
+        if (typeof clearReauthInputs === 'function') {
+          clearReauthInputs();
+        } else {
+          const inputs = Array.from(document.querySelectorAll('.reauthpin-inputs input'));
+          inputs.forEach(i => { 
+            try { 
+              i.value = ''; 
+              i.classList.remove('filled');
+            } catch(e){} 
+          });
+        }
+      } catch(e) {}
+      
       if (typeof safeCall === 'function' && typeof notify === 'function') {
         safeCall(notify, 'Verification failed – invalid server response.', 'error', reauthAlert, reauthAlertMsg);
       }
@@ -10821,6 +10901,22 @@ async function tryBiometricWithCachedOptions() {
     } else {
       console.warn('[reauth] verify returned ok but not verified', verifyData);
       hideLoader();
+      
+      // 🔥 Clear simulated PIN
+      try {
+        if (typeof clearReauthInputs === 'function') {
+          clearReauthInputs();
+        } else {
+          const inputs = Array.from(document.querySelectorAll('.reauthpin-inputs input'));
+          inputs.forEach(i => { 
+            try { 
+              i.value = ''; 
+              i.classList.remove('filled');
+            } catch(e){} 
+          });
+        }
+      } catch(e) {}
+      
       if (typeof safeCall === 'function' && typeof notify === 'function') {
         safeCall(notify, 'Biometric verification failed', 'error', reauthAlert, reauthAlertMsg);
       }
