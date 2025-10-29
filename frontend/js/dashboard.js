@@ -1387,9 +1387,13 @@ if (biometricsEnabled) {
       localStorage.setItem('biometricsEnabled', biometricsEnabled ? 'true' : 'false');
       
       if (!biometricsEnabled) {
-        localStorage.setItem('biometricForLogin', 'false');
-        localStorage.setItem('biometricForTx', 'false');
-      }
+  // Don't aggressively wipe user child choices on transient failures.
+  // Preserve biometricForLogin / biometricForTx unless this is an explicit logout.
+  __sec_log.d('[onDashboardLoad] biom disabled by server — preserving child settings (unless explicit logout)');
+  // Optionally mark pending so other modules won't clear children:
+  try { localStorage.setItem('__sec_biom_pending', '1'); } catch(e) {}
+}
+
       
       if (biometricsEnabled && localStorage.getItem('credentialId')) {
         prefetchAuthOptions();
@@ -8253,19 +8257,27 @@ try {
   // Try to obtain userId (short wait). If none, do NOT call server (we avoid Missing userId).
   const resolvedUserId = await getOrCreateSessionPromise(); // wait up to 4000ms for session
   if (!resolvedUserId) {
-    __sec_log.i('reconcile: no userId available after short wait — will clear biometric flags locally and skip server check');
-    try {
-      localStorage.setItem(__sec_KEYS.biom, '0');
-      localStorage.setItem('biometricsEnabled', 'false');
-      localStorage.setItem(__sec_KEYS.bioLogin, '0');
-      localStorage.setItem(__sec_KEYS.bioTx, '0');
-      localStorage.setItem('biometricForLogin', 'false');
-      localStorage.setItem('biometricForTx', 'false');
-    } catch (e) { __sec_log.e('reconcile: local clear failed', e); }
-    if (__sec_parentSwitch) __sec_setChecked(__sec_parentSwitch, false);
-    if (__sec_bioOptions) { __sec_bioOptions.classList.remove('show'); __sec_bioOptions.hidden = true; }
-    return; // skip server call because server requires userId
+  __sec_log.i('reconcile: no userId available after short wait — deferring server check; preserving child flags');
+
+  try {
+    // Mark parent as not currently validated (do NOT wipe child toggles).
+    localStorage.setItem(__sec_KEYS.biom, '0');
+    localStorage.setItem('biometricsEnabled', 'false');
+
+    // transient marker telling other modules to avoid destructive clears while session pending
+    localStorage.setItem('__sec_biom_pending', '1');
+  } catch (e) {
+    __sec_log.e('reconcile: persist on pending state failed', e);
   }
+
+  // Update UI: show parent as unchecked but DO NOT change child check states.
+  if (__sec_parentSwitch) __sec_setChecked(__sec_parentSwitch, false);
+  if (__sec_bioOptions) { __sec_bioOptions.classList.remove('show'); __sec_bioOptions.hidden = true; }
+
+  // Skip server call
+  return;
+}
+
 
 
   // We have a userId — call the server with both credentialId and userId
@@ -8305,6 +8317,9 @@ try {
     safeCall(notify, 'Fingerprint set up successfully!', 'success');
     localStorage.setItem(__sec_KEYS.bioLogin, '1'); localStorage.setItem('biometricForLogin','true');
     localStorage.setItem(__sec_KEYS.bioTx, '1'); localStorage.setItem('biometricForTx','true');
+    // Clear pending marker now that we've reconciled with server
+    try { localStorage.removeItem('__sec_biom_pending'); } catch (e) { __sec_log.e('failed to clear __sec_biom_pending', e); }
+
   } catch (e) { __sec_log.e('reconcile: persist enabled flags failed', e); }
   if (__sec_parentSwitch) __sec_setChecked(__sec_parentSwitch, true);
   if (__sec_bioOptions) {
