@@ -1743,54 +1743,67 @@ if (status === 'SUBSCRIBED') {
 // 🔹 Fixed Biometric UI Restoration (parent follows children rule)
 // ----------------- Fixed restoreBiometricUI (handles reload correctly) -----------------
 async function restoreBiometricUI() {
-    const biometricsEnabled = localStorage.getItem('biometricsEnabled') === 'true';
+    // 🔥 READ VALUES FIRST - Don't let anything modify them yet
+    const biometricsEnabledRaw = localStorage.getItem('biometricsEnabled');
     const credentialId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
     const hasPin = localStorage.getItem('hasPin') === 'true';
+    const bioForLoginRaw = localStorage.getItem('biometricForLogin');
+    const bioForTxRaw = localStorage.getItem('biometricForTx');
     
-    // Read sub-flags preserving explicit false values
-    let bioForLogin = (localStorage.getItem('biometricForLogin') === 'true');
-    let bioForTx = (localStorage.getItem('biometricForTx') === 'true');
+    console.log('[DEBUG-UI] restoreBiometricUI RAW localStorage reads:', {
+        biometricsEnabled: biometricsEnabledRaw,
+        credentialId: credentialId,
+        bioForLogin: bioForLoginRaw,
+        bioForTx: bioForTxRaw,
+        hasPin
+    });
+    
+    // Parse flags
+    let biometricsEnabled = biometricsEnabledRaw === 'true';
+    let bioForLogin = bioForLoginRaw === 'true';
+    let bioForTx = bioForTxRaw === 'true';
     
     // 🔥 KEY RULE: Parent can only be ON if at least one child is ON
     const atLeastOneChildEnabled = bioForLogin || bioForTx;
     
-    if (biometricsEnabled) {
-        // Only default to ON for *unset* keys (first-time enable)
-        const rawLogin = localStorage.getItem('biometricForLogin');
-        const rawTx = localStorage.getItem('biometricForTx');
-        
-        if (rawLogin === null) {
-            localStorage.setItem('biometricForLogin', 'true');
-            bioForLogin = true;
-        }
-        if (rawTx === null) {
-            localStorage.setItem('biometricForTx', 'true');
-            bioForTx = true;
-        }
-        
-        // 🔥 CRITICAL: If both children are OFF, force parent OFF
-        if (!bioForLogin && !bioForTx) {
-            console.log('[DEBUG-UI] Both children OFF on reload -> forcing parent OFF');
-            localStorage.setItem('biometricsEnabled', 'false');
-            // Update local var so UI reflects this
-            biometricsEnabled = false;
-        }
-    } else {
-        // Parent disabled: ensure children flags are false
-        localStorage.setItem('biometricForLogin', 'false');
-        localStorage.setItem('biometricForTx', 'false');
+    // Handle first-time setup (all keys are null)
+    if (biometricsEnabledRaw === null && bioForLoginRaw === null && bioForTxRaw === null) {
+        console.log('[DEBUG-UI] First-time setup detected, leaving all OFF');
+        biometricsEnabled = false;
         bioForLogin = false;
         bioForTx = false;
     }
+    // If biometricsEnabled is true but children keys are unset -> default them to true
+    else if (biometricsEnabled && bioForLoginRaw === null && bioForTxRaw === null) {
+        console.log('[DEBUG-UI] Bio enabled but children unset -> defaulting children to true');
+        bioForLogin = true;
+        bioForTx = true;
+        localStorage.setItem('biometricForLogin', 'true');
+        localStorage.setItem('biometricForTx', 'true');
+    }
+    // If biometricsEnabled is true but BOTH children are explicitly false -> turn parent OFF
+    else if (biometricsEnabled && !bioForLogin && !bioForTx) {
+        console.log('[DEBUG-UI] Both children OFF -> turning parent OFF');
+        biometricsEnabled = false;
+        localStorage.setItem('biometricsEnabled', 'false');
+    }
+    // If biometricsEnabled is false -> ensure children are false
+    else if (!biometricsEnabled) {
+        console.log('[DEBUG-UI] Parent OFF -> ensuring children OFF');
+        bioForLogin = false;
+        bioForTx = false;
+        localStorage.setItem('biometricForLogin', 'false');
+        localStorage.setItem('biometricForTx', 'false');
+    }
     
-    // Debug trace
-    console.log('[DEBUG-UI] restoreBiometricUI state:', {
+    // Final state
+    console.log('[DEBUG-UI] restoreBiometricUI FINAL state:', {
         biometricsEnabled,
         hasCred: !!credentialId,
         hasPin,
         bioForLogin,
         bioForTx,
-        atLeastOneChildEnabled
+        atLeastOneChildEnabled: bioForLogin || bioForTx
     });
     
     // Helper: Apply state to a switch button
@@ -1818,8 +1831,16 @@ async function restoreBiometricUI() {
             return false;
         }
         
-        // 🔥 NEW LOGIC: Parent state depends on children + credential presence
-        const shouldParentBeOn = biometricsEnabled && credentialId && atLeastOneChildEnabled;
+        // 🔥 Parent state depends on: enabled flag + credential exists + at least one child enabled
+        const shouldParentBeOn = biometricsEnabled && credentialId && (bioForLogin || bioForTx);
+        
+        console.log('[DEBUG-UI] Applying UI state:', {
+            shouldParentBeOn,
+            biometricsEnabled,
+            hasCredential: !!credentialId,
+            bioForLogin,
+            bioForTx
+        });
         
         if (shouldParentBeOn) {
             // Case A: Parent ON (at least one child is enabled + credential exists)
@@ -1833,7 +1854,7 @@ async function restoreBiometricUI() {
             const setupCta = document.getElementById('biometricsSetupCta');
             if (setupCta) setupCta.hidden = true;
             
-            console.log('[DEBUG-UI] Applied ACTIVE state (parent ON, children visible)');
+            console.log('[DEBUG-UI] ✅ Applied ACTIVE state (parent ON, children visible)');
             
         } else if (biometricsEnabled && !credentialId) {
             // Case B: Server says enabled but no local credential -> show setup CTA
@@ -1846,13 +1867,10 @@ async function restoreBiometricUI() {
                 setupCta.hidden = false;
             }
             
-            if (typeof notify === 'function') {
-                notify('Biometrics appear unregistered on this device — please set up biometrics.', 'info');
-            }
             console.warn('[WARN-UI] biometricsEnabled true but credential missing; showing setup CTA');
             
         } else {
-            // Case C: Parent OFF (either disabled OR both children off)
+            // Case C: Parent OFF (either disabled OR both children off OR no credential)
             applySwitchState(mainSwitch, false);
             const subgroup = document.getElementById('biometricsOptions');
             if (subgroup) subgroup.hidden = true;
@@ -1860,7 +1878,7 @@ async function restoreBiometricUI() {
             const setupCta = document.getElementById('biometricsSetupCta');
             if (setupCta) setupCta.hidden = true;
             
-            console.log('[DEBUG-UI] Applied INACTIVE state (parent OFF, children hidden)');
+            console.log('[DEBUG-UI] ⭕ Applied INACTIVE state (parent OFF, children hidden)');
         }
         
         // Re-attach main/sub handlers defensively
@@ -1887,8 +1905,8 @@ async function restoreBiometricUI() {
             txSwitch.__eventsAttached = true;
         }
         
-        console.log('[DEBUG-UI] Final main aria-checked:', mainSwitch.getAttribute('aria-checked'));
-        console.log('[DEBUG-UI] Subgroup hidden:', document.getElementById('biometricsOptions')?.hidden);
+        console.log('[DEBUG-UI] Final UI state - main aria-checked:', mainSwitch.getAttribute('aria-checked'));
+        console.log('[DEBUG-UI] Final UI state - subgroup hidden:', document.getElementById('biometricsOptions')?.hidden);
         
         return true;
     }
