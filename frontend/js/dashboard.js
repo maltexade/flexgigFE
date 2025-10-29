@@ -1346,27 +1346,28 @@ try {
       credentialId: localStorage.getItem('credentialId')
     });
     // 🔹 Sync sub-flags: Default to 'true' ONLY if unset when bio enabled; preserve user choices
+// 🔹 Sync sub-flags: Default to 'true' ONLY if unset when bio enabled; preserve user choices
 if (biometricsEnabled) {
-  const storedLogin = localStorage.getItem('biometricForLogin');
-  const storedTx = localStorage.getItem('biometricForTx');
-  
-  // Default unset to true (first-time enable)
-  if (storedLogin === null) {
-    localStorage.setItem('biometricForLogin', 'true');
-  }
-  if (storedTx === null) {
-    localStorage.setItem('biometricForTx', 'true');
-  }
-  
-  console.log('[DEBUG-SYNC] Sub-flags preserved/defaulted:', {
-    bioForLogin: localStorage.getItem('biometricForLogin') === 'true',
-    bioForTx: localStorage.getItem('biometricForTx') === 'true'
-  });
-} else {
-  // Reset to false only if bio off (existing)
-  localStorage.setItem('biometricForLogin', 'false');
-  localStorage.setItem('biometricForTx', 'false');
+    const storedLogin = localStorage.getItem('biometricForLogin');
+    const storedTx = localStorage.getItem('biometricForTx');
+    
+    // Default unset to true (first-time enable)
+    if (storedLogin === null) {
+        localStorage.setItem('biometricForLogin', 'true');
+    }
+    if (storedTx === null) {
+        localStorage.setItem('biometricForTx', 'true');
+    }
+    
+    console.log('[DEBUG-SYNC] Sub-flags preserved/defaulted:', {
+        bioForLogin: localStorage.getItem('biometricForLogin') === 'true',
+        bioForTx: localStorage.getItem('biometricForTx') === 'true'
+    });
 }
+// 🔥 REMOVED THE ELSE BLOCK - Don't reset children when parent is OFF!
+// Let restoreBiometricUI() handle the logic instead.
+// If both children are OFF, restoreBiometricUI will turn parent OFF.
+// If parent is OFF, restoreBiometricUI will ensure children are OFF.
     
     // If bio enabled and credentialId exists, prefetch immediately
     if (biometricsEnabled && localStorage.getItem('credentialId')) {
