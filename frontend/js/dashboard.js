@@ -1088,11 +1088,15 @@ function observeForElements() {
 // 🔹 Sub-handler stubs (add these functions globally — simple local toggles)
 // 🔹 Fixed Child Toggle Handlers (auto-disable parent when both children turn OFF)
 
+// 🔹 Fixed Child Toggle Handlers (allow individual ON/OFF, auto-disable parent when both OFF)
+
 async function handleBioLoginToggle(e) {
     e.preventDefault();
     const switchBtn = e.currentTarget;
     const currentlyOn = switchBtn.getAttribute('aria-checked') === 'true';
     const newState = !currentlyOn;
+    
+    console.log('[DEBUG] handleBioLoginToggle clicked:', { currentlyOn, newState });
     
     // Update this child's state
     switchBtn.setAttribute('aria-checked', newState.toString());
@@ -1105,11 +1109,21 @@ async function handleBioLoginToggle(e) {
     }
     localStorage.setItem('biometricForLogin', newState ? 'true' : 'false');
     
+    // Update security module keys if they exist
+    if (window.__sec_KEYS && window.__sec_KEYS.bioLogin) {
+        localStorage.setItem(window.__sec_KEYS.bioLogin, newState ? '1' : '0');
+    }
+    
     // 🔥 CHECK: If BOTH children are now OFF, turn parent OFF
     const bioForTx = localStorage.getItem('biometricForTx') === 'true';
     if (!newState && !bioForTx) {
         console.log('[DEBUG] Both children OFF -> disabling parent');
         localStorage.setItem('biometricsEnabled', 'false');
+        
+        // Update security module parent key if exists
+        if (window.__sec_KEYS && window.__sec_KEYS.biom) {
+            localStorage.setItem(window.__sec_KEYS.biom, '0');
+        }
         
         // Update parent UI
         const mainSwitch = document.getElementById('biometricsSwitch');
@@ -1131,6 +1145,12 @@ async function handleBioLoginToggle(e) {
             notify(newState ? 'Biometrics enabled for login' : 'Biometrics disabled for login', newState ? 'success' : 'info');
         }
     }
+    
+    console.log('[DEBUG] handleBioLoginToggle complete:', {
+        bioForLogin: localStorage.getItem('biometricForLogin'),
+        bioForTx: localStorage.getItem('biometricForTx'),
+        biometricsEnabled: localStorage.getItem('biometricsEnabled')
+    });
 }
 
 async function handleBioTxToggle(e) {
@@ -1138,6 +1158,8 @@ async function handleBioTxToggle(e) {
     const switchBtn = e.currentTarget;
     const currentlyOn = switchBtn.getAttribute('aria-checked') === 'true';
     const newState = !currentlyOn;
+    
+    console.log('[DEBUG] handleBioTxToggle clicked:', { currentlyOn, newState });
     
     // Update this child's state
     switchBtn.setAttribute('aria-checked', newState.toString());
@@ -1150,11 +1172,21 @@ async function handleBioTxToggle(e) {
     }
     localStorage.setItem('biometricForTx', newState ? 'true' : 'false');
     
+    // Update security module keys if they exist
+    if (window.__sec_KEYS && window.__sec_KEYS.bioTx) {
+        localStorage.setItem(window.__sec_KEYS.bioTx, newState ? '1' : '0');
+    }
+    
     // 🔥 CHECK: If BOTH children are now OFF, turn parent OFF
     const bioForLogin = localStorage.getItem('biometricForLogin') === 'true';
     if (!newState && !bioForLogin) {
         console.log('[DEBUG] Both children OFF -> disabling parent');
         localStorage.setItem('biometricsEnabled', 'false');
+        
+        // Update security module parent key if exists
+        if (window.__sec_KEYS && window.__sec_KEYS.biom) {
+            localStorage.setItem(window.__sec_KEYS.biom, '0');
+        }
         
         // Update parent UI
         const mainSwitch = document.getElementById('biometricsSwitch');
@@ -1176,6 +1208,12 @@ async function handleBioTxToggle(e) {
             notify(newState ? 'Biometrics enabled for transactions' : 'Biometrics disabled for transactions', newState ? 'success' : 'info');
         }
     }
+    
+    console.log('[DEBUG] handleBioTxToggle complete:', {
+        bioForLogin: localStorage.getItem('biometricForLogin'),
+        bioForTx: localStorage.getItem('biometricForTx'),
+        biometricsEnabled: localStorage.getItem('biometricsEnabled')
+    });
 }
 
 // 🔹 Optional: Main toggle stub (if not defined — calls register/disable)
