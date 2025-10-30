@@ -1337,6 +1337,9 @@ async function onDashboardLoad() {
 
   // Then background refresh
   await getSession(); // This will update if needed
+  // 🔥 ADD THESE TWO LINES:
+    await manageDashboardCards();
+    initializeSmartAccountPinButton();
   // after await getSession();
 try {
   // make sure we always get fresh server data (avoid 304/caching)
@@ -1772,6 +1775,200 @@ if (status === 'SUBSCRIBED') {
   checkForUpdates();
   pollStatus(); // Initial
   setInterval(pollStatus, 30000); // Every 30s
+}
+
+
+// ============================================
+// SMART DASHBOARD CARDS (Setup Pin + Update Profile)
+// ============================================
+
+/**
+ * Hides dashboard cards based on completion status from server
+ * Call this after getSession() or on dashboard load
+ */
+async function manageDashboardCards() {
+    try {
+        console.log('[Dashboard Cards] Checking card visibility');
+        
+        // Get current session/user data
+        let hasPin = localStorage.getItem('hasPin') === 'true';
+        let profileCompleted = localStorage.getItem('profileCompleted') === 'true';
+        
+        // Also check from fresh session if available
+        if (typeof getSession === 'function') {
+            try {
+                const session = await getSession();
+                if (session?.user) {
+                    hasPin = session.user.hasPin || hasPin;
+                    profileCompleted = session.user.profileCompleted || profileCompleted;
+                }
+            } catch (e) {
+                console.warn('[Dashboard Cards] getSession failed, using localStorage', e);
+            }
+        }
+        
+        console.log('[Dashboard Cards] Status:', { hasPin, profileCompleted });
+        
+        // Hide Setup Pin card if PIN is already set
+        const pinCard = document.getElementById('dashboardPinCard');
+        if (pinCard) {
+            if (hasPin) {
+                pinCard.style.display = 'none';
+                console.log('[Dashboard Cards] Setup Pin card hidden (PIN exists)');
+            } else {
+                pinCard.style.display = '';
+                console.log('[Dashboard Cards] Setup Pin card visible (no PIN)');
+            }
+        }
+        
+        // Hide Update Profile card if profile is completed
+        const profileCard = document.getElementById('dashboardUpdateProfileCard');
+        if (profileCard) {
+            if (profileCompleted) {
+                profileCard.style.display = 'none';
+                console.log('[Dashboard Cards] Update Profile card hidden (profile completed)');
+            } else {
+                profileCard.style.display = '';
+                console.log('[Dashboard Cards] Update Profile card visible (incomplete profile)');
+            }
+        }
+        
+    } catch (err) {
+        console.error('[Dashboard Cards] Error managing cards:', err);
+    }
+}
+
+function initializeSmartAccountPinButton() {
+    try {
+        // Find the Account Pin row in security modal
+        const accountPinRow = document.getElementById('securityPinRow');
+        const accountPinStatus = document.getElementById('accountPinStatus');
+        
+        if (!accountPinRow || !accountPinStatus) {
+            console.warn('[Smart PIN Button] Account Pin elements not found in security modal');
+            return;
+        }
+        
+        console.log('[Smart PIN Button] Found Account Pin row, setting up smart behavior');
+        
+        // Function to update button text based on PIN status
+        function updateAccountPinButton() {
+            const hasPin = localStorage.getItem('hasPin') === 'true';
+            
+            if (hasPin) {
+                accountPinStatus.textContent = 'PIN set. You can change your PIN here';
+                console.log('[Smart PIN Button] Updated to "change PIN" mode');
+            } else {
+                accountPinStatus.textContent = 'No PIN set. Setup PIN';
+                console.log('[Smart PIN Button] Updated to "setup PIN" mode');
+            }
+        }
+        
+        // Update button text initially
+        updateAccountPinButton();
+        
+        // Override click handler
+        accountPinRow.addEventListener('click', async function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            const hasPin = localStorage.getItem('hasPin') === 'true';
+            
+            console.log('[Smart PIN Button] Clicked, hasPin:', hasPin);
+            
+            if (hasPin) {
+                // PIN exists -> Open Change PIN modal
+                console.log('[Smart PIN Button] Opening Change PIN modal');
+                
+                // Try different methods to open change PIN modal
+                if (typeof openChangePinModal === 'function') {
+                    openChangePinModal();
+                } else if (typeof window.openChangePinModal === 'function') {
+                    window.openChangePinModal();
+                } else {
+                    // Fallback: trigger modal directly
+                    const changePinModal = document.getElementById('changePinModal') || 
+                                          document.getElementById('pinChangeModal') ||
+                                          document.querySelector('.pin-change-modal');
+                    if (changePinModal) {
+                        changePinModal.classList.remove('hidden');
+                        changePinModal.classList.add('active');
+                        changePinModal.style.display = 'flex';
+                    } else {
+                        console.error('[Smart PIN Button] Change PIN modal not found');
+                        if (typeof notify === 'function') {
+                            notify('Change PIN feature not available', 'error');
+                        }
+                    }
+                }
+            } else {
+                // No PIN -> Open Setup PIN modal (from dashboard)
+                console.log('[Smart PIN Button] Opening Setup PIN modal');
+                
+                // Try different methods to open setup PIN modal
+                if (typeof openSetupPinModal === 'function') {
+                    openSetupPinModal();
+                } else if (typeof window.openSetupPinModal === 'function') {
+                    window.openSetupPinModal();
+                } else {
+                    // Fallback: Click the dashboard pin card to trigger its modal
+                    const dashboardPinCard = document.getElementById('dashboardPinCard');
+                    if (dashboardPinCard && dashboardPinCard.onclick) {
+                        dashboardPinCard.onclick();
+                    } else {
+                        // Last resort: trigger modal directly
+                        const setupPinModal = document.getElementById('setupPinModal') || 
+                                             document.getElementById('pinSetupModal') ||
+                                             document.querySelector('.pin-setup-modal');
+                        if (setupPinModal) {
+                            setupPinModal.classList.remove('hidden');
+                            setupPinModal.classList.add('active');
+                            setupPinModal.style.display = 'flex';
+                        } else {
+                            console.error('[Smart PIN Button] Setup PIN modal not found');
+                            if (typeof notify === 'function') {
+                                notify('Setup PIN feature not available', 'error');
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Close security modal after opening PIN modal
+            try {
+                const securityModal = document.getElementById('securityModal') || 
+                                     document.querySelector('.security-modal');
+                if (securityModal) {
+                    securityModal.classList.add('hidden');
+                    securityModal.classList.remove('active');
+                }
+            } catch (err) {
+                console.warn('[Smart PIN Button] Could not close security modal', err);
+            }
+        });
+        
+        // Listen for PIN status changes (e.g., after successful PIN setup)
+        window.addEventListener('pin-status-changed', function() {
+            console.log('[Smart PIN Button] PIN status changed, updating button');
+            updateAccountPinButton();
+            
+            // Also refresh dashboard cards
+            manageDashboardCards();
+        });
+        
+        // Also listen for storage changes (cross-tab sync)
+        window.addEventListener('storage', function(e) {
+            if (e.key === 'hasPin') {
+                console.log('[Smart PIN Button] hasPin changed in storage, updating button');
+                updateAccountPinButton();
+            }
+        });
+        
+        console.log('[Smart PIN Button] Initialization complete');
+        
+    } catch (err) {
+        console.error('[Smart PIN Button] Initialization error:', err);
+    }
 }
 
 // 🔹 Biometric UI Restoration (runs on load to persist state across reloads)
@@ -4588,6 +4785,7 @@ updateBalanceDisplay();
 
         console.log('[dashboard.js] PIN setup successfully');
         localStorage.setItem('hasPin', 'true'); // PIN successfully set
+        onPinSetupSuccess();
 
         const dashboardPinCard = document.getElementById('dashboardPinCard');
         if (dashboardPinCard) dashboardPinCard.style.display = 'none';
@@ -4652,6 +4850,30 @@ updateBalanceDisplay();
     });
   }
 }
+
+function onPinSetupSuccess() {
+    console.log('[PIN Setup] Success - updating flags and UI');
+    
+    // Update localStorage
+    localStorage.setItem('hasPin', 'true');
+    
+    // Dispatch custom event so other components can react
+    window.dispatchEvent(new CustomEvent('pin-status-changed', { 
+        detail: { hasPin: true } 
+    }));
+    
+    // Hide the dashboard Setup Pin card
+    const pinCard = document.getElementById('dashboardPinCard');
+    if (pinCard) {
+        pinCard.style.display = 'none';
+    }
+    
+    // Optionally notify user
+    if (typeof notify === 'function') {
+        notify('PIN set up successfully!', 'success');
+    }
+}
+
 
 
     // ---------------------
@@ -6002,6 +6224,7 @@ parsedData.message)) || rawText || `HTTP ${response.status}`;
       const notification = document.getElementById('notification') || document.getElementById('profileUpdateNotification');
       if (notification) {
         notification.textContent = 'Profile updated successfully!';
+        onProfileUpdateSuccess();
         notification.classList.add('active');
         setTimeout(() => notification.classList.remove('active'), 3000);
       }
@@ -6036,6 +6259,24 @@ parsedData.message)) || rawText || `HTTP ${response.status}`;
 
   updateProfileForm.addEventListener('submit', 
 updateProfileForm.__submitHandler);
+}
+
+function onProfileUpdateSuccess() {
+    console.log('[Profile Update] Success - updating flags and UI');
+    
+    // Update localStorage
+    localStorage.setItem('profileCompleted', 'true');
+    
+    // Hide the dashboard Update Profile card
+    const profileCard = document.getElementById('dashboardUpdateProfileCard');
+    if (profileCard) {
+        profileCard.style.display = 'none';
+    }
+    
+    // Optionally notify user
+    if (typeof notify === 'function') {
+        notify('Profile updated successfully!', 'success');
+    }
 }
 
 // Profile-specific phone number functions
