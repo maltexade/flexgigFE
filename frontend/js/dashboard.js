@@ -1790,48 +1790,52 @@ async function manageDashboardCards() {
     try {
         console.log('[Dashboard Cards] Checking card visibility');
         
-        // Get current session/user data
+        // 🔥 INSTANT: Apply from localStorage immediately (no flash!)
         let hasPin = localStorage.getItem('hasPin') === 'true';
         let profileCompleted = localStorage.getItem('profileCompleted') === 'true';
         
-        // Also check from fresh session if available
-        if (typeof getSession === 'function') {
+        // Helper to apply visibility
+        function applyCardVisibility(hasPin, profileCompleted) {
+            const pinCard = document.getElementById('dashboardPinCard');
+            if (pinCard) {
+                pinCard.style.display = hasPin ? 'none' : '';
+                console.log('[Dashboard Cards] Setup Pin card', hasPin ? 'hidden' : 'visible');
+            }
+            
+            const profileCard = document.getElementById('dashboardUpdateProfileCard');
+            if (profileCard) {
+                profileCard.style.display = profileCompleted ? 'none' : '';
+                console.log('[Dashboard Cards] Update Profile card', profileCompleted ? 'hidden' : 'visible');
+            }
+        }
+        
+        // 🔥 APPLY INSTANTLY from cache (no waiting!)
+        applyCardVisibility(hasPin, profileCompleted);
+        
+        // 🔥 BACKGROUND SYNC: Update from server (non-blocking)
+        setTimeout(async () => {
             try {
-                const session = await getSession();
-                if (session?.user) {
-                    hasPin = session.user.hasPin || hasPin;
-                    profileCompleted = session.user.profileCompleted || profileCompleted;
+                if (typeof getSession === 'function') {
+                    const session = await getSession();
+                    if (session?.user) {
+                        const serverHasPin = session.user.hasPin || false;
+                        const serverProfileCompleted = session.user.profileCompleted || false;
+                        
+                        // Update localStorage for next load
+                        localStorage.setItem('hasPin', serverHasPin ? 'true' : 'false');
+                        localStorage.setItem('profileCompleted', serverProfileCompleted ? 'true' : 'false');
+                        
+                        // Re-apply if values changed
+                        if (serverHasPin !== hasPin || serverProfileCompleted !== profileCompleted) {
+                            console.log('[Dashboard Cards] Server sync updated values');
+                            applyCardVisibility(serverHasPin, serverProfileCompleted);
+                        }
+                    }
                 }
             } catch (e) {
-                console.warn('[Dashboard Cards] getSession failed, using localStorage', e);
+                console.warn('[Dashboard Cards] Background sync failed', e);
             }
-        }
-        
-        console.log('[Dashboard Cards] Status:', { hasPin, profileCompleted });
-        
-        // Hide Setup Pin card if PIN is already set
-        const pinCard = document.getElementById('dashboardPinCard');
-        if (pinCard) {
-            if (hasPin) {
-                pinCard.style.display = 'none';
-                console.log('[Dashboard Cards] Setup Pin card hidden (PIN exists)');
-            } else {
-                pinCard.style.display = '';
-                console.log('[Dashboard Cards] Setup Pin card visible (no PIN)');
-            }
-        }
-        
-        // Hide Update Profile card if profile is completed
-        const profileCard = document.getElementById('dashboardUpdateProfileCard');
-        if (profileCard) {
-            if (profileCompleted) {
-                profileCard.style.display = 'none';
-                console.log('[Dashboard Cards] Update Profile card hidden (profile completed)');
-            } else {
-                profileCard.style.display = '';
-                console.log('[Dashboard Cards] Update Profile card visible (incomplete profile)');
-            }
-        }
+        }, 100); // Small delay so it doesn't block initial render
         
     } catch (err) {
         console.error('[Dashboard Cards] Error managing cards:', err);
@@ -4854,7 +4858,7 @@ updateBalanceDisplay();
 function onPinSetupSuccess() {
     console.log('[PIN Setup] Success - updating flags and UI');
     
-    // Update localStorage
+    // Update localStorage (instant + persistent)
     localStorage.setItem('hasPin', 'true');
     
     // Dispatch custom event so other components can react
@@ -4862,10 +4866,16 @@ function onPinSetupSuccess() {
         detail: { hasPin: true } 
     }));
     
-    // Hide the dashboard Setup Pin card
+    // Hide the dashboard Setup Pin card immediately
     const pinCard = document.getElementById('dashboardPinCard');
     if (pinCard) {
         pinCard.style.display = 'none';
+    }
+    
+    // Update Account PIN status in security modal
+    const accountPinStatus = document.getElementById('accountPinStatus');
+    if (accountPinStatus) {
+        accountPinStatus.textContent = 'PIN set. You can change your PIN here';
     }
     
     // Optionally notify user
@@ -6264,10 +6274,10 @@ updateProfileForm.__submitHandler);
 function onProfileUpdateSuccess() {
     console.log('[Profile Update] Success - updating flags and UI');
     
-    // Update localStorage
+    // Update localStorage (instant + persistent)
     localStorage.setItem('profileCompleted', 'true');
     
-    // Hide the dashboard Update Profile card
+    // Hide the dashboard Update Profile card immediately
     const profileCard = document.getElementById('dashboardUpdateProfileCard');
     if (profileCard) {
         profileCard.style.display = 'none';
