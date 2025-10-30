@@ -1928,21 +1928,7 @@ async function restoreBiometricUI() {
             mainSwitch.__eventsAttached = true;
         }
         
-        const loginSwitch = document.getElementById('bioLoginSwitch');
-        if (loginSwitch && !loginSwitch.__eventsAttached) {
-            if (typeof handleBioLoginToggle === 'function') {
-                try { loginSwitch.addEventListener('click', handleBioLoginToggle); } catch (e) {}
-            }
-            loginSwitch.__eventsAttached = true;
-        }
         
-        const txSwitch = document.getElementById('bioTxSwitch');
-        if (txSwitch && !txSwitch.__eventsAttached) {
-            if (typeof handleBioTxToggle === 'function') {
-                try { txSwitch.addEventListener('click', handleBioTxToggle); } catch (e) {}
-            }
-            txSwitch.__eventsAttached = true;
-        }
         
         console.log('[DEBUG-UI] Final UI state - main aria-checked:', mainSwitch.getAttribute('aria-checked'));
         console.log('[DEBUG-UI] Final UI state - subgroup hidden:', document.getElementById('biometricsOptions')?.hidden);
