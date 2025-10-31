@@ -8462,77 +8462,19 @@ window.showSlideNotification = window.showSlideNotification || showSlideNotifica
   const __sec_PIN_CONFIRM    = __sec_q('#confirmPin');
 
   // notify helper (prefer slide notification)
-  // Global stack tracker (simple array of elements—resets on page if needed)
-let __sec_notificationStack = [];
-
-// Enhanced notify: Manages stack + smart removal
-function __sec_pin_notify(message, type = 'info', duration = type === 'error' ? 4000 : 2000) {
-  // Clear existing notifies first (from prior fix—prevents overlap)
+  function __sec_pin_notify(message, type = 'info', duration = type === 'error' ? 4000 : 2000) {
+  // Clear existing notifies first (prevents overlap/stale "wrong" ones)
   const existing = document.querySelectorAll('.slide-notification, .toast');
-  existing.forEach(el => el.remove());
+  existing.forEach(el => el.remove());  // Or el.classList.add('hidden')
 
-  // Create and show new notification
+  // Prefer slide-in, fallback to toast
   if (typeof showSlideNotification === 'function') {
-    const notification = showSlideNotification({ 
-      message, 
-      type, 
-      duration, 
-      position: 'top-right'  // Assuming your default
-    });
-
-    // Assume showSlideNotification returns the DOM element (common pattern—e.g., div.slide-notification)
-    // If it doesn't, query it post-creation: const notification = document.querySelector('.slide-notification:last-child');
-    if (notification && notification.classList.contains('slide-notification')) {
-      // Add stack index for quick lookup
-      notification.setAttribute('data-stack-index', __sec_notificationStack.length);
-      __sec_notificationStack.push(notification);
-
-      // Override auto-close: Instead of built-in timeout, use our smart remover
-      clearTimeout(notification.__sec_autoTimeout);  // Clear if any existing
-      notification.__sec_autoTimeout = setTimeout(() => {
-        __sec_smartRemoveNotification(notification);
-      }, duration);
-
-      // Optional: Manual dismiss listener (if your toasts have a close button)
-      const closeBtn = notification.querySelector('[data-dismiss]') || notification;  // Or your close selector
-      closeBtn.addEventListener('click', () => __sec_smartRemoveNotification(notification), { once: true });
-    }
+    showSlideNotification({ message, type, duration, position: 'top-right' });  // Add position if not default
   } else if (typeof showToast === 'function') {
-    // Fallback: No stack needed for basic toast
     showToast(message, type, duration);
   } else {
+    // Fallback: Native alert or console (but avoid in prod)
     console[type === 'error' ? 'error' : 'log'](message);
-  }
-}
-
-// Smart remover: Check if top, then slide or vanish
-function __sec_smartRemoveNotification(el) {
-  if (!el || !__sec_notificationStack.length) return;
-
-  const index = parseInt(el.getAttribute('data-stack-index'), 10);
-  const isTop = index === __sec_notificationStack.length - 1;
-
-  if (isTop) {
-    // Top: Slide out (your existing animation—trigger by class or style)
-    el.classList.add('slide-out');  // Assumes CSS handles this (see below)
-    // Wait for animation end, then remove
-    el.addEventListener('transitionend', () => {
-      el.remove();
-      __sec_notificationStack.pop();  // Remove from stack
-      // Optional: Shift up others if needed (but CSS should handle positioning)
-    }, { once: true });
-  } else {
-    // Not top: Instant vanish (no disruption)
-    el.style.transition = 'none';  // Disable anim for instant
-    el.style.opacity = '0';
-    el.style.display = 'none';
-    el.remove();
-    // Remove from stack by index (splice to keep order)
-    __sec_notificationStack.splice(index, 1);
-    // Re-index remaining (quick loop)
-    __sec_notificationStack.forEach((stackEl, i) => {
-      stackEl.setAttribute('data-stack-index', i);
-    });
   }
 }
 
