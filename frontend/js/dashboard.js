@@ -442,24 +442,118 @@ async function withLoader(task) {
 
 
 // Robust error parser: returns { message, code, raw }
+// Robust error parser that unwraps nested JSON strings and extracts the most useful message
 async function parseErrorResponse(res) {
+  // Try to read JSON first, then text, then fall back to status
+  let rawJson = null;
+  let rawText = null;
+
   try {
-    // clone in case the caller later wants to read the body too
-    const clone = res.clone();
-    // try JSON first
-    const json = await clone.json().catch(() => null);
-    if (json && (json.message || json.code || Object.keys(json).length)) {
-      return { message: (json.message || JSON.stringify(json)), code: json.code || null, raw: json };
+    rawJson = await res.clone().json().catch(() => null);
+  } catch (e) { rawJson = null; }
+
+  try {
+    rawText = await res.clone().text().catch(() => null);
+  } catch (e) { rawText = null; }
+
+  // Helper: try to parse a string as JSON, safely
+  function tryParseMaybeString(s) {
+    if (typeof s !== 'string') return s;
+    s = s.trim();
+    if (!s) return s;
+    // heuristics: if it starts with { or [ or a quoted JSON object
+    if (/^[{[]/.test(s) || (/^".*"$/.test(s))) {
+      try {
+        return JSON.parse(s);
+      } catch (e) {
+        // try to unquote a JSON string that contains JSON
+        try {
+          // remove wrapping quotes if present
+          if (s[0] === '"' && s[s.length - 1] === '"') {
+            return JSON.parse(s.slice(1, -1));
+          }
+        } catch (e2) {}
+      }
     }
-  } catch (e) { /* ignore JSON parse error */ }
+    return s;
+  }
 
+  // Normalize an unknown value into an object we can inspect
+  let candidate = rawJson ?? rawText;
+
+  // If candidate is a string that contains JSON, parse it
+  candidate = tryParseMaybeString(candidate);
+
+  // If candidate is still a string and rawJson exists and rawJson.message is a JSON string, attempt that too
+  if (typeof candidate === 'object' && candidate !== null) {
+    // some servers embed a JSON string inside a `message` or `error` field
+    if (typeof candidate.message === 'string') {
+      const maybe = tryParseMaybeString(candidate.message);
+      if (typeof maybe === 'object') candidate = Object.assign({}, candidate, { __embeddedMessage: maybe });
+    }
+    if (typeof candidate.error === 'string') {
+      const maybe = tryParseMaybeString(candidate.error);
+      if (typeof maybe === 'object') candidate = Object.assign({}, candidate, { __embeddedError: maybe });
+    }
+  } else if (typeof candidate === 'string' && rawJson && typeof rawJson === 'object') {
+    // Sometimes res.json() returns an object but res.text() returns JSON-string. Use rawJson as primary.
+    candidate = rawJson;
+  }
+
+  // Prefer extraction order:
+  // 1. candidate.__embeddedMessage.error.message or __embeddedError.error.message
+  // 2. candidate.error.message
+  // 3. candidate.message
+  // 4. candidate (string) or statusText
+  function extractMessageFrom(obj) {
+    if (!obj) return null;
+    // unwrap embedded structures
+    if (obj.__embeddedMessage) obj = obj.__embeddedMessage;
+    if (obj.__embeddedError) obj = obj.__embeddedError;
+
+    if (typeof obj === 'string') return obj;
+    if (typeof obj === 'object') {
+      if (obj.error && typeof obj.error === 'object') {
+        if (obj.error.message) return obj.error.message;
+      }
+      if (obj.error && typeof obj.error === 'string') {
+        // maybe error is JSON string
+        const parsed = tryParseMaybeString(obj.error);
+        if (parsed && parsed.error && parsed.error.message) return parsed.error.message;
+        if (typeof parsed === 'string') return parsed;
+      }
+      if (obj.message) return obj.message;
+      // sometimes API nests inside `data` or `errors`
+      if (obj.data && obj.data.error && obj.data.error.message) return obj.data.error.message;
+      if (Array.isArray(obj.errors) && obj.errors.length) {
+        // e.g. [{ message: 'x' }]
+        if (obj.errors[0].message) return obj.errors[0].message;
+      }
+      // fallback: stringify something meaningful (but not whole huge object)
+      try {
+        return JSON.stringify(obj);
+      } catch (e) {
+        return String(obj);
+      }
+    }
+    return null;
+  }
+
+  const message = extractMessageFrom(candidate) || extractMessageFrom(rawJson) || extractMessageFrom(rawText) || `${res.status} ${res.statusText || ''}`.trim() || 'Unknown error';
+  // code extraction
+  let code = null;
   try {
-    const txt = await res.text();
-    if (txt) return { message: txt, code: null, raw: txt };
-  } catch (e) { /* ignore text parse error */ }
+    if (candidate && typeof candidate === 'object') {
+      if (candidate.error && candidate.error.code) code = candidate.error.code;
+      else if (candidate.code) code = candidate.code;
+      else if (candidate.__embeddedMessage?.error?.code) code = candidate.__embeddedMessage.error.code;
+      else if (candidate.__embeddedError?.error?.code) code = candidate.__embeddedError.error.code;
+    }
+  } catch (e) { code = null; }
 
-  return { message: res.status ? `${res.status} ${res.statusText || ''}`.trim() : 'Unknown error', code: null, raw: null };
+  return { message, code, raw: candidate };
 }
+
 
 // Safe fallback clear all pin inputs if older helper missing
 if (typeof window.__fg_pin_clearAllInputs !== 'function') {
@@ -8834,41 +8928,61 @@ function __sec_pin_wireHandlers() {
         // use fetchWithAuth to avoid missing auth header/cookies
         // verify current PIN
 const verifyRes = await fetchWithAuth(`${window.__SEC_API_BASE}/api/verify-pin`, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ pin: currentPin, userId: uid })
-});
-if (!verifyRes.ok) {
-  const body = await parseErrorResponse(verifyRes);
-  // Log structured server reason for debugging
-  console.warn('[PIN][warn] current PIN verification failed', body);
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pin: currentPin, userId: uid })
+  });
 
-  // Notify user with server-provided message if available
-  __sec_pin_notify(body.message || 'Current PIN is incorrect. Try again.', 'error');
+  if (!verifyRes.ok) {
+    const body = await parseErrorResponse(verifyRes);
+    console.warn('[PIN][warn] current PIN verification failed', body);
 
-  // clear inputs safely (uses the fallback or your existing helper)
-  try { window.__fg_pin_clearAllInputs(); } catch (_) { 
-    // final fallback local reset
-    document.querySelectorAll('#currentPin, #newPin, #confirmPin').forEach(el => { try { el.value = ''; } catch(_){} });
-    const first = document.querySelector('#currentPin'); if (first) try { first.focus(); } catch(_){} 
+    // Friendly notify using server message when available
+    __sec_pin_notify(body.message || 'Failed to verify PIN. Try again.', 'error');
+
+    // Clear inputs safely (call your safe override if present)
+    try {
+      if (typeof window.__fg_pin_clearAllInputs === 'function') {
+        window.__fg_pin_clearAllInputs();
+      } else {
+        document.querySelectorAll('#currentPin, #newPin, #confirmPin').forEach(el => { if (el) el.value = ''; });
+        const first = document.querySelector('#currentPin'); if (first) first.focus();
+      }
+    } catch (_) {
+      // swallow - we don't want clearing to throw
+      const first = document.querySelector('#currentPin'); if (first) try { first.focus(); } catch (_) {}
+    }
+
+    // Throw a readable error so outer catch logs a string (not object)
+    throw new Error(body.message || `Verify PIN failed (${verifyRes.status})`);
   }
 
-  // throw to stop the success path and let outer catch handle logs/state
-  throw new Error(body.message || `Verify PIN failed (${verifyRes.status})`);
-}
+  // If verify succeeded, SAVE the new PIN
+  const saveRes = await fetchWithAuth(`${window.__SEC_API_BASE}/api/save-pin`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pin: newPin, userId: uid })
+  });
 
-// save new PIN
-const saveRes = await fetchWithAuth(`${window.__SEC_API_BASE}/api/save-pin`, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ pin: newPin, userId: uid })
-});
-if (!saveRes.ok) {
-  const body = await parseErrorResponse(saveRes);
-  console.warn('[PIN][warn] save PIN failed', body);
-  __sec_pin_notify(body.message || 'Failed to update PIN. Try again.', 'error');
-  throw new Error(body.message || `Save PIN failed (${saveRes.status})`);
-}
+  if (!saveRes.ok) {
+    const body = await parseErrorResponse(saveRes);
+    console.warn('[PIN][warn] save PIN failed', body);
+
+    // Notify user with server message when available
+    __sec_pin_notify(body.message || 'Failed to update PIN. Try again.', 'error');
+
+    // keep inputs cleared/focused for retry
+    try {
+      if (typeof window.__fg_pin_clearAllInputs === 'function') {
+        window.__fg_pin_clearAllInputs();
+      } else {
+        document.querySelectorAll('#currentPin, #newPin, #confirmPin').forEach(el => { if (el) el.value = ''; });
+        const first = document.querySelector('#currentPin'); if (first) first.focus();
+      }
+    } catch (_) { /* ignore */ }
+
+    throw new Error(body.message || `Save PIN failed (${saveRes.status})`);
+  }
 
 
         // Success: update state
