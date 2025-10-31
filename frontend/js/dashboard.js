@@ -291,21 +291,20 @@ async function tryImmediateReauthWithFreshOptions(freshOpts, attemptLimit = 1) {
 
 
 // ---------- Loader (refcounted, idempotent) ----------
+// PATCH FOR dashboard.js - Replace your existing loader section with this:
+
+// ---------- Loader (refcounted, idempotent) - FIXED for Modal Manager ----------
 (function () {
-  // loader refcount - number of active showLoader callers
   let __loaderRefCount = 0;
-  let __loaderSavedState = null; // Map to hold saved disabled states
+  let __loaderSavedState = null;
   let __loaderBackHandlerInstalled = false;
 
   function _saveAndDisableInteractive() {
-    // Save only once (map keyed by element)
     __loaderSavedState = new Map();
     const els = Array.from(document.querySelectorAll('button, input, select, textarea, a'));
     els.forEach(el => {
       try {
-        // store boolean previous disabled state
         __loaderSavedState.set(el, !!el.disabled);
-        // disable interactives
         el.disabled = true;
       } catch (e) { /* ignore elements that throw */ }
     });
@@ -316,7 +315,6 @@ async function tryImmediateReauthWithFreshOptions(freshOpts, attemptLimit = 1) {
     try {
       __loaderSavedState.forEach((wasDisabled, el) => {
         try {
-          // restore previous boolean state
           el.disabled = !!wasDisabled;
         } catch (e) { /* ignore */ }
       });
@@ -330,14 +328,18 @@ async function tryImmediateReauthWithFreshOptions(freshOpts, attemptLimit = 1) {
     if (!loader) return;
     __loaderRefCount++;
 
-    // Only actually change DOM when refcount transitions 0 -> 1
     if (__loaderRefCount === 1) {
       loader.hidden = false;
-
-      // Save and disable interactive controls
       _saveAndDisableInteractive();
 
-      // Lock back button (install popstate handler once)
+      // CRITICAL FIX: Only lock scroll if ModalManager isn't already locking it
+      const modalManagerActive = window.ModalManager && window.ModalManager.isScrollLocked && window.ModalManager.isScrollLocked();
+      if (!modalManagerActive) {
+        // Loader can lock scroll (lightweight - just overflow)
+        document.body.style.setProperty('--loader-scroll-lock', 'hidden', 'important');
+        document.body.classList.add('loader-active');
+      }
+
       if (!__loaderBackHandlerInstalled) {
         __backHandler = function () {
           history.pushState(null, '', location.href);
@@ -353,21 +355,23 @@ async function tryImmediateReauthWithFreshOptions(freshOpts, attemptLimit = 1) {
     const loader = document.getElementById('appLoader');
     if (!loader) return;
 
-    // allow callers to force-hide (useful in exceptional cases)
     if (forceReset) {
       __loaderRefCount = 0;
     } else {
       __loaderRefCount = Math.max(0, __loaderRefCount - 1);
     }
 
-    // Only actually restore when refcount reaches 0
     if (__loaderRefCount === 0) {
       loader.hidden = true;
-
-      // restore saved states
       _restoreInteractive();
 
-      // Remove back handler if installed
+      // CRITICAL FIX: Only unlock if ModalManager isn't using it
+      const modalManagerActive = window.ModalManager && window.ModalManager.isScrollLocked && window.ModalManager.isScrollLocked();
+      if (!modalManagerActive) {
+        document.body.style.removeProperty('--loader-scroll-lock');
+        document.body.classList.remove('loader-active');
+      }
+
       if (__loaderBackHandlerInstalled && typeof __backHandler === 'function') {
         window.removeEventListener('popstate', __backHandler);
         __backHandler = null;
@@ -888,7 +892,7 @@ async function getSession() {
         } else {
 
           // change this later
-          
+
           console.warn('[WARN] getSession: Refresh failed — not redirecting; dispatching session:missing');
           window.dispatchEvent(new CustomEvent('session:missing', {
             detail: { reason: 'refresh_failed', timestamp: Date.now() }

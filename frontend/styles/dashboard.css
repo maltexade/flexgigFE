@@ -3045,3 +3045,14 @@ a[style*="color: #f00"] { color: var(--danger); }
 /* visual classes used by simulatePinEntry */
 .simulated-pin { outline: none; }
 .filled { background-color: #fffdef; border-color: #f1c40f !important; }
+
+
+body.loader-active:not(.modal-open) {
+  overflow: var(--loader-scroll-lock, auto) !important;
+}
+
+body.modal-open {
+  overflow: hidden !important;
+  position: fixed !important;
+  width: 100% !important;
+}

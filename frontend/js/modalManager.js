@@ -2,7 +2,6 @@
 (function () {
   'use strict';
 
-  // Toggle for dev logs (set to false in prod)
   const DEBUG_LOGS = true;
 
   function log(type, msg, data = {}) {
@@ -20,49 +19,82 @@
     pinModal: { element: document.getElementById('pinModal'), hasPullHandle: false },
     allPlansModal: { element: document.getElementById('allPlansModal'), hasPullHandle: true },
     contactModal: { element: document.getElementById('contactModal'), hasPullHandle: false },
+    checkoutModal: { element: document.getElementById('checkoutModal'), hasPullHandle: false },
   };
 
-  // Modal stack to track open modals
   const openModalsStack = [];
   let currentDepth = 0;
   let isProcessingPopstate = false;
   let scrollPosition = 0;
+  let bodyScrollLocked = false;
 
   // ==================== SCROLL LOCK MANAGEMENT ====================
   function lockBodyScroll() {
+    if (bodyScrollLocked) {
+      log('debug', 'lockBodyScroll: Already locked, skipping');
+      return;
+    }
+
     // Save current scroll position
     scrollPosition = window.pageYOffset || document.documentElement.scrollTop;
     
-    // Apply styles to prevent scrolling
+    // Apply comprehensive scroll lock styles
     document.body.style.overflow = 'hidden';
     document.body.style.position = 'fixed';
     document.body.style.top = `-${scrollPosition}px`;
     document.body.style.width = '100%';
+    document.body.style.left = '0';
+    document.body.style.right = '0';
     
-    // Also lock html element for iOS
+    // Lock HTML element for iOS Safari
     document.documentElement.style.overflow = 'hidden';
+    document.documentElement.style.position = 'relative';
     
+    // Prevent scroll on main container if exists
+    const mainContent = document.querySelector('main') || document.querySelector('.main-content');
+    if (mainContent) {
+      mainContent.style.overflow = 'hidden';
+      mainContent.style.height = '100vh';
+    }
+    
+    bodyScrollLocked = true;
     log('debug', `lockBodyScroll: Locked at position ${scrollPosition}`);
   }
 
   function unlockBodyScroll() {
-    // Only unlock if no modals are open
+    // Only unlock if no modals remain open
     if (openModalsStack.length > 0) {
-      log('debug', 'unlockBodyScroll: Skipped - modals still open');
+      log('debug', 'unlockBodyScroll: Modals still open, skipping unlock');
+      return;
+    }
+
+    if (!bodyScrollLocked) {
+      log('debug', 'unlockBodyScroll: Not locked, skipping');
       return;
     }
     
-    // Remove scroll lock styles
+    // Remove all scroll lock styles
     document.body.style.overflow = '';
     document.body.style.position = '';
     document.body.style.top = '';
     document.body.style.width = '';
+    document.body.style.left = '';
+    document.body.style.right = '';
     
     document.documentElement.style.overflow = '';
+    document.documentElement.style.position = '';
+    
+    // Restore main content
+    const mainContent = document.querySelector('main') || document.querySelector('.main-content');
+    if (mainContent) {
+      mainContent.style.overflow = '';
+      mainContent.style.height = '';
+    }
     
     // Restore scroll position
     window.scrollTo(0, scrollPosition);
     
+    bodyScrollLocked = false;
     log('debug', `unlockBodyScroll: Unlocked, restored position ${scrollPosition}`);
   }
 
@@ -83,9 +115,17 @@
         z-index: -1;
         opacity: 0;
         transition: opacity 0.3s ease;
+        pointer-events: auto;
       `;
       
-      // Insert backdrop as first child
+      // Prevent clicks on backdrop from closing modal (optional - remove if you want backdrop clicks to close)
+      backdrop.addEventListener('click', (e) => {
+        e.stopPropagation();
+        // Uncomment to allow backdrop clicks to close modal:
+        // const modalId = modal.id;
+        // closeModal(modalId);
+      });
+      
       modal.insertBefore(backdrop, modal.firstChild);
       log('debug', `ensureBackdrop: Created backdrop for ${modal.id}`);
     }
@@ -114,7 +154,7 @@
       return false;
     }
     const cs = window.getComputedStyle(modal);
-    const ariaHidden = modal.getAttribute('aria-hidden') === 'true' ? false : true;
+    const ariaHidden = modal.getAttribute('aria-hidden') !== 'true';
     const isVisible =
       cs.display !== 'none' &&
       cs.visibility !== 'hidden' &&
@@ -201,7 +241,7 @@
         log('debug', `forceCloseModal: Modal ${modalId} closed, stack: ${openModalsStack.map((item) => item.id).join(', ')}, depth: ${currentDepth}`);
       }
       
-      // Unlock scroll if no more modals
+      // CRITICAL: Unlock scroll only when all modals closed
       unlockBodyScroll();
       
       const previousModal = openModalsStack[openModalsStack.length - 1];
@@ -249,7 +289,7 @@
       return;
     }
 
-    // Lock body scroll when first modal opens
+    // CRITICAL: Lock body scroll when first modal opens
     if (openModalsStack.length === 0) {
       lockBodyScroll();
     }
@@ -343,7 +383,7 @@
         log('debug', `closeModal: Modal ${modalId} closed, stack: ${openModalsStack.map((item) => item.id).join(', ')}, depth: ${currentDepth}`);
       }
 
-      // Unlock scroll if no more modals
+      // CRITICAL: Unlock scroll only when all modals closed
       unlockBodyScroll();
 
       const previousModal = openModalsStack[openModalsStack.length - 1];
@@ -632,6 +672,7 @@
       forceCloseModal,
       getOpenModals: () => openModalsStack.map((item) => item.id),
       getCurrentDepth: () => currentDepth,
+      isScrollLocked: () => bodyScrollLocked,
       closeAll: () => {
         log('info', 'closeAll: Closing all modals');
         while (openModalsStack.length > 0) {
