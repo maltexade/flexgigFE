@@ -8602,61 +8602,39 @@ window.showSlideNotification = window.showSlideNotification || showSlideNotifica
   // notify helper (prefer slide notification)
   // Robust notify: always deliver a plain string to UI and log raw input for debugging.
 // Keeps slide/toast preferences but normalizes message shape.
+// Replace existing __sec_pin_notify with this robust version.
+// Paste this into the same scope as other helpers.
+const PIN_DEBUG = true; // set false when done debugging
+
 function __sec_pin_notify(raw, type = 'info', duration = (type === 'error' ? 4000 : 2000)) {
-  // Lightweight debug helper (safe if not present)
-  function _dlog(...args) {
-    if (typeof fgPinLog === 'function') return fgPinLog('debug', ...args);
-    if (window && window.console && typeof console.debug === 'function') console.debug('[pin-notify]', ...args);
+  function dlog(...args) { if (!PIN_DEBUG) return; try { console.debug('[pin-notify]', ...args); } catch(_){} }
+
+  // 1) Normalize raw -> msg (plain string)
+  let msg = '';
+  try {
+    if (raw instanceof Error) msg = raw.message || String(raw);
+    else if (raw == null) msg = '';
+    else if (typeof raw === 'string') msg = raw;
+    else if (typeof raw === 'object') {
+      if (typeof raw.message === 'string' && raw.message.trim()) msg = raw.message;
+      else if (raw.error && typeof raw.error === 'object' && typeof raw.error.message === 'string') msg = raw.error.message;
+      else if (raw.error && typeof raw.error === 'string') {
+        try { const p = JSON.parse(raw.error); if (p?.message) msg = p.message; else msg = raw.error; } catch(e){ msg = raw.error; }
+      } else if (Array.isArray(raw.errors) && raw.errors[0] && raw.errors[0].message) msg = raw.errors[0].message;
+      else {
+        try { msg = JSON.stringify(raw); } catch(e){ msg = String(raw); }
+      }
+    } else msg = String(raw);
+  } catch (e) {
+    msg = 'An error occurred. Try again.';
   }
 
+  // unwrap one level of double-encoded JSON strings like '{"error":{"message":"Invalid PIN"}}'
   try {
-    _dlog('__sec_pin_notify called with:', raw, 'type:', type, 'duration:', duration);
-
-    // Normalize raw -> plain string, preferring common server shapes
-    let msg = '';
-
-    if (raw instanceof Error) {
-      msg = raw.message || String(raw);
-    } else if (raw == null) { // null or undefined
-      msg = '';
-    } else if (typeof raw === 'string') {
-      msg = raw;
-    } else if (typeof raw === 'object') {
-      // Prefer .message
-      if (typeof raw.message === 'string' && raw.message.trim()) {
-        msg = raw.message;
-      } else if (raw.error && typeof raw.error === 'object' && typeof raw.error.message === 'string') {
-        msg = raw.error.message;
-      } else if (raw.error && typeof raw.error === 'string') {
-        // maybe raw.error is a JSON string -> try parse
-        try {
-          const parsed = JSON.parse(raw.error);
-          if (parsed?.message) msg = parsed.message;
-          else msg = raw.error;
-        } catch (e) {
-          msg = raw.error;
-        }
-      } else if (Array.isArray(raw.errors) && raw.errors.length && raw.errors[0].message) {
-        msg = raw.errors[0].message;
-      } else {
-        // Last resort: compact JSON.stringify (shorten if huge)
-        try {
-          const s = JSON.stringify(raw);
-          msg = s.length > 400 ? s.slice(0, 400) + '…' : s;
-        } catch (e) {
-          msg = String(raw);
-        }
-      }
-    } else {
-      // number, boolean, etc.
-      msg = String(raw);
-    }
-
-    // If msg itself looks like JSON string (double-encoded), try one-level unwrap:
-    try {
-      const trimmed = msg.trim();
-      if ((trimmed.startsWith('{') || trimmed.startsWith('[') || (trimmed.startsWith('"') && trimmed.endsWith('"')))) {
-        const parsed = JSON.parse(trimmed);
+    const t = (typeof msg === 'string' ? msg.trim() : msg);
+    if (t && (t.startsWith('{') || t.startsWith('[') || (t.startsWith('"') && t.endsWith('"')))) {
+      try {
+        const parsed = JSON.parse(t);
         if (parsed && typeof parsed === 'object') {
           if (parsed.message) msg = parsed.message;
           else if (parsed.error && parsed.error.message) msg = parsed.error.message;
@@ -8664,73 +8642,108 @@ function __sec_pin_notify(raw, type = 'info', duration = (type === 'error' ? 400
         } else if (typeof parsed === 'string') {
           msg = parsed;
         }
-      }
-    } catch (e) {
-      // ignore parse errors — keep msg as-is
+      } catch (e) { /* ignore parse failure */ }
     }
+  } catch (e) { /* ignore */ }
 
-    msg = (typeof msg === 'string' ? msg.trim() : String(msg));
-    if (!msg) msg = (type === 'error' ? 'An error occurred. Try again.' : '');
+  // final cleanup
+  msg = (typeof msg === 'string' ? msg.trim() : String(msg));
+  if (!msg) msg = (type === 'error' ? 'An error occurred. Try again.' : '');
 
-    _dlog('__sec_pin_notify final message:', msg);
+  dlog('__sec_pin_notify: normalized msg:', msg, 'type:', type, 'duration:', duration, 'rawPreview:', raw);
 
-    // ------- Manage existing notifies more gracefully -------
-    // Instead of destroying them all immediately, prefer to remove only transient toasts that are non-sticky.
-    // If you *must* remove all, keep the existing behavior; otherwise attempt a gentler approach:
+  // 2) Gentle cleanup of non-sticky old toasts (do not aggressively remove sticky server banners)
+  try {
+    const container = document.querySelector('#flexgig_slide_container') || document.querySelector('#toast_container');
+    if (container) {
+      Array.from(container.children).forEach((el) => {
+        const isSticky = el.dataset?.serverId || el.classList?.contains('sticky');
+        if (!isSticky) try { el.remove(); } catch (e) { dlog('failed to remove toast child', e); }
+      });
+    } else {
+      // minimal fallback: remove some known transient classes
+      document.querySelectorAll('.flexgig-toast, .toast, .slide-notification').forEach(el => {
+        if (!el.classList.contains('sticky')) try { el.remove(); } catch(e) { dlog('removal fallback failed', e); }
+      });
+    }
+  } catch (e) {
+    dlog('notify cleanup error', e);
+  }
+
+  // 3) Deliver to UI: try safe signatures for both slide and toast helpers.
+  // We'll attempt message-first signature first because that's common, then object-style.
+  let delivered = false;
+
+  // Helper to try a call and catch failures
+  function tryCall(fn, args, label) {
     try {
-      const container = document.querySelector('#flexgig_slide_container') || document.querySelector('#toast_container') || null;
-      if (container) {
-        // Remove only toasts that are not the top sticky server banner (if your app marks them)
-        const children = Array.from(container.children);
-        children.forEach((el, i) => {
-          // Detect server-sticky marker (example: data-server-id or class 'sticky')
-          const isSticky = el.dataset && (el.dataset.serverId || el.dataset.sticky) || el.classList.contains('sticky') || false;
-          if (!isSticky) {
-            // remove non-sticky old toasts so they don't overlap
-            try { el.remove(); } catch (e) { /* ignore */ }
-          } else {
-            // leave sticky banners alone
-          }
-        });
-      } else {
-        // fallback (old behavior) — remove all
-        const existing = document.querySelectorAll('.slide-notification, .toast, .flexgig-toast');
-        existing.forEach(el => { try { el.remove(); } catch(e){} });
+      fn.apply(null, args);
+      dlog('notify: used', label, 'args:', args);
+      return true;
+    } catch (err) {
+      dlog('notify: call failed for', label, 'error:', err);
+      return false;
+    }
+  }
+
+  // Try slide notification (message-first signature)
+  try {
+    if (typeof showSlideNotification === 'function') {
+      // attempt common signature: (message, type, duration, opts)
+      delivered = tryCall(showSlideNotification, [msg, type, duration, { position: 'top-right' }], 'showSlideNotification(message, type, duration, opts)');
+      if (!delivered) {
+        // attempt object signature: ({ message, type, duration, position })
+        delivered = tryCall(showSlideNotification, [{ message: msg, type, duration, position: 'top-right' }], 'showSlideNotification({message,...})');
       }
-    } catch (e) {
-      // don't let removal errors block notifications
-      _dlog('notify: cleanup existing toasts errored', e);
+      if (delivered) return;
+    }
+  } catch (e) { dlog('showSlideNotification path error', e); }
+
+  // Try toast helper
+  try {
+    if (typeof showToast === 'function') {
+      // try common signature (message, type, duration)
+      delivered = tryCall(showToast, [msg, type, duration], 'showToast(message, type, duration)');
+      if (!delivered) {
+        // try object style
+        delivered = tryCall(showToast, [{ message: msg, type, duration }], 'showToast({message,...})');
+      }
+      if (delivered) return;
+    }
+  } catch (e) { dlog('showToast path error', e); }
+
+  // 4) Final fallback: build a simple DOM toast inline (guarantee string usage)
+  try {
+    const fallbackId = '__fg_notify_fallback';
+    let fallbackContainer = document.getElementById(fallbackId);
+    if (!fallbackContainer) {
+      fallbackContainer = document.createElement('div');
+      fallbackContainer.id = fallbackId;
+      fallbackContainer.style.position = 'fixed';
+      fallbackContainer.style.top = '20px';
+      fallbackContainer.style.right = '20px';
+      fallbackContainer.style.zIndex = '13000';
+      document.body.appendChild(fallbackContainer);
     }
 
-    // ------- Deliver to UI: prefer slide, fallback to toast -------
-    try {
-      if (typeof showSlideNotification === 'function') {
-        // Always pass a string message; other options left as an object
-        showSlideNotification({ message: msg, type, duration, position: 'top-right' });
-        return;
-      }
-    } catch (e) {
-      _dlog('showSlideNotification failed:', e);
-      // fallthrough to toast
-    }
-
-    try {
-      if (typeof showToast === 'function') {
-        // showToast often expects (message, type, duration)
-        showToast(msg, type, duration);
-        return;
-      }
-    } catch (e) {
-      _dlog('showToast failed:', e);
-    }
-
-    // Final fallback: console (avoid alert)
-    if (type === 'error') console.error(msg);
-    else console.log(msg);
-
-  } catch (outerErr) {
-    // Last-resort fallback — ensure nothing throws
-    try { console.error('__sec_pin_notify failed', outerErr); } catch (_) {}
+    const el = document.createElement('div');
+    el.textContent = msg; // textContent ensures object->String handled correctly
+    el.style.background = (type === 'error' ? '#e53935' : '#333');
+    el.style.color = '#fff';
+    el.style.padding = '10px 14px';
+    el.style.borderRadius = '8px';
+    el.style.marginTop = '8px';
+    el.style.maxWidth = '360px';
+    el.style.boxShadow = '0 6px 18px rgba(0,0,0,0.18)';
+    fallbackContainer.appendChild(el);
+    setTimeout(() => { try { el.remove(); } catch(_) {} }, duration || 3000);
+    dlog('notify: used fallback DOM toast');
+    return;
+  } catch (e) {
+    // last resort: console
+    console[type === 'error' ? 'error' : 'log'](msg);
+    dlog('notify fallback to console, msg:', msg, 'error:', e);
+    return;
   }
 }
 
