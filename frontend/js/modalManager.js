@@ -27,6 +27,19 @@
   let currentDepth = 0;
   let isProcessingPopstate = false;
 
+  // Z-Index stack for nested modals (auto-bumps)
+  let modalZIndexBase = 1049;  // Bootstrap default -1
+  function getNextZIndex() {
+    modalZIndexBase++;
+    return modalZIndexBase;
+  }
+  function resetZIndexStack() {
+    modalZIndexBase = 1049;
+    openModalsStack.forEach((item, idx) => {
+      item.modal.style.zIndex = idx === 0 ? 1050 : 1050 + (idx + 1);
+    });
+  }
+
   // Utility: Check if modal is visible (trimmed logs)
   function isModalVisible(modal) {
     if (!modal) {
@@ -49,6 +62,13 @@
         'aria-hidden': modal.getAttribute('aria-hidden')
       });
       modal.dataset._lastVisible = isVisible;
+    }
+
+    // Detect ghosts (visible but no focusables/interactive)
+    const hasFocusable = modal.querySelector('button:not([disabled]), input:not([disabled])') !== null;
+    if (isVisible && !hasFocusable && !modal.dataset.ghost) {
+      modal.dataset.ghost = 'true';
+      log('warn', `isModalVisible: Flagged ${modal.id} as ghost (visible but empty)`);
     }
     return isVisible;
   }
@@ -116,6 +136,8 @@
       modal.style.display = 'none';
       modal.setAttribute('aria-hidden', 'true');
       modal.setAttribute('inert', '');
+      modal.style.zIndex = '';  // Reset z-index
+      
       const idx = openModalsStack.findIndex((item) => item.id === modalId);
       if (idx !== -1) {
         openModalsStack.splice(idx, 1);
@@ -189,6 +211,10 @@
         currentDepth++;
       }
 
+      // NEW: Set z-index based on stack depth
+      modal.style.zIndex = getNextZIndex();
+      log('debug', `openModal: Set z-index ${modal.style.zIndex} for ${modalId} (depth ${currentDepth})`);
+
       if (!skipHistory) {
         history.pushState({ modalId }, '', `#${modalId}`);
       }
@@ -248,6 +274,7 @@
       modal.style.display = 'none';
       modal.setAttribute('aria-hidden', 'true');
       modal.setAttribute('inert', '');
+      modal.style.zIndex = '';  // Reset z-index
       
       // Remove from stack
       const idx = openModalsStack.findIndex((item) => item.id === modalId);
@@ -257,35 +284,61 @@
         log('debug', `closeModal: Modal ${modalId} closed, stack: ${openModalsStack.map((item) => item.id).join(', ')}, depth: ${currentDepth}`);
       }
 
-      // Restore previous modal if exists
+      // ✅ CRITICAL: Full restore for previous modal (z-index, trap clear, repaint)
       const previousModal = openModalsStack[openModalsStack.length - 1];
       if (previousModal) {
         const prevEl = previousModal.modal;
         
-        // Ensure previous modal is visible
+        // Ensure previous modal is visible + z-index top
         if (!isModalVisible(prevEl)) {
           prevEl.classList.remove('hidden');
           prevEl.style.display = modals[previousModal.id].hasPullHandle ? 'block' : 'flex';
           prevEl.setAttribute('aria-hidden', 'false');
           prevEl.removeAttribute('inert');
-          
-          // Re-apply z-index to ensure it's on top
-          prevEl.style.zIndex = '1050';
-          log('debug', `closeModal: Restored visibility for ${previousModal.id}`);
         }
         
-        // Focus first focusable element
+        // NEW: Bump z-index to top + force repaint
+        prevEl.style.zIndex = getNextZIndex();  // Fresh top
+        log('debug', `closeModal: Bumped z-index ${prevEl.style.zIndex} for restored ${previousModal.id}`);
+        
+        // Force repaint (fixes ghost overlays)
+        prevEl.offsetHeight;  // Trigger reflow
+        
+        // Clear any lingering trap on previous (if duped)
+        if (prevEl._trapHandler) {
+          prevEl.removeEventListener('keydown', prevEl._trapHandler);
+          delete prevEl._trapHandler;
+        }
+        trapFocus(prevEl);  // Re-apply fresh trap
+        
+        // Focus first focusable
         const focusable = prevEl.querySelector(
           'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
         );
         if (focusable) {
-          setTimeout(() => focusable.focus(), 100);
-          log('debug', `closeModal: Restored focus to ${previousModal.id}`);
+          setTimeout(() => {
+            focusable.focus();
+            // Ensure interactive: Remove any stale inert/disabled
+            focusable.removeAttribute('inert');
+            focusable.disabled = false;
+          }, 150);  // Delay for reflow
+          log('debug', `closeModal: Restored focus + interactivity to ${previousModal.id}`);
+        }
+        
+        // Guard: If ghost (e.g., clicks pass through), force close all below
+        if (prevEl.dataset.ghost === 'true') {
+          log('warn', `closeModal: Detected ghost on ${previousModal.id} – closing stack`);
+          while (openModalsStack.length > openModalsStack.findIndex(item => item.id === previousModal.id)) {
+            const lower = openModalsStack.pop();
+            if (lower.modal) lower.modal.dataset.ghost = 'false';  // Clear
+          }
+          resetZIndexStack();  // Reset clean
         }
       } else {
-        // No more modals, focus body
+        // No more modals, focus body + reset z-index
         document.body.focus();
-        log('debug', 'closeModal: Restored focus to document body');
+        resetZIndexStack();
+        log('debug', 'closeModal: Restored focus to document body + z-index reset');
       }
     });
 
@@ -361,13 +414,23 @@
         newTopModal.id === e.state.modalId &&
         !isModalVisible(newTopModal.modal)
       ) {
-        newTopModal.modal.classList.remove('hidden');
-        newTopModal.modal.style.display = modals[newTopModal.id].hasPullHandle ? 'block' : 'flex';
-        newTopModal.modal.setAttribute('aria-hidden', 'false');
-        newTopModal.modal.removeAttribute('inert');
-        applyTransition(newTopModal.modal, true);
-        trapFocus(newTopModal.modal);
-        log('debug', `handlePopstate: Restored modal ${newTopModal.id}`);
+        const prevEl = newTopModal.modal;
+        prevEl.classList.remove('hidden');
+        prevEl.style.display = modals[newTopModal.id].hasPullHandle ? 'block' : 'flex';
+        prevEl.setAttribute('aria-hidden', 'false');
+        prevEl.removeAttribute('inert');
+        
+        // NEW: Same restore as closeModal (z-index, repaint, trap)
+        prevEl.style.zIndex = getNextZIndex();
+        prevEl.offsetHeight;  // Repaint
+        if (prevEl._trapHandler) {
+          prevEl.removeEventListener('keydown', prevEl._trapHandler);
+          delete prevEl._trapHandler;
+        }
+        trapFocus(prevEl);
+        
+        applyTransition(prevEl, true);
+        log('debug', `handlePopstate: Restored modal ${newTopModal.id} with z-index ${prevEl.style.zIndex}`);
       }
     } else if (openModalsStack.length > 0) {
       log('debug', 'handlePopstate: No modal state, closing top modal only');
@@ -582,6 +645,9 @@
         log('info', 'closeAll: All modals closed, reset history state');
       },
     };
+
+    resetZIndexStack();  // Clean z-index on boot
+    log('debug', 'initialize: Z-index stack reset');
     
     log('info', 'initialize: Initialization complete');
   }
