@@ -5155,7 +5155,7 @@ function __fg_pin_clearAllInputs() {
           }
         } catch (err) {
           __fg_pin_log.e('Error verifying PIN:', err);
-          __fg_pin_notify('Failed to verify PIN. Try again.', 'error');
+          __fg_pin_notify('Current PIN is incorrect. Try again.', 'error');
           return;
         }
 
@@ -8775,7 +8775,7 @@ if (!verifyRes.ok) {
   console.warn('[PIN][warn] current PIN verification failed', body);
 
   // Notify user with server-provided message if available
-  __sec_pin_notify(body.message || 'Failed to verify PIN. Try again.', 'error');
+  __sec_pin_notify(body.message || 'Current PIN is incorrect. Try again.', 'error');
 
   // clear inputs safely (uses the fallback or your existing helper)
   try { window.__fg_pin_clearAllInputs(); } catch (_) { 
