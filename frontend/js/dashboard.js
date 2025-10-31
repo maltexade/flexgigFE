@@ -9898,6 +9898,7 @@ function toggleKeypadProcessing(disabled) {
   const inputs = getReauthInputs();
   inputs.forEach(i => { i.disabled = disabled; });
 }
+window.toggleKeypadProcessing = window.toggleKeypadProcessing || toggleKeypadProcessing; // expose if needed
 
 // PIN completion handler (server verification)
 // ----- Updated implementation with proper reauth flow -----
