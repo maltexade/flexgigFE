@@ -380,22 +380,33 @@ async function tryImmediateReauthWithFreshOptions(freshOpts, attemptLimit = 1) {
 
 async function withLoader(task) {
   const start = Date.now();
-  // callerInfo extraction (keep as-is) ...
+
+  // Try to extract caller info from the stack trace
   let callerInfo = 'unknown';
   try {
     const rawStack = (new Error()).stack || '';
     const lines = rawStack.split('\n').map(l => l.trim()).filter(Boolean);
+
+    // Find the first stack frame that is NOT inside withLoader itself
+    // The stack usually looks like:
+    // Error
+    // at withLoader (file:line:col)
+    // at callerFunction (file:line:col)
     let callerLine = lines.find(l => !/withLoader/.test(l) && !/Error/.test(l));
+    // Fallback to the second line if above didn't work
     if (!callerLine && lines.length >= 2) callerLine = lines[1];
+
     if (callerLine) {
+      // Try to match common V8/Chromium stack frame: "at funcName (fileURL:line:col)"
       let m = callerLine.match(/at\s+(.*)\s+\((.*):(\d+):(\d+)\)/);
       if (m) {
         const func = m[1];
-        const file = m[2].split('/').pop();
+        const file = m[2].split('/').pop(); // keep filename for readability
         const line = m[3];
         const col = m[4];
         callerInfo = `${func} @ ${file}:${line}:${col}`;
       } else {
+        // Try Firefox-like format: "funcName@fileURL:line:col"
         m = callerLine.match(/(.*)@(.+):(\d+):(\d+)/);
         if (m) {
           const func = m[1] || '(anonymous)';
@@ -404,6 +415,7 @@ async function withLoader(task) {
           const col = m[4];
           callerInfo = `${func} @ ${file}:${line}:${col}`;
         } else {
+          // Last resort: just use the raw frame string
           callerInfo = callerLine;
         }
       }
@@ -413,21 +425,7 @@ async function withLoader(task) {
   }
 
   console.log(`[DEBUG ⌛⌛⌛] withLoader: Starting task (called from ${callerInfo})`);
-
-  // show loader first
   showLoader();
-
-  // Give the browser one frame to paint _before_ running the task.
-  // This avoids the common "loader appears too late" UX problem.
-  await new Promise((resolve) => {
-    if (typeof requestAnimationFrame === 'function') {
-      requestAnimationFrame(() => requestAnimationFrame(resolve)); // two frames is safest
-    } else {
-      // fallback
-      setTimeout(resolve, 16);
-    }
-  });
-
   try {
     const result = await task();
     const duration = Date.now() - start;
@@ -441,7 +439,6 @@ async function withLoader(task) {
     try { hideLoader(); } catch (e) { /* ignore */ }
   }
 }
-
 
 
 
@@ -4345,9 +4342,6 @@ updateBalanceDisplay();
       toast.className = `flexgig-toast ${type}`;
       toast.textContent = message;
       container.appendChild(toast);
-      // inside showToast after container.appendChild(toast);
-      setTimeout(() => toast.classList.add('show'), 12); // 8–20ms is fine
-
 
       // animate in
       requestAnimationFrame(() => toast.classList.add('show'));
@@ -4481,25 +4475,19 @@ updateBalanceDisplay();
   }
 
   if (step === 'confirm') {
-  if (currentPin !== firstPin) {
-    console.warn('[PIN] mismatch on confirmation');
-    showToast('PINs do not match — try again', 'error');
-    step = 'create';
-    if (pinTitleEl) pinTitleEl.textContent = 'Create PIN';
-    if (pinSubtitleEl) pinSubtitleEl.textContent = 'Create a 4-digit PIN';
-    resetInputs();
-    localStorage.setItem('hasPin', 'false');
-    return;
-  }
+    if (currentPin !== firstPin) {
+      console.warn('[PIN] mismatch on confirmation');
+      showToast('PINs do not match — try again', 'error');
+      step = 'create';
+      if (pinTitleEl) pinTitleEl.textContent = 'Create PIN';
+      if (pinSubtitleEl) pinSubtitleEl.textContent = 'Create a 4-digit PIN';
+      resetInputs();
+      localStorage.setItem('hasPin', 'false'); // PIN not set
+      return;
+    }
 
-  // Prevent double submit
-  if (processing) return;
-  processing = true;
-
-  // Perform network operation within loader, but DO NOT do UI updates inside the task.
-  let saveError = null;
-  try {
-    await withLoader(async () => {
+    processing = true;
+    return withLoader(async () => {
       try {
         const res = await fetch('https://api.flexgig.com.ng/api/save-pin', {
           method: 'POST',
@@ -4507,37 +4495,30 @@ updateBalanceDisplay();
           body: JSON.stringify({ pin: currentPin }),
           credentials: 'include',
         });
+
         if (!res.ok) throw new Error('Save PIN failed');
-        // optionally parse response if you need details:
-        // const payload = await res.json();
+
+        console.log('[dashboard.js] PIN setup successfully');
+        localStorage.setItem('hasPin', 'true'); // PIN successfully set
+        onPinSetupSuccess();
+
+        const dashboardPinCard = document.getElementById('dashboardPinCard');
+        if (dashboardPinCard) dashboardPinCard.style.display = 'none';
+        if (accountPinStatus) accountPinStatus.textContent = 'PIN set';
+
+        showToast('PIN updated successfully', 'success', 2400);
+        pinModal.classList.add('hidden');
+        resetInputs();
       } catch (err) {
-        saveError = err;
-        throw err; // rethrow to let withLoader log it
+        console.error('[dashboard.js] PIN save error:', err);
+        showToast('Failed to save PIN. Try again.', 'error', 2200);
+        localStorage.setItem('hasPin', 'false'); // PIN failed
+        resetInputs();
+      } finally {
+        processing = false;
       }
     });
-
-    // Successful save -> update UI *after* loader hidden
-    console.log('[dashboard.js] PIN setup successfully (server confirmed)');
-    localStorage.setItem('hasPin', 'true');
-    onPinSetupSuccess(); // keep this call (it updates cards, dispatches events)
-    const dashboardPinCard = document.getElementById('dashboardPinCard');
-    if (dashboardPinCard) dashboardPinCard.style.display = 'none';
-    pinModal.classList.add('hidden');
-    resetInputs();
-    showToast('PIN updated successfully', 'success', 2400);
-
-  } catch (err) {
-    // Save failed -> handle after loader hidden too
-    console.error('[dashboard.js] PIN save error (post-withLoader):', err, saveError);
-    localStorage.setItem('hasPin', 'false');
-    resetInputs();
-    showToast('Failed to save PIN. Try again.', 'error', 2200);
-  } finally {
-    processing = false;
   }
-  return;
-}
-
 
   if (step === 'reauth') {
     return withLoader(async () => {
@@ -8481,16 +8462,21 @@ window.showSlideNotification = window.showSlideNotification || showSlideNotifica
   const __sec_PIN_CONFIRM    = __sec_q('#confirmPin');
 
   // notify helper (prefer slide notification)
-  function __sec_pin_notify(msg, type = 'info') {
-    __sec_log.i('[PIN notify]', msg, type);
-    if (typeof showSlideNotification === 'function') {
-      showSlideNotification(msg, type);
-    } else if (typeof showToast === 'function') {
-      showToast(msg, type === 'error' ? 'error' : (type === 'success' ? 'success' : 'info'));
-    } else {
-      if (type === 'error') console.error('[PIN]', msg); else console.log('[PIN]', msg);
-    }
+  function __sec_pin_notify(message, type = 'info', duration = type === 'error' ? 4000 : 2000) {
+  // Clear existing notifies first (prevents overlap/stale "wrong" ones)
+  const existing = document.querySelectorAll('.slide-notification, .toast');
+  existing.forEach(el => el.remove());  // Or el.classList.add('hidden')
+
+  // Prefer slide-in, fallback to toast
+  if (typeof showSlideNotification === 'function') {
+    showSlideNotification({ message, type, duration, position: 'top-right' });  // Add position if not default
+  } else if (typeof showToast === 'function') {
+    showToast(message, type, duration);
+  } else {
+    // Fallback: Native alert or console (but avoid in prod)
+    console[type === 'error' ? 'error' : 'log'](message);
   }
+}
 
   // small helper: get uid from session or local storage
   async function __sec_pin_getUid() {
@@ -8622,130 +8608,148 @@ window.showSlideNotification = window.showSlideNotification || showSlideNotifica
   }
 
   /* ========== Wire PIN modal controls ========== */
-/* ========== Wire PIN modal controls ========== */
 function __sec_pin_wireHandlers() {
-  if (__sec_CHANGE_FORM) {
-    __sec_CHANGE_FORM.addEventListener('submit', async (ev) => {
-  ev.preventDefault();
-  try {
-    __sec_log.d('[PIN] submit started');
-    const cur = String((__sec_PIN_CURRENT && __sec_PIN_CURRENT.value) || '').trim();
-    const neu = String((__sec_PIN_NEW && __sec_PIN_NEW.value) || '').trim();
-    const conf = String((__sec_PIN_CONFIRM && __sec_PIN_CONFIRM.value) || '').trim();
-    __sec_log.d('[PIN] submitted values', { cur, neu, conf });
+  // Element selections (consistent with your __sec_q wrapper)
+  const __sec_CHANGE_FORM = __sec_q('#changePinForm');
+  const __sec_RESET_BTN = __sec_q('#resetPinBtn');
+  const __sec_PIN_CURRENT = __sec_q('#currentPin');
+  const __sec_PIN_NEW = __sec_q('#newPin');
+  const __sec_PIN_CONFIRM = __sec_q('#confirmPin');
 
-    // Helper to clear inputs
-    const clearInputs = () => {
-      if (__sec_PIN_CURRENT) __sec_PIN_CURRENT.value = '';
-      if (__sec_PIN_NEW) __sec_PIN_NEW.value = '';
-      if (__sec_PIN_CONFIRM) __sec_PIN_CONFIRM.value = '';
-    };
+  // Guard: Exit if no form/elements (e.g., wrong modal open)
+  if (!__sec_CHANGE_FORM || !__sec_PIN_CURRENT || !__sec_PIN_NEW || !__sec_PIN_CONFIRM) {
+    __sec_log.d('PIN elements not found, skipping wiring');
+    return;
+  }
 
-    // === Input validation ===
-    if (!/^\d{4}$/.test(cur)) {
-      __sec_pin_notify('Enter your current 4-digit PIN', 'error');
-      __sec_log.w('[PIN] current invalid');
-      clearInputs();
-      return;
-    }
-    if (!/^\d{4}$/.test(neu)) {
-      __sec_pin_notify('New PIN must be 4 digits', 'error');
-      __sec_log.w('[PIN] new invalid');
-      clearInputs();
-      return;
-    }
-    if (neu === cur) {
-      __sec_pin_notify('New PIN must be different from current PIN', 'error');
-      __sec_log.w('[PIN] new equals current');
-      clearInputs();
-      return;
-    }
-    if (neu !== conf) {
-      __sec_pin_notify('New PIN and confirmation do not match', 'error');
-      __sec_log.w('[PIN] confirm mismatch');
-      clearInputs();
-      return;
-    }
+  // Strict input binding (digits, auto-focus—your existing func)
+  __sec_pin_bindStrictInputs();
 
-    // === Get user ID ===
-    const info = await __sec_pin_getUid();
-    if (!info || !info.uid) {
-      __sec_pin_notify('You must be signed in to change PIN', 'error');
-      __sec_log.e('[PIN] no signed-in user');
-      clearInputs();
-      return;
-    }
-    const uid = info.uid;
-    __sec_log.d('[PIN] uid obtained', uid);
-
-    // === Verify current PIN with API ===
-    __sec_pin_notify('Verifying current PIN...', 'info');
-    const verifyResponse = await fetch('https://api.flexgig.com.ng/api/verify-pin', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
-        'Content-Type': 'application/json',
-      },
-      credentials: 'include',
-      body: JSON.stringify({ pin: cur }),
-    });
-
-    if (!verifyResponse.ok) {
-      const errText = await verifyResponse.text();
-      console.error('[SecurityPin] PIN verification failed:', errText);
-      __sec_pin_notify('Current PIN is incorrect', 'error');
-      clearInputs();
-      return;
-    }
-    __sec_log.i('[PIN] current PIN verified by API');
-
-    // === Update PIN ===
-    __sec_pin_notify('Updating PIN...', 'info');
-    const upd = await __sec_pin_updateStored(uid, neu);
-    if (upd && upd.ok) {
-      __sec_pin_notify('PIN changed successfully', 'success');
-      __sec_log.i('[PIN] update succeeded');
-
-      clearInputs();
-
-      if (window.ModalManager?.closeModal) {
-        window.ModalManager.closeModal('securityPinModal');
-        __sec_log.i('[PIN] closed securityPinModal via ModalManager');
-      } else {
-        __sec_PIN_MODAL?.classList.remove('active');
-        __sec_PIN_MODAL?.setAttribute('aria-hidden', 'true');
-        __sec_log.w('[PIN] ModalManager not found, closed directly');
+  // INSERT DEBOUNCE HERE: Real-time matching check on #confirmPin
+  let confirmDebounce;
+  __sec_PIN_CONFIRM.addEventListener('input', (e) => {
+    clearTimeout(confirmDebounce);
+    confirmDebounce = setTimeout(() => {
+      const newPin = __sec_PIN_NEW.value;
+      if (e.target.value !== newPin && e.target.value.length === 4) {
+        __sec_pin_notify('PINs do not match. Please retype.', 'warning', 1500);
       }
-    } else {
-      __sec_log.e('[PIN] update failed', upd?.error);
-      __sec_pin_notify('Failed to update PIN. Please try again later.', 'error');
-      clearInputs();
-    }
-  } catch (err) {
-    __sec_log.e('[PIN] submit error', err);
-    __sec_pin_notify('Unexpected error while changing PIN', 'error');
-    if (__sec_PIN_CURRENT) __sec_PIN_CURRENT.value = '';
-    if (__sec_PIN_NEW) __sec_PIN_NEW.value = '';
-    if (__sec_PIN_CONFIRM) __sec_PIN_CONFIRM.value = '';
-  }
-}, { passive: false });
-    __sec_log.i('[PIN] change form handler attached');
-  } else {
-    __sec_log.d('[PIN] change form not present yet');
+    }, 300);  // Debounce 300ms—feels responsive, no spam
+  });
+
+  // Wire form submit: Use the patched async handler (no 'e' in wiring call)
+  if (__sec_CHANGE_FORM) {
+    __sec_CHANGE_FORM.addEventListener('submit', async (e) => {  // Anonymous handler with (e)
+      e.preventDefault();  // Stops bubbling/form native submit
+      e.stopPropagation();
+
+      const currentPin = __sec_PIN_CURRENT.value.trim();
+      const newPin = __sec_PIN_NEW.value.trim();
+      const confirmPin = __sec_PIN_CONFIRM.value.trim();
+
+      // Immediate disable + loader (before validation)
+      toggleKeypadProcessing(true);  // Grays out inputs/keypad instantly
+      const loaderPromise = withLoader(async () => {  // Wrap WHOLE flow
+        try {
+          // Synchronous validation (fast, <10ms)
+          if (!/^\d{4}$/.test(currentPin) || !/^\d{4}$/.test(newPin) || !/^\d{4}$/.test(confirmPin)) {
+            throw new Error('All fields must be exactly 4 digits.');
+          }
+          if (newPin === currentPin) {
+            throw new Error('New PIN must be different from current PIN.');
+          }
+          if (newPin !== confirmPin) {
+            throw new Error('Confirm PIN does not match new PIN.');
+          }
+
+          // Async chain: Verify + Save (now under single loader)
+          const uid = await __sec_pin_getUid();  // Ensure this is awaited
+          if (!uid) throw new Error('Unable to retrieve account. Please refresh.');
+
+          const verifyRes = await fetch(`${window.__SEC_API_BASE}/api/verify-pin`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getAuthToken()}` },
+            body: JSON.stringify({ pin: currentPin, userId: uid })
+          });
+          if (!verifyRes.ok) {
+            const err = await verifyRes.json();
+            throw new Error(err.message || 'Current PIN verification failed.');
+          }
+
+          const saveRes = await fetch(`${window.__SEC_API_BASE}/api/save-pin`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getAuthToken()}` },
+            body: JSON.stringify({ pin: newPin, userId: uid })
+          });
+          if (!saveRes.ok) {
+            const err = await saveRes.json();
+            throw new Error(err.message || 'Failed to update PIN.');
+          }
+
+          // Success: Update local state immediately
+          localStorage.setItem('hasPin', 'true');
+          window.dispatchEvent(new CustomEvent('pin-status-changed'));  // Trigger UI refresh
+
+          // Notify + cleanup (under loader, so seamless)
+          __sec_pin_notify('PIN updated successfully!', 'success');
+
+          // Inline helpers (stub if you have globals)
+          function resetInputs() {
+            __sec_PIN_CURRENT.value = '';
+            __sec_PIN_NEW.value = '';
+            __sec_PIN_CONFIRM.value = '';
+            __sec_PIN_CURRENT.focus();
+          }
+          resetInputs();  // Clear fields
+
+          function closePinModal() {
+            const modal = __sec_q('#securityPinModal');
+            if (modal) modal.style.display = 'none';  // Or use ModalManager.hide('#securityPinModal')
+            // Optional: Remove listeners for cleanup (prevents leaks on reopen)
+            __sec_PIN_CONFIRM.removeEventListener('input', /* the debounce handler— but since anon, skip or use named func */);
+          }
+          closePinModal();
+
+        } catch (error) {
+          // Error handling: Specific, non-generic
+          console.error('PIN change error:', error);
+          let msg = error.message;
+          if (msg.includes('verification failed') || msg.includes('INCORRECT_PIN')) {
+            msg = 'Incorrect current PIN. Please try again.';
+          } else if (msg.includes('TOO_MANY_ATTEMPTS')) {
+            msg = 'Too many attempts. Account locked temporarily.';
+            // Inline persistLockout stub—implement if needed
+            function persistLockout(lockUntil) { localStorage.setItem('pinLockUntil', lockUntil); }
+            persistLockout(new Date(Date.now() + 5 * 60 * 1000).toISOString());  // 5min lock
+          }
+          __sec_pin_notify(msg, 'error');
+          // Optional: Shake animation on inputs
+          document.querySelectorAll('#currentPin, #newPin, #confirmPin').forEach(el => el.classList.add('shake'));
+          setTimeout(() => document.querySelectorAll('#currentPin, #newPin, #confirmPin').forEach(el => el.classList.remove('shake')), 300);
+          // Auto-focus back to currentPin for retry
+          __sec_PIN_CURRENT.focus();
+        } finally {
+          toggleKeypadProcessing(false);  // Re-enable instantly
+        }
+      });
+
+      // Handle loader promise (e.g., if withLoader returns a promise)
+      loaderPromise.catch(() => {});  // Swallow if needed, since errors are handled inside
+    });
   }
 
+  // Reset button wiring (unchanged from original)
   if (__sec_RESET_BTN) {
-    __sec_RESET_BTN.addEventListener('click', (ev) => {
-      ev.preventDefault();
-      __sec_log.i('[PIN] reset requested - redirecting to reset flow');
-      __sec_pin_notify('Redirecting to PIN reset flow', 'info');
+    __sec_RESET_BTN.addEventListener('click', (e) => {
+      e.preventDefault();
       window.location.href = '/reset-pin.html';
     });
   }
+
+  __sec_log.d('PIN modal controls wired successfully');
 }
 
-
-  /* ========== Convert rows to chevron buttons ========== */
+/* ========== Convert rows to chevron buttons ========== */
 function __sec_convertRowsToChevron() {
   if (__sec_pwdBtn) {
     __sec_pwdBtn.classList.add('chev-btn');
@@ -8768,39 +8772,38 @@ function __sec_convertRowsToChevron() {
   } else __sec_log.d('#changePwdBtn not present');
 }
 
-  /* ========== Init / Boot ========== */
-  async function __sec_boot() {
-    try {
-      __sec_log.d('Booting security module');
-      // Ensure session is available before wiring things that rely on it
-      if (typeof window.getSession === 'function') {
-        try { await window.getSession(); } catch (e) { __sec_log.d('getSession during boot failed', e); }
-      }
-
-      // Wire UI pieces
-      __sec_convertRowsToChevron();
-      __sec_initFromStorage();
-      __sec_wireEvents();
-
-      // PIN submodule bindings
-      __sec_pin_bindStrictInputs();
-      __sec_pin_wireHandlers();
-
-      __sec_log.i('security module booted (with WebAuthn & PIN integration)');
-    } catch (err) {
-      __sec_log.e('boot error', err);
+/* ========== Init / Boot ========== */
+async function __sec_boot() {
+  try {
+    __sec_log.d('Booting security module');
+    // Ensure session is available before wiring things that rely on it
+    if (typeof window.getSession === 'function') {
+      try { await window.getSession(); } catch (e) { __sec_log.d('getSession during boot failed', e); }
     }
-  }
 
-  /* Initialize: reuse existing boot wiring */
-  if (document.readyState === 'loading') {
-    __sec_log.d('DOM not ready, waiting for DOMContentLoaded');
-    document.addEventListener('DOMContentLoaded', __sec_boot);
-  } else {
-    __sec_log.d('DOM ready, booting immediately');
-    setTimeout(__sec_boot, 0);
-  }
+    // Wire UI pieces
+    __sec_convertRowsToChevron();
+    __sec_initFromStorage();
+    __sec_wireEvents();
 
+    // PIN submodule bindings (now safe—no 'e' arg)
+    __sec_pin_bindStrictInputs();
+    __sec_pin_wireHandlers();  // Wires listeners without error
+
+    __sec_log.i('security module booted (with WebAuthn & PIN integration)');
+  } catch (err) {
+    __sec_log.e('boot error', err);
+  }
+}
+
+/* Initialize: reuse existing boot wiring */
+if (document.readyState === 'loading') {
+  __sec_log.d('DOM not ready, waiting for DOMContentLoaded');
+  document.addEventListener('DOMContentLoaded', __sec_boot);
+} else {
+  __sec_log.d('DOM ready, booting immediately');
+  setTimeout(__sec_boot, 0);
+}
 /* ---- WebAuthn register/authenticate flows ---- */
 /* ---- WebAuthn utilities ---- */
 function base64urlToArrayBuffer(base64url) {
