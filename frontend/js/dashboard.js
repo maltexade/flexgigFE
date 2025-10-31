@@ -441,6 +441,38 @@ async function withLoader(task) {
 }
 
 
+// Robust error parser: returns { message, code, raw }
+async function parseErrorResponse(res) {
+  try {
+    // clone in case the caller later wants to read the body too
+    const clone = res.clone();
+    // try JSON first
+    const json = await clone.json().catch(() => null);
+    if (json && (json.message || json.code || Object.keys(json).length)) {
+      return { message: (json.message || JSON.stringify(json)), code: json.code || null, raw: json };
+    }
+  } catch (e) { /* ignore JSON parse error */ }
+
+  try {
+    const txt = await res.text();
+    if (txt) return { message: txt, code: null, raw: txt };
+  } catch (e) { /* ignore text parse error */ }
+
+  return { message: res.status ? `${res.status} ${res.statusText || ''}`.trim() : 'Unknown error', code: null, raw: null };
+}
+
+// Safe fallback clear all pin inputs if older helper missing
+if (typeof window.__fg_pin_clearAllInputs !== 'function') {
+  window.__fg_pin_clearAllInputs = function __fg_pin_clearAllInputs_fallback() {
+    try {
+      const els = document.querySelectorAll('#currentPin, #newPin, #confirmPin');
+      els.forEach(e => { try { e.value = ''; } catch (_) {} });
+      if (els && els[0]) try { els[0].focus(); } catch (_) {}
+    } catch (e) { /* swallow */ }
+  };
+}
+
+
 
 // ---------- STORAGE INSTRUMENTATION (paste once near top of script) ----------
 (function instrumentStorage() {
@@ -8731,27 +8763,44 @@ function __sec_pin_wireHandlers() {
         if (!uid) throw new Error('Unable to retrieve account. Please refresh.');
 
         // use fetchWithAuth to avoid missing auth header/cookies
-        const verifyRes = await fetchWithAuth(`${window.__SEC_API_BASE}/api/verify-pin`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pin: currentPin, userId: uid })
-        });
-        if (!verifyRes.ok) {
-          let errMsg = 'Current PIN verification failed.';
-          try { const ejson = await verifyRes.json(); if (ejson?.message) errMsg = ejson.message; } catch (__) {}
-          throw new Error(errMsg);
-        }
+        // verify current PIN
+const verifyRes = await fetchWithAuth(`${window.__SEC_API_BASE}/api/verify-pin`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ pin: currentPin, userId: uid })
+});
+if (!verifyRes.ok) {
+  const body = await parseErrorResponse(verifyRes);
+  // Log structured server reason for debugging
+  console.warn('[PIN][warn] current PIN verification failed', body);
 
-        const saveRes = await fetchWithAuth(`${window.__SEC_API_BASE}/api/save-pin`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pin: newPin, userId: uid })
-        });
-        if (!saveRes.ok) {
-          let serr = 'Failed to update PIN.';
-          try { const sjson = await saveRes.json(); if (sjson?.message) serr = sjson.message; } catch (__) {}
-          throw new Error(serr);
-        }
+  // Notify user with server-provided message if available
+  __sec_pin_notify(body.message || 'Failed to verify PIN. Try again.', 'error');
+
+  // clear inputs safely (uses the fallback or your existing helper)
+  try { window.__fg_pin_clearAllInputs(); } catch (_) { 
+    // final fallback local reset
+    document.querySelectorAll('#currentPin, #newPin, #confirmPin').forEach(el => { try { el.value = ''; } catch(_){} });
+    const first = document.querySelector('#currentPin'); if (first) try { first.focus(); } catch(_){} 
+  }
+
+  // throw to stop the success path and let outer catch handle logs/state
+  throw new Error(body.message || `Verify PIN failed (${verifyRes.status})`);
+}
+
+// save new PIN
+const saveRes = await fetchWithAuth(`${window.__SEC_API_BASE}/api/save-pin`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ pin: newPin, userId: uid })
+});
+if (!saveRes.ok) {
+  const body = await parseErrorResponse(saveRes);
+  console.warn('[PIN][warn] save PIN failed', body);
+  __sec_pin_notify(body.message || 'Failed to update PIN. Try again.', 'error');
+  throw new Error(body.message || `Save PIN failed (${saveRes.status})`);
+}
+
 
         // Success: update state
         localStorage.setItem('hasPin', 'true');
