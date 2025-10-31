@@ -1918,6 +1918,50 @@ function handleBroadcast(payload) {
   }
 }
 
+// ====== PIN global bindings (must be at top-level, before any usage) ======
+// Use `var` so the identifier exists as a global binding immediately (prevents ReferenceError)
+var __fg_pin_inputCurrentEl = null;
+var __fg_pin_inputNewEl = null;
+var __fg_pin_inputConfirmEl = null;
+var __fg_pin_changePinForm = null;
+var __fg_pin_securityPinModal = null;
+var __fg_pin_resetPinBtn = null;
+
+
+// Defensive safe clear (override any other definition)
+(function installSafeClear() {
+  const previous = window.__fg_pin_clearAllInputs;
+  window.__fg_pin_clearAllInputs = function __fg_pin_clearAllInputs_safe() {
+    try {
+      // Prefer the declared globals if available, fallback to DOM queries
+      const cur = (typeof __fg_pin_inputCurrentEl !== 'undefined' && __fg_pin_inputCurrentEl) ? __fg_pin_inputCurrentEl : document.getElementById('currentPin');
+      const neu = (typeof __fg_pin_inputNewEl !== 'undefined' && __fg_pin_inputNewEl) ? __fg_pin_inputNewEl : document.getElementById('newPin');
+      const conf = (typeof __fg_pin_inputConfirmEl !== 'undefined' && __fg_pin_inputConfirmEl) ? __fg_pin_inputConfirmEl : document.getElementById('confirmPin');
+
+      if (cur) try { cur.value = ''; } catch (e) {}
+      if (neu) try { neu.value = ''; } catch (e) {}
+      if (conf) try { conf.value = ''; } catch (e) {}
+
+      if (cur && typeof cur.focus === 'function') try { cur.focus(); } catch(e) {}
+    } catch (err) {
+      console.warn('__fg_pin_clearAllInputs_safe failed', err);
+      // If there was a previous implementation, call it (largest chance it's the intended logic)
+      if (typeof previous === 'function') try { previous(); } catch (e) { /* swallow */ }
+    }
+  };
+})();
+
+// Instrument calls to locate who triggers the clear
+(function traceClearCalls(){
+  const orig = window.__fg_pin_clearAllInputs;
+  window.__fg_pin_clearAllInputs = function tracedClear(...args){
+    console.warn('TRACE: __fg_pin_clearAllInputs called — stack:');
+    console.trace();
+    if (typeof orig === 'function') {
+      try { return orig.apply(this, args); } catch (e) { console.error('tracedClear orig failed', e); }
+    }
+  };
+})();
 
 
 
