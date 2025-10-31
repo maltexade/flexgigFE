@@ -886,9 +886,15 @@ async function getSession() {
             }
           });
         } else {
-          console.warn('[WARN] getSession: Refresh failed, redirecting');
-          window.location.href = '/login.html';
+
+          // change this later
+          
+          console.warn('[WARN] getSession: Refresh failed — not redirecting; dispatching session:missing');
+          window.dispatchEvent(new CustomEvent('session:missing', {
+            detail: { reason: 'refresh_failed', timestamp: Date.now() }
+          }));
           return null;
+
         }
       }
 
@@ -4464,58 +4470,59 @@ updateBalanceDisplay();
     }
 
     function showToast(message, type = 'success', duration = 2800) {
-      const container = ensureToastStylesAndContainer();
-      const toast = document.createElement('div');
-      toast.className = `flexgig-toast ${type}`;
-      toast.textContent = message;
-      container.appendChild(toast);
+  const container = ensureToastStylesAndContainer();
+  const toast = document.createElement('div');
+  toast.className = `flexgig-toast ${type}`;
+  toast.textContent = message;
+  container.appendChild(toast);
 
-      // animate in (existing behaviour)
-      requestAnimationFrame(() => toast.classList.add('show'));
+  // animate in (existing behaviour)
+  requestAnimationFrame(() => toast.classList.add('show'));
 
-      // Helper to remove this toast: slide-out if it's the top visible notification,
-      // otherwise fade and remove (no slide).
-      const removeAfter = () => {
-        try {
-          // compute "top" relative to container's visual order.
-          // Note: your container uses flex-direction: column; firstElementChild is the top-most.
-          const isTop = container.firstElementChild === toast;
+  // Helper to remove this toast: slide-out if it's the top visible notification,
+  // otherwise fade and remove (no slide).
+  const removeAfter = () => {
+    try {
+      // compute "top" relative to container's visual order.
+      // Note: your container uses flex-direction: column; firstElementChild is the top-most.
+      const isTop = container.firstElementChild === toast;
 
-          if (isTop) {
-            // Keep existing behaviour for top toast: remove .show so CSS handles transform (slide-out) + opacity
-            toast.classList.remove('show');
-            // Give CSS time to animate the slide-out (same 420ms you used before)
-            setTimeout(() => {
-              if (toast.parentNode) toast.remove();
-            }, 420);
-          } else {
-            // Not the top: do a fade-only removal without triggering translateX reverse animation.
-            // Force the toast to have no transform and only animate opacity.
-            // Use inline style to override injected stylesheet.
-            toast.style.transition = 'opacity .28s ease';
-            toast.style.transform = 'none';
-            // trigger reflow so the browser notices the style change before we set opacity to 0
-            // (safe micro-yield)
-            // eslint-disable-next-line no-unused-expressions
-            toast.offsetHeight;
-            toast.style.opacity = '0';
-            setTimeout(() => {
-              if (toast.parentNode) toast.remove();
-            }, 320); // slightly shorter than slide duration
-          }
-        } catch (err) {
-          // fallback: remove immediately if anything goes wrong
+      if (isTop) {
+        // Keep existing behaviour for top toast: remove .show so CSS handles transform (slide-out) + opacity
+        toast.classList.remove('show');
+        // Give CSS time to animate the slide-out (same 420ms you used before)
+        setTimeout(() => {
           if (toast.parentNode) toast.remove();
-          console.warn('showToast removeAfter failed:', err);
-        }
-      };
-
-      // schedule the removal
-      setTimeout(removeAfter, duration);
-
-      // return the element in case caller wants to manipulate it (optional)
-      return toast;
+        }, 420);
+      } else {
+        // Not the top: do a fade-only removal without triggering translateX reverse animation.
+        // Force the toast to have no transform and only animate opacity.
+        // Use inline style to override injected stylesheet.
+        toast.style.transition = 'opacity .28s ease';
+        toast.style.transform = 'none';
+        // trigger reflow so the browser notices the style change before we set opacity to 0
+        // (safe micro-yield)
+        // eslint-disable-next-line no-unused-expressions
+        toast.offsetHeight;
+        toast.style.opacity = '0';
+        setTimeout(() => {
+          if (toast.parentNode) toast.remove();
+        }, 320); // slightly shorter than slide duration
+      }
+    } catch (err) {
+      // fallback: remove immediately if anything goes wrong
+      if (toast.parentNode) toast.remove();
+      console.warn('showToast removeAfter failed:', err);
     }
+  };
+
+  // schedule the removal
+  setTimeout(removeAfter, duration);
+
+  // return the element in case caller wants to manipulate it (optional)
+  return toast;
+}
+
 
     // ---------------------
     // Helpers for input UI
@@ -4541,22 +4548,11 @@ updateBalanceDisplay();
     }
 
     function openModalAsCreate() {
-      // Use ModalManager for consistent stacking/back button
-      if (typeof window.ModalManager !== 'undefined' && typeof window.ModalManager.openModal === 'function') {
-        window.ModalManager.openModal('pinModal');
-        console.log('[PIN] Opened via ModalManager for create');
-      } else {
-        // Fallback: Direct (your original)
-        pinModal.classList.remove('hidden');
-      }
+      pinModal.classList.remove('hidden');
       step = 'create';
       if (pinTitleEl) pinTitleEl.textContent = 'Create PIN';
       if (pinSubtitleEl) pinSubtitleEl.textContent = 'Create a 4-digit PIN';
       resetInputs();
-
-      // Set guard flag (sync with Smart Button)
-      window.__setupPinActive = true;
-      setTimeout(() => { window.__setupPinActive = false; }, 30000);  // 30s
     }
 
     // ---------------------
@@ -4574,15 +4570,7 @@ updateBalanceDisplay();
           return;
         }
         const { user } = await res.json();
-
-        // Use ModalManager for consistent stacking/back button
-        if (typeof window.ModalManager !== 'undefined' && typeof window.ModalManager.openModal === 'function') {
-          window.ModalManager.openModal('pinModal');
-          console.log('[PIN] Opened via ModalManager for reauth');
-        } else {
-          // Fallback: Direct
-          pinModal.classList.remove('hidden');
-        }
+        pinModal.classList.remove('hidden');
 
         if (!user.pin) {
           if (pinTitleEl) pinTitleEl.textContent = 'Create PIN';
@@ -4611,18 +4599,10 @@ updateBalanceDisplay();
           if (pinTitleEl) pinTitleEl.textContent = 'Create PIN';
           if (pinSubtitleEl) pinSubtitleEl.textContent = 'Create a 4-digit PIN';
           resetInputs();
-          return;  // Don't close—stay in modal
-        }
-
-        // Close via ModalManager for stack/history
-        if (typeof window.ModalManager !== 'undefined' && typeof window.ModalManager.closeModal === 'function') {
-          window.ModalManager.closeModal('pinModal');
-          console.log('[PIN] Closed via ModalManager');
         } else {
-          // Fallback: Direct
           pinModal.classList.add('hidden');
+          resetInputs();
         }
-        resetInputs();
         processing = false;
       });
     }
@@ -4651,155 +4631,141 @@ updateBalanceDisplay();
     // ---------------------
     // Completion logic
     // ---------------------
-    async function handlePinCompletion() {
-      if (processing) return;
-      if (currentPin.length !== 4) return;
+  async function handlePinCompletion() {
+  if (processing) return;
+  if (currentPin.length !== 4) return;
 
-      if (step === 'create') {
-        firstPin = currentPin;
-        step = 'confirm';
-        if (pinTitleEl) pinTitleEl.textContent = 'Confirm PIN';
-        if (pinSubtitleEl) pinSubtitleEl.textContent = 'Confirm your 4-digit PIN';
+  if (step === 'create') {
+    firstPin = currentPin;
+    step = 'confirm';
+    if (pinTitleEl) pinTitleEl.textContent = 'Confirm PIN';
+    if (pinSubtitleEl) pinSubtitleEl.textContent = 'Confirm your 4-digit PIN';
+    resetInputs();
+    return;
+  }
+
+  if (step === 'confirm') {
+    if (currentPin !== firstPin) {
+      console.warn('[PIN] mismatch on confirmation');
+      showToast('PINs do not match — try again', 'error');
+      step = 'create';
+      if (pinTitleEl) pinTitleEl.textContent = 'Create PIN';
+      if (pinSubtitleEl) pinSubtitleEl.textContent = 'Create a 4-digit PIN';
+      resetInputs();
+      localStorage.setItem('hasPin', 'false'); // PIN not set
+      return;
+    }
+
+    processing = true;
+    return withLoader(async () => {
+      try {
+        const res = await fetch('https://api.flexgig.com.ng/api/save-pin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pin: currentPin }),
+          credentials: 'include',
+        });
+
+        if (!res.ok) throw new Error('Save PIN failed');
+
+        console.log('[dashboard.js] PIN setup successfully');
+        localStorage.setItem('hasPin', 'true'); // PIN successfully set
+        onPinSetupSuccess();
+
+        const dashboardPinCard = document.getElementById('dashboardPinCard');
+        if (dashboardPinCard) dashboardPinCard.style.display = 'none';
+        if (accountPinStatus) accountPinStatus.textContent = 'PIN set';
+
+        showToast('PIN updated successfully', 'success', 2400);
+        pinModal.classList.add('hidden');
         resetInputs();
-        return;
+      } catch (err) {
+        console.error('[dashboard.js] PIN save error:', err);
+        showToast('Failed to save PIN. Try again.', 'error', 2200);
+        localStorage.setItem('hasPin', 'false'); // PIN failed
+        resetInputs();
+      } finally {
+        processing = false;
       }
+    });
+  }
 
-      if (step === 'confirm') {
-        if (currentPin !== firstPin) {
-          console.warn('[PIN] mismatch on confirmation');
-          showToast('PINs do not match — try again', 'error');
-          // Shake animation (fun UX)
-          pinInputs.forEach(inp => inp.style.animation = 'shake 0.5s ease');
-          setTimeout(() => pinInputs.forEach(inp => inp.style.animation = ''), 500);
-          step = 'create';
-          if (pinTitleEl) pinTitleEl.textContent = 'Create PIN';
-          if (pinSubtitleEl) pinSubtitleEl.textContent = 'Create a 4-digit PIN';
-          resetInputs();
-          localStorage.setItem('hasPin', 'false'); // PIN not set
-          window.__setupPinActive = false;  // Clear on mismatch
-          return;
+  if (step === 'reauth') {
+    return withLoader(async () => {
+      processing = true;
+      try {
+        const res = await fetch('https://api.flexgig.com.ng/api/verify-pin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pin: currentPin }),
+          credentials: 'include',
+        });
+        if (!res.ok) throw new Error('Invalid PIN');
+
+        const { user } = await res.json();
+        const userData = {
+          email: user.email || '',
+          firstName: user.fullName?.split(' ')[0] || '',
+          username: user.username || '',
+          phoneNumber: user.phoneNumber || '',
+          address: user.address || '',
+          profilePicture: user.profilePicture || '',
+        };
+
+        if (typeof updateGreetingAndAvatar === 'function') {
+          await updateGreetingAndAvatar(userData.username, userData.firstName);
+        }
+        if (typeof loadUserProfile === 'function') {
+          await loadUserProfile(userData);
+        }
+        if (typeof updateBalanceDisplay === 'function') {
+          await updateBalanceDisplay();
         }
 
-        processing = true;
-        return withLoader(async () => {
-          try {
-            const res = await fetch('https://api.flexgig.com.ng/api/save-pin', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ pin: currentPin }),
-              credentials: 'include',
-            });
-
-            if (!res.ok) throw new Error('Save PIN failed');
-
-            console.log('[dashboard.js] PIN setup successfully');
-            localStorage.setItem('hasPin', 'true'); // PIN successfully set
-            onPinSetupSuccess();
-
-            const dashboardPinCard = document.getElementById('dashboardPinCard');
-            if (dashboardPinCard) dashboardPinCard.style.display = 'none';
-            if (accountPinStatus) accountPinStatus.textContent = 'PIN set';
-
-            showToast('PIN updated successfully', 'success', 2400);
-            // Close via ModalManager
-            if (typeof window.ModalManager !== 'undefined') {
-              window.ModalManager.closeModal('pinModal');
-            } else {
-              pinModal.classList.add('hidden');
-            }
-            resetInputs();
-            window.__setupPinActive = false;  // Clear on success
-          } catch (err) {
-            console.error('[dashboard.js] PIN save error:', err);
-            showToast('Failed to save PIN. Try again.', 'error', 2200);
-            localStorage.setItem('hasPin', 'false'); // PIN failed
-            resetInputs();
-            window.__setupPinActive = false;  // Clear on error
-          } finally {
-            processing = false;
-          }
-        });
+        pinModal.classList.add('hidden');
+        resetInputs();
+        console.log('[dashboard.js] PIN re-auth: Session restored');
+      } catch (err) {
+        console.error('[dashboard.js] PIN re-auth error:', err);
+        showToast('Invalid PIN or session. Redirecting to login...', 'error', 1800);
+        setTimeout(() => (window.location.href = '/'), 1200);
+      } finally {
+        processing = false;
       }
+    });
+  }
+}
 
-      if (step === 'reauth') {
-        return withLoader(async () => {
-          processing = true;
-          try {
-            const res = await fetch('https://api.flexgig.com.ng/api/verify-pin', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ pin: currentPin }),
-              credentials: 'include',
-            });
-            if (!res.ok) throw new Error('Invalid PIN');
-
-            const { user } = await res.json();
-            const userData = {
-              email: user.email || '',
-              firstName: user.fullName?.split(' ')[0] || '',
-              username: user.username || '',
-              phoneNumber: user.phoneNumber || '',
-              address: user.address || '',
-              profilePicture: user.profilePicture || '',
-            };
-
-            if (typeof updateGreetingAndAvatar === 'function') {
-              await updateGreetingAndAvatar(userData.username, userData.firstName);
-            }
-            if (typeof loadUserProfile === 'function') {
-              await loadUserProfile(userData);
-            }
-            if (typeof updateBalanceDisplay === 'function') {
-              await updateBalanceDisplay();
-            }
-
-            // Close via ModalManager
-            if (typeof window.ModalManager !== 'undefined') {
-              window.ModalManager.closeModal('pinModal');
-            } else {
-              pinModal.classList.add('hidden');
-            }
-            resetInputs();
-            console.log('[dashboard.js] PIN re-auth: Session restored');
-          } catch (err) {
-            console.error('[dashboard.js] PIN re-auth error:', err);
-            showToast('Invalid PIN or session. Redirecting to login...', 'error', 1800);
-            setTimeout(() => (window.location.href = '/'), 1200);
-          } finally {
-            processing = false;
-          }
-        });
-      }
-    }
-
-    function onPinSetupSuccess() {
-      console.log('[PIN Setup] Success - updating flags and UI');
-      
-      // Update localStorage (instant + persistent)
-      localStorage.setItem('hasPin', 'true');
-      
-      // Dispatch custom event so other components can react
-      window.dispatchEvent(new CustomEvent('pin-status-changed', { 
+function onPinSetupSuccess() {
+    console.log('[PIN Setup] Success - updating flags and UI');
+    
+    // Update localStorage (instant + persistent)
+    localStorage.setItem('hasPin', 'true');
+    
+    // Dispatch custom event so other components can react
+    window.dispatchEvent(new CustomEvent('pin-status-changed', { 
         detail: { hasPin: true } 
-      }));
-      
-      // Hide the dashboard Setup Pin card immediately
-      const pinCard = document.getElementById('dashboardPinCard');
-      if (pinCard) {
+    }));
+    
+    // Hide the dashboard Setup Pin card immediately
+    const pinCard = document.getElementById('dashboardPinCard');
+    if (pinCard) {
         pinCard.style.display = 'none';
-      }
-      
-      // Update Account PIN status in security modal
-      const accountPinStatus = document.getElementById('accountPinStatus');
-      if (accountPinStatus) {
-        accountPinStatus.textContent = 'PIN set. You can change your PIN here';
-      }
-      
-      // Optionally notify user
-      if (typeof notify === 'function') {
-        notify('PIN set up successfully!', 'success');
-      }
     }
+    
+    // Update Account PIN status in security modal
+    const accountPinStatus = document.getElementById('accountPinStatus');
+    if (accountPinStatus) {
+        accountPinStatus.textContent = 'PIN set. You can change your PIN here';
+    }
+    
+    // Optionally notify user
+    if (typeof notify === 'function') {
+        notify('PIN set up successfully!', 'success');
+    }
+}
+
+
 
     // ---------------------
     // Wire keypad buttons
@@ -4842,20 +4808,6 @@ updateBalanceDisplay();
     if (setupPinBtn) {
       setupPinBtn.addEventListener('click', openModalAsCreate);
     }
-
-    // NEW: Back button safety: Listen for popstate closes
-    window.addEventListener('popstate', (e) => {
-      if (pinModal && !pinModal.classList.contains('hidden')) {
-        // If PIN open, treat as close
-        if (typeof window.ModalManager !== 'undefined') {
-          window.ModalManager.closeModal('pinModal');
-        } else {
-          pinModal.classList.add('hidden');
-        }
-        resetInputs();
-        console.log('[PIN] Handled popstate close');
-      }
-    });
 
     console.log('[PIN] initialized — modal found, inputs:', pinInputs.length, 'keypad buttons:', keypadButtons.length);
   } // end init()
