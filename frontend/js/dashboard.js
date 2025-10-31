@@ -4337,22 +4337,59 @@ updateBalanceDisplay();
     }
 
     function showToast(message, type = 'success', duration = 2800) {
-      const container = ensureToastStylesAndContainer();
-      const toast = document.createElement('div');
-      toast.className = `flexgig-toast ${type}`;
-      toast.textContent = message;
-      container.appendChild(toast);
+  const container = ensureToastStylesAndContainer();
+  const toast = document.createElement('div');
+  toast.className = `flexgig-toast ${type}`;
+  toast.textContent = message;
+  container.appendChild(toast);
 
-      // animate in
-      requestAnimationFrame(() => toast.classList.add('show'));
+  // animate in (existing behaviour)
+  requestAnimationFrame(() => toast.classList.add('show'));
 
-      // remove after duration
-      const removeAfter = () => {
+  // Helper to remove this toast: slide-out if it's the top visible notification,
+  // otherwise fade and remove (no slide).
+  const removeAfter = () => {
+    try {
+      // compute "top" relative to container's visual order.
+      // Note: your container uses flex-direction: column; firstElementChild is the top-most.
+      const isTop = container.firstElementChild === toast;
+
+      if (isTop) {
+        // Keep existing behaviour for top toast: remove .show so CSS handles transform (slide-out) + opacity
         toast.classList.remove('show');
-        setTimeout(() => toast.remove(), 420);
-      };
-      setTimeout(removeAfter, duration);
+        // Give CSS time to animate the slide-out (same 420ms you used before)
+        setTimeout(() => {
+          if (toast.parentNode) toast.remove();
+        }, 420);
+      } else {
+        // Not the top: do a fade-only removal without triggering translateX reverse animation.
+        // Force the toast to have no transform and only animate opacity.
+        // Use inline style to override injected stylesheet.
+        toast.style.transition = 'opacity .28s ease';
+        toast.style.transform = 'none';
+        // trigger reflow so the browser notices the style change before we set opacity to 0
+        // (safe micro-yield)
+        // eslint-disable-next-line no-unused-expressions
+        toast.offsetHeight;
+        toast.style.opacity = '0';
+        setTimeout(() => {
+          if (toast.parentNode) toast.remove();
+        }, 320); // slightly shorter than slide duration
+      }
+    } catch (err) {
+      // fallback: remove immediately if anything goes wrong
+      if (toast.parentNode) toast.remove();
+      console.warn('showToast removeAfter failed:', err);
     }
+  };
+
+  // schedule the removal
+  setTimeout(removeAfter, duration);
+
+  // return the element in case caller wants to manipulate it (optional)
+  return toast;
+}
+
 
     // ---------------------
     // Helpers for input UI
