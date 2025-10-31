@@ -4748,7 +4748,13 @@ function __fg_pin_clearAllInputs() {
   const __fg_pin_securityPinModal = document.getElementById('securityPinModal');
   const __fg_pin_changePinForm = document.getElementById('changePinForm');
   const __fg_pin_resetPinBtn = document.getElementById('resetPinBtn');
-  const __fg_pin_inputCurrentEl = document.getElementById('currentPin');
+  // 🔹 Declare globally after the DOM is ready
+let __fg_pin_inputCurrentEl;
+
+document.addEventListener('DOMContentLoaded', () => {
+  __fg_pin_inputCurrentEl = document.getElementById('currentPin');
+});
+
   const __fg_pin_inputNewEl = document.getElementById('newPin');
   const __fg_pin_inputConfirmEl = document.getElementById('confirmPin');
 
