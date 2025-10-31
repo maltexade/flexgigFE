@@ -9039,7 +9039,7 @@ if (!saveRes.ok) {
       console.error('PIN change error:', error);
       let msg = error.message || 'Failed to change PIN.';
       if (/incorrect/i.test(msg) || msg.includes('INCORRECT_PIN')) {
-        msg = 'Incorrect current PIN. Please try again.';
+        console.log('Incorrect current PIN. Please try again.');
       } else if (msg.includes('TOO_MANY_ATTEMPTS')) {
         msg = 'Too many attempts. Account locked temporarily.';
         try { localStorage.setItem('pinLockUntil', new Date(Date.now() + 5*60*1000).toISOString()); } catch (_) {}
