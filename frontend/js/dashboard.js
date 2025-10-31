@@ -4345,6 +4345,9 @@ updateBalanceDisplay();
       toast.className = `flexgig-toast ${type}`;
       toast.textContent = message;
       container.appendChild(toast);
+      // inside showToast after container.appendChild(toast);
+      setTimeout(() => toast.classList.add('show'), 12); // 8–20ms is fine
+
 
       // animate in
       requestAnimationFrame(() => toast.classList.add('show'));
