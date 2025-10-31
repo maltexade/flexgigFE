@@ -759,329 +759,266 @@ if (updateProfileModal && updateProfileModal.classList.contains('active')) {
 // --- Robust getSession() with guarded updates and stable avatar handling ---
 // --- Robust getSession() with cache-first rendering ---
 // --- Robust getSession() with cache-first rendering ---
+// Global flags to prevent race conditions
+window.__sessionLoading = false;
+window.__sessionPromise = null;
+window.__lastSessionLoadId = 0;
+window.__INITIAL_SESSION_FETCHED = false;
+
 async function getSession() {
-  if (window.__sessionLoading) return;
-  window.__sessionLoading = true;
+  // Reuse in-flight request to prevent duplicate calls
+  if (window.__sessionPromise) {
+    console.log('[DEBUG] getSession: Reusing in-flight promise');
+    return window.__sessionPromise;
+  }
+
   const loadId = Date.now();
   window.__lastSessionLoadId = loadId;
 
-  function isValidImageSource(src) {
-    if (!src) return false;
-    return /^(data:image\/|https?:\/\/|\/)/i.test(src);
-  }
-
-  function applySessionToDOM(userObj, derivedFirstName) {
-    if (window.__lastSessionLoadId !== loadId) {
-      console.log('[DEBUG] getSession: stale loadId, abort DOM apply');
-      return;
-    }
-
-    const greetEl = document.getElementById('greet');
-    const firstnameEl = document.getElementById('firstname');
-    const avatarEl = document.getElementById('avatar');
-
-    if (!(greetEl && firstnameEl && avatarEl)) {
-      console.warn('[WARN] getSession: DOM elements not found when applying session');
-      return;
-    }
-
-    [greetEl, firstnameEl, avatarEl].forEach(el => {
-      if (el.firstChild && el.firstChild.classList?.contains('loading-blur')) {
-        el.firstChild.classList.add('fade-out');
-        setTimeout(() => (el.innerHTML = ''), 150);
-      }
-    });
-
-    const hour = new Date().getHours();
-    greetEl.textContent = hour < 12 ? 'Good Morning' : hour < 18 ? 'Good Afternoon' : 'Good Evening';
-    greetEl.classList.add('fade-in');
-
-    const displayName = userObj.username || derivedFirstName || 'User';
-    firstnameEl.textContent = displayName.charAt(0).toUpperCase() + displayName.slice(1);
-    firstnameEl.classList.add('fade-in');
-
-    const profilePicture = userObj.profilePicture || '';
-    if (isValidImageSource(profilePicture)) {
-      avatarEl.innerHTML = `<img src="${profilePicture}" alt="Profile Picture" class="avatar-img fade-in" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`;
-      avatarEl.removeAttribute('aria-label');
-    } else {
-      avatarEl.textContent = displayName.charAt(0).toUpperCase();
-      avatarEl.classList.add('fade-in');
-      avatarEl.setAttribute('aria-label', displayName);
-    }
-  }
-
-  async function waitForDomReady(retries = 8, delay = 100) {
-    for (let i = 0; i < retries; i++) {
-      if (document.getElementById('greet') && document.getElementById('firstname') && document.getElementById('avatar')) {
-        return true;
-      }
-      await new Promise(r => setTimeout(r, delay));
-    }
-    return false;
-  }
-
-  // Cache-first render
-  const cachedUserData = localStorage.getItem('userData');
-  let cachedUser = null;
-  let derivedFirstName = 'User';
-  if (cachedUserData) {
+  window.__sessionPromise = (async () => {
     try {
-      const parsed = JSON.parse(cachedUserData);
-      if (Date.now() - parsed.cachedAt < 300000) { // 5min TTL
-        cachedUser = parsed;
-        derivedFirstName = parsed.fullName?.split(' ')[0] || 'User';
-        console.log('[DEBUG] getSession: Using fresh cache for instant render');
-        const domReady = await waitForDomReady();
-        if (domReady) applySessionToDOM(cachedUser, derivedFirstName);
+      console.log('[DEBUG] getSession: Starting (loadId=' + loadId + ')');
+
+      // PHASE 1: Check for server initial data (FASTEST)
+      if (!window.__INITIAL_SESSION_FETCHED) {
+        console.log('[DEBUG] getSession: Fetching initial session data');
+        try {
+          const initialRes = await fetch(`${window.__SEC_API_BASE}/api/session/initial`, {
+            method: 'GET',
+            credentials: 'include',
+            headers: { 'Accept': 'application/json' }
+          });
+
+          if (initialRes.ok) {
+            const initialData = await initialRes.json();
+            window.__INITIAL_SESSION_FETCHED = true;
+
+            if (initialData.authenticated && initialData.user) {
+              console.log('[DEBUG] getSession: Using initial session data');
+              const user = initialData.user;
+              applySessionToDOM(user);
+              updateLocalStorageFromUser(user);
+              return { user };
+            }
+          }
+        } catch (err) {
+          console.warn('[WARN] getSession: Initial fetch failed', err);
+        }
       }
-    } catch (e) {
-      console.warn('[WARN] getSession: Invalid cache', e);
-    }
-  }
 
-  // Background fetch (cookie-first)
-  try {
-    if (!cachedUser) {
-      const greetEl = document.getElementById('greet');
-      const firstnameEl = document.getElementById('firstname');
-      const avatarEl = document.getElementById('avatar');
-      if (greetEl && firstnameEl && avatarEl) {
-        greetEl.innerHTML = '<div class="loading-blur"></div>';
-        firstnameEl.innerHTML = '<div class="loading-blur"></div>';
-        avatarEl.innerHTML = '<div class="loading-blur avatar-loader"></div>';
+      // PHASE 2: Use cache if fresh (FAST)
+      const cachedUserData = localStorage.getItem('userData');
+      let cachedUser = null;
+      
+      if (cachedUserData) {
+        try {
+          const parsed = JSON.parse(cachedUserData);
+          if (Date.now() - parsed.cachedAt < 60000) {
+            console.log('[DEBUG] getSession: Using fresh cache');
+            cachedUser = parsed;
+            applySessionToDOM(cachedUser);
+          }
+        } catch (e) {
+          console.warn('[WARN] getSession: Invalid cache', e);
+        }
       }
-    }
 
-    console.log('[DEBUG] getSession: Initiating /api/session fetch', new Date().toISOString());
-
-    // IMPORTANT: Do NOT attach localStorage authToken as a Bearer header.
-    // Allow cookies (token + rt) to be sent automatically by the browser.
-    let res = await fetch(`${window.__SEC_API_BASE}/api/session`, {
-      method: 'GET',
-      credentials: 'include',
-      headers: { 'Accept': 'application/json' }
-    });
-
-    // If server responds 401 -> attempt refresh endpoint (server will rotate cookies)
-    if (res.status === 401) {
-      console.log('[DEBUG] getSession: /api/session returned 401, attempting /auth/refresh');
-      const refreshRes = await fetch(`${window.__SEC_API_BASE}/auth/refresh`, {
-        method: 'POST',
+      // PHASE 3: Fetch from API (AUTHORITATIVE)
+      console.log('[DEBUG] getSession: Fetching from /api/session');
+      
+      let res = await fetch(`${window.__SEC_API_BASE}/api/session`, {
+        method: 'GET',
         credentials: 'include',
-        headers: { 'Accept': 'application/json' }
+        headers: { 
+          'Accept': 'application/json',
+          'Cache-Control': 'no-cache'
+        }
       });
 
-      if (refreshRes.ok) {
-        console.log('[DEBUG] getSession: /auth/refresh succeeded, retrying /api/session');
-        // cookies (token + rt) were rotated/set by server; retry session
-        res = await fetch(`${window.__SEC_API_BASE}/api/session`, {
-          method: 'GET',
+      if (res.status === 401) {
+        console.log('[DEBUG] getSession: 401, attempting refresh');
+        const refreshRes = await fetch(`${window.__SEC_API_BASE}/auth/refresh`, {
+          method: 'POST',
           credentials: 'include',
           headers: { 'Accept': 'application/json' }
         });
-      } else {
-        // refresh failed -> user must re-login
-        console.warn('[WARN] getSession: refresh failed', await refreshRes.text().catch(()=>'(no body)'));
-        // Optionally clear client-side cache / redirect to login
-        // localStorage.removeItem('userData'); // optional
-        window.__sessionLoading = false;
-        return null;
-      }
-    }
 
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      console.error('[ERROR] getSession: Session API returned error:', res.status, text);
-      // fallback to cache if available
-      if (cachedUser) applySessionToDOM(cachedUser, derivedFirstName);
-      window.__sessionLoading = false;
-      return null;
-    }
-
-    let payload = null;
-    try {
-      // prefer .json() but guard for empty body / invalid json
-      const txt = await res.text();
-      payload = txt ? JSON.parse(txt) : null;
-    } catch (e) {
-      console.warn('[WARN] getSession: Response not valid JSON or empty');
-      payload = null;
-    }
-    if (!payload || !payload.user) {
-      console.error('[ERROR] getSession: invalid payload from /api/session', payload);
-      if (cachedUser) applySessionToDOM(cachedUser, derivedFirstName);
-      window.__sessionLoading = false;
-      return null;
-    }
-
-    const { user, token: newToken } = payload;
-    console.log('[DEBUG] getSession: Raw user data', user);
-
-    let firstName = user.fullName?.split(' ')[0] || '';
-    if (!firstName && user.email) {
-      firstName = user.email.split('@')[0].replace(/[^a-zA-Z0-9]/g, '').replace(/(\d+)/, '');
-      firstName = (firstName && firstName.charAt(0).toUpperCase() + firstName.slice(1)) || 'User';
-    }
-
-    // Update cache with user info but DO NOT persist access token to localStorage
-    const userData = {
-      username: user.username || '',
-      fullName: user.fullName || '',
-      profilePicture: user.profilePicture || '',
-      id: user.uid || user.id || '',
-      hasPin: user.hasPin || false,
-      cachedAt: Date.now()
-    };
-    try {
-      localStorage.setItem('userData', JSON.stringify(userData));
-      // Still store convenient user bits
-      localStorage.setItem('userEmail', user.email || '');
-      localStorage.setItem('userId', user.uid || user.id || '');
-      localStorage.setItem('firstName', firstName);
-      localStorage.setItem('username', user.username || '');
-      localStorage.setItem('phoneNumber', user.phoneNumber || '');
-      localStorage.setItem('address', user.address || '');
-      localStorage.setItem('fullName', user.fullName || (user.email ? user.email.split('@')[0] : ''));
-      localStorage.setItem('fullNameEdited', user.fullNameEdited ? 'true' : 'false');
-      localStorage.setItem('lastUsernameUpdate', user.lastUsernameUpdate || '');
-      localStorage.setItem('profilePicture', user.profilePicture || '');
-      // Remove any old stored authToken to avoid stale usage
-      try { localStorage.removeItem('authToken'); } catch (e) {}
-    } catch (err) {
-      console.warn('[WARN] getSession: Failed to write some localStorage keys', err);
-    }
-
-    const domReady = await waitForDomReady();
-    if (!domReady) {
-      console.warn('[WARN] getSession: DOM elements not ready after waiting');
-    }
-    applySessionToDOM(user, firstName);
-
-    if (typeof loadUserProfile === 'function' && !cachedUser) {
-      try {
-        const profileResult = await loadUserProfile(true);
-        if (window.__lastSessionLoadId !== loadId) {
-          console.log('[DEBUG] getSession: loadUserProfile result is stale, ignoring');
-          window.__sessionLoading = false;
+        if (refreshRes.ok) {
+          console.log('[DEBUG] getSession: Refresh succeeded, retrying');
+          res = await fetch(`${window.__SEC_API_BASE}/api/session`, {
+            method: 'GET',
+            credentials: 'include',
+            headers: { 
+              'Accept': 'application/json',
+              'Cache-Control': 'no-cache'
+            }
+          });
+        } else {
+          console.warn('[WARN] getSession: Refresh failed, redirecting');
+          window.location.href = '/login.html';
           return null;
         }
-        const profileData = profileResult && typeof profileResult === 'object' ? profileResult : {
-          profilePicture: localStorage.getItem('profilePicture') || user.profilePicture || ''
-        };
-        const finalProfilePicture = isValidImageSource(profileData.profilePicture)
-          ? profileData.profilePicture
-          : isValidImageSource(user.profilePicture) ? user.profilePicture : '';
-        if (finalProfilePicture && finalProfilePicture !== (localStorage.getItem('profilePicture') || '')) {
-          try {
-            localStorage.setItem('profilePicture', finalProfilePicture);
-            userData.profilePicture = finalProfilePicture;
-            localStorage.setItem('userData', JSON.stringify(userData));
-          } catch (err) { /* ignore */ }
-          applySessionToDOM({ ...user, profilePicture: finalProfilePicture }, firstName);
-        } else {
-          applySessionToDOM({ ...user, profilePicture: finalProfilePicture || user.profilePicture }, firstName);
-        }
-      } catch (err) {
-        console.warn('[WARN] getSession: loadUserProfile failed, relying on session data', err?.message);
-        applySessionToDOM(user, firstName);
       }
-    }
 
-    console.log('[DEBUG] getSession: Completed (loadId=' + loadId + ')');
-    window.__sessionLoading = false;
-    return { user /* DO NOT return access token for client storage */ };
-  } catch (err) {
-    console.error('[ERROR] getSession: Failed to fetch session', err);
-    if (cachedUser) applySessionToDOM(cachedUser, derivedFirstName);
-    window.__sessionLoading = false;
-    return null;
-  }
+      if (!res.ok) {
+        console.error('[ERROR] getSession: API returned', res.status);
+        if (cachedUser) {
+          console.log('[DEBUG] getSession: Falling back to cache');
+          return { user: cachedUser };
+        }
+        return null;
+      }
+
+      const payload = await res.json();
+      if (!payload || !payload.user) {
+        console.error('[ERROR] getSession: Invalid payload', payload);
+        if (cachedUser) return { user: cachedUser };
+        return null;
+      }
+
+      const { user } = payload;
+      console.log('[DEBUG] getSession: API success', user);
+
+      // Only update DOM if data changed
+      if (!cachedUser || JSON.stringify(user) !== JSON.stringify(cachedUser)) {
+        console.log('[DEBUG] getSession: Data changed, updating DOM');
+        applySessionToDOM(user);
+      }
+
+      updateLocalStorageFromUser(user);
+
+      console.log('[DEBUG] getSession: Complete (loadId=' + loadId + ')');
+      return { user };
+
+    } catch (err) {
+      console.error('[ERROR] getSession: Failed', err);
+      
+      const cachedUserData = localStorage.getItem('userData');
+      if (cachedUserData) {
+        try {
+          const cached = JSON.parse(cachedUserData);
+          console.log('[DEBUG] getSession: Using cache as fallback');
+          applySessionToDOM(cached);
+          return { user: cached };
+        } catch (e) {
+          console.warn('[WARN] getSession: Cache parse failed', e);
+        }
+      }
+      return null;
+    } finally {
+      window.__sessionPromise = null;
+    }
+  })();
+
+  return window.__sessionPromise;
 }
 
-// Make globally accessible
 window.getSession = getSession;
 
-// 🔹 Global session promise (await this in boot/security for no races)
-let __sessionPromise = null;
-function getOrCreateSessionPromise() {
-  if (!__sessionPromise) {
-    __sessionPromise = getSession().then(session => {
-      console.log('[GLOBAL] Session ready for boot');
-      return session;
-    }).catch(e => {
-      console.error('[GLOBAL] Session promise failed', e);
-      throw e;
-    });
-  }
-  return __sessionPromise;
-}
 
-
-
-// --- Safe wrapper with retries ---
-function safeGetSession(retries = 5) {
+// Helper: Apply user data to DOM elements
+function applySessionToDOM(user) {
   const greetEl = document.getElementById('greet');
   const firstnameEl = document.getElementById('firstname');
   const avatarEl = document.getElementById('avatar');
 
-  if (greetEl && firstnameEl && avatarEl) {
-    getSession();
-  } else if (retries > 0) {
-    console.warn('[WARN] safeGetSession: Elements not ready, retrying...');
-    setTimeout(() => safeGetSession(retries - 1), 300);
+  if (!greetEl || !firstnameEl || !avatarEl) {
+    console.warn('[WARN] applySessionToDOM: Elements not found');
+    return;
+  }
+
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? 'Good Morning' : hour < 18 ? 'Good Afternoon' : 'Good Evening';
+  
+  if (greetEl.textContent !== greeting) {
+    greetEl.textContent = greeting;
+  }
+
+  const displayName = user.username || user.firstName || user.fullName?.split(' ')[0] || 'User';
+  const displayNameCapitalized = displayName.charAt(0).toUpperCase() + displayName.slice(1);
+  
+  if (firstnameEl.textContent !== displayNameCapitalized) {
+    firstnameEl.textContent = displayNameCapitalized;
+  }
+
+  const profilePicture = user.profilePicture || '';
+  const isValidImage = profilePicture && /^(data:image\/|https?:\/\/|\/)/i.test(profilePicture);
+  
+  if (isValidImage) {
+    const currentSrc = avatarEl.querySelector('img')?.src || '';
+    const picturePath = profilePicture.split('?')[0];
+    
+    if (!currentSrc.includes(picturePath)) {
+      avatarEl.innerHTML = `<img src="${profilePicture}" alt="Profile" class="avatar-img" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`;
+      avatarEl.removeAttribute('aria-label');
+    }
   } else {
-    console.error('[ERROR] safeGetSession: Elements never appeared');
+    const initial = displayName.charAt(0).toUpperCase();
+    const currentText = avatarEl.textContent?.trim() || '';
+    
+    if (currentText !== initial) {
+      avatarEl.innerHTML = '';
+      avatarEl.textContent = initial;
+      avatarEl.setAttribute('aria-label', displayNameCapitalized);
+    }
   }
 }
+
+// Helper: Update localStorage with user data
+function updateLocalStorageFromUser(user) {
+  try {
+    const userData = {
+      uid: user.uid || user.id || '',
+      email: user.email || '',
+      username: user.username || '',
+      fullName: user.fullName || '',
+      firstName: user.firstName || user.fullName?.split(' ')[0] || 'User',
+      phoneNumber: user.phoneNumber || '',
+      address: user.address || '',
+      profilePicture: user.profilePicture || '',
+      hasPin: user.hasPin || false,
+      hasBiometrics: user.hasBiometrics || false,
+      profileCompleted: user.profileCompleted || false,
+      fullNameEdited: user.fullNameEdited || false,
+      lastUsernameUpdate: user.lastUsernameUpdate || '',
+      cachedAt: Date.now()
+    };
+
+    localStorage.setItem('userData', JSON.stringify(userData));
+    localStorage.setItem('userEmail', user.email || '');
+    localStorage.setItem('userId', user.uid || user.id || '');
+    localStorage.setItem('firstName', userData.firstName);
+    localStorage.setItem('username', user.username || '');
+    localStorage.setItem('fullName', user.fullName || '');
+    localStorage.setItem('phoneNumber', user.phoneNumber || '');
+    localStorage.setItem('address', user.address || '');
+    localStorage.setItem('profilePicture', user.profilePicture || '');
+    localStorage.setItem('hasPin', user.hasPin ? 'true' : 'false');
+    localStorage.setItem('biometricsEnabled', user.hasBiometrics ? 'true' : 'false');
+    localStorage.setItem('profileCompleted', user.profileCompleted ? 'true' : 'false');
+    localStorage.setItem('fullNameEdited', user.fullNameEdited ? 'true' : 'false');
+    localStorage.setItem('lastUsernameUpdate', user.lastUsernameUpdate || '');
+
+    console.log('[DEBUG] updateLocalStorageFromUser: Updated', {
+      hasPin: user.hasPin,
+      hasBiometrics: user.hasBiometrics,
+      profileCompleted: user.profileCompleted
+    });
+  } catch (err) {
+    console.warn('[WARN] updateLocalStorageFromUser: Failed', err);
+  }
+}
+
+
 
 // Run observer only on dashboard
 if (window.location.pathname.includes('dashboard.html')) {
   window.addEventListener('load', () => { // Or 'DOMContentLoaded' if preferred
     console.log('[DEBUG] window.load: Starting MutationObserver');
-    observeForElements();
     onDashboardLoad();
   });
 }
 
-// --- Observer to wait for elements ---
-function observeForElements() {
-  const targetNode = document.body; // Or a specific parent like document.querySelector('.user-greeting')
-  const config = { childList: true, subtree: true }; // Watch for added/removed nodes
-
-  const observer = new MutationObserver((mutations, obs) => {
-    const greetEl = document.getElementById('greet');
-    const firstnameEl = document.getElementById('firstname');
-    const avatarEl = document.getElementById('avatar');
-
-    if (greetEl && firstnameEl && avatarEl) {
-      console.log('[DEBUG] MutationObserver: Elements detected, running getSession');
-      const cachedUserData = localStorage.getItem('userData');
-      if (cachedUserData) {
-        try {
-          const parsed = JSON.parse(cachedUserData);
-          const firstName = parsed.fullName?.split(' ')[0] || 'User';
-          applySessionToDOM(parsed, firstName);
-        } catch (e) { /* ignore */ }
-      }
-      getSession(); // Call directly (no need for safeGetSession retries here)
-      obs.disconnect(); // Stop observing once elements are found
-    }
-  });
-
-  observer.observe(targetNode, config);
-  console.log('[DEBUG] MutationObserver: Started watching for elements');
-  
-  // Fallback: If elements already exist, call immediately
-  const greetEl = document.getElementById('greet');
-  const firstnameEl = document.getElementById('firstname');
-  const avatarEl = document.getElementById('avatar');
-  if (greetEl && firstnameEl && avatarEl) {
-    console.log('[DEBUG] MutationObserver: Elements already present');
-    getSession();
-    observer.disconnect();
-  }
-}
 
 
 
@@ -1335,20 +1272,26 @@ async function onDashboardLoad() {
     } catch (e) { /* ignore */ }
   }
 
-  // Then background refresh
-  await getSession(); // This will update if needed
-  // 🔥 ADD THESE TWO LINES:
-    await manageDashboardCards();
-    initializeSmartAccountPinButton();
-  // after await getSession();
-try {
-  // make sure we always get fresh server data (avoid 304/caching)
-  const broadcasts = await fetchActiveBroadcasts(); // this already shows banner & sets active_broadcast_id
-  console.debug('[BCAST] fetchActiveBroadcasts returned', broadcasts.length);
-} catch (err) {
-  console.warn('[BCAST] fetchActiveBroadcasts failed at login', err);
-}
+  // --- SINGLE getSession() call (capture result) ---
+  let session = null;
+  try {
+    session = await getSession(); // <-- only one call in the entire function
+  } catch (err) {
+    console.warn('[onDashboardLoad] getSession() failed:', err);
+    session = null;
+  }
 
+  // 🔥 ADD THESE TWO LINES (after the single getSession)
+  await manageDashboardCards();
+  initializeSmartAccountPinButton();
+
+  // fetch active broadcasts (separate; doesn't call getSession)
+  try {
+    const broadcasts = await fetchActiveBroadcasts(); // this already shows banner & sets active_broadcast_id
+    console.debug('[BCAST] fetchActiveBroadcasts returned', broadcasts.length);
+  } catch (err) {
+    console.warn('[BCAST] fetchActiveBroadcasts failed at login', err);
+  }
 
   // Securely sync PIN/bio flags to storage on load
   try {
@@ -1356,7 +1299,7 @@ try {
     const freshRes = await fetch(`${window.__SEC_API_BASE}/api/session`, {
       method: 'GET',
       credentials: 'include',
-      headers: { 
+      headers: {
         'Accept': 'application/json',
         'Cache-Control': 'no-cache'  // Ensure fresh server data
       }
@@ -1375,7 +1318,7 @@ try {
 
     const hasPin = freshSession?.user?.hasPin || localStorage.getItem('hasPin') === 'true' || false;
     localStorage.setItem('hasPin', hasPin ? 'true' : 'false');
-    
+
     // 🔹 Align biometrics with fresh server fallback (uses backend's hasBiometrics count)
     const biometricsEnabled = freshSession?.user?.hasBiometrics || localStorage.getItem('biometricsEnabled') === 'true' || false;
     localStorage.setItem('biometricsEnabled', biometricsEnabled ? 'true' : 'false');
@@ -1386,52 +1329,44 @@ try {
       biometricsEnabled: localStorage.getItem('biometricsEnabled'),
       credentialId: localStorage.getItem('credentialId')
     });
-    // 🔹 Sync sub-flags: Default to 'true' ONLY if unset when bio enabled; preserve user choices
-// 🔹 Sync sub-flags: Default to 'true' ONLY if unset when bio enabled; preserve user choices
-if (biometricsEnabled) {
-    const storedLogin = localStorage.getItem('biometricForLogin');
-    const storedTx = localStorage.getItem('biometricForTx');
-    
-    // Default unset to true (first-time enable)
-    if (storedLogin === null) {
-        localStorage.setItem('biometricForLogin', 'true');
-    }
-    if (storedTx === null) {
-        localStorage.setItem('biometricForTx', 'true');
-    }
-    
-    console.log('[DEBUG-SYNC] Sub-flags preserved/defaulted:', {
+
+    if (biometricsEnabled) {
+      const storedLogin = localStorage.getItem('biometricForLogin');
+      const storedTx = localStorage.getItem('biometricForTx');
+
+      if (storedLogin === null) localStorage.setItem('biometricForLogin', 'true');
+      if (storedTx === null) localStorage.setItem('biometricForTx', 'true');
+
+      console.log('[DEBUG-SYNC] Sub-flags preserved/defaulted:', {
         bioForLogin: localStorage.getItem('biometricForLogin') === 'true',
         bioForTx: localStorage.getItem('biometricForTx') === 'true'
-    });
-}
-// 🔥 REMOVED THE ELSE BLOCK - Don't reset children when parent is OFF!
-// Let restoreBiometricUI() handle the logic instead.
-// If both children are OFF, restoreBiometricUI will turn parent OFF.
-// If parent is OFF, restoreBiometricUI will ensure children are OFF.
-    
+      });
+    }
+
     // If bio enabled and credentialId exists, prefetch immediately
-    if (biometricsEnabled && localStorage.getItem('credentialId')) {
+    if (localStorage.getItem('biometricsEnabled') === 'true' && localStorage.getItem('credentialId')) {
       prefetchAuthOptions();
     }
-    await restoreBiometricUI();  // Persist active state on reload
+    await restoreBiometricUI();
 
   } catch (err) {
     console.warn('[onDashboardLoad] Flag sync error', err);
-    // Fallback: Use existing (potentially cached) session
+    // Fallback: Use the single-session result captured earlier (if any),
+    // otherwise leave localStorage as-is or apply conservative defaults.
     try {
-      const session = await getSession();
-      const hasPin = session?.user?.hasPin || localStorage.getItem('hasPin') === 'true' || false;
+      const useSession = session; // reuse single call result (may be null)
+      const hasPin = useSession?.user?.hasPin || localStorage.getItem('hasPin') === 'true' || false;
       localStorage.setItem('hasPin', hasPin ? 'true' : 'false');
-      
-      const biometricsEnabled = session?.user?.hasBiometrics || localStorage.getItem('biometricsEnabled') === 'true' || false;
+
+      const biometricsEnabled = useSession?.user?.hasBiometrics || localStorage.getItem('biometricsEnabled') === 'true' || false;
       localStorage.setItem('biometricsEnabled', biometricsEnabled ? 'true' : 'false');
-      
+
+      // When biometrics not enabled, don't leave children in an indeterminate state:
       if (!biometricsEnabled) {
         localStorage.setItem('biometricForLogin', 'false');
         localStorage.setItem('biometricForTx', 'false');
       }
-      
+
       if (biometricsEnabled && localStorage.getItem('credentialId')) {
         prefetchAuthOptions();
       }
@@ -1452,46 +1387,45 @@ if (biometricsEnabled) {
   } else {
     console.warn('setupInactivity not available - skipping');
   }
+
   // --------------------------
-// React to successful reauth
-// --------------------------
-(function(){
-  let __fg_reauth_timer = null;
-  const __fg_reauth_debounce_ms = 600; // slightly larger debounce to allow server to settle
-  // Short-circuit: do not start a new poll if one started recently
-  const MIN_REAUTH_POLL_MS = 700;
-  let __fg_last_reauth_poll = 0;
+  // React to successful reauth
+  // --------------------------
+  (function(){
+    let __fg_reauth_timer = null;
+    const __fg_reauth_debounce_ms = 600; // slightly larger debounce to allow server to settle
+    // Short-circuit: do not start a new poll if one started recently
+    const MIN_REAUTH_POLL_MS = 700;
+    let __fg_last_reauth_poll = 0;
 
-  window.addEventListener('fg:reauth-success', (ev) => {
-    try {
-      if (typeof hideTinyReauthNotice === 'function') {
-        try { hideTinyReauthNotice(); } catch (e) { /* swallow */ }
-      }
-
-      if (__fg_reauth_timer) clearTimeout(__fg_reauth_timer);
-      __fg_reauth_timer = setTimeout(() => {
-        __fg_reauth_timer = null;
-        const now = Date.now();
-        if (now - __fg_last_reauth_poll < MIN_REAUTH_POLL_MS) {
-          console.debug('fg:reauth-success: recent poll already run — skipping immediate poll');
-          return;
+    window.addEventListener('fg:reauth-success', (ev) => {
+      try {
+        if (typeof hideTinyReauthNotice === 'function') {
+          try { hideTinyReauthNotice(); } catch (e) { /* swallow */ }
         }
-        __fg_last_reauth_poll = now;
-        try {
-          if (typeof pollStatus === 'function') {
-            pollStatus();
+
+        if (__fg_reauth_timer) clearTimeout(__fg_reauth_timer);
+        __fg_reauth_timer = setTimeout(() => {
+          __fg_reauth_timer = null;
+          const now = Date.now();
+          if (now - __fg_last_reauth_poll < MIN_REAUTH_POLL_MS) {
+            console.debug('fg:reauth-success: recent poll already run — skipping immediate poll');
+            return;
           }
-        } catch (e) {
-          console.warn('fg:reauth-success -> pollStatus failed', e);
-        }
-      }, __fg_reauth_debounce_ms);
-    } catch (err) {
-      console.warn('fg:reauth-success handler error', err);
-    }
-  }, { passive: true });
-})();
-
-
+          __fg_last_reauth_poll = now;
+          try {
+            if (typeof pollStatus === 'function') {
+              pollStatus();
+            }
+          } catch (e) {
+            console.warn('fg:reauth-success -> pollStatus failed', e);
+          }
+        }, __fg_reauth_debounce_ms);
+      } catch (err) {
+        console.warn('fg:reauth-success handler error', err);
+      }
+    }, { passive: true });
+  })();
 
   // Your existing inactivity check...
   const last = parseInt(localStorage.getItem('lastActive')) || 0;
@@ -1499,244 +1433,23 @@ if (biometricsEnabled) {
     showInactivityPrompt();
   }
 
-  // 🚀 NEW: Automatic Updates & Notifications
-  const STATUS_BANNER = document.getElementById('status-banner');
-  const BANNER_MSG = document.querySelector('.banner-msg');
-
-// --- improved pollStatus that persistently preserves server broadcasts ---
-// Assumes the wrapper dedupe/throttle is in place (FG_POLL_MIN_MS / inflight guard).
-async function _pollStatus_internal() {
-  try {
-    const apiBase = (window.__SEC_API_BASE || (typeof API_BASE !== 'undefined' ? API_BASE : ''));
-    const url = apiBase ? `${apiBase}/api/status` : '/api/status';
-
-    // Force fresh response to avoid 304 / cache surprises when broadcasts are added/removed.
-    const res = await fetch(url, { credentials: 'include', cache: 'no-store' });
-
-    // Try to parse JSON body if content-type indicates JSON (do this even if !res.ok)
-    let body = null;
-    try {
-      const ct = res.headers && typeof res.headers.get === 'function' ? res.headers.get('content-type') : null;
-      if (res.status !== 204 && ct && ct.toLowerCase().includes('application/json')) {
-        body = await res.json();
-      }
-    } catch (e) {
-      console.debug('pollStatus: JSON parse failed', e);
-      body = null;
-    }
-
-    // Treat 423 as processable for notification purposes.
-    const isLocked = res.status === 423;
-    const treatAsProcessable = res.ok || isLocked;
-
-    if (!treatAsProcessable) {
-      // If there is an active server-origin broadcast, preserve it and return.
-      if (window.__fg_currentBanner?.serverId || window.__fg_currentBanner?.id || localStorage.getItem('active_broadcast_id')) {
-        console.debug('pollStatus: non-OK but server broadcast active — preserving it. status=', res.status);
-        return;
-      }
-      console.debug('pollStatus: non-OK (not 423) — suppressed banner. status=', res.status);
-      return;
-    }
-
-    // At this point res.ok OR res.status === 423
-    const data = body || {};
-
-    // If server explicitly supplies a "notification" object (preferred)
-    if (data.notification) {
-      const notif = Array.isArray(data.notification) ? (data.notification[0] || null) : data.notification;
-
-      if (notif) {
-        const notifId = notif.id != null ? String(notif.id) : null;
-
-        // If currently visible banner matches server notification id, update only if message changed.
-        if ((window.__fg_currentBanner?.serverId && String(window.__fg_currentBanner.serverId) === notifId)
-            || (window.__fg_currentBanner?.id && String(window.__fg_currentBanner.id) === notifId)
-            || (localStorage.getItem('active_broadcast_id') && String(localStorage.getItem('active_broadcast_id')) === notifId)
-        ) {
-          // same server broadcast; update message if changed
-          if (window.__fg_currentBanner?.message !== notif.message) {
-            try {
-              showBanner(notif.message || '', { persistent: !!notif.sticky, serverId: notifId });
-              // also normalize local state
-              window.__fg_currentBanner = window.__fg_currentBanner || {};
-              window.__fg_currentBanner.message = notif.message || '';
-            } catch (e) { console.warn('showBanner update failed', e); }
-          } else {
-            // nothing changed; keep visible
-          }
-
-          // ensure we persist the server origin marker
-          try {
-            window.__fg_currentBanner = window.__fg_currentBanner || {};
-            window.__fg_currentBanner.serverId = notifId;
-            window.__fg_currentBanner.id = notifId;
-            window.__fg_currentBanner.sticky = !!notif.sticky;
-            localStorage.setItem('active_broadcast_id', notifId);
-            localStorage.setItem('active_broadcast_ts', String(Date.now()));
-          } catch (e) { /* non-fatal */ }
-
-          return; // leave visible
-        }
-
-        // If clientSticky (admin override) exists, preserve and do not replace
-        if (window.__fg_currentBanner?.clientSticky) {
-          console.debug('pollStatus: server notification present but preserving client-sticky banner');
-          return;
-        }
-
-        // Otherwise show/replace banner with server notification
-        try {
-          showBanner(notif.message || '', { persistent: !!notif.sticky, serverId: notifId });
-          // normalize __fg_currentBanner state immediately and persist
-          window.__fg_currentBanner = window.__fg_currentBanner || {};
-          window.__fg_currentBanner.id = notifId;
-          window.__fg_currentBanner.serverId = notifId;
-          window.__fg_currentBanner.message = notif.message || '';
-          window.__fg_currentBanner.sticky = !!notif.sticky;
-          window.__fg_currentBanner.clientSticky = false;
-          if (notifId != null) {
-            try { localStorage.setItem('active_broadcast_id', String(notifId)); } catch (e) {}
-            try { localStorage.setItem('active_broadcast_ts', String(Date.now())); } catch (e) {}
-          }
-        } catch (e) {
-          console.warn('pollStatus: showBanner failed for server notification', e);
-        }
-        return;
-      }
-    }
-
-    // If server explicitly indicates a removal/clear for a known active id:
-    // Some servers may implement a "notification_cleared_for" or "notification_removed" field.
-    // Respect it if present:
-    if (data.notification_cleared_for || data.notification_removed_for) {
-      const clearedId = String(data.notification_cleared_for || data.notification_removed_for);
-      const activeId = String(localStorage.getItem('active_broadcast_id') || window.__fg_currentBanner?.serverId || window.__fg_currentBanner?.id || '');
-      if (clearedId && activeId && clearedId === activeId) {
-        // server explicitly cleared this broadcast — clear locally
-        try {
-          hideBanner();
-          localStorage.removeItem('active_broadcast_id');
-          localStorage.removeItem('active_broadcast_ts');
-          window.__fg_currentBanner = window.__fg_currentBanner || {};
-          delete window.__fg_currentBanner.serverId;
-          delete window.__fg_currentBanner.id;
-        } catch (e) { console.warn('pollStatus: clearing server broadcast failed', e); }
-        return;
-      } else {
-        // cleared other id — ignore
-      }
-    }
-
-    // No notification provided in body:
-    // If a server-origin broadcast is active (persisted), preserve it.
-    const persistedActive = localStorage.getItem('active_broadcast_id');
-    if (window.__fg_currentBanner?.serverId || window.__fg_currentBanner?.id || persistedActive) {
-      console.debug('pollStatus: no notification in response but server broadcast is known/persisted — preserving it.');
-      return;
-    }
-
-    // If we got a 423 and there is no server banner, optionally open reauth modal silently.
-    if (isLocked) {
-      console.debug('pollStatus: 423 returned and no server banner active — optionally initReauthModal (no banner shown).');
-      try {
-        if (typeof initReauthModal === 'function') {
-          initReauthModal({ show: true, context: 'reauth' }); // remove or keep per your UX choice
-        }
-      } catch (e) {
-        console.debug('pollStatus: initReauthModal failed', e);
-      }
-      return;
-    }
-
-    // No server notification and not locked -> hide banner only if it's not sticky (server or client)
-    if (!(window.__fg_currentBanner?.sticky || window.__fg_currentBanner?.clientSticky)) {
-      try {
-        hideBanner();
-      } catch (e) { console.warn('hideBanner failed', e); }
-    } else {
-      console.debug('pollStatus: no server notification and banner is sticky — preserving it');
-    }
-
-  } catch (err) {
-    // fetch threw (network, CORS, etc.)
-    console.debug('pollStatus network error (suppressed banner)', err);
-    // If a server-origin banner is active, preserve it; otherwise do nothing (no transient banner).
-    if (window.__fg_currentBanner?.serverId || window.__fg_currentBanner?.id || localStorage.getItem('active_broadcast_id')) {
-      console.debug('pollStatus: network error but server broadcast active — preserved.');
-      return;
-    }
-    // otherwise intentionally silence network errors here (per your requirement)
-  }
-}
-
-
-
-
-
-
-
-  // Subscribe to Supabase Realtime channel for instant updates
-  const channel = supabaseClient.channel('network-status');
-  channel
-    .on('broadcast', { event: 'network-update' }, ({ payload }) => {
-      console.log('[DEBUG] Realtime push received:', payload);
-      if (payload.status === 'down' && payload.message) {
-        showBanner(payload.message);  // Instant display
-      } else {
-        hideBanner();  // Instant hide
-      }
-    })
-    .subscribe((status) => {
-      console.log('[DEBUG] Realtime subscription status:', status);
-      // inside subscription .subscribe((status) => { ... })
-if (status === 'SUBSCRIBED') {
-  // Use canonical pollStatus() so banner/state logic is centralized,
-  // and to avoid duplicate fetches or transient banners.
-  try {
-    if (typeof pollStatus === 'function') {
-      // fire-and-forget is fine because pollStatus returns a promise and is deduped.
-      pollStatus();
-      // if you need to wait for it to complete, use: await pollStatus();
-      try { fetchActiveBroadcasts().catch(e => console.warn('[BCAST] fetch on SUBSCRIBED failed', e)); }
-    catch (e) { console.warn('[BCAST] fetchActiveBroadcasts threw', e); }
-
-    }
-  } catch (e) {
-    console.debug('realtime SUBSCRIBED -> pollStatus failed', e);
-  }
-}
-
-
-    });
-
-  // Network listeners (fallback for offline)
-  window.addEventListener('online', hideBanner);
-  window.addEventListener('offline', () => showBanner('You are offline. Working with cached data.'));
-
-  // SW Registration & Update Listener
+  // Rocket: register SW, start pollStatus, etc.
   async function registerSW() {
     if ('serviceWorker' in navigator) {
       try {
         const reg = await navigator.serviceWorker.register('/service-worker.js');
         console.log('[DEBUG] SW registered', reg);
-
-        // Listen for updates
         reg.addEventListener('updatefound', () => {
           const newWorker = reg.installing;
           newWorker.addEventListener('statechange', () => {
             if (newWorker.state === 'installed') {
               if (navigator.serviceWorker.controller) {
-                // New content available; reload after 2s
-                console.log('[DEBUG] New SW version available. Reloading...');
                 setTimeout(() => {
                   if (confirm('Update available! Reload for latest features?')) {
                     window.location.reload();
                   }
                 }, 2000);
               } else {
-                // First install
-                console.log('[DEBUG] SW installed, page reload needed');
                 window.location.reload();
               }
             }
@@ -1758,7 +1471,6 @@ if (status === 'SUBSCRIBED') {
     setupInactivity();
   }
 
-  // Version check (fetches manifest to detect deploy)
   async function checkForUpdates() {
     try {
       const res = await fetch(`/frontend/pwa/manifest.json?v=${APP_VERSION}`);
@@ -1770,7 +1482,6 @@ if (status === 'SUBSCRIBED') {
     }
   }
 
-  // 🚀 Integrate: Register SW, check updates, start polling
   registerSW();
   checkForUpdates();
   pollStatus(); // Initial
@@ -14174,6 +13885,24 @@ try { if (!window.disableBiometrics) window.disableBiometrics = disableBiometric
     if (document.visibilityState === 'visible') recheckShow();
   }, { passive: true });
 })();
+
+// Event listeners for card updates
+window.addEventListener('pin-status-changed', function() {
+  console.log('[DEBUG] pin-status-changed: Refreshing dashboard cards');
+  manageDashboardCards();
+});
+
+window.addEventListener('profile-status-changed', function() {
+  console.log('[DEBUG] profile-status-changed: Refreshing dashboard cards');
+  manageDashboardCards();
+});
+
+window.addEventListener('storage', function(e) {
+  if (e.key === 'hasPin' || e.key === 'profileCompleted') {
+    console.log('[DEBUG] storage event: Refreshing dashboard cards');
+    manageDashboardCards();
+  }
+});
 
 
 
