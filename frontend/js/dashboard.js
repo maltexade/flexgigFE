@@ -2123,6 +2123,31 @@ function updateGreetingAndAvatar(username, firstName, imageUrl) {
 
 let recentTransactions = JSON.parse(localStorage.getItem('recentTransactions')) || [];
 
+// Defensive global override: clears PIN inputs safely (no ReferenceErrors)
+window.__fg_pin_clearAllInputs = function __fg_pin_clearAllInputs_safe() {
+  try {
+    // Prefer cached globals if available, otherwise query DOM as a fallback
+    const cur = (typeof __fg_pin_inputCurrentEl !== 'undefined' && __fg_pin_inputCurrentEl) ? __fg_pin_inputCurrentEl : document.getElementById('currentPin');
+    const neu = (typeof __fg_pin_inputNewEl !== 'undefined' && __fg_pin_inputNewEl) ? __fg_pin_inputNewEl : document.getElementById('newPin');
+    const conf = (typeof __fg_pin_inputConfirmEl !== 'undefined' && __fg_pin_inputConfirmEl) ? __fg_pin_inputConfirmEl : document.getElementById('confirmPin');
+
+    if (cur) try { cur.value = ''; } catch (e) { /* ignore */ }
+    if (neu) try { neu.value = ''; } catch (e) { /* ignore */ }
+    if (conf) try { conf.value = ''; } catch (e) { /* ignore */ }
+
+    // Focus the first input that exists
+    if (cur && typeof cur.focus === 'function') {
+      try { cur.focus(); } catch (e) { /* ignore */ }
+    } else if (neu && typeof neu.focus === 'function') {
+      try { neu.focus(); } catch (e) { /* ignore */ }
+    }
+  } catch (err) {
+    // never let clearing inputs throw — the app must continue to surface server error messages
+    console.warn('__fg_pin_clearAllInputs_safe failed', err);
+  }
+};
+
+
 // --- SVG IMAGE PATHS FOR PROVIDERS ---
 const svgPaths = {
   mtn: '/frontend/svg/MTN-icon.svg',
