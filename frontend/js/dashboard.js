@@ -441,7 +441,25 @@ async function withLoader(task) {
 }
 
 
+// Robust error parser: returns { message, code, raw }
+async function parseErrorResponse(res) {
+  try {
+    // clone in case the caller later wants to read the body too
+    const clone = res.clone();
+    // try JSON first
+    const json = await clone.json().catch(() => null);
+    if (json && (json.message || json.code || Object.keys(json).length)) {
+      return { message: (json.message || JSON.stringify(json)), code: json.code || null, raw: json };
+    }
+  } catch (e) { /* ignore JSON parse error */ }
 
+  try {
+    const txt = await res.text();
+    if (txt) return { message: txt, code: null, raw: txt };
+  } catch (e) { /* ignore text parse error */ }
+
+  return { message: res.status ? `${res.status} ${res.statusText || ''}`.trim() : 'Unknown error', code: null, raw: null };
+}
 
 // Safe fallback clear all pin inputs if older helper missing
 if (typeof window.__fg_pin_clearAllInputs !== 'function') {
@@ -9026,7 +9044,6 @@ if (!saveRes.ok) {
         msg = 'Too many attempts. Account locked temporarily.';
         try { localStorage.setItem('pinLockUntil', new Date(Date.now() + 5*60*1000).toISOString()); } catch (_) {}
       }
-      __sec_pin_notify(msg, 'error');
 
       // small shake on inputs
       document.querySelectorAll('#currentPin, #newPin, #confirmPin').forEach(el => {
