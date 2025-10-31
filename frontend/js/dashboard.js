@@ -441,25 +441,7 @@ async function withLoader(task) {
 }
 
 
-// Robust error parser: returns { message, code, raw }
-async function parseErrorResponse(res) {
-  try {
-    // clone in case the caller later wants to read the body too
-    const clone = res.clone();
-    // try JSON first
-    const json = await clone.json().catch(() => null);
-    if (json && (json.message || json.code || Object.keys(json).length)) {
-      return { message: (json.message || JSON.stringify(json)), code: json.code || null, raw: json };
-    }
-  } catch (e) { /* ignore JSON parse error */ }
 
-  try {
-    const txt = await res.text();
-    if (txt) return { message: txt, code: null, raw: txt };
-  } catch (e) { /* ignore text parse error */ }
-
-  return { message: res.status ? `${res.status} ${res.statusText || ''}`.trim() : 'Unknown error', code: null, raw: null };
-}
 
 // Safe fallback clear all pin inputs if older helper missing
 if (typeof window.__fg_pin_clearAllInputs !== 'function') {
@@ -8934,7 +8916,7 @@ function __sec_pin_wireHandlers() {
     confirmDebounceId = setTimeout(() => {
       const newPin = __sec_PIN_NEW.value;
       if (e.target.value !== newPin && e.target.value.length === 4) {
-        __sec_pin_notify('PINs do not match. Please retype.', 'warning', 1500);
+        console.log('PINs do not match. Please retype.', 'warning', 1500);
       }
     }, 300);
   }
