@@ -442,118 +442,24 @@ async function withLoader(task) {
 
 
 // Robust error parser: returns { message, code, raw }
-// Robust error parser that unwraps nested JSON strings and extracts the most useful message
 async function parseErrorResponse(res) {
-  // Try to read JSON first, then text, then fall back to status
-  let rawJson = null;
-  let rawText = null;
+  try {
+    // clone in case the caller later wants to read the body too
+    const clone = res.clone();
+    // try JSON first
+    const json = await clone.json().catch(() => null);
+    if (json && (json.message || json.code || Object.keys(json).length)) {
+      return { message: (json.message || JSON.stringify(json)), code: json.code || null, raw: json };
+    }
+  } catch (e) { /* ignore JSON parse error */ }
 
   try {
-    rawJson = await res.clone().json().catch(() => null);
-  } catch (e) { rawJson = null; }
+    const txt = await res.text();
+    if (txt) return { message: txt, code: null, raw: txt };
+  } catch (e) { /* ignore text parse error */ }
 
-  try {
-    rawText = await res.clone().text().catch(() => null);
-  } catch (e) { rawText = null; }
-
-  // Helper: try to parse a string as JSON, safely
-  function tryParseMaybeString(s) {
-    if (typeof s !== 'string') return s;
-    s = s.trim();
-    if (!s) return s;
-    // heuristics: if it starts with { or [ or a quoted JSON object
-    if (/^[{[]/.test(s) || (/^".*"$/.test(s))) {
-      try {
-        return JSON.parse(s);
-      } catch (e) {
-        // try to unquote a JSON string that contains JSON
-        try {
-          // remove wrapping quotes if present
-          if (s[0] === '"' && s[s.length - 1] === '"') {
-            return JSON.parse(s.slice(1, -1));
-          }
-        } catch (e2) {}
-      }
-    }
-    return s;
-  }
-
-  // Normalize an unknown value into an object we can inspect
-  let candidate = rawJson ?? rawText;
-
-  // If candidate is a string that contains JSON, parse it
-  candidate = tryParseMaybeString(candidate);
-
-  // If candidate is still a string and rawJson exists and rawJson.message is a JSON string, attempt that too
-  if (typeof candidate === 'object' && candidate !== null) {
-    // some servers embed a JSON string inside a `message` or `error` field
-    if (typeof candidate.message === 'string') {
-      const maybe = tryParseMaybeString(candidate.message);
-      if (typeof maybe === 'object') candidate = Object.assign({}, candidate, { __embeddedMessage: maybe });
-    }
-    if (typeof candidate.error === 'string') {
-      const maybe = tryParseMaybeString(candidate.error);
-      if (typeof maybe === 'object') candidate = Object.assign({}, candidate, { __embeddedError: maybe });
-    }
-  } else if (typeof candidate === 'string' && rawJson && typeof rawJson === 'object') {
-    // Sometimes res.json() returns an object but res.text() returns JSON-string. Use rawJson as primary.
-    candidate = rawJson;
-  }
-
-  // Prefer extraction order:
-  // 1. candidate.__embeddedMessage.error.message or __embeddedError.error.message
-  // 2. candidate.error.message
-  // 3. candidate.message
-  // 4. candidate (string) or statusText
-  function extractMessageFrom(obj) {
-    if (!obj) return null;
-    // unwrap embedded structures
-    if (obj.__embeddedMessage) obj = obj.__embeddedMessage;
-    if (obj.__embeddedError) obj = obj.__embeddedError;
-
-    if (typeof obj === 'string') return obj;
-    if (typeof obj === 'object') {
-      if (obj.error && typeof obj.error === 'object') {
-        if (obj.error.message) return obj.error.message;
-      }
-      if (obj.error && typeof obj.error === 'string') {
-        // maybe error is JSON string
-        const parsed = tryParseMaybeString(obj.error);
-        if (parsed && parsed.error && parsed.error.message) return parsed.error.message;
-        if (typeof parsed === 'string') return parsed;
-      }
-      if (obj.message) return obj.message;
-      // sometimes API nests inside `data` or `errors`
-      if (obj.data && obj.data.error && obj.data.error.message) return obj.data.error.message;
-      if (Array.isArray(obj.errors) && obj.errors.length) {
-        // e.g. [{ message: 'x' }]
-        if (obj.errors[0].message) return obj.errors[0].message;
-      }
-      // fallback: stringify something meaningful (but not whole huge object)
-      try {
-        return JSON.stringify(obj);
-      } catch (e) {
-        return String(obj);
-      }
-    }
-    return null;
-  }
-
-  const message = extractMessageFrom(candidate) || extractMessageFrom(rawJson) || extractMessageFrom(rawText) || `${res.status} ${res.statusText || ''}`.trim() || 'Unknown error';
-  // code extraction
-  let code = null;
-  try {
-    if (candidate && typeof candidate === 'object') {
-      if (candidate.error && candidate.error.code) code = candidate.error.code;
-      else if (candidate.code) code = candidate.code;
-      else if (candidate.__embeddedMessage?.error?.code) code = candidate.__embeddedMessage.error.code;
-      else if (candidate.__embeddedError?.error?.code) code = candidate.__embeddedError.error.code;
-    }
-  } catch (e) { code = null; }
-
-  return { message, code, raw: candidate };
+  return { message: res.status ? `${res.status} ${res.statusText || ''}`.trim() : 'Unknown error', code: null, raw: null };
 }
-
 
 // Safe fallback clear all pin inputs if older helper missing
 if (typeof window.__fg_pin_clearAllInputs !== 'function') {
@@ -8694,21 +8600,140 @@ window.showSlideNotification = window.showSlideNotification || showSlideNotifica
   const __sec_PIN_CONFIRM    = __sec_q('#confirmPin');
 
   // notify helper (prefer slide notification)
-  function __sec_pin_notify(message, type = 'info', duration = type === 'error' ? 4000 : 2000) {
-  // Clear existing notifies first (prevents overlap/stale "wrong" ones)
-  const existing = document.querySelectorAll('.slide-notification, .toast');
-  existing.forEach(el => el.remove());  // Or el.classList.add('hidden')
+  // Robust notify: always deliver a plain string to UI and log raw input for debugging.
+// Keeps slide/toast preferences but normalizes message shape.
+function __sec_pin_notify(raw, type = 'info', duration = (type === 'error' ? 4000 : 2000)) {
+  // Lightweight debug helper (safe if not present)
+  function _dlog(...args) {
+    if (typeof fgPinLog === 'function') return fgPinLog('debug', ...args);
+    if (window && window.console && typeof console.debug === 'function') console.debug('[pin-notify]', ...args);
+  }
 
-  // Prefer slide-in, fallback to toast
-  if (typeof showSlideNotification === 'function') {
-    showSlideNotification({ message, type, duration, position: 'top-right' });  // Add position if not default
-  } else if (typeof showToast === 'function') {
-    showToast(message, type, duration);
-  } else {
-    // Fallback: Native alert or console (but avoid in prod)
-    console[type === 'error' ? 'error' : 'log'](message);
+  try {
+    _dlog('__sec_pin_notify called with:', raw, 'type:', type, 'duration:', duration);
+
+    // Normalize raw -> plain string, preferring common server shapes
+    let msg = '';
+
+    if (raw instanceof Error) {
+      msg = raw.message || String(raw);
+    } else if (raw == null) { // null or undefined
+      msg = '';
+    } else if (typeof raw === 'string') {
+      msg = raw;
+    } else if (typeof raw === 'object') {
+      // Prefer .message
+      if (typeof raw.message === 'string' && raw.message.trim()) {
+        msg = raw.message;
+      } else if (raw.error && typeof raw.error === 'object' && typeof raw.error.message === 'string') {
+        msg = raw.error.message;
+      } else if (raw.error && typeof raw.error === 'string') {
+        // maybe raw.error is a JSON string -> try parse
+        try {
+          const parsed = JSON.parse(raw.error);
+          if (parsed?.message) msg = parsed.message;
+          else msg = raw.error;
+        } catch (e) {
+          msg = raw.error;
+        }
+      } else if (Array.isArray(raw.errors) && raw.errors.length && raw.errors[0].message) {
+        msg = raw.errors[0].message;
+      } else {
+        // Last resort: compact JSON.stringify (shorten if huge)
+        try {
+          const s = JSON.stringify(raw);
+          msg = s.length > 400 ? s.slice(0, 400) + '…' : s;
+        } catch (e) {
+          msg = String(raw);
+        }
+      }
+    } else {
+      // number, boolean, etc.
+      msg = String(raw);
+    }
+
+    // If msg itself looks like JSON string (double-encoded), try one-level unwrap:
+    try {
+      const trimmed = msg.trim();
+      if ((trimmed.startsWith('{') || trimmed.startsWith('[') || (trimmed.startsWith('"') && trimmed.endsWith('"')))) {
+        const parsed = JSON.parse(trimmed);
+        if (parsed && typeof parsed === 'object') {
+          if (parsed.message) msg = parsed.message;
+          else if (parsed.error && parsed.error.message) msg = parsed.error.message;
+          else msg = JSON.stringify(parsed);
+        } else if (typeof parsed === 'string') {
+          msg = parsed;
+        }
+      }
+    } catch (e) {
+      // ignore parse errors — keep msg as-is
+    }
+
+    msg = (typeof msg === 'string' ? msg.trim() : String(msg));
+    if (!msg) msg = (type === 'error' ? 'An error occurred. Try again.' : '');
+
+    _dlog('__sec_pin_notify final message:', msg);
+
+    // ------- Manage existing notifies more gracefully -------
+    // Instead of destroying them all immediately, prefer to remove only transient toasts that are non-sticky.
+    // If you *must* remove all, keep the existing behavior; otherwise attempt a gentler approach:
+    try {
+      const container = document.querySelector('#flexgig_slide_container') || document.querySelector('#toast_container') || null;
+      if (container) {
+        // Remove only toasts that are not the top sticky server banner (if your app marks them)
+        const children = Array.from(container.children);
+        children.forEach((el, i) => {
+          // Detect server-sticky marker (example: data-server-id or class 'sticky')
+          const isSticky = el.dataset && (el.dataset.serverId || el.dataset.sticky) || el.classList.contains('sticky') || false;
+          if (!isSticky) {
+            // remove non-sticky old toasts so they don't overlap
+            try { el.remove(); } catch (e) { /* ignore */ }
+          } else {
+            // leave sticky banners alone
+          }
+        });
+      } else {
+        // fallback (old behavior) — remove all
+        const existing = document.querySelectorAll('.slide-notification, .toast, .flexgig-toast');
+        existing.forEach(el => { try { el.remove(); } catch(e){} });
+      }
+    } catch (e) {
+      // don't let removal errors block notifications
+      _dlog('notify: cleanup existing toasts errored', e);
+    }
+
+    // ------- Deliver to UI: prefer slide, fallback to toast -------
+    try {
+      if (typeof showSlideNotification === 'function') {
+        // Always pass a string message; other options left as an object
+        showSlideNotification({ message: msg, type, duration, position: 'top-right' });
+        return;
+      }
+    } catch (e) {
+      _dlog('showSlideNotification failed:', e);
+      // fallthrough to toast
+    }
+
+    try {
+      if (typeof showToast === 'function') {
+        // showToast often expects (message, type, duration)
+        showToast(msg, type, duration);
+        return;
+      }
+    } catch (e) {
+      _dlog('showToast failed:', e);
+    }
+
+    // Final fallback: console (avoid alert)
+    if (type === 'error') console.error(msg);
+    else console.log(msg);
+
+  } catch (outerErr) {
+    // Last-resort fallback — ensure nothing throws
+    try { console.error('__sec_pin_notify failed', outerErr); } catch (_) {}
   }
 }
+
 
   // small helper: get uid from session or local storage
   async function __sec_pin_getUid() {
@@ -8928,61 +8953,41 @@ function __sec_pin_wireHandlers() {
         // use fetchWithAuth to avoid missing auth header/cookies
         // verify current PIN
 const verifyRes = await fetchWithAuth(`${window.__SEC_API_BASE}/api/verify-pin`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ pin: currentPin, userId: uid })
-  });
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ pin: currentPin, userId: uid })
+});
+if (!verifyRes.ok) {
+  const body = await parseErrorResponse(verifyRes);
+  // Log structured server reason for debugging
+  console.warn('[PIN][warn] current PIN verification failed', body);
 
-  if (!verifyRes.ok) {
-    const body = await parseErrorResponse(verifyRes);
-    console.warn('[PIN][warn] current PIN verification failed', body);
+  // Notify user with server-provided message if available
+  __sec_pin_notify(body.message || 'Current PIN is incorrect. Try again.', 'error');
 
-    // Friendly notify using server message when available
-    __sec_pin_notify(body.message || 'Failed to verify PIN. Try again.', 'error');
-
-    // Clear inputs safely (call your safe override if present)
-    try {
-      if (typeof window.__fg_pin_clearAllInputs === 'function') {
-        window.__fg_pin_clearAllInputs();
-      } else {
-        document.querySelectorAll('#currentPin, #newPin, #confirmPin').forEach(el => { if (el) el.value = ''; });
-        const first = document.querySelector('#currentPin'); if (first) first.focus();
-      }
-    } catch (_) {
-      // swallow - we don't want clearing to throw
-      const first = document.querySelector('#currentPin'); if (first) try { first.focus(); } catch (_) {}
-    }
-
-    // Throw a readable error so outer catch logs a string (not object)
-    throw new Error(body.message || `Verify PIN failed (${verifyRes.status})`);
+  // clear inputs safely (uses the fallback or your existing helper)
+  try { window.__fg_pin_clearAllInputs(); } catch (_) { 
+    // final fallback local reset
+    document.querySelectorAll('#currentPin, #newPin, #confirmPin').forEach(el => { try { el.value = ''; } catch(_){} });
+    const first = document.querySelector('#currentPin'); if (first) try { first.focus(); } catch(_){} 
   }
 
-  // If verify succeeded, SAVE the new PIN
-  const saveRes = await fetchWithAuth(`${window.__SEC_API_BASE}/api/save-pin`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ pin: newPin, userId: uid })
-  });
+  // throw to stop the success path and let outer catch handle logs/state
+  throw new Error(body.message || `Verify PIN failed (${verifyRes.status})`);
+}
 
-  if (!saveRes.ok) {
-    const body = await parseErrorResponse(saveRes);
-    console.warn('[PIN][warn] save PIN failed', body);
-
-    // Notify user with server message when available
-    __sec_pin_notify(body.message || 'Failed to update PIN. Try again.', 'error');
-
-    // keep inputs cleared/focused for retry
-    try {
-      if (typeof window.__fg_pin_clearAllInputs === 'function') {
-        window.__fg_pin_clearAllInputs();
-      } else {
-        document.querySelectorAll('#currentPin, #newPin, #confirmPin').forEach(el => { if (el) el.value = ''; });
-        const first = document.querySelector('#currentPin'); if (first) first.focus();
-      }
-    } catch (_) { /* ignore */ }
-
-    throw new Error(body.message || `Save PIN failed (${saveRes.status})`);
-  }
+// save new PIN
+const saveRes = await fetchWithAuth(`${window.__SEC_API_BASE}/api/save-pin`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ pin: newPin, userId: uid })
+});
+if (!saveRes.ok) {
+  const body = await parseErrorResponse(saveRes);
+  console.warn('[PIN][warn] save PIN failed', body);
+  __sec_pin_notify(body.message || 'Failed to update PIN. Try again.', 'error');
+  throw new Error(body.message || `Save PIN failed (${saveRes.status})`);
+}
 
 
         // Success: update state
