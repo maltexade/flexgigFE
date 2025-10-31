@@ -4337,22 +4337,59 @@ updateBalanceDisplay();
     }
 
     function showToast(message, type = 'success', duration = 2800) {
-      const container = ensureToastStylesAndContainer();
-      const toast = document.createElement('div');
-      toast.className = `flexgig-toast ${type}`;
-      toast.textContent = message;
-      container.appendChild(toast);
+  const container = ensureToastStylesAndContainer();
+  const toast = document.createElement('div');
+  toast.className = `flexgig-toast ${type}`;
+  toast.textContent = message;
+  container.appendChild(toast);
 
-      // animate in
-      requestAnimationFrame(() => toast.classList.add('show'));
+  // animate in (existing behaviour)
+  requestAnimationFrame(() => toast.classList.add('show'));
 
-      // remove after duration
-      const removeAfter = () => {
+  // Helper to remove this toast: slide-out if it's the top visible notification,
+  // otherwise fade and remove (no slide).
+  const removeAfter = () => {
+    try {
+      // compute "top" relative to container's visual order.
+      // Note: your container uses flex-direction: column; firstElementChild is the top-most.
+      const isTop = container.firstElementChild === toast;
+
+      if (isTop) {
+        // Keep existing behaviour for top toast: remove .show so CSS handles transform (slide-out) + opacity
         toast.classList.remove('show');
-        setTimeout(() => toast.remove(), 420);
-      };
-      setTimeout(removeAfter, duration);
+        // Give CSS time to animate the slide-out (same 420ms you used before)
+        setTimeout(() => {
+          if (toast.parentNode) toast.remove();
+        }, 420);
+      } else {
+        // Not the top: do a fade-only removal without triggering translateX reverse animation.
+        // Force the toast to have no transform and only animate opacity.
+        // Use inline style to override injected stylesheet.
+        toast.style.transition = 'opacity .28s ease';
+        toast.style.transform = 'none';
+        // trigger reflow so the browser notices the style change before we set opacity to 0
+        // (safe micro-yield)
+        // eslint-disable-next-line no-unused-expressions
+        toast.offsetHeight;
+        toast.style.opacity = '0';
+        setTimeout(() => {
+          if (toast.parentNode) toast.remove();
+        }, 320); // slightly shorter than slide duration
+      }
+    } catch (err) {
+      // fallback: remove immediately if anything goes wrong
+      if (toast.parentNode) toast.remove();
+      console.warn('showToast removeAfter failed:', err);
     }
+  };
+
+  // schedule the removal
+  setTimeout(removeAfter, duration);
+
+  // return the element in case caller wants to manipulate it (optional)
+  return toast;
+}
+
 
     // ---------------------
     // Helpers for input UI
@@ -8607,6 +8644,53 @@ window.showSlideNotification = window.showSlideNotification || showSlideNotifica
     }
   }
 
+  // Hardened token helper (does NOT log the token)
+function getAuthToken() {
+  try {
+    if (typeof window.__SEC_AUTH_TOKEN === 'string' && window.__SEC_AUTH_TOKEN) return window.__SEC_AUTH_TOKEN;
+
+    const keys = ['authToken','token','idToken','sessionToken','accessToken','__fg_token','__SEC_AUTH_TOKEN'];
+    for (const k of keys) {
+      try {
+        const v = localStorage.getItem(k);
+        if (v) return v;
+      } catch (e) { /* ignore localStorage read errors */ }
+    }
+
+    // last resort: check session/global session object
+    const sess = window.__SEC_SESSION || window.__session || null;
+    if (sess) {
+      if (typeof sess === 'string') {
+        try { const parsed = JSON.parse(sess); if (parsed?.token) return parsed.token; } catch(e){}
+      } else {
+        if (sess?.token) return sess.token;
+        if (sess?.user?.token) return sess.user.token;
+      }
+    }
+  } catch (err) {
+    // avoid exposing token-related internals to console in prod
+    console.warn('getAuthToken: token lookup failed.');
+  }
+  return ''; // empty means "no token found"
+}
+
+// fetch wrapper: try cookie-based first, fallback to bearer token if 401
+async function fetchWithAuth(url, opts = {}) {
+  // normalize headers object
+  const headers = Object.assign({}, opts.headers || {});
+  // try cookie-based first (safer if backend supports it)
+  let res = await fetch(url, Object.assign({}, opts, { headers, credentials: 'include' }));
+
+  if (res.status === 401 || res.status === 403) {
+    const token = getAuthToken();
+    if (!token) return res; // nothing to do
+    const headersWithToken = Object.assign({}, headers, { Authorization: `Bearer ${token}` });
+    res = await fetch(url, Object.assign({}, opts, { headers: headersWithToken, credentials: 'include' }));
+  }
+  return res;
+}
+
+
   /* ========== Wire PIN modal controls ========== */
 function __sec_pin_wireHandlers() {
   // Element selections (consistent with your __sec_q wrapper)
@@ -8666,25 +8750,20 @@ function __sec_pin_wireHandlers() {
           const uid = await __sec_pin_getUid();  // Ensure this is awaited
           if (!uid) throw new Error('Unable to retrieve account. Please refresh.');
 
-          const verifyRes = await fetch(`${window.__SEC_API_BASE}/api/verify-pin`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getAuthToken()}` },
-            body: JSON.stringify({ pin: currentPin, userId: uid })
-          });
-          if (!verifyRes.ok) {
-            const err = await verifyRes.json();
-            throw new Error(err.message || 'Current PIN verification failed.');
-          }
+          const verifyRes = await fetchWithAuth(`${window.__SEC_API_BASE}/api/verify-pin`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ pin: currentPin, userId: uid })
+});
+if (!verifyRes.ok) { const err = await verifyRes.json(); throw new Error(err.message || 'Current PIN verification failed.'); }
 
-          const saveRes = await fetch(`${window.__SEC_API_BASE}/api/save-pin`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getAuthToken()}` },
-            body: JSON.stringify({ pin: newPin, userId: uid })
-          });
-          if (!saveRes.ok) {
-            const err = await saveRes.json();
-            throw new Error(err.message || 'Failed to update PIN.');
-          }
+const saveRes = await fetchWithAuth(`${window.__SEC_API_BASE}/api/save-pin`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ pin: newPin, userId: uid })
+});
+if (!saveRes.ok) { const err = await saveRes.json(); throw new Error(err.message || 'Failed to update PIN.'); }
+
 
           // Success: Update local state immediately
           localStorage.setItem('hasPin', 'true');
