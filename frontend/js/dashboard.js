@@ -9956,46 +9956,72 @@ function openForgetPinFlow() {
   window.safeCall = window.safeCall || safeCall; // expose globally if needed
 
   // Cached DOM refs — (re)cached when needed
-  let reauthModal,
-      biometricView,
-      pinView,
-      reauthAvatar,
-      reauthName,
-      reauthAlert,
-      reauthAlertMsg,
-      deleteReauthKey,
-      verifyBiometricBtn,
-      switchToPin,
-      switchToBiometric,
-      logoutLinkBio,
-      logoutLinkPin,
-      forgetPinLinkBio,
-      forgetPinLinkPin,
-      promptModal,
-      yesBtn;
+let reauthModal,
+    biometricView,
+    pinView,
+    reauthAvatar,
+    reauthName,
+    reauthAlert,
+    reauthAlertMsg,
+    deleteReauthKey,
+    verifyBiometricBtn,
+    switchToPin,
+    switchToBiometric,
+    logoutLinkBio,
+    logoutLinkPin,
+    forgetPinLinkBio,
+    forgetPinLinkPin,
+    promptModal,
+    yesBtn;
 
-  function cacheDomRefs() {
-    console.log('cacheDomRefs called');
-    reauthModal = safeQuery('reauthModal');
-    biometricView = safeQuery('biometricView');
-    pinView = safeQuery('pinView');
-    reauthAvatar = safeQuery('reauthAvatar');
-    reauthName = safeQuery('reauthName');
-    reauthAlert = safeQuery('reauthAlert');
-    reauthAlertMsg = safeQuery('reauthAlertMsg');
-    deleteReauthKey = safeQuery('deleteReauthKey');
-    verifyBiometricBtn = safeQuery('verifyBiometricBtn');
-    switchToPin = safeQuery('switchToPin');
-    switchToBiometric = safeQuery('switchToBiometric');
-    logoutLinkBio = safeQuery('logoutLinkBio');
-    logoutLinkPin = safeQuery('logoutLinkPin');
-    forgetPinLinkBio = safeQuery('forgetPinLinkBio');
-    forgetPinLinkPin = safeQuery('forgetPinLinkPin');
-    promptModal = safeQuery('inactivityPrompt');
-    yesBtn = safeQuery('yesActiveBtn');
-    console.log('Cached refs - pinView:', !!pinView, 'deleteReauthKey:', !!deleteReauthKey);
-  }
-  window.cacheDomRefs = window.cacheDomRefs || cacheDomRefs; // expose if needed
+// --- PIN globals (added) ---
+let __fg_pin_securityPinModal = null;
+let __fg_pin_changePinForm = null;
+let __fg_pin_resetPinBtn = null;
+let __fg_pin_inputCurrentEl = null;
+let __fg_pin_inputNewEl = null;
+let __fg_pin_inputConfirmEl = null;
+// -----------------------------
+
+function cacheDomRefs() {
+  console.log('cacheDomRefs called');
+  reauthModal = safeQuery('reauthModal');
+  biometricView = safeQuery('biometricView');
+  pinView = safeQuery('pinView');
+  reauthAvatar = safeQuery('reauthAvatar');
+  reauthName = safeQuery('reauthName');
+  reauthAlert = safeQuery('reauthAlert');
+  reauthAlertMsg = safeQuery('reauthAlertMsg');
+  deleteReauthKey = safeQuery('deleteReauthKey');
+  verifyBiometricBtn = safeQuery('verifyBiometricBtn');
+  switchToPin = safeQuery('switchToPin');
+  switchToBiometric = safeQuery('switchToBiometric');
+  logoutLinkBio = safeQuery('logoutLinkBio');
+  logoutLinkPin = safeQuery('logoutLinkPin');
+  forgetPinLinkBio = safeQuery('forgetPinLinkBio');
+  forgetPinLinkPin = safeQuery('forgetPinLinkPin');
+  promptModal = safeQuery('inactivityPrompt');
+  yesBtn = safeQuery('yesActiveBtn');
+
+  // ---- PIN-specific refs (new) ----
+  // Uses safeQuery so missing elements won't throw.
+  __fg_pin_securityPinModal = safeQuery('securityPinModal');
+  __fg_pin_changePinForm   = safeQuery('changePinForm');
+  __fg_pin_resetPinBtn      = safeQuery('resetPinBtn');
+  __fg_pin_inputCurrentEl   = safeQuery('currentPin');
+  __fg_pin_inputNewEl       = safeQuery('newPin');
+  __fg_pin_inputConfirmEl   = safeQuery('confirmPin');
+  // ----------------------------------
+
+  console.log(
+    'Cached refs - pinView:', !!pinView,
+    'deleteReauthKey:', !!deleteReauthKey,
+    'pinModal:', !!__fg_pin_securityPinModal,
+    'pinForm:', !!__fg_pin_changePinForm
+  );
+}
+window.cacheDomRefs = window.cacheDomRefs || cacheDomRefs; // expose if needed
+
 
     // --------------------
   // PIN state (shared)
