@@ -380,33 +380,22 @@ async function tryImmediateReauthWithFreshOptions(freshOpts, attemptLimit = 1) {
 
 async function withLoader(task) {
   const start = Date.now();
-
-  // Try to extract caller info from the stack trace
+  // callerInfo extraction (keep as-is) ...
   let callerInfo = 'unknown';
   try {
     const rawStack = (new Error()).stack || '';
     const lines = rawStack.split('\n').map(l => l.trim()).filter(Boolean);
-
-    // Find the first stack frame that is NOT inside withLoader itself
-    // The stack usually looks like:
-    // Error
-    // at withLoader (file:line:col)
-    // at callerFunction (file:line:col)
     let callerLine = lines.find(l => !/withLoader/.test(l) && !/Error/.test(l));
-    // Fallback to the second line if above didn't work
     if (!callerLine && lines.length >= 2) callerLine = lines[1];
-
     if (callerLine) {
-      // Try to match common V8/Chromium stack frame: "at funcName (fileURL:line:col)"
       let m = callerLine.match(/at\s+(.*)\s+\((.*):(\d+):(\d+)\)/);
       if (m) {
         const func = m[1];
-        const file = m[2].split('/').pop(); // keep filename for readability
+        const file = m[2].split('/').pop();
         const line = m[3];
         const col = m[4];
         callerInfo = `${func} @ ${file}:${line}:${col}`;
       } else {
-        // Try Firefox-like format: "funcName@fileURL:line:col"
         m = callerLine.match(/(.*)@(.+):(\d+):(\d+)/);
         if (m) {
           const func = m[1] || '(anonymous)';
@@ -415,7 +404,6 @@ async function withLoader(task) {
           const col = m[4];
           callerInfo = `${func} @ ${file}:${line}:${col}`;
         } else {
-          // Last resort: just use the raw frame string
           callerInfo = callerLine;
         }
       }
@@ -425,7 +413,21 @@ async function withLoader(task) {
   }
 
   console.log(`[DEBUG ⌛⌛⌛] withLoader: Starting task (called from ${callerInfo})`);
+
+  // show loader first
   showLoader();
+
+  // Give the browser one frame to paint _before_ running the task.
+  // This avoids the common "loader appears too late" UX problem.
+  await new Promise((resolve) => {
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => requestAnimationFrame(resolve)); // two frames is safest
+    } else {
+      // fallback
+      setTimeout(resolve, 16);
+    }
+  });
+
   try {
     const result = await task();
     const duration = Date.now() - start;
@@ -439,6 +441,7 @@ async function withLoader(task) {
     try { hideLoader(); } catch (e) { /* ignore */ }
   }
 }
+
 
 
 
@@ -4475,19 +4478,25 @@ updateBalanceDisplay();
   }
 
   if (step === 'confirm') {
-    if (currentPin !== firstPin) {
-      console.warn('[PIN] mismatch on confirmation');
-      showToast('PINs do not match — try again', 'error');
-      step = 'create';
-      if (pinTitleEl) pinTitleEl.textContent = 'Create PIN';
-      if (pinSubtitleEl) pinSubtitleEl.textContent = 'Create a 4-digit PIN';
-      resetInputs();
-      localStorage.setItem('hasPin', 'false'); // PIN not set
-      return;
-    }
+  if (currentPin !== firstPin) {
+    console.warn('[PIN] mismatch on confirmation');
+    showToast('PINs do not match — try again', 'error');
+    step = 'create';
+    if (pinTitleEl) pinTitleEl.textContent = 'Create PIN';
+    if (pinSubtitleEl) pinSubtitleEl.textContent = 'Create a 4-digit PIN';
+    resetInputs();
+    localStorage.setItem('hasPin', 'false');
+    return;
+  }
 
-    processing = true;
-    return withLoader(async () => {
+  // Prevent double submit
+  if (processing) return;
+  processing = true;
+
+  // Perform network operation within loader, but DO NOT do UI updates inside the task.
+  let saveError = null;
+  try {
+    await withLoader(async () => {
       try {
         const res = await fetch('https://api.flexgig.com.ng/api/save-pin', {
           method: 'POST',
@@ -4495,30 +4504,37 @@ updateBalanceDisplay();
           body: JSON.stringify({ pin: currentPin }),
           credentials: 'include',
         });
-
         if (!res.ok) throw new Error('Save PIN failed');
-
-        console.log('[dashboard.js] PIN setup successfully');
-        localStorage.setItem('hasPin', 'true'); // PIN successfully set
-        onPinSetupSuccess();
-
-        const dashboardPinCard = document.getElementById('dashboardPinCard');
-        if (dashboardPinCard) dashboardPinCard.style.display = 'none';
-        if (accountPinStatus) accountPinStatus.textContent = 'PIN set';
-
-        showToast('PIN updated successfully', 'success', 2400);
-        pinModal.classList.add('hidden');
-        resetInputs();
+        // optionally parse response if you need details:
+        // const payload = await res.json();
       } catch (err) {
-        console.error('[dashboard.js] PIN save error:', err);
-        showToast('Failed to save PIN. Try again.', 'error', 2200);
-        localStorage.setItem('hasPin', 'false'); // PIN failed
-        resetInputs();
-      } finally {
-        processing = false;
+        saveError = err;
+        throw err; // rethrow to let withLoader log it
       }
     });
+
+    // Successful save -> update UI *after* loader hidden
+    console.log('[dashboard.js] PIN setup successfully (server confirmed)');
+    localStorage.setItem('hasPin', 'true');
+    onPinSetupSuccess(); // keep this call (it updates cards, dispatches events)
+    const dashboardPinCard = document.getElementById('dashboardPinCard');
+    if (dashboardPinCard) dashboardPinCard.style.display = 'none';
+    pinModal.classList.add('hidden');
+    resetInputs();
+    showToast('PIN updated successfully', 'success', 2400);
+
+  } catch (err) {
+    // Save failed -> handle after loader hidden too
+    console.error('[dashboard.js] PIN save error (post-withLoader):', err, saveError);
+    localStorage.setItem('hasPin', 'false');
+    resetInputs();
+    showToast('Failed to save PIN. Try again.', 'error', 2200);
+  } finally {
+    processing = false;
   }
+  return;
+}
+
 
   if (step === 'reauth') {
     return withLoader(async () => {
@@ -5678,7 +5694,7 @@ async function updateStoredPin(uid, newPin) {
   setTimeout(async () => {
     try {
       console.log('[BOOT] Starting PIN check...');
-      await getOrCreateSessionPromise();  // Wait for session (global, no duplicate fetches)
+      await getSession();  // Wait for session (global, no duplicate fetches)
       
       // Now safe: Wrap with full catch
       await new Promise((resolve, reject) => {

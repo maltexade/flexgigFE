@@ -204,6 +204,7 @@ function openModal(modalId, skipHistory = false) {
 
 
   // Close modal
+// Close modal (FIXED VERSION - handles nested modals properly)
 function closeModal(modalId) {
   console.log(`[ModalManager] closeModal: Attempting to close ${modalId}`);
   const modalConfig = modals[modalId];
@@ -211,31 +212,27 @@ function closeModal(modalId) {
     console.error(`[ModalManager] closeModal: Modal config or element not found for ${modalId}`);
     return;
   }
+  
   const modal = modalConfig.element;
   if (!isModalVisible(modal)) {
     console.warn(`[ModalManager] closeModal: Modal ${modalId} is not visible`);
     return;
   }
 
-  // Check if history state matches and trigger back to let popstate handle the close
-  if (history.state && history.state.modalId === modalId) {
-  history.back();
-  console.log(`[ModalManager] closeModal: Triggered history.back for ${modalId}`);
-  // ✅ Don’t return immediately — let fallback handle the close if needed
-}
-
-
-  // Fallback close logic if history state doesn't match
+  // Move focus away from modal BEFORE closing
   if (document.activeElement && modal.contains(document.activeElement)) {
     document.body.focus();
     console.log(`[ModalManager] closeModal: Moved focus from ${modalId} to body`);
   }
 
+  // Apply closing transition
   applyTransition(modal, false, () => {
     modal.classList.add('hidden');
     modal.style.display = 'none';
     modal.setAttribute('aria-hidden', 'true');
     modal.setAttribute('inert', '');
+    
+    // Remove from stack
     const idx = openModalsStack.findIndex((item) => item.id === modalId);
     if (idx !== -1) {
       openModalsStack.splice(idx, 1);
@@ -245,28 +242,45 @@ function closeModal(modalId) {
           .map((item) => item.id)
           .join(', ')}, depth: ${currentDepth}`
       );
-    } else {
-      console.warn(`[ModalManager] closeModal: Modal ${modalId} not found in stack`);
     }
 
+    // ✅ CRITICAL FIX: Restore previous modal if exists
     const previousModal = openModalsStack[openModalsStack.length - 1];
     if (previousModal) {
-      const focusable = previousModal.modal.querySelector(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      const prevEl = previousModal.modal;
+      
+      // Ensure previous modal is visible
+      if (!isModalVisible(prevEl)) {
+        prevEl.classList.remove('hidden');
+        prevEl.style.display = modals[previousModal.id].hasPullHandle ? 'block' : 'flex';
+        prevEl.setAttribute('aria-hidden', 'false');
+        prevEl.removeAttribute('inert');
+        
+        // Re-apply z-index to ensure it's on top
+        prevEl.style.zIndex = '1050';
+        console.log(`[ModalManager] closeModal: Restored visibility for ${previousModal.id}`);
+      }
+      
+      // Focus first focusable element
+      const focusable = prevEl.querySelector(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
       );
       if (focusable) {
-        focusable.focus();
+        setTimeout(() => focusable.focus(), 100); // Small delay ensures DOM is stable
         console.log(`[ModalManager] closeModal: Restored focus to ${previousModal.id}`);
-      } else {
-        console.warn(
-          `[ModalManager] closeModal: No focusable elements in previous modal ${previousModal.id}`
-        );
       }
     } else {
+      // No more modals, focus body
       document.body.focus();
       console.log('[ModalManager] closeModal: Restored focus to document body');
     }
   });
+
+  // Handle history if needed
+  if (history.state && history.state.modalId === modalId) {
+    history.back();
+    console.log(`[ModalManager] closeModal: Triggered history.back for ${modalId}`);
+  }
 }
 
   // Focus trap for accessibility
@@ -559,6 +573,20 @@ Object.entries(triggers).forEach(([triggerId, modalId]) => {
   
   console.log('[ModalManager] initialize: Initialization complete');
 }
+
+// Add click protection for nested modals (prevents click-through)
+Object.entries(modals).forEach(([modalId, { element }]) => {
+  if (!element) return;
+  
+  element.addEventListener('click', (e) => {
+    // Stop clicks from propagating to modals beneath
+    if (e.target === element || e.target.closest('.modal-content')) {
+      e.stopPropagation();
+    }
+  });
+  
+  console.log(`[ModalManager] Added click protection for ${modalId}`);
+});
 
   document.addEventListener('DOMContentLoaded', initialize);
   console.log('[ModalManager] Registered DOMContentLoaded listener');
