@@ -1598,48 +1598,71 @@ function initializeSmartAccountPinButton() {
         
         console.log('[Smart PIN Button] Found Account Pin row, setting up smart behavior');
         
-        // Helper: Open a PIN modal with fallbacks + accessibility (DRY)
-        function openPinModal(mode = 'setup') {
-            // Try named functions first
-            const openFunc = mode === 'change' 
-                ? (window.openChangePinModal || openChangePinModal) 
-                : (window.openSetupPinModal || openSetupPinModal);
-            if (typeof openFunc === 'function') {
-                openFunc();
-                // Auto-focus after open
+        // Helper: Open a PIN modal with fallbacks + accessibility (DRY) – No openSetupPinModal assumption
+        async function openPinModal(mode = 'setup') {
+            // For CHANGE: Use ModalManager or direct (your securityPinModal)
+            if (mode === 'change') {
+                if (typeof window.ModalManager !== 'undefined' && typeof window.ModalManager.openModal === 'function') {
+                    window.ModalManager.openModal('securityPinModal');
+                    console.log('[Smart PIN Button] Opened securityPinModal via ModalManager');
+                } else {
+                    // Direct fallback
+                    const modal = document.getElementById('securityPinModal') || 
+                                  document.querySelector('.pin-change-modal');
+                    if (modal) {
+                        modal.classList.remove('hidden');
+                        modal.classList.add('active');
+                        modal.style.display = 'flex';
+                        console.log('[Smart PIN Button] Direct open securityPinModal');
+                    } else {
+                        console.error('[Smart PIN Button] Change modal not found');
+                        if (typeof notify === 'function') notify('Change PIN not available', 'error');
+                        return false;
+                    }
+                }
                 setTimeout(() => focusFirstInput(mode), 100);
                 return true;
             }
-
-            // Fallback: Find & show modal
-            const modalId = mode === 'change' ? 'changePinModal' : 'setupPinModal';
-            const modal = document.getElementById(modalId) || 
-                          document.getElementById(mode === 'change' ? 'pinChangeModal' : 'pinSetupModal') ||
-                          document.querySelector(mode === 'change' ? '.pin-change-modal' : '.pin-setup-modal') ||
-                          document.getElementById('pinModal');  // Shared modal fallback
             
-            if (modal) {
-                modal.classList.remove('hidden');
-                modal.classList.add('active');
-                modal.style.display = 'flex';
+            // For SETUP: Always fallback to dashboardPinCard (your reliable trigger for create mode)
+            console.log('[Smart PIN Button] Setup: Triggering via dashboardPinCard');
+            const dashboardPinCard = document.getElementById('dashboardPinCard');
+            if (dashboardPinCard) {
+                // Ensure visible (in case hidden by race)
+                dashboardPinCard.style.display = 'block';  // Or 'flex' if card uses it
+                dashboardPinCard.style.visibility = 'visible';
                 
-                // Auto-focus (accessibility)
-                setTimeout(() => focusFirstInput(mode), 100);
+                // Trigger click (your wiring opens pinModal in create mode)
+                if (dashboardPinCard.onclick) {
+                    dashboardPinCard.onclick(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                } else {
+                    // Manual dispatch if no onclick
+                    dashboardPinCard.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                }
                 
+                // Scroll for UX
+                dashboardPinCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                
+                // Set global flag to block closes/idle during setup
+                window.__setupPinActive = true;
+                setTimeout(() => { window.__setupPinActive = false; }, 30000);  // 30s guard (adjust)
+                
+                console.log('[Smart PIN Button] Dashboard card triggered for setup');
+                setTimeout(() => focusFirstInput(mode), 200);  // Longer delay for card animation
                 return true;
             }
-
-            console.error(`[Smart PIN Button] ${mode} modal not found`);
-            if (typeof notify === 'function') notify(`${mode} PIN feature not available`, 'error');
+            
+            console.error('[Smart PIN Button] Dashboard card not found for setup');
+            if (typeof notify === 'function') notify('Setup PIN not available', 'error');
             return false;
         }
         
         // Helper: Focus first input in modal for accessibility
         function focusFirstInput(mode) {
-            const modal = document.querySelector('.modal.active') ||  // Assumes active class on opened modal
-                          document.getElementById(mode === 'change' ? 'changePinModal' : 'setupPinModal');
+            // Broader selector: Any active/open PIN modal
+            const modal = document.querySelector('.modal.active, .pin-modal:not(.hidden), #pinModal:not(.hidden), #securityPinModal:not(.hidden)');
             if (modal) {
-                const firstInput = modal.querySelector('input[type="password"], input[autofocus]');
+                const firstInput = modal.querySelector('input[type="password"], input[autofocus], .pin-input');
                 if (firstInput) {
                     firstInput.focus();
                     firstInput.setAttribute('aria-label', mode === 'change' 
@@ -1647,18 +1670,6 @@ function initializeSmartAccountPinButton() {
                         : 'Enter new PIN to set up');
                 }
             }
-        }
-        
-        // For setup mode: Fallback to dashboard card if direct modal fails
-        function fallbackToDashboardCard() {
-            const dashboardPinCard = document.getElementById('dashboardPinCard');
-            if (dashboardPinCard && dashboardPinCard.onclick) {
-                dashboardPinCard.onclick(new MouseEvent('click', { bubbles: true }));
-                // Scroll to it for better UX
-                dashboardPinCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                return true;
-            }
-            return false;
         }
         
         // Function to update button text based on PIN status
@@ -1677,26 +1688,21 @@ function initializeSmartAccountPinButton() {
         // Update button text initially
         updateAccountPinButton();
         
-        // Override click handler
+        // Override click handler (CAPTURE PHASE: Blocks ModalManager early)
         accountPinRow.addEventListener('click', async function(e) {
+            // BLOCK OVERLAP: Stop ALL propagation (ModalManager won't fire)
+            e.stopImmediatePropagation();
             e.preventDefault();
             e.stopPropagation();
             
             const hasPin = localStorage.getItem('hasPin') === 'true';
             
-            console.log('[Smart PIN Button] Clicked, hasPin:', hasPin);
+            console.log('[Smart PIN Button] Clicked (blocked ModalManager), hasPin:', hasPin);
             
-            if (hasPin) {
-                // PIN exists -> Open Change PIN modal
-                console.log('[Smart PIN Button] Opening Change PIN modal');
-                openPinModal('change');
-            } else {
-                // No PIN -> Open Setup PIN modal (from dashboard)
-                console.log('[Smart PIN Button] Opening Setup PIN modal');
-                if (!openPinModal('setup')) {
-                    // If direct open fails, fallback to dashboard card
-                    fallbackToDashboardCard();
-                }
+            const opened = await openPinModal(hasPin ? 'change' : 'setup');
+            if (!opened) {
+                console.warn('[Smart PIN Button] Failed to open modal');
+                return;
             }
             
             // Close security modal after opening PIN modal
@@ -1710,7 +1716,7 @@ function initializeSmartAccountPinButton() {
             } catch (err) {
                 console.warn('[Smart PIN Button] Could not close security modal', err);
             }
-        });
+        }, { capture: true, passive: false });  // Capture: Runs FIRST!
         
         // Listen for PIN status changes (e.g., after successful PIN setup)
         window.addEventListener('pin-status-changed', function() {
