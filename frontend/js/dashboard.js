@@ -5218,13 +5218,12 @@ function __fg_pin_clearAllInputs() {
             const { error } = await verifyRes.json();
             __fg_pin_log.w('current PIN verification failed', error);
             __fg_pin_showFieldError(__fg_pin_inputCurrentEl, error?.message || 'Current PIN is incorrect');
-            __fg_pin_notify(error?.message || 'Current PIN is incorrect', 'error');
             __fg_pin_clearAllInputs();
             return;
           }
         } catch (err) {
           __fg_pin_log.e('Error verifying PIN:', err);
-          __fg_pin_notify('Current PIN is incorrect. Try again.', 'error');
+          console.log('Current PIN is incorrect. Try again.', 'error');
           return;
         }
 
@@ -5738,7 +5737,7 @@ async function updateStoredPin(uid, newPin) {
         // Note: Assuming backend verify-pin can check currentPin; if found.value is hashed, use reAuthenticateWithPin for current
         await reAuthenticateWithPin(info.uid, currentPin, async (success) => {
           if (!success) {
-            notify('Current PIN is incorrect', 'error');
+            console.log('Current PIN is incorrect', 'error');
             return;
           }
           notify('Updating PIN...', 'info');
