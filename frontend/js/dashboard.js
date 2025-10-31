@@ -8976,7 +8976,7 @@ if (!verifyRes.ok) {
   console.warn('[PIN][warn] current PIN verification failed', body);
 
   // Notify user with server-provided message if available
-  __sec_pin_notify(body.message || 'Current PIN is incorrect. Try again.', 'error');
+  __sec_pin_notify('Current PIN is incorrect. Try again.', 'error');
 
   // clear inputs safely (uses the fallback or your existing helper)
   try { window.__fg_pin_clearAllInputs(); } catch (_) { 
@@ -8998,7 +8998,7 @@ const saveRes = await fetchWithAuth(`${window.__SEC_API_BASE}/api/save-pin`, {
 if (!saveRes.ok) {
   const body = await parseErrorResponse(saveRes);
   console.warn('[PIN][warn] save PIN failed', body);
-  __sec_pin_notify(body.message || 'Failed to update PIN. Try again.', 'error');
+  __sec_pin_notify('Failed to update PIN. Try again.', 'error');
   throw new Error(body.message || `Save PIN failed (${saveRes.status})`);
 }
 
@@ -9044,6 +9044,7 @@ if (!saveRes.ok) {
         msg = 'Too many attempts. Account locked temporarily.';
         try { localStorage.setItem('pinLockUntil', new Date(Date.now() + 5*60*1000).toISOString()); } catch (_) {}
       }
+      __sec_pin_notify(msg, 'error');
 
       // small shake on inputs
       document.querySelectorAll('#currentPin, #newPin, #confirmPin').forEach(el => {
