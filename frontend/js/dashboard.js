@@ -9030,7 +9030,7 @@ if (!saveRes.ok) {
 
         // Show success notify after we gave the browser a frame to paint (modal hidden)
         requestAnimationFrame(() => {
-          __sec_pin_notify('PIN updated successfully!', 'success');
+          console.log('PIN updated successfully!', 'success');
         });
       });
     } catch (error) {
