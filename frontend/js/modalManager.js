@@ -130,40 +130,48 @@
 
   // ==================== TRANSITION EFFECTS ====================
   function applyTransition(modal, show, callback) {
-    if (!modal) return callback?.();
+  if (!modal) return callback?.();
+  const isProfile = modal.id === 'updateProfileModal';
+  modal.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+  modal.style.opacity = show ? '0' : '1';
+  modal.style.transform = show ? (isProfile ? 'translateX(-100%)' : 'translateY(20px)') : (isProfile ? 'translateX(0)' : 'translateY(0)');
 
-    const isProfile = modal.id === 'updateProfileModal';
-    modal.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
-    modal.style.opacity = show ? '0' : '1';
-    modal.style.transform = show
-      ? (isProfile ? 'translateX(-100%)' : 'translateY(20px)')
-      : (isProfile ? 'translateX(0)' : 'translateY(0)');
+  let finished = false;
+  const onTransitionEnd = () => {
+    if (finished) return;
+    finished = true;
+    modal.removeEventListener('transitionend', onTransitionEnd);
+    if (!show) {
+      modal.classList.add('hidden');
+      modal.style.display = 'none';
+      modal.setAttribute('aria-hidden', 'true');
+      modal.setAttribute('inert', '');
+      hideBackdrop(modal);
+    } else {
+      modal.removeAttribute('inert');
+      showBackdrop(modal);
+    }
+    if (!isProcessingPopstate) log('debug', `applyTransition: ${modal.id} ${show ? 'shown' : 'hidden'}`);
+    callback?.();
+  };
 
-    const onTransitionEnd = () => {
-      modal.removeEventListener('transitionend', onTransitionEnd);
-      if (!show) {
-        modal.classList.add('hidden');
-        modal.style.display = 'none';
-        modal.setAttribute('aria-hidden', 'true');
-        modal.setAttribute('inert', '');
-        hideBackdrop(modal);
-      } else {
-        modal.removeAttribute('inert');
-        showBackdrop(modal);
-      }
-      if (!isProcessingPopstate) log('debug', `applyTransition: ${modal.id} ${show ? 'shown' : 'hidden'}`);
-      callback?.();
-    };
+  modal.addEventListener('transitionend', onTransitionEnd);
 
-    modal.addEventListener('transitionend', onTransitionEnd);
+  // fallback: if transitionend doesn't fire within 450ms, force complete
+  const fallbackTimer = setTimeout(() => {
+    if (!finished) {
+      log('warn', `applyTransition: fallback triggered for ${modal.id}`);
+      onTransitionEnd();
+    }
+    clearTimeout(fallbackTimer);
+  }, 450);
 
-    requestAnimationFrame(() => {
-      modal.style.opacity = show ? '1' : '0';
-      modal.style.transform = show
-        ? (isProfile ? 'translateX(0)' : 'translateY(0)')
-        : (isProfile ? 'translateX(-100%)' : 'translateY(20px)');
-    });
-  }
+  requestAnimationFrame(() => {
+    modal.style.opacity = show ? '1' : '0';
+    modal.style.transform = show ? (isProfile ? 'translateX(0)' : 'translateY(0)') : (isProfile ? 'translateX(-100%)' : 'translateY(20px)');
+  });
+}
+
 
   // ==================== FORCE CLOSE MODAL ====================
   function forceCloseModal(modalId) {
@@ -273,34 +281,57 @@
       modal.style.opacity = '0';
     }
 
-    applyTransition(modal, true, () => {
-      if (!openModalsStack.some((item) => item.id === modalId)) {
-        openModalsStack.push({ modal, id: modalId });
-        currentDepth++;
-      }
+    // --- inside applyTransition callback in openModal (replace the existing block that sets history & focus) ---
+applyTransition(modal, true, () => {
+  if (!openModalsStack.some((item) => item.id === modalId)) {
+    openModalsStack.push({ modal, id: modalId });
+    currentDepth++;
+  }
 
-      if (!skipHistory) {
-        history.pushState({ modalId }, '', `#${modalId}`);
-      }
+  // PUSH a standardized modal history state (consistent with handlePopstate)
+  if (!skipHistory) {
+    const newDepth = currentDepth;
+    history.pushState(
+      { isModal: true, modalDepth: newDepth, modalId },
+      '',
+      `#${modalId}`
+    );
+  }
 
-      let focusTarget =
-        modal.querySelector('input, select, textarea, [tabindex]:not([tabindex="-1"])') ||
-        modal.querySelector('button:not([data-close])');
+  // Prefer focusing without causing scroll jumps
+  let focusTarget = modal.querySelector('input, select, textarea, [tabindex]:not([tabindex="-1"])') ||
+                    modal.querySelector('button:not([data-close])');
 
-      if (modalId === 'securityPinModal') {
-        const title = modal.querySelector('#pinTitle');
-        if (title) focusTarget = title;
-        document.dispatchEvent(new CustomEvent('security:pin-modal-opened'));
-        log('debug', 'openModal: Dispatched security:pin-modal-opened for securityPinModal');
-      }
+  if (modalId === 'securityPinModal') {
+    const title = modal.querySelector('#pinTitle');
+    if (title) focusTarget = title;
+    document.dispatchEvent(new CustomEvent('security:pin-modal-opened'));
+    log('debug', 'openModal: Dispatched security:pin-modal-opened for securityPinModal');
+  }
 
-      if (focusTarget) {
-        focusTarget.setAttribute('tabindex', '-1');
-        focusTarget.focus();
-      }
+  if (focusTarget) {
+    // Set temporary tabindex only if it doesn't already have a usable tab index
+    const hadTabIndex = focusTarget.hasAttribute('tabindex');
+    if (!hadTabIndex) focusTarget.setAttribute('tabindex', '-1');
 
-      trapFocus(modal);
-    });
+    // Use preventScroll option to avoid reflow/scroll jumps
+    try {
+      focusTarget.focus({ preventScroll: true });
+    } catch (e) {
+      // Fallback for older browsers
+      focusTarget.focus();
+    }
+
+    // Remove the temporary tabindex if we added one
+    if (!hadTabIndex) {
+      // allow a short delay so focus handling finishes
+      setTimeout(() => focusTarget.removeAttribute('tabindex'), 50);
+    }
+  }
+
+  trapFocus(modal);
+});
+
   }
 
   // ==================== CLOSE MODAL ====================
@@ -373,10 +404,18 @@
       }
     });
 
-    if (history.state && history.state.modalId === modalId) {
-      history.back();
-      log('debug', `closeModal: Triggered history.back for ${modalId}`);
-    }
+    // at end of closeModal(...):
+// Only go history.back() if current history state looks like a modal entry that belongs to this modal
+try {
+  if (history.state && history.state.isModal && history.state.modalId === modalId) {
+    history.back();
+    log('debug', `closeModal: Triggered history.back for ${modalId}`);
+  }
+} catch (e) {
+  // ignore history exceptions on older browsers or unusual states
+  log('warn', `closeModal: history.back() check failed for ${modalId}`, e);
+}
+
   }
 
   // ==================== FOCUS TRAP ====================

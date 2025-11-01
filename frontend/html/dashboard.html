@@ -371,47 +371,43 @@
             </div>
           </div>
           <button id="continueBtn" class="continue-btn" disabled>Continue</button>
-          <div id="checkoutModal" class="modal" aria-hidden="true">
-            <div class="modal-content">
-              <div class="pull-handle"></div>
-              <button class="close-btn" data-close type="button" aria-label="Close checkout modal">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-                  <circle cx="12" cy="12" r="10" fill="#bfc7d3"/>
-                  <path d="M8 8l8 8M16 8l-8 8" stroke="#021827" stroke-width="2" stroke-linecap="round"/>
-                </svg>
-              </button>
-              <div class="section-header">
-                <h2>Confirm</h2>
-              </div>
-              <div class="checkout-content">
-                <div class="send-to-section">
-                  <h3>Send to</h3>
-                  <p id="checkout-phone"></p>
-                </div>
-                <div class="checkout-details">
-                  <div class="details-left">
-                    <p>Service</p>
-                    <p>Price</p>
-                    <p>Data Package</p>
-                    <p>Provider</p>
-                  </div>
-                  <div class="details-right">
-                    <p><span class="data-icon">
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                        <rect x="6" y="12" width="2" height="8" fill="#1E90FF"/>
-                        <rect x="10" y="8" width="2" height="12" fill="#1E90FF"/>
-                        <rect x="14" y="4" width="2" height="16" fill="#1E90FF"/>
-                      </svg>
-                    </span>Data</p>
-                    <p id="checkout-price"></p>
-                    <p id="checkout-data"></p>
-                    <p id="checkout-provider"></p>
-                  </div>
-                </div>
-                <button id="payBtn" class="pay-btn" type="button" disabled>Pay</button>
-              </div>
-            </div>
-          </div>
+          <!-- checkout modal root -->
+<div id="checkoutModal" aria-hidden="true" role="dialog" aria-modal="true">
+  <div class="modal-content" role="document">
+    <div class="modal-header">
+      <div class="title">Confirm payment</div>
+      <button class="btn-close" aria-label="Close" data-close>✕</button>
+    </div>
+
+    <div class="checkout-amount">₦1,200</div>
+    <div class="checkout-meta">For: <span class="meta-item">MTN Data - 1GB</span></div>
+
+    <div class="payment-methods" role="list">
+      <div class="payment-method selected" data-method="wallet" role="listitem" tabindex="0">
+        <div class="left">
+          <div class="pm-icon">W</div>
+          <div class="pm-name">Wallet balance</div>
+        </div>
+        <div class="right"><div class="pm-desc">Available: ₦5,000</div></div>
+      </div>
+
+      <div class="payment-method" data-method="card" role="listitem" tabindex="0">
+        <div class="left">
+          <div class="pm-icon">C</div>
+          <div class="pm-name">Card</div>
+        </div>
+        <div class="right"><div class="pm-desc">Visa / Mastercard</div></div>
+      </div>
+      <!-- add more methods -->
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn-secondary" id="btnCancelCheckout">Cancel</button>
+      <button id="payBtn">Pay ₦1,200</button>
+    </div>
+  </div>
+</div>
+
         </div>
         <div class="recent-transactions">
           <h4>
