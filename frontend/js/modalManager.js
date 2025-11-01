@@ -9,7 +9,7 @@
     console[type](`[ModalManager] ${msg}`, data);
   }
 
-  // Modal configuration
+  // Modal configuration - checkoutModal added with pullHandle
   const modals = {
     settingsModal: { element: document.getElementById('settingsModal'), hasPullHandle: false },
     helpSupportModal: { element: document.getElementById('helpSupportModal'), hasPullHandle: false },
@@ -19,7 +19,7 @@
     pinModal: { element: document.getElementById('pinModal'), hasPullHandle: false },
     allPlansModal: { element: document.getElementById('allPlansModal'), hasPullHandle: true },
     contactModal: { element: document.getElementById('contactModal'), hasPullHandle: false },
-    checkoutModal: { element: document.getElementById('checkoutModal'), hasPullHandle: false },
+    checkoutModal: { element: document.getElementById('checkoutModal'), hasPullHandle: true },
   };
 
   const openModalsStack = [];
@@ -31,71 +31,87 @@
   // ==================== SCROLL LOCK MANAGEMENT ====================
   function lockBodyScroll() {
     if (bodyScrollLocked) {
-      log('debug', 'lockBodyScroll: Already locked, skipping');
+      log('debug', 'lockBodyScroll: Already locked');
       return;
     }
 
-    // Save current scroll position
     scrollPosition = window.pageYOffset || document.documentElement.scrollTop;
     
-    // Apply comprehensive scroll lock styles
-    document.body.style.overflow = 'hidden';
-    document.body.style.position = 'fixed';
-    document.body.style.top = `-${scrollPosition}px`;
-    document.body.style.width = '100%';
-    document.body.style.left = '0';
-    document.body.style.right = '0';
+    // Comprehensive lock strategy
+    const body = document.body;
+    const html = document.documentElement;
     
-    // Lock HTML element for iOS Safari
-    document.documentElement.style.overflow = 'hidden';
-    document.documentElement.style.position = 'relative';
+    body.style.setProperty('overflow', 'hidden', 'important');
+    body.style.setProperty('position', 'fixed', 'important');
+    body.style.setProperty('top', `-${scrollPosition}px`, 'important');
+    body.style.setProperty('width', '100%', 'important');
+    body.style.setProperty('left', '0', 'important');
+    body.style.setProperty('right', '0', 'important');
     
-    // Prevent scroll on main container if exists
-    const mainContent = document.querySelector('main') || document.querySelector('.main-content');
-    if (mainContent) {
-      mainContent.style.overflow = 'hidden';
-      mainContent.style.height = '100vh';
+    html.style.setProperty('overflow', 'hidden', 'important');
+    html.style.setProperty('position', 'relative', 'important');
+    
+    // Lock main container
+    const main = document.querySelector('main') || document.querySelector('.main-content') || document.querySelector('.dashboard-content');
+    if (main) {
+      main.dataset._origOverflow = main.style.overflow || '';
+      main.dataset._origHeight = main.style.height || '';
+      main.style.setProperty('overflow', 'hidden', 'important');
+      main.style.setProperty('height', '100vh', 'important');
     }
     
+    // Add body class for CSS hooks
+    body.classList.add('modal-open');
+    
     bodyScrollLocked = true;
-    log('debug', `lockBodyScroll: Locked at position ${scrollPosition}`);
+    log('info', `🔒 Body scroll LOCKED at position ${scrollPosition}`);
   }
 
   function unlockBodyScroll() {
-    // Only unlock if no modals remain open
+    // CRITICAL: Only unlock when stack is truly empty
     if (openModalsStack.length > 0) {
-      log('debug', 'unlockBodyScroll: Modals still open, skipping unlock');
+      log('debug', `unlockBodyScroll: SKIPPED - ${openModalsStack.length} modal(s) still open`);
       return;
     }
 
     if (!bodyScrollLocked) {
-      log('debug', 'unlockBodyScroll: Not locked, skipping');
+      log('debug', 'unlockBodyScroll: Not locked');
       return;
     }
     
-    // Remove all scroll lock styles
-    document.body.style.overflow = '';
-    document.body.style.position = '';
-    document.body.style.top = '';
-    document.body.style.width = '';
-    document.body.style.left = '';
-    document.body.style.right = '';
+    const body = document.body;
+    const html = document.documentElement;
     
-    document.documentElement.style.overflow = '';
-    document.documentElement.style.position = '';
+    // Remove all inline styles
+    body.style.removeProperty('overflow');
+    body.style.removeProperty('position');
+    body.style.removeProperty('top');
+    body.style.removeProperty('width');
+    body.style.removeProperty('left');
+    body.style.removeProperty('right');
     
-    // Restore main content
-    const mainContent = document.querySelector('main') || document.querySelector('.main-content');
-    if (mainContent) {
-      mainContent.style.overflow = '';
-      mainContent.style.height = '';
+    html.style.removeProperty('overflow');
+    html.style.removeProperty('position');
+    
+    // Restore main container
+    const main = document.querySelector('main') || document.querySelector('.main-content') || document.querySelector('.dashboard-content');
+    if (main) {
+      const origOverflow = main.dataset._origOverflow || '';
+      const origHeight = main.dataset._origHeight || '';
+      main.style.overflow = origOverflow;
+      main.style.height = origHeight;
+      delete main.dataset._origOverflow;
+      delete main.dataset._origHeight;
     }
+    
+    // Remove body class
+    body.classList.remove('modal-open');
     
     // Restore scroll position
     window.scrollTo(0, scrollPosition);
     
     bodyScrollLocked = false;
-    log('debug', `unlockBodyScroll: Unlocked, restored position ${scrollPosition}`);
+    log('info', `🔓 Body scroll UNLOCKED, restored to ${scrollPosition}`);
   }
 
   // ==================== BACKDROP MANAGEMENT ====================
@@ -118,16 +134,8 @@
         pointer-events: auto;
       `;
       
-      // Prevent clicks on backdrop from closing modal (optional - remove if you want backdrop clicks to close)
-      backdrop.addEventListener('click', (e) => {
-        e.stopPropagation();
-        // Uncomment to allow backdrop clicks to close modal:
-        // const modalId = modal.id;
-        // closeModal(modalId);
-      });
-      
       modal.insertBefore(backdrop, modal.firstChild);
-      log('debug', `ensureBackdrop: Created backdrop for ${modal.id}`);
+      log('debug', `ensureBackdrop: Created for ${modal.id}`);
     }
     
     return backdrop;
@@ -149,23 +157,13 @@
 
   // ==================== MODAL VISIBILITY CHECK ====================
   function isModalVisible(modal) {
-    if (!modal) {
-      log('warn', 'isModalVisible: Modal is null or undefined');
-      return false;
-    }
+    if (!modal) return false;
     const cs = window.getComputedStyle(modal);
     const ariaHidden = modal.getAttribute('aria-hidden') !== 'true';
-    const isVisible =
-      cs.display !== 'none' &&
-      cs.visibility !== 'hidden' &&
-      !modal.classList.contains('hidden') &&
-      ariaHidden;
-    
-    if (isVisible !== (modal.dataset._lastVisible === 'true')) {
-      log('debug', `isModalVisible: ${modal.id} now ${isVisible ? 'visible' : 'hidden'}`);
-      modal.dataset._lastVisible = isVisible;
-    }
-    return isVisible;
+    return cs.display !== 'none' && 
+           cs.visibility !== 'hidden' && 
+           !modal.classList.contains('hidden') && 
+           ariaHidden;
   }
 
   // ==================== TRANSITION EFFECTS ====================
@@ -173,11 +171,33 @@
     if (!modal) return callback?.();
 
     const isProfile = modal.id === 'updateProfileModal';
+    const isCheckout = modal.id === 'checkoutModal';
+    const isAllPlans = modal.id === 'allPlansModal';
+    
+    // Modals with pull handles slide from bottom
+    const slideFromBottom = isCheckout || isAllPlans || modal.querySelector('.pull-handle');
+    
     modal.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
-    modal.style.opacity = show ? '0' : '1';
-    modal.style.transform = show
-      ? (isProfile ? 'translateX(-100%)' : 'translateY(20px)')
-      : (isProfile ? 'translateX(0)' : 'translateY(0)');
+    
+    if (show) {
+      modal.style.opacity = '0';
+      if (isProfile) {
+        modal.style.transform = 'translateX(-100%)';
+      } else if (slideFromBottom) {
+        modal.style.transform = 'translateY(100%)';
+      } else {
+        modal.style.transform = 'translateY(20px)';
+      }
+    } else {
+      modal.style.opacity = '1';
+      if (isProfile) {
+        modal.style.transform = 'translateX(0)';
+      } else if (slideFromBottom) {
+        modal.style.transform = 'translateY(0)';
+      } else {
+        modal.style.transform = 'translateY(0)';
+      }
+    }
 
     const onTransitionEnd = () => {
       modal.removeEventListener('transitionend', onTransitionEnd);
@@ -191,31 +211,45 @@
         modal.removeAttribute('inert');
         showBackdrop(modal);
       }
-      if (!isProcessingPopstate) log('debug', `applyTransition: ${modal.id} ${show ? 'shown' : 'hidden'}`);
       callback?.();
     };
 
     modal.addEventListener('transitionend', onTransitionEnd);
 
     requestAnimationFrame(() => {
-      modal.style.opacity = show ? '1' : '0';
-      modal.style.transform = show
-        ? (isProfile ? 'translateX(0)' : 'translateY(0)')
-        : (isProfile ? 'translateX(-100%)' : 'translateY(20px)');
+      if (show) {
+        modal.style.opacity = '1';
+        if (isProfile) {
+          modal.style.transform = 'translateX(0)';
+        } else if (slideFromBottom) {
+          modal.style.transform = 'translateY(0)';
+        } else {
+          modal.style.transform = 'translateY(0)';
+        }
+      } else {
+        modal.style.opacity = '0';
+        if (isProfile) {
+          modal.style.transform = 'translateX(-100%)';
+        } else if (slideFromBottom) {
+          modal.style.transform = 'translateY(100%)';
+        } else {
+          modal.style.transform = 'translateY(20px)';
+        }
+      }
     });
   }
 
   // ==================== FORCE CLOSE MODAL ====================
   function forceCloseModal(modalId) {
-    log('debug', `forceCloseModal: Forcing close of ${modalId}`);
+    log('debug', `forceCloseModal: ${modalId}`);
     const modalConfig = modals[modalId];
-    if (!modalConfig || !modalConfig.element) {
-      log('error', `forceCloseModal: Modal config or element not found for ${modalId}`);
+    if (!modalConfig?.element) {
+      log('error', `forceCloseModal: Not found ${modalId}`);
       return;
     }
+    
     const modal = modalConfig.element;
     if (!isModalVisible(modal)) {
-      log('debug', `forceCloseModal: Modal ${modalId} already closed`);
       const idx = openModalsStack.findIndex((item) => item.id === modalId);
       if (idx !== -1) {
         openModalsStack.splice(idx, 1);
@@ -223,10 +257,11 @@
       }
       return;
     }
+    
     if (document.activeElement && modal.contains(document.activeElement)) {
       document.body.focus();
-      log('debug', `forceCloseModal: Moved focus from ${modalId} to body`);
     }
+    
     applyTransition(modal, false, () => {
       modal.classList.add('hidden');
       modal.style.display = 'none';
@@ -238,105 +273,91 @@
       if (idx !== -1) {
         openModalsStack.splice(idx, 1);
         currentDepth = openModalsStack.length;
-        log('debug', `forceCloseModal: Modal ${modalId} closed, stack: ${openModalsStack.map((item) => item.id).join(', ')}, depth: ${currentDepth}`);
+        log('info', `Closed ${modalId}, stack: [${openModalsStack.map(i => i.id).join(', ')}], depth: ${currentDepth}`);
       }
       
-      // CRITICAL: Unlock scroll only when all modals closed
-      unlockBodyScroll();
+      // CRITICAL: Unlock only when stack empty
+      if (openModalsStack.length === 0) {
+        unlockBodyScroll();
+      }
       
       const previousModal = openModalsStack[openModalsStack.length - 1];
       if (previousModal) {
         const focusable = previousModal.modal.querySelector(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
         );
-        if (focusable) {
-          focusable.focus();
-          log('debug', `forceCloseModal: Restored focus to ${previousModal.id}`);
-        }
-      } else {
-        document.body.focus();
-        log('debug', 'forceCloseModal: Restored focus to document body');
+        if (focusable) focusable.focus();
       }
     });
   }
 
   // ==================== OPEN MODAL ====================
   function openModal(modalId, skipHistory = false) {
-    log('debug', `openModal: Attempting to open ${modalId}`);
+    log('debug', `openModal: ${modalId}`);
 
     const modalConfig = modals[modalId];
-    if (!modalConfig || !modalConfig.element) {
-      log('error', `openModal: Modal config or element not found for ${modalId}`);
+    if (!modalConfig?.element) {
+      log('error', `openModal: Not found ${modalId}`);
       return;
     }
 
     const modal = modalConfig.element;
-    const isVisible = isModalVisible(modal);
-
-    if (isVisible) {
-      if (!openModalsStack.some((item) => item.id === modalId)) {
-        openModalsStack.push({ modal, id: modalId });
-        currentDepth++;
-      } else {
-        log('debug', `openModal: ${modalId} already open, skipping`);
-        return;
-      }
-    }
-
-    // Guard: Skip if PIN setup active
-    if ((modalId === 'pinModal' || modalId === 'securityPinModal') && window.__setupPinActive) {
-      log('warn', `openModal: Skipping ${modalId} – setup active`);
+    
+    // Check if already in stack
+    if (openModalsStack.some((item) => item.id === modalId)) {
+      log('debug', `openModal: ${modalId} already open`);
       return;
     }
 
-    // CRITICAL: Lock body scroll when first modal opens
+    // PIN setup guard
+    if ((modalId === 'pinModal' || modalId === 'securityPinModal') && window.__setupPinActive) {
+      log('warn', `openModal: Blocked ${modalId} - setup active`);
+      return;
+    }
+
+    // CRITICAL: Lock scroll when first modal opens
     if (openModalsStack.length === 0) {
       lockBodyScroll();
     }
+
+    // Calculate z-index for proper stacking
+    const baseZIndex = 1000;
+    const zIndex = baseZIndex + (currentDepth * 10);
+    modal.style.zIndex = zIndex;
+    
+    log('info', `Opening ${modalId} at z-index ${zIndex}, depth: ${currentDepth}`);
 
     modal.classList.remove('hidden');
     modal.style.display = modalConfig.hasPullHandle ? 'block' : 'flex';
     modal.setAttribute('aria-hidden', 'false');
     modal.removeAttribute('inert');
     
-    // Ensure proper z-index stacking
-    modal.style.zIndex = 1000 + currentDepth * 10;
-
-    // Ensure backdrop exists
     ensureBackdrop(modal);
 
-    if (modalId === 'updateProfileModal') {
-      modal.style.transform = 'translateX(-100%)';
-      modal.style.opacity = '0';
-    } else {
-      modal.style.transform = 'translateY(20px)';
-      modal.style.opacity = '0';
-    }
-
     applyTransition(modal, true, () => {
-      if (!openModalsStack.some((item) => item.id === modalId)) {
-        openModalsStack.push({ modal, id: modalId });
-        currentDepth++;
-      }
+      openModalsStack.push({ modal, id: modalId });
+      currentDepth++;
+      
+      log('info', `Opened ${modalId}, stack: [${openModalsStack.map(i => i.id).join(', ')}], depth: ${currentDepth}`);
 
       if (!skipHistory) {
-        history.pushState({ modalId }, '', `#${modalId}`);
+        history.pushState({ modalId, modalDepth: currentDepth }, '', `#${modalId}`);
       }
 
-      let focusTarget =
-        modal.querySelector('input, select, textarea, [tabindex]:not([tabindex="-1"])') ||
-        modal.querySelector('button:not([data-close])');
+      let focusTarget = modal.querySelector('input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])');
+      if (!focusTarget) {
+        focusTarget = modal.querySelector('button:not([data-close]):not([disabled])');
+      }
 
       if (modalId === 'securityPinModal') {
         const title = modal.querySelector('#pinTitle');
         if (title) focusTarget = title;
         document.dispatchEvent(new CustomEvent('security:pin-modal-opened'));
-        log('debug', 'openModal: Dispatched security:pin-modal-opened for securityPinModal');
       }
 
       if (focusTarget) {
         focusTarget.setAttribute('tabindex', '-1');
-        focusTarget.focus();
+        setTimeout(() => focusTarget.focus(), 100);
       }
 
       trapFocus(modal);
@@ -345,28 +366,27 @@
 
   // ==================== CLOSE MODAL ====================
   function closeModal(modalId) {
-    log('debug', `closeModal: Attempting to close ${modalId}`);
+    log('debug', `closeModal: ${modalId}`);
     const modalConfig = modals[modalId];
-    if (!modalConfig || !modalConfig.element) {
-      log('error', `closeModal: Modal config or element not found for ${modalId}`);
+    if (!modalConfig?.element) {
+      log('error', `closeModal: Not found ${modalId}`);
       return;
     }
     
     const modal = modalConfig.element;
     if (!isModalVisible(modal)) {
-      log('warn', `closeModal: Modal ${modalId} is not visible`);
+      log('warn', `closeModal: ${modalId} not visible`);
       return;
     }
 
-    // Guard: Don't auto-close PIN during setup
+    // PIN setup guard
     if ((modalId === 'pinModal' || modalId === 'securityPinModal') && window.__setupPinActive) {
-      log('warn', `closeModal: Skipping ${modalId} – setup active`);
+      log('warn', `closeModal: Blocked ${modalId} - setup active`);
       return;
     }
 
     if (document.activeElement && modal.contains(document.activeElement)) {
       document.body.focus();
-      log('debug', `closeModal: Moved focus from ${modalId} to body`);
     }
 
     applyTransition(modal, false, () => {
@@ -380,11 +400,13 @@
       if (idx !== -1) {
         openModalsStack.splice(idx, 1);
         currentDepth = openModalsStack.length;
-        log('debug', `closeModal: Modal ${modalId} closed, stack: ${openModalsStack.map((item) => item.id).join(', ')}, depth: ${currentDepth}`);
+        log('info', `Closed ${modalId}, stack: [${openModalsStack.map(i => i.id).join(', ')}], depth: ${currentDepth}`);
       }
 
-      // CRITICAL: Unlock scroll only when all modals closed
-      unlockBodyScroll();
+      // CRITICAL: Only unlock when stack empty
+      if (openModalsStack.length === 0) {
+        unlockBodyScroll();
+      }
 
       const previousModal = openModalsStack[openModalsStack.length - 1];
       if (previousModal) {
@@ -395,9 +417,9 @@
           prevEl.style.display = modals[previousModal.id].hasPullHandle ? 'block' : 'flex';
           prevEl.setAttribute('aria-hidden', 'false');
           prevEl.removeAttribute('inert');
-          prevEl.style.zIndex = 1000 + (currentDepth - 1) * 10;
+          prevEl.style.zIndex = 1000 + ((currentDepth - 1) * 10);
           showBackdrop(prevEl);
-          log('debug', `closeModal: Restored visibility for ${previousModal.id}`);
+          log('debug', `Restored ${previousModal.id}`);
         }
         
         const focusable = prevEl.querySelector(
@@ -405,36 +427,26 @@
         );
         if (focusable) {
           setTimeout(() => focusable.focus(), 100);
-          log('debug', `closeModal: Restored focus to ${previousModal.id}`);
         }
-      } else {
-        document.body.focus();
-        log('debug', 'closeModal: Restored focus to document body');
       }
     });
 
-    if (history.state && history.state.modalId === modalId) {
+    if (history.state?.modalId === modalId) {
       history.back();
-      log('debug', `closeModal: Triggered history.back for ${modalId}`);
     }
   }
 
   // ==================== FOCUS TRAP ====================
   function trapFocus(modal) {
-    if (!modal) {
-      log('error', 'trapFocus: Modal is null or undefined');
-      return;
-    }
+    if (!modal) return;
+    
     const focusableElements = modal.querySelectorAll(
       'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
     );
     const firstFocusable = focusableElements[0];
     const lastFocusable = focusableElements[focusableElements.length - 1];
 
-    if (!firstFocusable || !lastFocusable) {
-      log('warn', `trapFocus: No focusable elements in modal ${modal.id}`);
-      return;
-    }
+    if (!firstFocusable || !lastFocusable) return;
 
     const keydownHandler = (e) => {
       if (e.key === 'Tab') {
@@ -450,72 +462,60 @@
 
     modal._trapHandler = keydownHandler;
     modal.addEventListener('keydown', keydownHandler);
-    log('debug', `trapFocus: Focus trap set for ${modal.id}`);
   }
 
   // ==================== POPSTATE HANDLER ====================
   function handlePopstate(e) {
-    if (isProcessingPopstate) {
-      log('debug', 'handlePopstate: Skipping, already processing popstate');
-      return;
-    }
+    if (isProcessingPopstate) return;
     isProcessingPopstate = true;
-    log('debug', 'handlePopstate: Popstate event triggered', e.state);
+    
+    log('info', `🔙 Popstate: state=${JSON.stringify(e.state)}, stack=[${openModalsStack.map(i => i.id).join(', ')}]`);
 
     const topModal = openModalsStack[openModalsStack.length - 1];
     if (topModal) {
-      log('debug', `handlePopstate: Closing top modal ${topModal.id}`);
+      log('debug', `Closing top modal: ${topModal.id}`);
       forceCloseModal(topModal.id);
     }
 
-    if (e.state && e.state.isModal && e.state.modalDepth && e.state.modalId) {
-      log('debug', `handlePopstate: Processing modal state, depth: ${e.state.modalDepth}, modalId: ${e.state.modalId}`);
+    if (e.state?.isModal && e.state.modalDepth && e.state.modalId) {
       while (openModalsStack.length > e.state.modalDepth) {
         const { id } = openModalsStack.pop();
         forceCloseModal(id);
-        log('debug', `handlePopstate: Closed modal ${id}`);
       }
+      
       const newTopModal = openModalsStack[openModalsStack.length - 1];
-      if (
-        newTopModal &&
-        newTopModal.id === e.state.modalId &&
-        !isModalVisible(newTopModal.modal)
-      ) {
-        newTopModal.modal.classList.remove('hidden');
-        newTopModal.modal.style.display = modals[newTopModal.id].hasPullHandle ? 'block' : 'flex';
-        newTopModal.modal.setAttribute('aria-hidden', 'false');
-        newTopModal.modal.removeAttribute('inert');
-        showBackdrop(newTopModal.modal);
-        applyTransition(newTopModal.modal, true);
-        trapFocus(newTopModal.modal);
-        log('debug', `handlePopstate: Restored modal ${newTopModal.id}`);
+      if (newTopModal && newTopModal.id === e.state.modalId && !isModalVisible(newTopModal.modal)) {
+        const m = newTopModal.modal;
+        m.classList.remove('hidden');
+        m.style.display = modals[newTopModal.id].hasPullHandle ? 'block' : 'flex';
+        m.setAttribute('aria-hidden', 'false');
+        m.removeAttribute('inert');
+        showBackdrop(m);
+        applyTransition(m, true);
+        trapFocus(m);
       }
     } else if (openModalsStack.length > 0) {
-      log('debug', 'handlePopstate: No modal state, closing top modal only');
       const { id } = openModalsStack.pop();
       forceCloseModal(id);
-      log('debug', `handlePopstate: Closed modal ${id}`);
       
       const previousModal = openModalsStack[openModalsStack.length - 1];
       if (previousModal && !isModalVisible(previousModal.modal)) {
-        previousModal.modal.classList.remove('hidden');
-        previousModal.modal.style.display = modals[previousModal.id].hasPullHandle ? 'block' : 'flex';
-        previousModal.modal.setAttribute('aria-hidden', 'false');
-        previousModal.modal.removeAttribute('inert');
-        showBackdrop(previousModal.modal);
-        applyTransition(previousModal.modal, true);
-        trapFocus(previousModal.modal);
-        log('debug', `handlePopstate: Restored previous modal ${previousModal.id}`);
+        const m = previousModal.modal;
+        m.classList.remove('hidden');
+        m.style.display = modals[previousModal.id].hasPullHandle ? 'block' : 'flex';
+        m.setAttribute('aria-hidden', 'false');
+        m.removeAttribute('inert');
+        showBackdrop(m);
+        applyTransition(m, true);
+        trapFocus(m);
       }
     }
 
     currentDepth = openModalsStack.length;
-    log('debug', `handlePopstate: Updated stack: ${openModalsStack.map((item) => item.id).join(', ')}, depth: ${currentDepth}`);
     
     if (openModalsStack.length === 0) {
       history.replaceState({ isModal: false }, '', window.location.href);
       unlockBodyScroll();
-      log('debug', 'handlePopstate: Reset history state and unlocked scroll');
     } else {
       history.replaceState(
         {
@@ -526,40 +526,36 @@
         '',
         window.location.href
       );
-      log('debug', 'handlePopstate: Updated history state for modal stack');
     }
 
     setTimeout(() => {
       isProcessingPopstate = false;
-      log('debug', 'handlePopstate: Popstate processing complete');
     }, 50);
   }
 
   // ==================== INITIALIZATION ====================
   function initialize() {
-    log('info', 'initialize: Starting initialization');
+    log('info', '🚀 ModalManager initializing...');
     
     Object.entries(modals).forEach(([modalId, { element }]) => {
       if (!element) {
-        log('error', `initialize: Modal element not found for ${modalId}`);
+        log('warn', `Modal not found: ${modalId}`);
       } else {
-        log('debug', `initialize: Modal ${modalId} found`);
-        if (element.getAttribute('aria-hidden') === null || element.getAttribute('aria-hidden') === 'true') {
-          element.setAttribute('aria-hidden', 'true');
-          element.setAttribute('inert', '');
-          element.classList.add('hidden');
-          element.style.display = 'none';
-        }
+        element.setAttribute('aria-hidden', 'true');
+        element.setAttribute('inert', '');
+        element.classList.add('hidden');
+        element.style.display = 'none';
       }
     });
 
     Object.entries(modals).forEach(([modalId, { element }]) => {
       if (!element) return;
+      
       const closeBtn = element.querySelector('[data-close]');
       if (closeBtn) {
         const closeHandler = (e) => {
           e.preventDefault();
-          log('debug', `Close button clicked for ${modalId}`);
+          e.stopPropagation();
           closeModal(modalId);
         };
         closeBtn.removeEventListener('click', closeBtn._closeHandler);
@@ -567,7 +563,6 @@
         closeBtn._closeHandler = closeHandler;
         closeBtn.addEventListener('click', closeHandler);
         closeBtn.addEventListener('touchend', closeHandler);
-        log('debug', `initialize: Bound close button for ${modalId}`);
       }
     });
 
@@ -584,62 +579,44 @@
 
     Object.entries(triggers).forEach(([triggerId, modalId]) => {
       const trigger = document.getElementById(triggerId);
+      if (!trigger) return;
 
-      if (trigger) {
-        if (triggerId === "securityPinRow") {
-          trigger.addEventListener("click", (e) => {
-            if (trigger.dataset.skipModal === 'true' || window.__smartPinHandled) {
-              log('debug', `[GUARD] Ignored ${triggerId} click – Smart Button handled`);
-              e.stopImmediatePropagation();
-              return;
-            }
-
-            e.preventDefault();
-
-            if (e.target.closest("#securityPinModal")) {
-              log('debug', `[GUARD] Ignored click inside securityPinModal`);
-              return;
-            }
-
-            log('debug', `Trigger clicked: ${triggerId} to open ${modalId}`);
-            openModal(modalId);
-          });
-
-          const secModal = document.getElementById("securityPinModal");
-          if (secModal) {
-            secModal.addEventListener("click", (e) => {
-              if (
-                e.target.closest("form") ||
-                e.target.tagName === "INPUT" ||
-                e.target.tagName === "BUTTON"
-              ) {
-                e.stopPropagation();
-                log('debug', `[GUARD] Click inside securityPinModal ignored for reopening`);
-              }
-            });
+      if (triggerId === "securityPinRow") {
+        trigger.addEventListener("click", (e) => {
+          if (trigger.dataset.skipModal === 'true' || window.__smartPinHandled) {
+            e.stopImmediatePropagation();
+            return;
           }
-        } else {
-          trigger.addEventListener("click", (e) => {
-            e.preventDefault();
-            log('debug', `Trigger clicked: ${triggerId} to open ${modalId}`);
-            openModal(modalId);
+          e.preventDefault();
+          if (e.target.closest("#securityPinModal")) return;
+          openModal(modalId);
+        }, { capture: true });
+
+        const secModal = document.getElementById("securityPinModal");
+        if (secModal) {
+          secModal.addEventListener("click", (e) => {
+            if (e.target.closest("form") || e.target.tagName === "INPUT" || e.target.tagName === "BUTTON") {
+              e.stopPropagation();
+            }
           });
         }
-
-        log('debug', `initialize: Bound trigger ${triggerId} to ${modalId}`);
+      } else {
+        trigger.addEventListener("click", (e) => {
+          e.preventDefault();
+          openModal(modalId);
+        });
       }
     });
 
     window.addEventListener('popstate', handlePopstate);
-    log('debug', 'initialize: Popstate listener added');
 
+    // Lighter mutation observer - only for critical state changes
     Object.entries(modals).forEach(([modalId, { element }]) => {
       if (!element) return;
-      const observer = new MutationObserver((mutations) => {
-        if (isProcessingPopstate || window.__setupPinActive) {
-          return;
-        }
-
+      
+      const observer = new MutationObserver(() => {
+        if (isProcessingPopstate || window.__setupPinActive) return;
+        
         clearTimeout(observer._debounceTimer);
         observer._debounceTimer = setTimeout(() => {
           const visible = isModalVisible(element);
@@ -647,23 +624,21 @@
           
           if (visible && !inStack && !element.dataset._mutating) {
             element.dataset._mutating = 'true';
-            log('debug', `MutationObserver: ${modalId} became visible, opening`);
             openModal(modalId);
-            setTimeout(() => { delete element.dataset._mutating; }, 200);
+            setTimeout(() => delete element.dataset._mutating, 200);
           } else if (!visible && inStack && !element.dataset._mutating) {
             element.dataset._mutating = 'true';
-            log('debug', `MutationObserver: ${modalId} became hidden, closing`);
             closeModal(modalId);
-            setTimeout(() => { delete element.dataset._mutating; }, 200);
+            setTimeout(() => delete element.dataset._mutating, 200);
           }
-        }, 200);
+        }, 150);
       });
+      
       observer.observe(element, {
         attributes: true,
-        attributeFilter: ['style', 'class', 'aria-hidden'],
+        attributeFilter: ['class', 'aria-hidden'],
         subtree: false,
       });
-      log('debug', `initialize: MutationObserver set for ${modalId}`);
     });
 
     window.ModalManager = {
@@ -674,7 +649,7 @@
       getCurrentDepth: () => currentDepth,
       isScrollLocked: () => bodyScrollLocked,
       closeAll: () => {
-        log('info', 'closeAll: Closing all modals');
+        log('info', '🗑️ Closing all modals');
         while (openModalsStack.length > 0) {
           const { id } = openModalsStack.pop();
           forceCloseModal(id);
@@ -682,33 +657,19 @@
         currentDepth = 0;
         unlockBodyScroll();
         history.replaceState({ isModal: false }, '', window.location.href);
-        log('info', 'closeAll: All modals closed, reset history state');
       },
     };
     
-    log('info', 'initialize: Initialization complete');
+    log('info', '✅ ModalManager ready');
   }
-
-  Object.entries(modals).forEach(([modalId, { element }]) => {
-    if (!element) return;
-    
-    element.addEventListener('click', (e) => {
-      if (e.target === element || e.target.closest('.modal-content')) {
-        e.stopPropagation();
-      }
-    });
-    
-    log('debug', `Added click protection for ${modalId}`);
-  });
 
   document.addEventListener('DOMContentLoaded', initialize);
 
   window.addEventListener('unload', () => {
-    log('debug', 'unload: Cleaning up listeners');
     unlockBodyScroll();
     window.removeEventListener('popstate', handlePopstate);
     Object.values(modals).forEach(({ element }) => {
-      if (element && element._trapHandler) {
+      if (element?._trapHandler) {
         element.removeEventListener('keydown', element._trapHandler);
       }
     });
