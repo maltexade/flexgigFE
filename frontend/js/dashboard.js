@@ -1598,27 +1598,79 @@ async function manageDashboardCards() {
 }
 
 function initializeSmartAccountPinButton() {
-  try {
-    // Avoid double-binding
-    if (initializeSmartAccountPinButton._bound) return;
-    initializeSmartAccountPinButton._bound = true;
-
-    // Find the Account Pin row in security modal
-    const accountPinRow = document.getElementById('securityPinRow');
-    const accountPinStatus = document.getElementById('accountPinStatus');
-
-    if (!accountPinRow || !accountPinStatus) {
-      console.warn('[Smart PIN Button] Account Pin elements not found in security modal');
-      return;
-    }
-
-    console.log('[Smart PIN Button] Found Account Pin row, setting up smart behavior');
-
-    // Ensure a global marker for where the PIN modal was opened from
-    window.lastModalSource = window.lastModalSource || null;
-
-    // Helper: Focus first input in modal for accessibility (safe: no mobile autofocus)
-    // ---------- PATCH: safer focusFirstInput ----------
+    try {
+        // Find the Account Pin row in security modal
+        const accountPinRow = document.getElementById('securityPinRow');
+        const accountPinStatus = document.getElementById('accountPinStatus');
+        
+        if (!accountPinRow || !accountPinStatus) {
+            console.warn('[Smart PIN Button] Account Pin elements not found in security modal');
+            return;
+        }
+        
+        console.log('[Smart PIN Button] Found Account Pin row, setting up smart behavior');
+        
+        // Helper: Open a PIN modal with fallbacks + accessibility (DRY) – No openSetupPinModal assumption
+        async function openPinModal(mode = 'setup') {
+            // For CHANGE: Use ModalManager or direct (your securityPinModal)
+            if (mode === 'change') {
+                if (typeof window.ModalManager !== 'undefined' && typeof window.ModalManager.openModal === 'function') {
+                    window.ModalManager.openModal('securityPinModal');
+                    console.log('[Smart PIN Button] Opened securityPinModal via ModalManager');
+                } else {
+                    // Direct fallback
+                    const modal = document.getElementById('securityPinModal') || 
+                                  document.querySelector('.pin-change-modal');
+                    if (modal) {
+                        modal.classList.remove('hidden');
+                        modal.classList.add('active');
+                        modal.style.display = 'flex';
+                        console.log('[Smart PIN Button] Direct open securityPinModal');
+                    } else {
+                        console.error('[Smart PIN Button] Change modal not found');
+                        if (typeof notify === 'function') notify('Change PIN not available', 'error');
+                        return false;
+                    }
+                }
+                setTimeout(() => focusFirstInput(mode), 100);
+                return true;
+            }
+            
+            // For SETUP: Always fallback to dashboardPinCard (your reliable trigger for create mode)
+            console.log('[Smart PIN Button] Setup: Triggering via dashboardPinCard');
+            const dashboardPinCard = document.getElementById('dashboardPinCard');
+            if (dashboardPinCard) {
+                // Ensure visible (in case hidden by race)
+                dashboardPinCard.style.display = 'block';  // Or 'flex' if card uses it
+                dashboardPinCard.style.visibility = 'visible';
+                
+                // Trigger click (your wiring opens pinModal in create mode)
+                if (dashboardPinCard.onclick) {
+                    dashboardPinCard.onclick(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                } else {
+                    // Manual dispatch if no onclick
+                    dashboardPinCard.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                }
+                
+                // Scroll for UX
+                dashboardPinCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                
+                // Set global flag to block closes/idle during setup
+                window.__setupPinActive = true;
+                setTimeout(() => { window.__setupPinActive = false; }, 30000);  // 30s guard (adjust)
+                
+                console.log('[Smart PIN Button] Dashboard card triggered for setup');
+                setTimeout(() => focusFirstInput(mode), 200);  // Longer delay for card animation
+                return true;
+            }
+            
+            console.error('[Smart PIN Button] Dashboard card not found for setup');
+            if (typeof notify === 'function') notify('Setup PIN not available', 'error');
+            return false;
+        }
+        
+        // Helper: Focus first input in modal for accessibility
+        // ---------- PATCH: safer focusFirstInput ----------
 function focusFirstInput(mode) {
   const modal = document.querySelector('.modal.active, .pin-modal:not(.hidden), #pinModal:not(.hidden), #securityPinModal:not(.hidden)');
   if (!modal) return;
@@ -1646,120 +1698,78 @@ function focusFirstInput(mode) {
   }
 }
 
-
-    // Helper: Open a PIN modal with ModalManager (preferred) or safe DOM fallback.
-    // mode: 'setup' | 'change'
-    async function openPinModal(mode = 'setup') {
-      window.lastModalSource = 'security'; // record where this flow came from
-
-      // Prefer using ModalManager so stack/history remain consistent
-      if (window.ModalManager && typeof window.ModalManager.openModal === 'function') {
-        try {
-          if (mode === 'change') {
-            // open change-pin modal (securityPinModal)
-            window.ModalManager.openModal('securityPinModal');
-            console.log('[Smart PIN Button] Opened securityPinModal via ModalManager');
-          } else {
-            // setup flow -> open pin setup modal id 'pinModal' (or your create-pin modal id)
-            window.ModalManager.openModal('pinModal');
-            console.log('[Smart PIN Button] Opened pinModal (setup) via ModalManager');
-          }
-
-          // Focus safely after a short delay so modal has finished its show animation
-          setTimeout(() => focusFirstInput(mode), 160);
-          return true;
-        } catch (err) {
-          console.warn('[Smart PIN Button] ModalManager.openModal failed, falling back to DOM open', err);
-          // continue to DOM fallback
+        
+        // Function to update button text based on PIN status
+        function updateAccountPinButton() {
+            const hasPin = localStorage.getItem('hasPin') === 'true';
+            
+            if (hasPin) {
+                accountPinStatus.textContent = 'PIN set. You can change your PIN here';
+                console.log('[Smart PIN Button] Updated to "change PIN" mode');
+            } else {
+                accountPinStatus.textContent = 'No PIN set. Setup PIN';
+                console.log('[Smart PIN Button] Updated to "setup PIN" mode');
+            }
         }
-      }
-
-      // DOM fallback (least preferred)
-      const modalId = mode === 'change' ? 'securityPinModal' : 'pinModal';
-      const modal = document.getElementById(modalId) || document.querySelector(`.${modalId}`);
-      if (modal) {
-        try {
-          // Show modal using the same conventions your CSS expects
-          modal.classList.remove('hidden');
-          modal.classList.add('active');
-          modal.style.display = modal.style.display || 'flex';
-          setTimeout(() => focusFirstInput(mode), 160);
-          console.log(`[Smart PIN Button] Directly opened ${modalId}`);
-          return true;
-        } catch (err) {
-          console.error('[Smart PIN Button] DOM fallback open failed for', modalId, err);
-          if (typeof notify === 'function') notify('PIN modal not available', 'error');
-          return false;
-        }
-      }
-
-      console.error('[Smart PIN Button] PIN modal not found for mode:', mode);
-      if (typeof notify === 'function') notify('PIN modal not available', 'error');
-      return false;
-    }
-
-    // Function to update button text based on PIN status
-    function updateAccountPinButton() {
-      const hasPin = localStorage.getItem('hasPin') === 'true';
-
-      if (hasPin) {
-        accountPinStatus.textContent = 'PIN set. You can change your PIN here';
-        console.log('[Smart PIN Button] Updated to "change PIN" mode');
-      } else {
-        accountPinStatus.textContent = 'No PIN set. Setup PIN';
-        console.log('[Smart PIN Button] Updated to "setup PIN" mode');
-      }
-    }
-
-    // Update button text initially
-    updateAccountPinButton();
-
-    // Smart click handler — do NOT stopImmediatePropagation; use non-capture so ModalManager can still receive events if needed.
-    accountPinRow.addEventListener('click', async function (e) {
-      e.preventDefault();
-
-      // Check current PIN status
-      const hasPin = localStorage.getItem('hasPin') === 'true';
-      console.log('[Smart PIN Button] Clicked, hasPin:', hasPin);
-
-      // Open the appropriate PIN modal (we record lastModalSource so close handlers can return to security)
-      const opened = await openPinModal(hasPin ? 'change' : 'setup');
-      if (!opened) {
-        console.warn('[Smart PIN Button] Failed to open modal');
-        return;
-      }
-
-      // Do NOT forcibly hide the security modal via direct DOM toggles here.
-      // Let ModalManager stack modals (preferred) so it can manage scroll & focus.
-      // If you MUST hide the security modal immediately (rare), use ModalManager.closeModal:
-      // window.ModalManager.closeModal('securityModal');
-    }, { capture: false, passive: false });
-
-    // Listen for PIN status changes (e.g., after successful PIN setup)
-    window.addEventListener('pin-status-changed', function () {
-      console.log('[Smart PIN Button] PIN status changed, updating button');
-      updateAccountPinButton();
-
-      // Also refresh dashboard cards if you have that function
-      if (typeof manageDashboardCards === 'function') {
-        try { manageDashboardCards(); } catch (err) { console.warn('[Smart PIN Button] manageDashboardCards failed', err); }
-      }
-    });
-
-    // Also listen for storage changes (cross-tab sync)
-    window.addEventListener('storage', function (e) {
-      if (e.key === 'hasPin') {
-        console.log('[Smart PIN Button] hasPin changed in storage, updating button');
+        
+        // Update button text initially
         updateAccountPinButton();
-      }
-    });
-
-    console.log('[Smart PIN Button] Initialization complete');
-  } catch (err) {
-    console.error('[Smart PIN Button] Initialization error:', err);
-  }
+        
+        // Override click handler (CAPTURE PHASE: Blocks ModalManager early)
+        accountPinRow.addEventListener('click', async function(e) {
+            // BLOCK OVERLAP: Stop ALL propagation (ModalManager won't fire)
+            e.stopImmediatePropagation();
+            e.preventDefault();
+            e.stopPropagation();
+            
+            const hasPin = localStorage.getItem('hasPin') === 'true';
+            
+            console.log('[Smart PIN Button] Clicked (blocked ModalManager), hasPin:', hasPin);
+            
+            const opened = await openPinModal(hasPin ? 'change' : 'setup');
+            if (!opened) {
+                console.warn('[Smart PIN Button] Failed to open modal');
+                return;
+            }
+            
+            // Close security modal after opening PIN modal
+            try {
+                const securityModal = document.getElementById('securityModal') || 
+                                     document.querySelector('.security-modal');
+                if (securityModal) {
+                    securityModal.classList.add('hidden');
+                    securityModal.classList.remove('active');
+                }
+            } catch (err) {
+                console.warn('[Smart PIN Button] Could not close security modal', err);
+            }
+        }, { capture: true, passive: false });  // Capture: Runs FIRST!
+        
+        // Listen for PIN status changes (e.g., after successful PIN setup)
+        window.addEventListener('pin-status-changed', function() {
+            console.log('[Smart PIN Button] PIN status changed, updating button');
+            updateAccountPinButton();
+            
+            // Also refresh dashboard cards
+            if (typeof manageDashboardCards === 'function') {
+                manageDashboardCards();
+            }
+        });
+        
+        // Also listen for storage changes (cross-tab sync)
+        window.addEventListener('storage', function(e) {
+            if (e.key === 'hasPin') {
+                console.log('[Smart PIN Button] hasPin changed in storage, updating button');
+                updateAccountPinButton();
+            }
+        });
+        
+        console.log('[Smart PIN Button] Initialization complete');
+        
+    } catch (err) {
+        console.error('[Smart PIN Button] Initialization error:', err);
+    }
 }
-
 
 // 🔹 Biometric UI Restoration (runs on load to persist state across reloads)
 // 🔹 Biometric UI Restoration (runs on load to persist state across reloads)
@@ -3155,129 +3165,58 @@ if (seeAllBtn) {
     });
   }
 
-  // --- UPDATED PLAN CLICK HANDLER ---
-function handlePlanClick(e) {
-  const plan = e.currentTarget;
-  const id = plan.getAttribute('data-id');
-  const isModalClick = !!plan.closest('.plan-modal-content');
-  const activeProvider = providerClasses.find(cls => slider.classList.contains(cls));
+  // --- PLAN CLICK HANDLER ---
+  function handlePlanClick(e) {
+    const plan = e.currentTarget;
+    const id = plan.getAttribute('data-id');
+    const isModalClick = plan.closest('.plan-modal-content');
+    const activeProvider = providerClasses.find(cls => slider.classList.contains(cls));
 
-  const dashPlan = plansRow.querySelector(`.plan-box[data-id="${id}"]`);
-  const isDashSelected = dashPlan && dashPlan.classList.contains('selected');
+    const dashPlan = plansRow.querySelector(`.plan-box[data-id="${id}"]`);
+    const isDashSelected = dashPlan && dashPlan.classList.contains('selected');
 
-  // If user re-selected the same plan from inside the modal, just close the modal
-  if (isModalClick && isDashSelected) {
-    e.stopPropagation();
-    // Prefer ModalManager to keep stack/history consistent, fallback to legacy closeModal()
-    if (window.ModalManager && typeof window.ModalManager.closeModal === 'function') {
-      try {
-        window.ModalManager.closeModal('allPlansModal');
-      } catch (err) {
-        console.warn('[handlePlanClick] ModalManager.closeModal failed, falling back:', err);
-        try { closeModal(); } catch(e){}
-      }
-    } else {
-      try { closeModal(); } catch(e){}
-    }
-    console.log('[DEBUG] handlePlanClick: Reselected same plan, modal closed, ID:', id);
-    return;
-  }
-
-  // Selecting a plan from the modal (not the dashboard)
-  if (isModalClick) {
-    const dashPlans = Array.from(plansRow.querySelectorAll('.plan-box'));
-    const sameAsFirst = dashPlans.length && dashPlans[0].getAttribute('data-id') === id;
-
-    // mark selection on internal state
-    selectPlanById(id);
-
-    if (!sameAsFirst) {
-      // clone from modal into dashboard top slot
-      const cloneForDashboard = plan.cloneNode(true);
-      if (activeProvider) cloneForDashboard.classList.add(activeProvider);
-
-      let subType = '';
-      if (activeProvider === 'mtn') {
-        subType = id.includes('awoof') ? 'awoof' : id.includes('gifting') ? 'gifting' : '';
-      } else if (activeProvider === 'airtel') {
-        subType = id.includes('awoof') ? 'awoof' : id.includes('cg') ? 'cg' : '';
-      } else if (activeProvider === 'glo') {
-        subType = id.includes('cg') ? 'cg' : id.includes('gifting') ? 'gifting' : '';
-      }
-
-      if (subType && activeProvider !== 'ninemobile') {
-        const tag = document.createElement('span');
-        tag.className = 'plan-type-tag';
-        tag.textContent = subType.charAt(0).toUpperCase() + subType.slice(1);
-        cloneForDashboard.appendChild(tag);
-      }
-
-      plansRow.insertBefore(cloneForDashboard, plansRow.firstChild);
-
-      // Keep only two visible dashboard plans (0 and 1)
-      const allDashPlans = Array.from(plansRow.querySelectorAll('.plan-box'));
-      if (allDashPlans.length > 2) {
-        plansRow.removeChild(allDashPlans[2]);
-      }
-
-      // wire click for the cloned element
-      cloneForDashboard.addEventListener('click', handlePlanClick);
-
-      console.log('[DEBUG] handlePlanClick: Cloned modal plan to dashboard, ID:', id);
-    } else {
-      // simply select the first dashboard plan if it already matches
-      dashPlans[0].classList.add('selected', activeProvider);
-      console.log('[DEBUG] handlePlanClick: Selected first dashboard plan, no cloning needed, ID:', id);
-    }
-
-    // persist state
-    saveUserState();
-
-    // --- NEW: close the plans modal first using ModalManager (if present), then open checkout ---
-    if (window.ModalManager && typeof window.ModalManager.closeModal === 'function') {
-      try {
-        window.ModalManager.closeModal('allPlansModal');
-      } catch (err) {
-        console.warn('[handlePlanClick] ModalManager.closeModal threw, falling back to closeModal():', err);
-        try { closeModal(); } catch(e){}
-      }
-
-      // small delay to allow ModalManager to restore scroll/focus before opening checkout
-      setTimeout(() => {
-        try {
-          // renderCheckoutModal / openCheckoutModal may exist in your codebase — try to call render first
-          if (typeof renderCheckoutModal === 'function') {
-            try { renderCheckoutModal(id); } catch (err) { console.warn('[handlePlanClick] renderCheckoutModal failed', err); }
-          }
-          // Prefer ModalManager to open the checkout so history/trap are consistent
-          if (typeof window.ModalManager.openModal === 'function') {
-            window.ModalManager.openModal('checkoutModal');
-          } else if (typeof openCheckoutModal === 'function') {
-            openCheckoutModal();
-          } else {
-            // As a final fallback try to show checkout modal via DOM (least preferred)
-            const checkoutEl = document.getElementById('checkoutModal');
-            if (checkoutEl) checkoutEl.classList.remove('hidden');
-          }
-        } catch (err) {
-          console.error('[handlePlanClick] failed to open checkout modal:', err);
+    if (isModalClick && isDashSelected) {
+      e.stopPropagation();
+      closeModal();
+      console.log('[DEBUG] handlePlanClick: Reselected same plan, modal closed, ID:', id);
+    } else if (isModalClick) {
+      const dashPlans = Array.from(plansRow.querySelectorAll('.plan-box'));
+      const sameAsFirst = dashPlans.length && dashPlans[0].getAttribute('data-id') === id;
+      selectPlanById(id);
+      if (!sameAsFirst) {
+        const cloneForDashboard = plan.cloneNode(true);
+        cloneForDashboard.classList.add(activeProvider);
+        let subType = '';
+        if (activeProvider === 'mtn') {
+          subType = id.includes('awoof') ? 'awoof' : id.includes('gifting') ? 'gifting' : '';
+        } else if (activeProvider === 'airtel') {
+          subType = id.includes('awoof') ? 'awoof' : id.includes('cg') ? 'cg' : '';
+        } else if (activeProvider === 'glo') {
+          subType = id.includes('cg') ? 'cg' : id.includes('gifting') ? 'gifting' : '';
         }
-      }, 140);
+        if (subType && activeProvider !== 'ninemobile') {
+          const tag = document.createElement('span');
+          tag.className = 'plan-type-tag';
+          tag.textContent = subType.charAt(0).toUpperCase() + subType.slice(1);
+          cloneForDashboard.appendChild(tag);
+        }
+        plansRow.insertBefore(cloneForDashboard, plansRow.firstChild);
+        const allDashPlans = Array.from(plansRow.querySelectorAll('.plan-box'));
+        if (allDashPlans.length > 2) {
+          plansRow.removeChild(allDashPlans[2]);
+        }
+        cloneForDashboard.addEventListener('click', handlePlanClick);
+        console.log('[DEBUG] handlePlanClick: Cloned modal plan to dashboard, ID:', id);
+      } else {
+        dashPlans[0].classList.add('selected', activeProvider);
+        console.log('[DEBUG] handlePlanClick: Selected first dashboard plan, no cloning needed, ID:', id);
+      }
+      saveUserState();
+      closeModal();
     } else {
-      // Legacy fallback: close modal, then open checkout after a short delay
-      try { closeModal(); } catch(e){}
-      setTimeout(() => {
-        try { if (typeof renderCheckoutModal === 'function') renderCheckoutModal(id); } catch(e){}
-        try { if (typeof openCheckoutModal === 'function') openCheckoutModal(); } catch(e){}
-      }, 120);
+      selectPlanById(id);
     }
-
-  } else {
-    // clicked on dashboard plan (non-modal) -> just select it
-    selectPlanById(id);
   }
-}
-
 
   // --- UPDATE CONTACT/CANCEL BUTTON ---
   function updateContactOrCancel() {
@@ -3433,241 +3372,104 @@ async function triggerCheckoutReauth() {
 
 
   // --- RENDER CHECKOUT MODAL ---
-  // Render checkout content and wire interactions
-// ---------- CHECKOUT: helper state ----------
-window.__checkoutState = window.__checkoutState || { lastAmountText: null, lastPlan: null, escHandler: null };
-
-// ---------- RENDER CHECKOUT MODAL (idempotent) ----------
-function renderCheckoutModal(plan = {}) {
-  // plan may be object { id, provider, amount, label, meta }
-  const root = document.getElementById('checkoutModal');
-  if (!root) {
-    console.warn('[checkout] checkoutModal not found');
+  function renderCheckoutModal() {
+  const state = JSON.parse(localStorage.getItem('userState') || '{}');
+  const { provider, planId, number } = state;
+  if (!provider || !planId || !number) {
+    console.log('[DEBUG] renderCheckoutModal: Missing required state:', { provider, planId, number });
     return;
   }
 
-  window.__checkoutState.lastPlan = plan;
-
-  const amountEl = root.querySelector('.checkout-amount');
-  const metaEl = root.querySelector('.checkout-meta .meta-item');
-  const payBtn = root.querySelector('#payBtn');
-  const methodsWrap = root.querySelector('.payment-methods');
-
-  const amount = (plan.amount != null) ? plan.amount : (window.__selectedPlanAmount || 0);
-  const displayAmount = typeof amount === 'number' ? `₦${Number(amount).toLocaleString()}` : `${amount}`;
-
-  if (amountEl) amountEl.textContent = displayAmount;
-  if (metaEl) metaEl.textContent = plan.label || `${(plan.provider || '').toUpperCase()} ${plan.id || ''}`;
-
-  // Update pay button label (remember original text so we can restore on error)
-  if (payBtn) {
-    window.__checkoutState.lastAmountText = `Pay ${displayAmount}`;
-    payBtn.textContent = window.__checkoutState.lastAmountText;
-    payBtn.disabled = false;
-    payBtn.setAttribute('aria-label', `Pay ${displayAmount}`);
+  const plan = findPlanById(planId, provider);
+  if (!plan) {
+    console.log('[DEBUG] renderCheckoutModal: No plan found for ID:', planId);
+    return;
   }
 
-  // Populate payment methods (rebuild safely)
-  if (methodsWrap) {
-    const methods = [
-      { id: 'wallet', name: 'Wallet balance', desc: `Available: ${window.__walletBalance ? `₦${Number(window.__walletBalance).toLocaleString()}` : '—'}` },
-      { id: 'card', name: 'Card', desc: 'Visa / Mastercard' },
-      { id: 'ussd', name: 'USSD', desc: 'Bank transfer (USSD)' }
-    ];
+  const phoneEl = document.getElementById('checkout-phone');
+  const priceEl = document.getElementById('checkout-price');
+  const dataEl = document.getElementById('checkout-data');
+  const providerEl = document.getElementById('checkout-provider');
+  const payBtn = document.getElementById('payBtn');
 
-    // Build items
-    methodsWrap.innerHTML = '';
-    methods.forEach((m, idx) => {
-      const item = document.createElement('div');
-      item.className = 'payment-method' + (idx === 0 ? ' selected' : '');
-      item.setAttribute('data-method', m.id);
-      item.setAttribute('role', 'listitem');
-      item.setAttribute('tabindex', '0');
-
-      item.innerHTML = `
-        <div class="left">
-          <div class="pm-icon" aria-hidden="true">${m.name.charAt(0)}</div>
-          <div class="pm-name">${m.name}</div>
-        </div>
-        <div class="right"><div class="pm-desc">${m.desc}</div></div>
-      `;
-
-      // Remove previous listeners by cloning (cheap but safe)
-      // (we're creating a new element so no duplicates possible)
-
-      item.addEventListener('click', () => {
-        methodsWrap.querySelectorAll('.payment-method').forEach(x => x.classList.remove('selected'));
-        item.classList.add('selected');
-        // Optionally update pay button text per method here
-      });
-
-      item.addEventListener('keydown', (ev) => {
-        if (ev.key === 'Enter' || ev.key === ' ') {
-          ev.preventDefault();
-          item.click();
-        }
-      });
-
-      methodsWrap.appendChild(item);
-    });
-  }
-
-  // Wire cancel (idempotent)
-  const cancelBtn = root.querySelector('#btnCancelCheckout');
-  if (cancelBtn) {
-    // clear previous handler then attach
-    cancelBtn.onclick = () => closeCheckoutModal();
-  }
-
-  // Wire pay button (idempotent)
-  if (payBtn) {
-    // Replace previous handler to avoid duplicates
-    payBtn.onclick = async () => {
-      const selected = root.querySelector('.payment-method.selected');
-      const method = selected?.getAttribute('data-method') || 'wallet';
-      payBtn.disabled = true;
-      payBtn.textContent = 'Processing…';
-      payBtn.setAttribute('aria-busy', 'true');
-
-      try {
-        // TODO: replace with your real payment API call
-        // Example:
-        // const res = await fetch('/api/pay', {
-        //   method: 'POST',
-        //   credentials: 'include',
-        //   headers: { 'Content-Type': 'application/json' },
-        //   body: JSON.stringify({ planId: plan.id, method })
-        // });
-        // const json = await res.json();
-        // if (!res.ok) throw new Error(json?.message || 'Payment failed');
-
-        console.log('[checkout] initiating payment', { plan, method });
-        // simulate network latency
-        await new Promise(r => setTimeout(r, 700));
-
-        // Close and show success
-        closeCheckoutModal();
-        if (typeof notify === 'function') notify('Payment successful', 'success');
-        return;
-      } catch (err) {
-        console.error('[checkout] payment failed', err);
-        if (typeof notify === 'function') notify('Payment failed', 'error');
-        // restore pay button
-        payBtn.disabled = false;
-        payBtn.textContent = window.__checkoutState.lastAmountText || `Pay ${displayAmount}`;
-        payBtn.removeAttribute('aria-busy');
-      }
-    };
-  }
-}
-
-// ---------- CLOSE CHECKOUT (centralized) ----------
-function closeCheckoutModal() {
-  const root = document.getElementById('checkoutModal');
-  if (!root) return;
-
-  // If ModalManager exists, prefer it (it will call transitions and pop history)
-  if (window.ModalManager && typeof window.ModalManager.closeModal === 'function') {
-    try {
-      window.ModalManager.closeModal('checkoutModal');
-    } catch (err) {
-      console.warn('[checkout] ModalManager.closeModal threw, falling back to DOM hide', err);
-      // fallback to DOM hide below
-      root.classList.remove('active');
-      root.style.display = 'none';
-      root.setAttribute('aria-hidden', 'true');
-      document.body.classList.remove('modal-open');
+  if (phoneEl) {
+    const rawNumber = normalizePhone(number); // Ensure raw number is valid
+    const formattedNumber = formatNigeriaNumber(rawNumber).value; // Get formatted number
+    if (!rawNumber || rawNumber.length !== 11 || !formattedNumber) {
+      console.warn('[WARN] renderCheckoutModal: Invalid number - Raw:', rawNumber, 'Formatted:', formattedNumber, 'Original:', number);
+      phoneEl.textContent = ''; // Fallback to empty if invalid
+    } else {
+      phoneEl.textContent = formattedNumber;
+      // Inline styles to prevent cutoff of 13-character formatted number
+      phoneEl.style.whiteSpace = 'nowrap';
+      phoneEl.style.overflow = 'visible';
+      phoneEl.style.textOverflow = 'initial';
+      phoneEl.style.maxWidth = 'none';
+      phoneEl.style.width = 'auto';
+      phoneEl.style.display = 'inline-block';
+      console.log('[DEBUG] renderCheckoutModal: Phone number set:', formattedNumber, 'Length:', formattedNumber.length, 'Raw:', rawNumber);
     }
-  } else {
-    // DOM fallback hide
-    root.classList.remove('active');
-    root.style.display = 'none';
-    root.setAttribute('aria-hidden', 'true');
-    document.body.classList.remove('modal-open');
-
-    // undo history push if we added one
-    try {
-      if (history.state && history.state.isModal && history.state.modalId === 'checkoutModal') {
-        history.back();
-      }
-    } catch (e) { /* ignore */ }
   }
-
-  // Remove Escape handler if attached
-  if (window.__checkoutState && typeof window.__checkoutState.escHandler === 'function') {
-    window.removeEventListener('keydown', window.__checkoutState.escHandler);
-    window.__checkoutState.escHandler = null;
+  if (priceEl) priceEl.textContent = `₦${plan.price}`;
+  if (dataEl) dataEl.textContent = `${plan.data} (${plan.duration})`;
+  if (providerEl) {
+    const displayName = provider === 'ninemobile' ? '9mobile' : provider.charAt(0).toUpperCase() + provider.slice(1);
+    providerEl.innerHTML = `${svgShapes[provider]} ${displayName}`;
+    console.log('[DEBUG] renderCheckoutModal: Provider set with SVG:', displayName);
   }
-
-  // Reset pay button busy state if visible
-  const payBtn = root.querySelector('#payBtn');
   if (payBtn) {
     payBtn.disabled = false;
-    payBtn.textContent = window.__checkoutState.lastAmountText || payBtn.textContent.replace('Processing…', '');
-    payBtn.removeAttribute('aria-busy');
+    payBtn.classList.add('active');
   }
+  console.log('[DEBUG] renderCheckoutModal: Rendered for provider:', provider, 'planId:', planId, 'number:', number);
 }
 
-// ---------- OPEN CHECKOUT (prefer ModalManager; fallback safe DOM) ----------
-function openCheckoutModal(plan = {}) {
-  const root = document.getElementById('checkoutModal');
-  if (!root) {
-    console.error('[ERROR] openCheckoutModal: #checkoutModal not found in DOM');
-    return;
-  }
-
-  // Render content first (idempotent)
-  renderCheckoutModal(plan);
-
-  // Setup Escape key handler once
-  if (!window.__checkoutState.escHandler) {
-    window.__checkoutState.escHandler = (ev) => {
-      if (ev.key === 'Escape') {
-        ev.preventDefault();
-        closeCheckoutModal();
-      }
-    };
-    window.addEventListener('keydown', window.__checkoutState.escHandler);
-  }
-
-  // If ModalManager available, use it (keeps history/scroll/focus consistent)
-  if (window.ModalManager && typeof window.ModalManager.openModal === 'function') {
-    try {
-      window.lastModalSource = window.lastModalSource || 'dashboard';
-      window.ModalManager.openModal('checkoutModal');
+  // --- OPEN CHECKOUT MODAL ---
+  function openCheckoutModal() {
+    const checkoutModal = document.getElementById('checkoutModal');
+    if (!checkoutModal) {
+      console.error('[ERROR] openCheckoutModal: #checkoutModal not found in DOM');
       return;
-    } catch (err) {
-      console.warn('[checkout] ModalManager.openModal threw, falling back to DOM show', err);
-      // continue to DOM fallback
     }
+    const checkoutModalContent = checkoutModal.querySelector('.modal-content');
+    if (!checkoutModalContent) {
+      console.error('[ERROR] openCheckoutModal: .modal-content not found');
+      return;
+    }
+    checkoutModal.style.display = 'none';
+    checkoutModal.classList.remove('active');
+    checkoutModalContent.style.transform = 'translateY(0)';
+    renderCheckoutModal();
+    setTimeout(() => {
+      checkoutModal.style.display = 'flex';
+      checkoutModal.classList.add('active');
+      checkoutModal.setAttribute('aria-hidden', 'false');
+      document.body.classList.add('modal-open');
+      checkoutModal.focus();
+      history.pushState({ popup: true }, '', location.href);
+      console.log('[DEBUG] openCheckoutModal: Modal opened, display:', checkoutModal.style.display, 'active:', checkoutModal.classList.contains('active'));
+    }, 50);
   }
 
-  // DOM fallback: show using your previous conventions, but corrected
-  const content = root.querySelector('.modal-content');
-  root.style.display = 'flex';
-  setTimeout(() => {
-    root.classList.add('active');
-    root.setAttribute('aria-hidden', 'false');
-    document.body.classList.add('modal-open');
-
-    // Focus container (avoid focusing inputs on mobile — keep focus on the modal container)
-    try {
-      const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
-      if (isMobile) {
-        content?.querySelector('.title')?.focus?.({ preventScroll: true });
-      } else {
-        content?.focus?.({ preventScroll: true });
-      }
-    } catch (e) {}
-
-    // Push a light history state so back button can close modal (if you want)
-    try {
-      history.pushState({ isModal: true, modalId: 'checkoutModal' }, '', location.href);
-    } catch (e) { /* ignore */ }
-
-  }, 12);
-}
-
+  // --- CLOSE CHECKOUT MODAL ---
+  function closeCheckoutModal() {
+    const checkoutModal = document.getElementById('checkoutModal');
+    if (!checkoutModal) {
+      console.error('[ERROR] closeCheckoutModal: #checkoutModal not found');
+      return;
+    }
+    const checkoutModalContent = checkoutModal.querySelector('.modal-content');
+    checkoutModal.classList.remove('active');
+    checkoutModal.style.display = 'none';
+    checkoutModal.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('modal-open');
+    checkoutModalContent.style.transform = 'translateY(100%)';
+    if (history.state && history.state.popup) {
+      history.back();
+      console.log('[DEBUG] closeCheckoutModal: History state popped');
+    }
+    console.log('[DEBUG] closeCheckoutModal: Modal closed, display:', checkoutModal.style.display, 'active:', checkoutModal.classList.length);
+  }
 
   // --- SERVICE SELECTION ---
   serviceItems.forEach((item, i) => {
@@ -4811,45 +4613,20 @@ updateBalanceDisplay();
     // ---------------------
     // Close/back button
     // ---------------------
-    // ---------- PATCH: unified PIN close handler using ModalManager ----------
-if (closePinModal) {
-  closePinModal.addEventListener('click', () => {
-    if (step === 'confirm') {
-      step = 'create';
-      if (pinTitleEl) pinTitleEl.textContent = 'Create PIN';
-      if (pinSubtitleEl) pinSubtitleEl.textContent = 'Create a 4-digit PIN';
-      resetInputs();
-      return;
-    }
-
-    // Use ModalManager so history/popstate stays consistent
-    if (window.ModalManager && typeof window.ModalManager.closeModal === 'function') {
-      window.ModalManager.closeModal('pinModal');
-      resetInputs();
-      processing = false;
-
-      // After closing, return to the modal that opened the PIN modal (if any)
-      setTimeout(() => {
-        if (lastModalSource === 'security') {
-          try { window.ModalManager.openModal('securityModal'); } catch(e) {}
-        } else if (lastModalSource === 'settings') {
-          try { window.ModalManager.openModal('settingsModal'); } catch(e) {}
-        } else if (lastModalSource === 'checkout') {
-          try { window.ModalManager.openModal('checkoutModal'); } catch(e) {}
+    if (closePinModal) {
+      closePinModal.addEventListener('click', () => {
+        if (step === 'confirm') {
+          step = 'create';
+          if (pinTitleEl) pinTitleEl.textContent = 'Create PIN';
+          if (pinSubtitleEl) pinSubtitleEl.textContent = 'Create a 4-digit PIN';
+          resetInputs();
+        } else {
+          pinModal.classList.add('hidden');
+          resetInputs();
         }
-        // clear marker
-        lastModalSource = null;
-      }, 100);
-      return;
+        processing = false;
+      });
     }
-
-    // Fallback legacy path (existing behavior)
-    pinModal.classList.add('hidden');
-    resetInputs();
-    processing = false;
-  });
-}
-
 
     // ---------------------
     // Input actions
@@ -7448,100 +7225,55 @@ if (addressInput && !addressInput.disabled) {
 
 
 
-// ---------- UPDATED openUpdateProfileModal (with caching & ModalManager support) ----------
-async function openUpdateProfileModal(profile = {}) {
+function openUpdateProfileModal(profile = {}) {
   if (!updateProfileModal || !updateProfileForm) {
     console.error('[ERROR] openUpdateProfileModal: Modal or form not found');
     return;
   }
 
-  // --- Ensure global cache object exists ---
-  window.__cachedProfile = window.__cachedProfile || { profileData: null, avatarUrl: null, lastFetched: 0 };
+  // show modal
+  updateProfileModal.style.display = 'block';
+  setTimeout(() => {
+    updateProfileModal.classList.add('active');
+    updateProfileModal.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('modal-open');
+  }, 10);
 
-  // Fetch and populate cache when needed. If `profile` is passed, merge it into cache.
-  async function ensureProfileLoaded(incomingProfile = {}) {
-    const now = Date.now();
+  // --- Populate form fields (prefer provided profile, then localStorage as fallback) ---
+  const fullName = profile?.fullName || localStorage.getItem('fullName') || (localStorage.getItem('userEmail') || '').split('@')[0] || '';
+  const username = profile?.username || localStorage.getItem('username') || '';
+  const phoneNumber = profile?.phoneNumber || localStorage.getItem('phoneNumber') || '';
+  const email = profile?.email || localStorage.getItem('userEmail') || '';
+  const address = profile?.address || localStorage.getItem('address') || '';
 
-    // If the caller passed an explicit profile object, merge it into cache immediately
-    if (incomingProfile && Object.keys(incomingProfile).length) {
-      window.__cachedProfile.profileData = Object.assign({}, window.__cachedProfile.profileData || {}, incomingProfile);
-      if (incomingProfile.profilePicture) window.__cachedProfile.avatarUrl = incomingProfile.profilePicture;
-      window.__cachedProfile.lastFetched = now;
-      return;
-    }
-
-    // Serve from cache if it's fresh (5s threshold)
-    if (window.__cachedProfile.profileData && (now - (window.__cachedProfile.lastFetched || 0) < 5000)) {
-      return;
-    }
-
-    // Attempt remote fetch
-    try {
-      const res = await fetch('/api/me/profile', { credentials: 'include' });
-      if (!res.ok) throw new Error('Profile fetch failed: ' + res.status);
-      const json = await res.json();
-      // store whole profile and avatar
-      window.__cachedProfile.profileData = json || {};
-      window.__cachedProfile.avatarUrl = json?.profilePicture || window.__cachedProfile.avatarUrl || '';
-      window.__cachedProfile.lastFetched = now;
-    } catch (err) {
-      // don't break the flow — keep whatever cached or localStorage values exist
-      console.warn('[openUpdateProfileModal] ensureProfileLoaded failed:', err);
-    }
-  }
-
-  // Merge priority: explicit `profile` param -> cached profile -> localStorage values
-  await ensureProfileLoaded(profile);
-
-  const cached = window.__cachedProfile.profileData || {};
-  const fullName = (profile?.fullName) || cached.fullName || localStorage.getItem('fullName') || (localStorage.getItem('userEmail') || '').split('@')[0] || '';
-  const username = (profile?.username) || cached.username || localStorage.getItem('username') || '';
-  const phoneNumberRaw = (profile?.phoneNumber) || cached.phoneNumber || localStorage.getItem('phoneNumber') || '';
-  const email = (profile?.email) || cached.email || localStorage.getItem('userEmail') || '';
-  const address = (profile?.address) || cached.address || localStorage.getItem('address') || '';
-
-  // populate inputs
   if (fullNameInput) fullNameInput.value = fullName;
   if (usernameInput) usernameInput.value = username;
-  if (phoneNumberInput) phoneNumberInput.value = phoneNumberRaw ? formatNigeriaNumberProfile(phoneNumberRaw).value : '';
+  if (phoneNumberInput) phoneNumberInput.value = phoneNumber ? formatNigeriaNumberProfile(phoneNumber).value : '';
   if (emailInput) emailInput.value = email;
   if (addressInput) addressInput.value = address;
 
-  // field enable/disable rules
+  // --- Field enable/disable rules (server-driven) ---
   if (fullNameInput) fullNameInput.disabled = localStorage.getItem('fullNameEdited') === 'true';
-  if (phoneNumberInput) phoneNumberInput.disabled = !!phoneNumberRaw;
+  if (phoneNumberInput) phoneNumberInput.disabled = !!phoneNumber;
   if (emailInput) emailInput.disabled = true;
-  if (addressInput) addressInput.disabled = !!(profile?.address || cached.address || localStorage.getItem('address')?.trim());
-  if (profilePictureInput) profilePictureInput.disabled = false;
+  if (addressInput) addressInput.disabled = !!(profile?.address || localStorage.getItem('address')?.trim());
+  if (profilePictureInput) profilePictureInput.disabled = false; // always editable
 
-  // Avatar / preview: prefer cache avatarUrl, then profilePicture in localStorage
-  const cachedAvatar = window.__cachedProfile.avatarUrl || localStorage.getItem('profilePicture') || '';
-  const isValidProfilePicture = !!cachedAvatar && /^(data:image\/|https?:\/\/|\/|blob:)/i.test(cachedAvatar);
+  // --- Avatar / preview ---
+  const profilePicture = localStorage.getItem('profilePicture') || '';
+  const isValidProfilePicture = !!profilePicture && /^(data:image\/|https?:\/\/|\/|blob:)/i.test(profilePicture);
   const displayName = username || (fullName.split(' ')[0] || 'User');
 
   if (profilePicturePreview) {
-    // If preview element is an <img>, set src; if it's a container, fallback to innerHTML/text
-    if (profilePicturePreview.tagName && profilePicturePreview.tagName.toLowerCase() === 'img') {
-      if (isValidProfilePicture) {
-        profilePicturePreview.src = cachedAvatar;
-        profilePicturePreview.alt = displayName;
-      } else {
-        // show placeholder: either blank src or data URI fallback
-        profilePicturePreview.removeAttribute('src');
-        profilePicturePreview.alt = displayName;
-      }
+    if (isValidProfilePicture) {
+      profilePicturePreview.innerHTML = `<img src="${profilePicture}" alt="Profile Picture" class="avatar-img" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`;
     } else {
-      // Element is a container; use innerHTML for image or initial
-      if (isValidProfilePicture) {
-        profilePicturePreview.innerHTML = `<img src="${cachedAvatar}" alt="Profile Picture" class="avatar-img" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`;
-      } else {
-        profilePicturePreview.innerHTML = '';
-        profilePicturePreview.textContent = displayName.charAt(0).toUpperCase();
-      }
+      profilePicturePreview.innerHTML = '';
+      profilePicturePreview.textContent = displayName.charAt(0).toUpperCase();
     }
   }
 
-  // Reset validation UI
+  // --- Reset error UI, invalid classes and touched flags ---
   [fullNameError, usernameError, phoneNumberError, addressError, profilePictureError].forEach(errEl => {
     if (errEl) {
       errEl.textContent = '';
@@ -7555,51 +7287,20 @@ async function openUpdateProfileModal(profile = {}) {
 
   Object.keys(fieldTouched).forEach(k => fieldTouched[k] = false);
 
-  // Ensure no duplicate listeners
-  try {
-    if (typeof detachProfileListeners === 'function') detachProfileListeners();
-  } catch (e) {
-    console.warn('[openUpdateProfileModal] detachProfileListeners missing or threw', e);
-  }
-  try {
-    if (typeof attachProfileListeners === 'function') attachProfileListeners();
-  } catch (e) {
-    console.warn('[openUpdateProfileModal] attachProfileListeners missing or threw', e);
-  }
+  // --- Ensure no duplicate listeners: detach previous, then attach fresh handlers ---
+  detachProfileListeners();
+  attachProfileListeners(); // attachProfileListeners should add input/blur/paste handlers for fullName/username/phone/address/profilePicture
+
+  // NOTE: Do NOT add inline input listeners for validation here.
+  // The attachProfileListeners() function is the single source of truth and
+  // is responsible for adding the input + blur handlers that follow the
+  // "live rules vs blur-on-length" pattern (so length errors only show on blur/submit).
 
   // Re-run initial validation to set the save button state correctly
-  try { validateProfileForm(false); } catch (e) { console.warn('[openUpdateProfileModal] validateProfileForm threw', e); }
+  validateProfileForm(false);
 
-  // --- Show modal: prefer ModalManager (handles focus/scroll/history), fallback to DOM show ---
-  if (window.ModalManager && typeof window.ModalManager.openModal === 'function') {
-    try {
-      // record where the modal was opened from (useful for returning)
-      window.lastModalSource = window.lastModalSource || 'dashboard';
-      window.ModalManager.openModal('updateProfileModal');
-      console.log('[openUpdateProfileModal] Opened updateProfileModal via ModalManager');
-    } catch (err) {
-      console.warn('[openUpdateProfileModal] ModalManager.openModal failed, falling back to DOM show', err);
-      // fallback to DOM show below
-      updateProfileModal.style.display = 'block';
-      setTimeout(() => {
-        updateProfileModal.classList.add('active');
-        updateProfileModal.setAttribute('aria-hidden', 'false');
-        document.body.classList.add('modal-open');
-      }, 10);
-    }
-  } else {
-    // legacy DOM approach
-    updateProfileModal.style.display = 'block';
-    setTimeout(() => {
-      updateProfileModal.classList.add('active');
-      updateProfileModal.setAttribute('aria-hidden', 'false');
-      document.body.classList.add('modal-open');
-    }, 10);
-  }
-
-  console.log('[DEBUG] openUpdateProfileModal: Modal opened', { fullName, username, phoneNumber: phoneNumberRaw, email });
+  console.log('[DEBUG] openUpdateProfileModal: Modal opened', { fullName, username, phoneNumber, email });
 }
-
 
 
 function closeUpdateProfileModal() {
