@@ -1538,9 +1538,13 @@ async function onDashboardLoad() {
  * Hides dashboard cards based on completion status from server
  * Call this after getSession() or on dashboard load
  */
-async function manageDashboardCards() {
+// Updated manageDashboardCards(): Force server check + instant apply, with await for sync to ensure no flash/revert.
+// Mirrors profile logic exactly (symmetric). Calls apply after sync completes, not in parallel.
+// Added forceHide param for manual calls (e.g., after PIN setup success) to immediately hide if local/server confirms true.
+
+async function manageDashboardCards(forceHide = false) {
     try {
-        console.log('[Dashboard Cards] Checking card visibility');
+        console.log('[Dashboard Cards] Checking card visibility', { forceHide });
         
         // Helper to apply visibility (always read from localStorage for robustness)
         function applyCardVisibility() {
@@ -1549,8 +1553,9 @@ async function manageDashboardCards() {
             
             const pinCard = document.getElementById('dashboardPinCard');
             if (pinCard) {
-                pinCard.style.display = hasPin ? 'none' : '';
-                console.log('[Dashboard Cards] Setup Pin card', hasPin ? 'hidden' : 'visible');
+                const shouldHide = hasPin || forceHide;  // Force hide if requested (e.g., post-PIN setup)
+                pinCard.style.display = shouldHide ? 'none' : '';
+                console.log('[Dashboard Cards] Setup Pin card', shouldHide ? 'hidden' : 'visible');
             }
             
             const profileCard = document.getElementById('dashboardUpdateProfileCard');
@@ -1560,68 +1565,83 @@ async function manageDashboardCards() {
             }
         }
         
-        // 🔥 APPLY INSTANTLY from cache (no waiting!)
+        // 🔥 APPLY INSTANTLY from cache (no waiting!) - but we'll re-apply after sync
         applyCardVisibility();
         
         // Add global listeners for real-time updates (PIN event + storage sync)
-        window.addEventListener('pin-status-changed', function() {
-            console.log('[Dashboard Cards] PIN status changed, re-applying visibility');
-            applyCardVisibility();
-        });
+        if (!window.__dashboardListenersAttached) {  // Idempotent: attach once
+            window.addEventListener('pin-status-changed', function() {
+                console.log('[Dashboard Cards] PIN status changed, re-applying visibility');
+                manageDashboardCards(true);  // Force hide on PIN change
+            });
+            
+            window.addEventListener('profile-status-changed', function() {
+                console.log('[Dashboard Cards] Profile status changed, re-applying visibility');
+                manageDashboardCards();
+            });
+            
+            window.addEventListener('storage', function(e) {
+                if (e.key === 'hasPin' || e.key === 'profileCompleted') {
+                    console.log('[Dashboard Cards] Storage changed for cards, re-applying visibility');
+                    manageDashboardCards(e.key === 'hasPin' ? true : false);  // Force on PIN change
+                }
+            });
+            
+            window.__dashboardListenersAttached = true;
+        }
         
-        window.addEventListener('storage', function(e) {
-            if (e.key === 'hasPin' || e.key === 'profileCompleted') {
-                console.log('[Dashboard Cards] Storage changed for cards, re-applying visibility');
-                applyCardVisibility();
-            }
-        });
-        
-        // 🔥 BACKGROUND SYNC: Update from server (non-blocking)
-        setTimeout(async () => {
-            try {
-                if (typeof getSession === 'function') {
-                    const session = await getSession();
-                    if (session?.user) {
-                        const serverHasPin = session.user.hasPin || false;
-                        const serverProfileCompleted = session.user.profileCompleted || false;
-                        
-                        // Track if changed for dispatch
-                        const oldHasPin = localStorage.getItem('hasPin') === 'true';
-                        const oldProfileCompleted = localStorage.getItem('profileCompleted') === 'true';
-                        
-                        // NEW GUARD: If local 'hasPin' is true but server false, log warning but DON'T revert (possible lag)
-                        const newHasPin = oldHasPin ? true : serverHasPin;  // Preserve true if local was true
-                        if (oldHasPin && !serverHasPin) {
-                            console.warn('[Dashboard Cards] Server hasPin false but local true - preserving local (possible server lag)');
-                        }
-                        
-                        // Update localStorage
-                        localStorage.setItem('hasPin', newHasPin ? 'true' : 'false');
-                        localStorage.setItem('profileCompleted', serverProfileCompleted ? 'true' : 'false');
-                        
-                        // Re-apply visibility (always after sync)
-                        applyCardVisibility();
-                        
-                        // Dispatch events if values changed (for other listeners, e.g., smart button)
-                        if (newHasPin !== oldHasPin) {
-                            window.dispatchEvent(new Event('pin-status-changed'));
-                            console.log('[Dashboard Cards] Dispatched pin-status-changed after sync');
-                        }
-                        if (serverProfileCompleted !== oldProfileCompleted && typeof window.dispatchEvent === 'function') {
-                            window.dispatchEvent(new Event('profile-status-changed'));
-                            console.log('[Dashboard Cards] Dispatched profile-status-changed after sync');
-                        }
+        // 🔥 BACKGROUND SYNC: Await server update, then re-apply (ensures server truth wins, no revert)
+        try {
+            if (typeof getSession === 'function') {
+                const session = await getSession();  // Await: Wait for fresh server data
+                if (session?.user) {
+                    const serverHasPin = session.user.hasPin || false;
+                    const serverProfileCompleted = session.user.profileCompleted || false;
+                    
+                    // Track if changed for dispatch
+                    const oldHasPin = localStorage.getItem('hasPin') === 'true';
+                    const oldProfileCompleted = localStorage.getItem('profileCompleted') === 'true';
+                    
+                    // Update localStorage from server (authoritative)
+                    localStorage.setItem('hasPin', serverHasPin ? 'true' : 'false');
+                    localStorage.setItem('profileCompleted', serverProfileCompleted ? 'true' : 'false');
+                    
+                    // Re-apply AFTER update (forces hide if server now true)
+                    applyCardVisibility();
+                    
+                    // Dispatch events if values changed (for other listeners, e.g., smart button)
+                    if (serverHasPin !== oldHasPin) {
+                        window.dispatchEvent(new Event('pin-status-changed'));
+                        console.log('[Dashboard Cards] Dispatched pin-status-changed after sync');
+                    }
+                    if (serverProfileCompleted !== oldProfileCompleted && typeof window.dispatchEvent === 'function') {
+                        window.dispatchEvent(new Event('profile-status-changed'));
+                        console.log('[Dashboard Cards] Dispatched profile-status-changed after sync');
                     }
                 }
-            } catch (e) {
-                console.warn('[Dashboard Cards] Background sync failed', e);
             }
-        }, 500);  // Increase delay to 500ms to give server time to update
+        } catch (e) {
+            console.warn('[Dashboard Cards] Background sync failed', e);
+            // On error, re-apply from cache (no change)
+            applyCardVisibility();
+        }
         
     } catch (err) {
         console.error('[Dashboard Cards] Error managing cards:', err);
     }
 }
+
+// In initializeSmartAccountPinButton(): Update the 'pin-status-changed' listener to force hide
+// Replace the existing listener with this:
+window.addEventListener('pin-status-changed', function() {
+    console.log('[Smart PIN Button] PIN status changed, updating button');
+    updateAccountPinButton();
+    
+    // Force hide PIN card on change (mirrors profile force)
+    if (typeof manageDashboardCards === 'function') {
+        manageDashboardCards(true);  // true = forceHide
+    }
+});
 
 function initializeSmartAccountPinButton() {
     try {
