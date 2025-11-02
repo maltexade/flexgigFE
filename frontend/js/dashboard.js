@@ -1546,33 +1546,34 @@ async function onDashboardLoad() {
 // Logs prefixed with [DC-TRACE] for easy grep. Run this, add PIN, check console for flow.
 // Added timestamps for timing analysis (e.g., race detection).
 
-// Add this global flag once (idempotent observer)
-if (!window.__pinCardObserver) {
-    window.__pinCardObserver = new MutationObserver((mutations) => {
+// Global observer for BOTH cards (idempotent - attach once)
+if (!window.__dashboardCardsObserver) {
+    window.__dashboardCardsObserver = new MutationObserver((mutations) => {
         let needsReapply = false;
         mutations.forEach((mutation) => {
             if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
                 mutation.addedNodes.forEach((node) => {
-                    if (node.id === 'dashboardPinCard' || node.querySelector('#dashboardPinCard')) {
+                    if (node.id === 'dashboardPinCard' || node.id === 'dashboardUpdateProfileCard' || 
+                        node.querySelector('#dashboardPinCard, #dashboardUpdateProfileCard')) {
                         needsReapply = true;
-                        console.log('[PIN-OBSERVER] Card re-added after nav - re-applying visibility');
+                        console.log('[CARDS-OBSERVER] Card(s) re-added after nav - re-applying visibility');
                     }
                 });
             }
         });
         if (needsReapply && typeof manageDashboardCards === 'function') {
-            manageDashboardCards();  // Re-check hasPin and apply
+            manageDashboardCards();  // Re-check hasPin/profileCompleted and apply
         }
     });
-    // Observe the dashboard container (adjust selector if needed, e.g., '#dashboard-container')
+    // Observe dashboard container (adjust selector)
     const dashboardContainer = document.querySelector('#dashboard') || document.body;
     if (dashboardContainer) {
-        window.__pinCardObserver.observe(dashboardContainer, { childList: true, subtree: true });
-        console.log('[PIN-OBSERVER] Attached to dashboard for nav resilience');
+        window.__dashboardCardsObserver.observe(dashboardContainer, { childList: true, subtree: true });
+        console.log('[CARDS-OBSERVER] Attached for PIN + Profile resilience');
     }
 }
 
-async function manageDashboardCards(forceHide = false) {
+async function manageDashboardCards(forceHidePin = false, forceShowProfile = false) {  // Symmetric params
     const traceId = `DC-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const log = (msg, data = {}) => {
         const ts = new Date().toISOString();
@@ -1580,116 +1581,92 @@ async function manageDashboardCards(forceHide = false) {
     };
     
     try {
-        log('START: Checking card visibility', { forceHide });
+        log('START: Checking cards visibility', { forceHidePin, forceShowProfile });
         
-        // Helper to apply visibility
-        function applyCardVisibility() {
-            const hasPin = localStorage.getItem('hasPin') === 'true';
-            const profileCompleted = localStorage.getItem('profileCompleted') === 'true';
-            
-            log('APPLY: Reading local values', { hasPin, profileCompleted });
-            
-            const pinCard = document.getElementById('dashboardPinCard');
-            if (pinCard) {
-                const shouldHide = hasPin || forceHide;
-                const hideClass = 'pin-card-hidden';
-                const fadeClass = 'pin-card-fading';  // For graceful transition
-                
-                if (shouldHide) {
-                    // Graceful: Add fade first, then hide after transition
-                    pinCard.classList.add(fadeClass);
-                    setTimeout(() => {
-                        pinCard.classList.add(hideClass);
-                        pinCard.classList.remove(fadeClass);
-                        log('APPLY: PIN fade-to-hide complete');
-                    }, 200);  // Match CSS transition duration
-                } else {
-                    // Show: Remove hide/fade, force flex inline (resets any override)
-                    pinCard.classList.remove(hideClass, fadeClass);
-                    pinCard.style.display = 'flex';  // Inline flex only when showing (safe, no !important needed)
-                    log('APPLY: PIN show with inline flex');
-                }
-                
-                // Log computed after apply
-                requestAnimationFrame(() => {  // After paint
-                    const computed = getComputedStyle(pinCard).display;
-                    log('APPLY: PIN card post-paint check', { 
-                        shouldHide, 
-                        computed, 
-                        finalVisible: computed !== 'none',
-                        classList: pinCard.className 
-                    });
-                    
-                    // Force if mismatch (rare, e.g., external CSS)
-                    if (shouldHide && computed !== 'none') {
-                        log('WARN: PIN mismatch - forcing hide');
-                        pinCard.classList.add(hideClass);
-                        pinCard.style.setProperty('display', 'none', 'important');
-                    } else if (!shouldHide && computed !== 'flex') {
-                        log('WARN: PIN mismatch - forcing flex');
-                        pinCard.style.setProperty('display', 'flex', 'important');
-                    }
-                });
-            } else {
-                log('APPLY: PIN card element NOT FOUND - check ID');
+        // Helper to apply visibility to a card
+        function applyToCard(cardId, shouldHide, cardType = 'generic') {
+            const card = document.getElementById(cardId);
+            if (!card) {
+                log(`APPLY: ${cardType} card element NOT FOUND - check ID '${cardId}'`);
+                return;
             }
             
-            // Profile (unchanged, but symmetric)
-            const profileCard = document.getElementById('dashboardUpdateProfileCard');
-            if (profileCard) {
-                const hideClass = 'pin-card-hidden';  // Reuse or make 'profile-card-hidden'
-                if (profileCompleted) {
-                    profileCard.classList.add(hideClass);
-                    profileCard.classList.add(fadeClass);
-                    setTimeout(() => {
-                        profileCard.classList.remove(fadeClass);
-                    }, 200);
-                } else {
-                    profileCard.classList.remove(hideClass, fadeClass);
-                    profileCard.style.display = 'flex';  // Assume profile also flex
-                }
-                requestAnimationFrame(() => {
-                    const computed = getComputedStyle(profileCard).display;
-                    log('APPLY: Profile card post-paint check', { 
-                        profileCompleted, 
-                        computed, 
-                        finalVisible: computed !== 'none',
-                        classList: profileCard.className 
-                    });
-                });
+            const hideClass = 'dashboard-card-hidden';
+            const fadeClass = 'dashboard-card-fading';
+            
+            log(`APPLY: ${cardType} card - shouldHide: ${shouldHide}`, { id: cardId });
+            
+            if (shouldHide) {
+                // Graceful: Fade first, then hide
+                card.classList.add(fadeClass);
+                setTimeout(() => {
+                    card.classList.add(hideClass);
+                    card.classList.remove(fadeClass);
+                    log(`APPLY: ${cardType} fade-to-hide complete`);
+                }, 200);
             } else {
-                log('APPLY: Profile card element NOT FOUND');
+                // Show: Remove classes, force flex inline (resets overrides)
+                card.classList.remove(hideClass, fadeClass);
+                card.style.display = 'flex';  // Inline restore - no !important needed
+                log(`APPLY: ${cardType} show with inline flex`);
             }
+            
+            // Post-paint verification
+            requestAnimationFrame(() => {
+                const computed = getComputedStyle(card).display;
+                log(`APPLY: ${cardType} post-paint check`, { 
+                    shouldHide, 
+                    computed, 
+                    finalVisible: computed !== 'none',
+                    classList: card.className 
+                });
+                
+                // Force if mismatch
+                if (shouldHide && computed !== 'none') {
+                    log(`WARN: ${cardType} mismatch - forcing hide`);
+                    card.classList.add(hideClass);
+                    card.style.setProperty('display', 'none', 'important');
+                } else if (!shouldHide && computed !== 'flex') {
+                    log(`WARN: ${cardType} mismatch - forcing flex`);
+                    card.style.setProperty('display', 'flex', 'important');
+                }
+            });
         }
         
-        // Instant apply
+        // 🔥 APPLY INSTANTLY from localStorage
         log('PHASE1: Instant apply from localStorage');
-        applyCardVisibility();
+        const hasPin = localStorage.getItem('hasPin') === 'true';
+        const profileCompleted = localStorage.getItem('profileCompleted') === 'true';
         
-        // Listeners (unchanged from previous)
+        // Apply to PIN card
+        applyToCard('dashboardPinCard', hasPin || forceHidePin, 'PIN');
+        
+        // Apply to Profile card (symmetric)
+        applyToCard('dashboardUpdateProfileCard', profileCompleted || !forceShowProfile, 'Profile');
+        
+        // Listeners (unchanged, but log)
         if (!window.__dashboardListenersAttached) {
-            log('ATTACH: Adding global listeners (first time)');
+            log('ATTACH: Adding global listeners');
             window.addEventListener('pin-status-changed', (e) => {
-                log('EVENT: pin-status-changed triggered', { bubbles: e.bubbles });
-                manageDashboardCards(true);
+                log('EVENT: pin-status-changed');
+                manageDashboardCards(true);  // Force hide PIN
             });
             window.addEventListener('profile-status-changed', (e) => {
-                log('EVENT: profile-status-changed triggered');
-                manageDashboardCards();
+                log('EVENT: profile-status-changed');
+                manageDashboardCards(false, true);  // Force show Profile if needed
             });
             window.addEventListener('storage', (e) => {
                 log('EVENT: storage changed', { key: e.key });
-                if (e.key === 'hasPin' || e.key === 'profileCompleted') {
-                    manageDashboardCards(e.key === 'hasPin' ? true : false);
-                }
+                if (e.key === 'hasPin') manageDashboardCards(true);
+                if (e.key === 'profileCompleted') manageDashboardCards(false, true);
             });
             window.__dashboardListenersAttached = true;
         } else {
             log('ATTACH: Listeners already attached');
         }
         
-        // Background sync (unchanged, but logs enhanced)
-        log('PHASE2: Starting background server sync');
+        // Background sync (symmetric for both)
+        log('PHASE2: Background server sync');
         try {
             if (typeof getSession === 'function') {
                 const session = await getSession();
@@ -1701,20 +1678,26 @@ async function manageDashboardCards(forceHide = false) {
                     const oldHasPin = localStorage.getItem('hasPin') === 'true';
                     localStorage.setItem('hasPin', serverHasPin ? 'true' : 'false');
                     localStorage.setItem('profileCompleted', serverProfileCompleted ? 'true' : 'false');
-                    log('SYNC: Updated localStorage', { newHasPin: serverHasPin });
+                    log('SYNC: Updated localStorage');
                     
-                    log('SYNC: Re-applying after sync');
-                    applyCardVisibility();
+                    // Re-apply to both
+                    applyToCard('dashboardPinCard', serverHasPin, 'PIN');
+                    applyToCard('dashboardUpdateProfileCard', serverProfileCompleted, 'Profile');
                     
                     if (serverHasPin !== oldHasPin) {
                         log('SYNC: Dispatching pin-status-changed');
                         window.dispatchEvent(new Event('pin-status-changed'));
                     }
+                    if (serverProfileCompleted !== oldHasPin) {  // Typo fix: oldProfileCompleted
+                        window.dispatchEvent(new Event('profile-status-changed'));
+                    }
                 }
             }
         } catch (e) {
             log('SYNC: Failed', { error: e.message });
-            applyCardVisibility();  // Fallback to local
+            // Fallback re-apply
+            applyToCard('dashboardPinCard', localStorage.getItem('hasPin') === 'true', 'PIN');
+            applyToCard('dashboardUpdateProfileCard', localStorage.getItem('profileCompleted') === 'true', 'Profile');
         }
         
         log('END: manageDashboardCards complete');
