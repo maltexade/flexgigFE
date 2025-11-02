@@ -1668,41 +1668,6 @@ function initializeSmartAccountPinButton() {
             if (typeof notify === 'function') notify('Setup PIN not available', 'error');
             return false;
         }
-
-        // Improved Smart PIN handler for securityPinRow click event
-// This ensures it only runs on actual user click (not on load/init), and only opens pinModal if no PIN exists.
-// Place this inside the click event listener for the securityPinRow trigger in modalManager.js or dashboard.js.
-
-// Guard against non-click invocations (e.g., if somehow called during load)
-if (event.type !== 'click') {
-  console.warn('[Smart PIN] Non-click event ignored (load/init protection)');
-  return;
-}
-
-// Check for existing PIN setup
-if (localStorage.getItem('hasPin') === 'true') {
-  // PIN exists: Proceed to open securityPinModal (normal flow)
-  console.log('[Smart PIN] PIN exists: Opening securityPinModal');
-  openModal('securityPinModal');  // Or ModalManager.openModal if available
-  return;
-}
-
-// No PIN: Setup mode - open pinModal directly, but only from security/dashboard contexts
-// (Assuming this handler is already bound to securityPinRow or dashboardPinCard)
-// Add a context check if needed (e.g., via event target or data attribute)
-const isFromSecurity = event.currentTarget.id === 'securityPinRow';
-const isFromDashboard = event.currentTarget.id === 'dashboardPinCard';
-
-if (!isFromSecurity && !isFromDashboard) {
-  console.warn('[Smart PIN] Click from unexpected context, ignoring');
-  return;
-}
-
-console.log(`[Smart PIN] Setup mode: Opening pinModal from ${isFromSecurity ? 'security' : 'dashboard'}`);
-window.__smartPinHandled = true;  // Flag to block other flows (e.g., reauth overlap)
-ModalManager.openModal('pinModal');  // Direct open with full stack/history support
-event.preventDefault();  // Prevent any default or bubbling to other handlers
-event.stopPropagation();  // Ensure no further propagation (e.g., to parent modals)
         
         // Helper: Focus first input in modal for accessibility
         // ---------- PATCH: safer focusFirstInput ----------
