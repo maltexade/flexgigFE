@@ -3047,7 +3047,7 @@ a[style*="color: #f00"] { color: var(--danger); }
 .filled { background-color: #fffdef; border-color: #f1c40f !important; }
 
 .card.pin {
-  display: flex !important;
+  display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
