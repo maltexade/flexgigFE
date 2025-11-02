@@ -1,4 +1,3 @@
-// /frontend/js/modalManager.js
 (function () {
   'use strict';
 
@@ -140,7 +139,7 @@
     });
   }
 
-  // Open modal (added PIN guards, less spam)
+  // Open modal (added dynamic z-index for stack robustness)
   function openModal(modalId, skipHistory = false) {
     log('debug', `openModal: Attempting to open ${modalId}`);
 
@@ -163,16 +162,13 @@
       }
     }
 
-    // Guard: Skip if PIN setup active (from Smart Button)
-    if ((modalId === 'pinModal' || modalId === 'securityPinModal') && window.__setupPinActive) {
-      log('warn', `openModal: Skipping ${modalId} – setup active`);
-      return;
-    }
-
     modal.classList.remove('hidden');
     modal.style.display = modalConfig.hasPullHandle ? 'block' : 'flex';
     modal.setAttribute('aria-hidden', 'false');
     modal.removeAttribute('inert');
+
+    // Set dynamic z-index based on stack depth (ensures top modal is always visible on top)
+    modal.style.zIndex = 1050 + (openModalsStack.length * 10);
 
     // Special slide-in for updateProfileModal
     if (modalId === 'updateProfileModal') {
@@ -215,7 +211,7 @@
     });
   }
 
-  // Close modal (added PIN guard, trimmed logs)
+  // Close modal (removed PIN guard as no longer needed)
   function closeModal(modalId) {
     log('debug', `closeModal: Attempting to close ${modalId}`);
     const modalConfig = modals[modalId];
@@ -227,12 +223,6 @@
     const modal = modalConfig.element;
     if (!isModalVisible(modal)) {
       log('warn', `closeModal: Modal ${modalId} is not visible`);
-      return;
-    }
-
-    // Guard: Don't auto-close PIN during setup
-    if ((modalId === 'pinModal' || modalId === 'securityPinModal') && window.__setupPinActive) {
-      log('warn', `closeModal: Skipping ${modalId} – setup active`);
       return;
     }
 
@@ -257,22 +247,10 @@
         log('debug', `closeModal: Modal ${modalId} closed, stack: ${openModalsStack.map((item) => item.id).join(', ')}, depth: ${currentDepth}`);
       }
 
-      // Restore previous modal if exists
+      // Restore previous modal if exists (no need to show if already visible; z-index handles layering)
       const previousModal = openModalsStack[openModalsStack.length - 1];
       if (previousModal) {
         const prevEl = previousModal.modal;
-        
-        // Ensure previous modal is visible
-        if (!isModalVisible(prevEl)) {
-          prevEl.classList.remove('hidden');
-          prevEl.style.display = modals[previousModal.id].hasPullHandle ? 'block' : 'flex';
-          prevEl.setAttribute('aria-hidden', 'false');
-          prevEl.removeAttribute('inert');
-          
-          // Re-apply z-index to ensure it's on top
-          prevEl.style.zIndex = '1050';
-          log('debug', `closeModal: Restored visibility for ${previousModal.id}`);
-        }
         
         // Focus first focusable element
         const focusable = prevEl.querySelector(
@@ -365,6 +343,8 @@
         newTopModal.modal.style.display = modals[newTopModal.id].hasPullHandle ? 'block' : 'flex';
         newTopModal.modal.setAttribute('aria-hidden', 'false');
         newTopModal.modal.removeAttribute('inert');
+        // Reset z-index if needed (though usually not, as it was set on open)
+        newTopModal.modal.style.zIndex = 1050 + (openModalsStack.length * 10);
         applyTransition(newTopModal.modal, true);
         trapFocus(newTopModal.modal);
         log('debug', `handlePopstate: Restored modal ${newTopModal.id}`);
@@ -381,6 +361,8 @@
         previousModal.modal.style.display = modals[previousModal.id].hasPullHandle ? 'block' : 'flex';
         previousModal.modal.setAttribute('aria-hidden', 'false');
         previousModal.modal.removeAttribute('inert');
+        // Reset z-index
+        previousModal.modal.style.zIndex = 1050 + (openModalsStack.length * 10);
         applyTransition(previousModal.modal, true);
         trapFocus(previousModal.modal);
         log('debug', `handlePopstate: Restored previous modal ${previousModal.id}`);
@@ -411,7 +393,7 @@
     }, 50);
   }
 
-  // Initialize (added observer debounce, PIN guards)
+  // Initialize (removed __setupPinActive from observer)
   function initialize() {
     log('info', 'initialize: Starting initialization');
     Object.entries(modals).forEach(([modalId, { element }]) => {
@@ -462,7 +444,7 @@
       'see-all-plans': 'allPlansModal',
     };
 
-    // Bind triggers to open modals (added Smart Button skip for securityPinRow)
+    // Bind triggers to open modals (retained Smart Button skip for securityPinRow)
     Object.entries(triggers).forEach(([triggerId, modalId]) => {
       const trigger = document.getElementById(triggerId);
 
@@ -532,8 +514,8 @@
     Object.entries(modals).forEach(([modalId, { element }]) => {
       if (!element) return;
       const observer = new MutationObserver((mutations) => {
-        if (isProcessingPopstate || window.__setupPinActive) {  // Guard for popstate/setup
-          log('debug', `MutationObserver: Skipping for ${modalId} during popstate/setup`);
+        if (isProcessingPopstate) {  // Guard for popstate
+          log('debug', `MutationObserver: Skipping for ${modalId} during popstate`);
           return;
         }
 
