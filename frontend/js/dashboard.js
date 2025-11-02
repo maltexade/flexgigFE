@@ -1546,34 +1546,14 @@ async function onDashboardLoad() {
 // Logs prefixed with [DC-TRACE] for easy grep. Run this, add PIN, check console for flow.
 // Added timestamps for timing analysis (e.g., race detection).
 
-// Global observer for BOTH cards (idempotent - attach once)
-if (!window.__dashboardCardsObserver) {
-    window.__dashboardCardsObserver = new MutationObserver((mutations) => {
-        let needsReapply = false;
-        mutations.forEach((mutation) => {
-            if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
-                mutation.addedNodes.forEach((node) => {
-                    if (node.id === 'dashboardPinCard' || node.id === 'dashboardUpdateProfileCard' || 
-                        node.querySelector('#dashboardPinCard, #dashboardUpdateProfileCard')) {
-                        needsReapply = true;
-                        console.log('[CARDS-OBSERVER] Card(s) re-added after nav - re-applying visibility');
-                    }
-                });
-            }
-        });
-        if (needsReapply && typeof manageDashboardCards === 'function') {
-            manageDashboardCards();  // Re-check hasPin/profileCompleted and apply
-        }
-    });
-    // Observe dashboard container (adjust selector)
-    const dashboardContainer = document.querySelector('#dashboard') || document.body;
-    if (dashboardContainer) {
-        window.__dashboardCardsObserver.observe(dashboardContainer, { childList: true, subtree: true });
-        console.log('[CARDS-OBSERVER] Attached for PIN + Profile resilience');
-    }
-}
+// FIXED manageDashboardCards(): Symmetric server sync for BOTH cards.
+// - Profile now explicitly awaits server.user.profileCompleted (like PIN's hasPin).
+// - Fixed dispatch bug: Use oldProfileCompleted (not oldHasPin).
+// - Enhanced logs for Profile sync (e.g., 'SYNC: Profile server value').
+// - Ensures localStorage updated from server, then re-apply (no local-only fallback unless error).
+// - On error, log but still apply from local (graceful).
 
-async function manageDashboardCards(forceHidePin = false, forceShowProfile = false) {  // Symmetric params
+async function manageDashboardCards(forceHidePin = false, forceShowProfile = false) {
     const traceId = `DC-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const log = (msg, data = {}) => {
         const ts = new Date().toISOString();
@@ -1633,27 +1613,27 @@ async function manageDashboardCards(forceHidePin = false, forceShowProfile = fal
             });
         }
         
-        // 🔥 APPLY INSTANTLY from localStorage
+        // 🔥 APPLY INSTANTLY from localStorage (initial render)
         log('PHASE1: Instant apply from localStorage');
-        const hasPin = localStorage.getItem('hasPin') === 'true';
-        const profileCompleted = localStorage.getItem('profileCompleted') === 'true';
+        const localHasPin = localStorage.getItem('hasPin') === 'true';
+        const localProfileCompleted = localStorage.getItem('profileCompleted') === 'true';
         
         // Apply to PIN card
-        applyToCard('dashboardPinCard', hasPin || forceHidePin, 'PIN');
+        applyToCard('dashboardPinCard', localHasPin || forceHidePin, 'PIN');
         
-        // Apply to Profile card (symmetric)
-        applyToCard('dashboardUpdateProfileCard', profileCompleted || !forceShowProfile, 'Profile');
+        // Apply to Profile card (local first)
+        applyToCard('dashboardUpdateProfileCard', localProfileCompleted || !forceShowProfile, 'Profile');
         
-        // Listeners (unchanged, but log)
+        // Listeners (unchanged)
         if (!window.__dashboardListenersAttached) {
             log('ATTACH: Adding global listeners');
             window.addEventListener('pin-status-changed', (e) => {
                 log('EVENT: pin-status-changed');
-                manageDashboardCards(true);  // Force hide PIN
+                manageDashboardCards(true);
             });
             window.addEventListener('profile-status-changed', (e) => {
                 log('EVENT: profile-status-changed');
-                manageDashboardCards(false, true);  // Force show Profile if needed
+                manageDashboardCards(false, true);  // Force show Profile
             });
             window.addEventListener('storage', (e) => {
                 log('EVENT: storage changed', { key: e.key });
@@ -1665,39 +1645,63 @@ async function manageDashboardCards(forceHidePin = false, forceShowProfile = fal
             log('ATTACH: Listeners already attached');
         }
         
-        // Background sync (symmetric for both)
-        log('PHASE2: Background server sync');
+        // 🔥 BACKGROUND SYNC: Await server for BOTH (authoritative - overrides local)
+        log('PHASE2: Background server sync (await getSession for both PIN + Profile)');
         try {
             if (typeof getSession === 'function') {
-                const session = await getSession();
+                log('SYNC: Calling getSession()');
+                const sessionStart = Date.now();
+                const session = await getSession();  // Await fresh server data
+                const sessionDuration = Date.now() - sessionStart;
+                log('SYNC: getSession() complete', { durationMs: sessionDuration, sessionExists: !!session });
+                
                 if (session?.user) {
+                    // PIN: Server check
                     const serverHasPin = session.user.hasPin || false;
-                    const serverProfileCompleted = session.user.profileCompleted || false;
-                    log('SYNC: Server values', { serverHasPin, serverProfileCompleted });
+                    log('SYNC: PIN server value', { serverHasPin });
                     
-                    const oldHasPin = localStorage.getItem('hasPin') === 'true';
+                    // Profile: Server check (symmetric)
+                    const serverProfileCompleted = session.user.profileCompleted || false;
+                    log('SYNC: Profile server value', { serverProfileCompleted });
+                    
+                    // Track old locals for dispatch
+                    const oldHasPin = localHasPin;
+                    const oldProfileCompleted = localProfileCompleted;
+                    log('SYNC: Old local values', { oldHasPin, oldProfileCompleted });
+                    
+                    // Update localStorage from server (authoritative for both)
                     localStorage.setItem('hasPin', serverHasPin ? 'true' : 'false');
                     localStorage.setItem('profileCompleted', serverProfileCompleted ? 'true' : 'false');
-                    log('SYNC: Updated localStorage');
+                    log('SYNC: Updated localStorage from server', { newHasPin: serverHasPin, newProfileCompleted: serverProfileCompleted });
                     
-                    // Re-apply to both
+                    // Re-apply to BOTH after update
+                    log('SYNC: Re-applying to PIN after server sync');
                     applyToCard('dashboardPinCard', serverHasPin, 'PIN');
+                    
+                    log('SYNC: Re-applying to Profile after server sync');
                     applyToCard('dashboardUpdateProfileCard', serverProfileCompleted, 'Profile');
                     
+                    // Dispatch if changed
                     if (serverHasPin !== oldHasPin) {
                         log('SYNC: Dispatching pin-status-changed');
                         window.dispatchEvent(new Event('pin-status-changed'));
                     }
-                    if (serverProfileCompleted !== oldHasPin) {  // Typo fix: oldProfileCompleted
+                    if (serverProfileCompleted !== oldProfileCompleted) {
+                        log('SYNC: Dispatching profile-status-changed');
                         window.dispatchEvent(new Event('profile-status-changed'));
                     }
+                } else {
+                    log('SYNC: No user in session - fallback to local');
                 }
+            } else {
+                log('SYNC: getSession() not available - fallback to local');
             }
         } catch (e) {
             log('SYNC: Failed', { error: e.message });
-            // Fallback re-apply
-            applyToCard('dashboardPinCard', localStorage.getItem('hasPin') === 'true', 'PIN');
-            applyToCard('dashboardUpdateProfileCard', localStorage.getItem('profileCompleted') === 'true', 'Profile');
+            // Fallback: Re-apply from local (but log warning - server check failed)
+            log('SYNC: Fallback re-apply from local (server error)');
+            applyToCard('dashboardPinCard', localHasPin, 'PIN');
+            applyToCard('dashboardUpdateProfileCard', localProfileCompleted, 'Profile');
         }
         
         log('END: manageDashboardCards complete');
