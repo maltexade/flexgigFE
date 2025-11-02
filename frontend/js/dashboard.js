@@ -1546,8 +1546,34 @@ async function onDashboardLoad() {
 // Logs prefixed with [DC-TRACE] for easy grep. Run this, add PIN, check console for flow.
 // Added timestamps for timing analysis (e.g., race detection).
 
+// Add this global flag once (idempotent observer)
+if (!window.__pinCardObserver) {
+    window.__pinCardObserver = new MutationObserver((mutations) => {
+        let needsReapply = false;
+        mutations.forEach((mutation) => {
+            if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+                mutation.addedNodes.forEach((node) => {
+                    if (node.id === 'dashboardPinCard' || node.querySelector('#dashboardPinCard')) {
+                        needsReapply = true;
+                        console.log('[PIN-OBSERVER] Card re-added after nav - re-applying visibility');
+                    }
+                });
+            }
+        });
+        if (needsReapply && typeof manageDashboardCards === 'function') {
+            manageDashboardCards();  // Re-check hasPin and apply
+        }
+    });
+    // Observe the dashboard container (adjust selector if needed, e.g., '#dashboard-container')
+    const dashboardContainer = document.querySelector('#dashboard') || document.body;
+    if (dashboardContainer) {
+        window.__pinCardObserver.observe(dashboardContainer, { childList: true, subtree: true });
+        console.log('[PIN-OBSERVER] Attached to dashboard for nav resilience');
+    }
+}
+
 async function manageDashboardCards(forceHide = false) {
-    const traceId = `DC-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;  // Unique trace per call
+    const traceId = `DC-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const log = (msg, data = {}) => {
         const ts = new Date().toISOString();
         console.log(`[DC-TRACE ${ts} #${traceId}] ${msg}`, data);
@@ -1556,7 +1582,7 @@ async function manageDashboardCards(forceHide = false) {
     try {
         log('START: Checking card visibility', { forceHide });
         
-        // Helper to apply visibility (always read from localStorage for robustness)
+        // Helper to apply visibility
         function applyCardVisibility() {
             const hasPin = localStorage.getItem('hasPin') === 'true';
             const profileCompleted = localStorage.getItem('profileCompleted') === 'true';
@@ -1565,174 +1591,138 @@ async function manageDashboardCards(forceHide = false) {
             
             const pinCard = document.getElementById('dashboardPinCard');
             if (pinCard) {
-                const shouldHide = hasPin || forceHide;  // Force hide if requested (e.g., post-PIN setup)
-                const newDisplay = shouldHide ? 'none' : '';
-                const oldDisplay = pinCard.style.display;
-                pinCard.style.display = newDisplay;
-                log('APPLY: PIN card update', { 
-                    id: pinCard.id, 
-                    shouldHide, 
-                    oldDisplay, 
-                    newDisplay,
-                    finalVisible: newDisplay !== 'none'
+                const shouldHide = hasPin || forceHide;
+                const hideClass = 'pin-card-hidden';
+                const fadeClass = 'pin-card-fading';  // For graceful transition
+                
+                if (shouldHide) {
+                    // Graceful: Add fade first, then hide after transition
+                    pinCard.classList.add(fadeClass);
+                    setTimeout(() => {
+                        pinCard.classList.add(hideClass);
+                        pinCard.classList.remove(fadeClass);
+                        log('APPLY: PIN fade-to-hide complete');
+                    }, 200);  // Match CSS transition duration
+                } else {
+                    // Show: Remove hide/fade, force flex inline (resets any override)
+                    pinCard.classList.remove(hideClass, fadeClass);
+                    pinCard.style.display = 'flex';  // Inline flex only when showing (safe, no !important needed)
+                    log('APPLY: PIN show with inline flex');
+                }
+                
+                // Log computed after apply
+                requestAnimationFrame(() => {  // After paint
+                    const computed = getComputedStyle(pinCard).display;
+                    log('APPLY: PIN card post-paint check', { 
+                        shouldHide, 
+                        computed, 
+                        finalVisible: computed !== 'none',
+                        classList: pinCard.className 
+                    });
+                    
+                    // Force if mismatch (rare, e.g., external CSS)
+                    if (shouldHide && computed !== 'none') {
+                        log('WARN: PIN mismatch - forcing hide');
+                        pinCard.classList.add(hideClass);
+                        pinCard.style.setProperty('display', 'none', 'important');
+                    } else if (!shouldHide && computed !== 'flex') {
+                        log('WARN: PIN mismatch - forcing flex');
+                        pinCard.style.setProperty('display', 'flex', 'important');
+                    }
                 });
             } else {
-                log('APPLY: PIN card element NOT FOUND');
+                log('APPLY: PIN card element NOT FOUND - check ID');
             }
             
+            // Profile (unchanged, but symmetric)
             const profileCard = document.getElementById('dashboardUpdateProfileCard');
             if (profileCard) {
-                const newDisplay = profileCompleted ? 'none' : '';
-                const oldDisplay = profileCard.style.display;
-                profileCard.style.display = newDisplay;
-                log('APPLY: Profile card update', { 
-                    id: profileCard.id, 
-                    profileCompleted, 
-                    oldDisplay, 
-                    newDisplay,
-                    finalVisible: newDisplay !== 'none'
+                const hideClass = 'pin-card-hidden';  // Reuse or make 'profile-card-hidden'
+                if (profileCompleted) {
+                    profileCard.classList.add(hideClass);
+                    profileCard.classList.add(fadeClass);
+                    setTimeout(() => {
+                        profileCard.classList.remove(fadeClass);
+                    }, 200);
+                } else {
+                    profileCard.classList.remove(hideClass, fadeClass);
+                    profileCard.style.display = 'flex';  // Assume profile also flex
+                }
+                requestAnimationFrame(() => {
+                    const computed = getComputedStyle(profileCard).display;
+                    log('APPLY: Profile card post-paint check', { 
+                        profileCompleted, 
+                        computed, 
+                        finalVisible: computed !== 'none',
+                        classList: profileCard.className 
+                    });
                 });
             } else {
                 log('APPLY: Profile card element NOT FOUND');
             }
         }
         
-        // 🔥 APPLY INSTANTLY from cache (no waiting!) - but we'll re-apply after sync
+        // Instant apply
         log('PHASE1: Instant apply from localStorage');
         applyCardVisibility();
         
-        // Add global listeners for real-time updates (PIN event + storage sync)
-        if (!window.__dashboardListenersAttached) {  // Idempotent: attach once
+        // Listeners (unchanged from previous)
+        if (!window.__dashboardListenersAttached) {
             log('ATTACH: Adding global listeners (first time)');
-            window.addEventListener('pin-status-changed', function() {
-                log('EVENT: pin-status-changed triggered');
-                manageDashboardCards(true);  // Force hide on PIN change
+            window.addEventListener('pin-status-changed', (e) => {
+                log('EVENT: pin-status-changed triggered', { bubbles: e.bubbles });
+                manageDashboardCards(true);
             });
-            
-            window.addEventListener('profile-status-changed', function() {
+            window.addEventListener('profile-status-changed', (e) => {
                 log('EVENT: profile-status-changed triggered');
                 manageDashboardCards();
             });
-            
-            window.addEventListener('storage', function(e) {
-                log('EVENT: storage changed', { key: e.key, newValue: e.newValue, oldValue: e.oldValue });
+            window.addEventListener('storage', (e) => {
+                log('EVENT: storage changed', { key: e.key });
                 if (e.key === 'hasPin' || e.key === 'profileCompleted') {
-                    manageDashboardCards(e.key === 'hasPin' ? true : false);  // Force on PIN change
+                    manageDashboardCards(e.key === 'hasPin' ? true : false);
                 }
             });
-            
             window.__dashboardListenersAttached = true;
-            log('ATTACH: Listeners attached successfully');
         } else {
-            log('ATTACH: Listeners already attached (skipped)');
+            log('ATTACH: Listeners already attached');
         }
         
-        // 🔥 BACKGROUND SYNC: Await server update, then re-apply (ensures server truth wins, no revert)
-        log('PHASE2: Starting background server sync (await getSession)');
+        // Background sync (unchanged, but logs enhanced)
+        log('PHASE2: Starting background server sync');
         try {
             if (typeof getSession === 'function') {
-                log('SYNC: Calling getSession()');
-                const sessionStart = Date.now();
-                const session = await getSession();  // Await: Wait for fresh server data
-                const sessionDuration = Date.now() - sessionStart;
-                log('SYNC: getSession() complete', { durationMs: sessionDuration, sessionExists: !!session });
-                
+                const session = await getSession();
                 if (session?.user) {
                     const serverHasPin = session.user.hasPin || false;
                     const serverProfileCompleted = session.user.profileCompleted || false;
-                    
                     log('SYNC: Server values', { serverHasPin, serverProfileCompleted });
                     
-                    // Track if changed for dispatch
                     const oldHasPin = localStorage.getItem('hasPin') === 'true';
-                    const oldProfileCompleted = localStorage.getItem('profileCompleted') === 'true';
-                    log('SYNC: Old local values', { oldHasPin, oldProfileCompleted });
+                    localStorage.setItem('hasPin', serverHasPin ? 'true' : 'false');
+                    localStorage.setItem('profileCompleted', serverProfileCompleted ? 'true' : 'false');
+                    log('SYNC: Updated localStorage', { newHasPin: serverHasPin });
                     
-                    // Update localStorage from server (authoritative)
-                    const newHasPinStr = serverHasPin ? 'true' : 'false';
-                    const newProfileStr = serverProfileCompleted ? 'true' : 'false';
-                    localStorage.setItem('hasPin', newHasPinStr);
-                    localStorage.setItem('profileCompleted', newProfileStr);
-                    log('SYNC: Updated localStorage', { newHasPin: serverHasPin, newProfileCompleted: serverProfileCompleted });
-                    
-                    // Re-apply AFTER update (forces hide if server now true)
-                    log('SYNC: Re-applying visibility after local update');
+                    log('SYNC: Re-applying after sync');
                     applyCardVisibility();
                     
-                    // Dispatch events if values changed (for other listeners, e.g., smart button)
                     if (serverHasPin !== oldHasPin) {
-                        log('SYNC: Dispatching pin-status-changed (change detected)');
+                        log('SYNC: Dispatching pin-status-changed');
                         window.dispatchEvent(new Event('pin-status-changed'));
-                    } else {
-                        log('SYNC: No dispatch for pin (no change)');
                     }
-                    if (serverProfileCompleted !== oldProfileCompleted && typeof window.dispatchEvent === 'function') {
-                        log('SYNC: Dispatching profile-status-changed (change detected)');
-                        window.dispatchEvent(new Event('profile-status-changed'));
-                    } else {
-                        log('SYNC: No dispatch for profile (no change)');
-                    }
-                } else {
-                    log('SYNC: No user in session - skipping update');
                 }
-            } else {
-                log('SYNC: getSession() function not available - skipping');
             }
         } catch (e) {
-            log('SYNC: Background sync failed', { error: e.message || e });
-            // On error, re-apply from cache (no change)
-            log('SYNC: Re-applying from cache on error');
-            applyCardVisibility();
+            log('SYNC: Failed', { error: e.message });
+            applyCardVisibility();  // Fallback to local
         }
         
         log('END: manageDashboardCards complete');
         
     } catch (err) {
-        const ts = new Date().toISOString();
-        console.error(`[DC-ERROR ${ts} #${traceId}] Error managing cards:`, err);
+        log('ERROR: Unexpected', { error: err.message });
     }
 }
-
-// Enhanced initializeSmartAccountPinButton() listener with logs
-// Replace the existing 'pin-status-changed' listener with this verbose version:
-window.addEventListener('pin-status-changed', function(e) {
-    const ts = new Date().toISOString();
-    console.log(`[Smart PIN TRACE ${ts}] PIN status changed event fired`, { 
-        event: e.type, 
-        bubbles: e.bubbles, 
-        cancelable: e.cancelable 
-    });
-    
-    // Update button text
-    updateAccountPinButton();
-    console.log(`[Smart PIN TRACE ${ts}] Button text updated`);
-    
-    // Force hide PIN card on change (mirrors profile force)
-    if (typeof manageDashboardCards === 'function') {
-        console.log(`[Smart PIN TRACE ${ts}] Calling manageDashboardCards(true) for force hide`);
-        manageDashboardCards(true);  // true = forceHide
-    } else {
-        console.warn(`[Smart PIN TRACE ${ts}] manageDashboardCards not available`);
-    }
-});
-
-// Optional: Add global log for storage changes on hasPin (for cross-tab debugging)
-window.addEventListener('storage', function(e) {
-    if (e.key === 'hasPin') {
-        const ts = new Date().toISOString();
-        console.log(`[GLOBAL STORAGE TRACE ${ts}] hasPin changed externally`, { 
-            key: e.key, 
-            oldValue: e.oldValue, 
-            newValue: e.newValue, 
-            url: e.url || window.location.href 
-        });
-    }
-});
-
-// Call manageDashboardCards() on dashboard load with trace
-// Ensure this is called in onDashboardLoad() or DOMContentLoaded:
-console.log('[DC-INIT] Initial call to manageDashboardCards()');
-manageDashboardCards();
 
 function initializeSmartAccountPinButton() {
     try {

@@ -3047,11 +3047,14 @@ a[style*="color: #f00"] { color: var(--danger); }
 .filled { background-color: #fffdef; border-color: #f1c40f !important; }
 
 .card.pin {
-  display: flex;
+  display: flex;  /* Removed !important - now relies on specificity */
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   flex-wrap: nowrap; /* Prevent wrapping */
+  transition: opacity 0.2s ease, height 0.2s ease;  /* Optional: Smooth hide/show */
+  opacity: 1;  /* Default visible state */
+  height: auto;  /* Default height */
 }
 
 .card.pin > div:first-child {
@@ -3062,6 +3065,24 @@ a[style*="color: #f00"] { color: var(--danger); }
 .card.pin .arrow-icon {
   flex-shrink: 0; /* Never shrink */
   margin-left: auto; /* Always stick right */
+}
+
+/* New: Hide class - overrides visibility without breaking flex when removed */
+.card.pin.pin-card-hidden {
+  display: none !important;  /* Keep !important for reliable hide */
+  opacity: 0;
+  height: 0;
+  overflow: hidden;  /* Hide content during transition */
+  gap: 0;  /* Collapse gap */
+}
+
+/* Optional: Fading hide for gracefulness - add before .pin-card-hidden */
+.card.pin.pin-card-fading {
+  opacity: 0;
+  height: 0;
+  overflow: hidden;
+  gap: 0;
+  transition: opacity 0.2s ease, height 0.2s ease, gap 0.2s ease;
 }
 
 
