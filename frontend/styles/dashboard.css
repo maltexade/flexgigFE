@@ -1582,7 +1582,7 @@ body:has(.pin-modal:not(.hidden)) {
   background: rgba(0,0,0,0.45);
   justify-content: center;
   align-items: center;
-  z-index: 12003;
+  z-index: 12003 !important;
   padding: 20px;
 }
 .mp-reset-modal[aria-hidden="false"] { display: flex; }
