@@ -102,9 +102,6 @@ function hideBackdrop(modal) {
     pinModal: { id: 'pinModal', element: null, hasPullHandle: false },
     allPlansModal: { id: 'allPlansModal', element: null, hasPullHandle: true },
     contactModal: { id: 'contactModal', element: null, hasPullHandle: false },
-    // add inside the `modals` object initialization:
-    createPinModal: { id: 'createPinModal', element: null, hasPullHandle: false },
-
   };
 
 

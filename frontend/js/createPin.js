@@ -1,213 +1,276 @@
-/* createPin.js
-   Handles: UI validation, server call to set new PIN, inline notifications,
-   closing all modals and refreshing dashboard on success.
+/* pinModal-wires.js
+   Wires the #pinModal keypad, create-mode, submit to /save-pin/.
+   Drop this after your ModalManager and pinModal HTML.
 */
-(function createPinFlow_v1(){
+(function pinModalWires(){
   'use strict';
 
   const DEBUG = true;
-  const log = (...a) => { if (DEBUG) console.debug('[CREATE-PIN]', ...a); };
+  const log = (...args) => { if (DEBUG) console.debug('[PIN-WIRE]', ...args); };
 
-  const MODAL_ID = 'createPinModal';
-  const INPUT_NEW = 'cp-new-pin';
-  const INPUT_CONFIRM = 'cp-confirm-pin';
-  const SUBMIT_BTN = 'cp-submit-btn';
-  const NOTICE_ID = 'cp-notice';
+  // config
+  const MODAL_ID = 'pinModal';
+  const INPUT_SELECTOR = '.pin-inputs input';
+  const KEYPAD_SELECTOR = '.pin-keypad';
+  const DELETE_BTN_ID = 'deleteKey';
+  const PIN_ALERT_ID = 'pinAlert';
+  const PIN_ALERT_MSG_ID = 'pinAlertMsg';
+  const CENTER_ALERT_ID = 'centerAlert';
+  const CENTER_ALERT_MSG_ID = 'centerAlertMsg';
+  const API_BASE = (window.__SEC_API_BASE || '').replace(/\/$/, '');
+  const SAVE_PIN_ENDPOINT = API_BASE ? `${API_BASE}/save-pin/` : '/save-pin/';
 
-  const API_BASE = (window.__SEC_API_BASE || '').replace(/\/$/, '') || '';
-  // adjust endpoint name if your server uses different route
-  const SERVER_SET_PIN = API_BASE ? `${API_BASE}/auth/save-pin` : '/auth/save-pin';
+  // state
+  let pinDigits = []; // stores digits as strings
+  let isSubmitting = false;
 
+  // helpers
   const $ = id => document.getElementById(id);
+  const q = (sel, root=document) => (root || document).querySelector(sel);
+  const qAll = (sel, root=document) => Array.from((root || document).querySelectorAll(sel));
 
-  // getUserEmail: try to reuse other code if exposed, otherwise fallback
-  async function getUserEmail() {
+  function showAlert(msg, {center=false, timeout=4000} = {}) {
     try {
-      if (window.__rp_wire_debug && typeof window.__rp_wire_debug.getUserEmail === 'function') {
-        const e = await window.__rp_wire_debug.getUserEmail();
-        if (e) return e;
+      if (center) {
+        const c = $(CENTER_ALERT_ID);
+        const cm = $(CENTER_ALERT_MSG_ID);
+        if (cm) cm.textContent = msg;
+        if (c) { c.classList.remove('hidden'); c.style.display = ''; }
+        if (timeout > 0) setTimeout(()=>{ if (c) { c.classList.add('hidden'); c.style.display='none'; } }, timeout);
+      } else {
+        const a = $(PIN_ALERT_ID);
+        const am = $(PIN_ALERT_MSG_ID);
+        if (am) am.textContent = msg;
+        if (a) { a.classList.remove('hidden'); a.style.display = ''; }
+        if (timeout > 0) setTimeout(()=>{ if (a) { a.classList.add('hidden'); a.style.display='none'; } }, timeout);
       }
-      // try page/session getSession
-      const gs = window.getSession || (window.dashboard && window.dashboard.getSession) || window.getSessionFromDashboard;
-      if (typeof gs === 'function') {
-        try {
-          const session = await gs();
-          if (session && session.email) return session.email;
-          if (session && session.user && session.user.email) return session.user.email;
-        } catch(e) { log('getSession failed', e); }
-      }
-      if (window.__SERVER_USER_DATA__ && window.__SERVER_USER_DATA__.email) return window.__SERVER_USER_DATA__.email;
-      const fallback = localStorage.getItem('mockEmail') || localStorage.getItem('__mock_email') || localStorage.getItem('dev_email');
-      return fallback || '';
-    } catch (e) {
-      console.error('getUserEmail error', e);
-      return '';
-    }
+    } catch (e) { console.error('showAlert error', e); }
   }
 
-  async function postJson(url, data) {
-    log('postJson', url, data);
-    const res = await fetch(url, {
-      method: 'POST',
-      credentials: 'include',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify(data)
+  function clearAlerts() {
+    const a = $(PIN_ALERT_ID); if (a) { a.classList.add('hidden'); a.style.display='none'; }
+    const c = $(CENTER_ALERT_ID); if (c) { c.classList.add('hidden'); c.style.display='none'; }
+  }
+
+  function updateInputsFromState() {
+    const inputs = qAll(INPUT_SELECTOR, $(MODAL_ID));
+    inputs.forEach((inp, idx) => {
+      inp.value = pinDigits[idx] ? pinDigits[idx] : '';
+      // keep them readonly; masking is automatic for password fields
     });
-    const text = await res.text();
-    try { return { status: res.status, body: JSON.parse(text) }; } catch(e) { return { status: res.status, body: text }; }
   }
 
-  function showNotice(msg, type = 'error') {
-    const n = $(NOTICE_ID);
-    if (!n) return;
-    n.classList.remove('error','success');
-    if (type === 'success') n.classList.add('success');
-    else n.classList.add('error');
-    n.textContent = msg;
+  function resetPinState() {
+    pinDigits = [];
+    updateInputsFromState();
+    clearAlerts();
   }
 
-  function clearNotice() {
-    const n = $(NOTICE_ID);
-    if (!n) return;
-    n.textContent = '';
-    n.classList.remove('error','success');
+  function disableKeypad(disabled) {
+    const modal = $(MODAL_ID);
+    if (!modal) return;
+    const buttons = qAll(`${KEYPAD_SELECTOR} button`, modal);
+    buttons.forEach(b => b.disabled = !!disabled);
   }
 
-  // form validation: 4 digits numeric and both match
-  function validatePins(n, c) {
-    if (!n || !c) return { ok:false, msg: 'Both fields are required.' };
-    if (n.length !== 4 || c.length !== 4) return { ok:false, msg: 'PIN must be 4 digits.' };
-    if (!/^\d{4}$/.test(n) || !/^\d{4}$/.test(c)) return { ok:false, msg: 'PIN must contain digits only.' };
-    if (n !== c) return { ok:false, msg: 'PINs do not match.' };
-    return { ok: true };
-  }
+  // Submit to server
+  async function submitPin() {
+    if (isSubmitting) return;
+    if (pinDigits.length !== 4) return;
+    const pin = pinDigits.join('');
 
-  async function submitNewPin(e) {
-    e && e.preventDefault && e.preventDefault();
-    clearNotice();
-
-    const newPinEl = $(INPUT_NEW);
-    const confirmEl = $(INPUT_CONFIRM);
-    const submitBtn = $(SUBMIT_BTN);
-
-    if (!newPinEl || !confirmEl || !submitBtn) {
-      console.warn('createPin: required elements missing');
-      return;
-    }
-
-    const newPin = newPinEl.value.trim();
-    const confirmPin = confirmEl.value.trim();
-
-    const v = validatePins(newPin, confirmPin);
-    if (!v.ok) {
-      showNotice(v.msg, 'error');
-      return;
-    }
-
-    submitBtn.disabled = true;
-    const origText = submitBtn.textContent;
-    submitBtn.textContent = 'Setting PIN…';
+    isSubmitting = true;
+    disableKeypad(true);
+    showAlert('Saving PIN…', { center: true, timeout: 0 });
 
     try {
-      const email = await getUserEmail();
-      if (!email) {
-        showNotice('Unable to determine your email. Please re-login and try again.', 'error');
-        return;
-      }
+      const url = SAVE_PIN_ENDPOINT;
+      log('POST', url, { pin });
+      const res = await fetch(url, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin })
+      });
 
-      const { status, body } = await postJson(SERVER_SET_PIN, { email, pin: newPin });
+      const text = await res.text();
+      let body;
+      try { body = JSON.parse(text); } catch(e) { body = text; }
 
-      if (status >= 200 && status < 300) {
-        // server succeeded
-        showNotice('PIN created successfully. Redirecting…', 'success');
-
-        // close all modals and refresh dashboard/session
+      log('save-pin response', res.status, body);
+      if (res.ok) {
+        // success: close all modals and go to dashboard
+        showAlert('PIN created successfully. Redirecting…', { center: true, timeout: 800 });
         try {
           if (window.ModalManager && typeof window.ModalManager.closeAll === 'function') {
             window.ModalManager.closeAll();
           } else {
-            // fallback: try to close just this modal
-            const el = document.getElementById(MODAL_ID);
-            if (el) { el.classList.add('hidden'); el.style.display='none'; el.setAttribute('aria-hidden','true'); }
-          }
-        } catch(err) { log('error closing modals', err); }
-
-        // Try to refresh session first, else full reload
-        setTimeout(async () => {
-          try {
-            if (typeof window.getSession === 'function') {
-              await window.getSession();
-              // optionally you could call a dashboard render function here if available
-            } else if (window.dashboard && typeof window.dashboard.refresh === 'function') {
-              await window.dashboard.refresh();
-            } else {
-              // fallback to reload so dashboard reflects new PIN state
-              window.location.reload();
+            // fallback: hide known modals
+            const pm = $(MODAL_ID);
+            if (pm) { pm.classList.add('hidden'); pm.style.display = 'none'; pm.setAttribute('aria-hidden','true'); }
+            if (window.ModalManager && typeof window.ModalManager.closeModal === 'function') {
+              window.ModalManager.closeModal(MODAL_ID);
             }
-          } catch(e) {
-            // final fallback
-            window.location.reload();
           }
-        }, 700);
+        } catch(e){ log('closeAll failed', e); }
 
-      } else {
-        // show server error message
-        const serverMsg = (body && (body.error?.message || body.message)) ? (body.error?.message || body.message) : JSON.stringify(body);
-        showNotice('Failed to set PIN: ' + serverMsg, 'error');
+        // give a small delay to let close animation play
+        setTimeout(() => {
+          // try to refresh session if available, else navigate to root/dashboard
+          if (typeof window.getSession === 'function') {
+            try {
+              window.getSession().then(()=> { window.location.href = '/'; }).catch(()=> { window.location.href = '/'; });
+            } catch(e) {
+              window.location.href = '/';
+            }
+          } else {
+            window.location.href = '/';
+          }
+        }, 600);
+
+        return;
       }
 
+      // non-ok: show server error message
+      const errMsg = (body && (body.error?.message || body.message)) || (typeof body === 'string' ? body : `Error ${res.status}`);
+      showAlert(errMsg || 'Failed to save PIN', { center: false, timeout: 5000 });
+      // reset inputs so user can retry safely
+      pinDigits = [];
+      updateInputsFromState();
     } catch (err) {
-      console.error('createPin submit error', err);
-      showNotice('Network error. Check console and try again.', 'error');
+      console.error('save-pin error', err);
+      showAlert('Network error saving PIN. Try again.', { center: false, timeout: 5000 });
+      pinDigits = [];
+      updateInputsFromState();
     } finally {
-      submitBtn.disabled = false;
-      submitBtn.textContent = origText || 'Reset PIN';
+      isSubmitting = false;
+      disableKeypad(false);
+      // remove center 'Saving PIN...' if present
+      clearAlerts();
     }
   }
 
-  // Setup wiring
-  function wireCreatePin() {
-    const submitBtn = $(SUBMIT_BTN);
-    if (submitBtn) {
-      submitBtn.removeEventListener('click', submitNewPin);
-      submitBtn.addEventListener('click', submitNewPin);
+  // Key handler when digits are pressed
+  function onDigitPress(digit) {
+    if (isSubmitting) return;
+    if (!/^\d$/.test(digit)) return;
+    if (pinDigits.length >= 4) return;
+    pinDigits.push(String(digit));
+    updateInputsFromState();
+
+    if (pinDigits.length === 4) {
+      // small delay to allow UI update
+      setTimeout(() => submitPin(), 150);
+    }
+  }
+
+  function onDeletePress() {
+    if (isSubmitting) return;
+    if (pinDigits.length === 0) return;
+    pinDigits.pop();
+    updateInputsFromState();
+  }
+
+  // Setup DOM wiring
+  function wireUp() {
+    const modal = $(MODAL_ID);
+    if (!modal) {
+      log('pinModal not found in DOM:', MODAL_ID);
+      return;
     }
 
-    // allow pressing Enter on confirm input to submit
-    const confirmInput = $(INPUT_CONFIRM);
-    if (confirmInput) {
-      confirmInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-          submitNewPin(e);
+    // keypad buttons
+    const keypad = q(KEYPAD_SELECTOR, modal);
+    if (keypad) {
+      keypad.addEventListener('click', (e) => {
+        const btn = e.target.closest('button');
+        if (!btn) return;
+        // delete key
+        if (btn.id === DELETE_BTN_ID) {
+          onDeletePress();
+          return;
+        }
+        // numeric buttons — textContent should be the digit
+        const txt = (btn.textContent || '').trim();
+        if (/^\d$/.test(txt)) {
+          onDigitPress(txt);
         }
       });
+    } else {
+      log('no keypad found');
     }
 
-    // optional: focus the first input when modal opens; uses ModalManager mutation/event
-    document.addEventListener('modal:opened', (ev) => {
-      if (!ev?.target) return;
-      if (ev.target.id === MODAL_ID) {
-        setTimeout(() => {
-          const first = $(INPUT_NEW);
-          if (first) {
-            first.focus();
-            first.select && first.select();
-          }
-        }, 80);
+    // keyboard accessibility: also support physical keyboard numbers and Backspace when modal focused
+    modal.addEventListener('keydown', (e) => {
+      if (isSubmitting) return;
+      if (/^\d$/.test(e.key)) {
+        onDigitPress(e.key);
+        e.preventDefault();
+      } else if (e.key === 'Backspace' || e.key === 'Delete') {
+        onDeletePress();
+        e.preventDefault();
+      } else if (e.key === 'Escape') {
+        // close modal if desired
+        try { if (window.ModalManager && typeof window.ModalManager.closeModal === 'function') window.ModalManager.closeModal(MODAL_ID); } catch(_) {}
       }
-    }, { capture: true });
+    });
+
+    // Close button (back arrow) already has data-close and ModalManager will wire it.
+    // But ensure that when modal opens we reset state if create-mode
+    const observer = new MutationObserver(() => {
+      const hidden = modal.getAttribute('aria-hidden') === 'true' || modal.classList.contains('hidden');
+      if (!hidden) {
+        // opened
+        // if modal has create flag then treat as create flow
+        resetPinState();
+        clearAlerts();
+        // focus for keyboard accessibility
+        setTimeout(() => { try { modal.focus(); } catch(e){} }, 50);
+      } else {
+        // modal closed — clear state
+        resetPinState();
+        if (modal.dataset.createMode) delete modal.dataset.createMode;
+      }
+    });
+    observer.observe(modal, { attributes: true, attributeFilter: ['aria-hidden','class'] });
+
+    // set tabindex so modal can receive keydowns
+    if (!modal.hasAttribute('tabindex')) modal.setAttribute('tabindex', '-1');
+
+    // hide alert containers initially if present
+    clearAlerts();
+
+    // expose helper to open create modal externally
+    window.openCreatePinModal = function openCreatePinModal() {
+      const pm = $(MODAL_ID);
+      if (!pm) { log('openCreatePinModal: modal missing'); return false; }
+      pm.dataset.createMode = 'true';
+      // prefer ModalManager
+      try {
+        if (window.ModalManager && typeof window.ModalManager.openModal === 'function') {
+          window.ModalManager.openModal(MODAL_ID);
+        } else {
+          // fallback direct show
+          pm.classList.remove('hidden');
+          pm.style.display = pm.dataset.hasPullHandle === 'true' ? 'block' : 'flex';
+          pm.setAttribute('aria-hidden', 'false');
+          pm.dispatchEvent(new CustomEvent('modal:opened', { bubbles: true }));
+        }
+        return true;
+      } catch (e) {
+        console.error('openCreatePinModal error', e);
+        return false;
+      }
+    };
+
+    log('wired pinModal keypad and submit');
   }
 
-  // init after DOM ready
+  // auto-wire after DOM load
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', wireCreatePin);
+    document.addEventListener('DOMContentLoaded', wireUp);
   } else {
-    wireCreatePin();
+    wireUp();
   }
 
-  // expose helper for debugging
-  window.__createPin_debug = {
-    submitNewPin,
-    validatePins
-  };
 })();
