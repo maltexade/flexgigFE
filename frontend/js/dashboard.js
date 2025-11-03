@@ -1226,7 +1226,7 @@ async function handleBioToggle(e) {
   }
 }
 
-const IDLE_TIME = 15 * 1000; // 10 min in prod
+const IDLE_TIME = 1000 * 1000; // 10 min in prod
 
 // === Safety shim: ensure pollStatus exists (place this near top, before onDashboardLoad runs) ===
 if (typeof pollStatus === 'undefined') {
@@ -5318,7 +5318,7 @@ function __fg_pin_clearAllInputs() {
             'error'
           );
           setTimeout(() => {
-            window.location.href = '/reset-pin.html';
+            //window.location.href = '/reset-pin.html';
           }, 1200);
           return;
         }
@@ -5399,7 +5399,7 @@ function __fg_pin_clearAllInputs() {
       ev.preventDefault();
       __fg_pin_log.i('resetPinBtn clicked - redirecting to reset flow');
       __fg_pin_notify('Redirecting to PIN reset flow', 'info');
-      window.location.href = '/reset-pin.html';
+      //window.location.href = '/reset-pin.html';
     });
   }
 
@@ -5881,7 +5881,7 @@ async function updateStoredPin(uid, newPin) {
     if (resetPinBtn) {
       resetPinBtn.addEventListener('click', () => {
         notify('Redirecting to PIN reset flow', 'info');
-        window.location.href = '/reset-pin.html';
+        //window.location.href = '/reset-pin.html';
       });
     }
   }
@@ -9184,7 +9184,7 @@ if (!saveRes.ok) {
   if (__sec_RESET_BTN) {
     __sec_RESET_BTN.addEventListener('click', (ev) => {
       ev.preventDefault();
-      window.location.href = '/reset-pin.html';
+      //window.location.href = '/reset-pin.html';
     });
   }
 
@@ -11981,7 +11981,7 @@ async function bioVerifyAndFinalize(assertion) {
         link.addEventListener('click', (ev) => {
           ev.preventDefault();
           try { localStorage.removeItem('reauthPending'); } catch(e){}
-          window.location.href = '/reset-pin.html';
+          //window.location.href = '/reset-pin.html';
         });
         link.__bound = true;
       }

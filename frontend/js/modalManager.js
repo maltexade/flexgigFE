@@ -10,16 +10,19 @@
   }
 
   // Modal configuration
+    // Modal configuration (use id strings and resolve elements later)
   const modals = {
-    settingsModal: { element: document.getElementById('settingsModal'), hasPullHandle: false },
-    helpSupportModal: { element: document.getElementById('helpSupportModal'), hasPullHandle: false },
-    securityModal: { element: document.getElementById('securityModal'), hasPullHandle: false },
-    securityPinModal: { element: document.getElementById('securityPinModal'), hasPullHandle: false },
-    updateProfileModal: { element: document.getElementById('updateProfileModal'), hasPullHandle: true },
-    pinModal: { element: document.getElementById('pinModal'), hasPullHandle: false },
-    allPlansModal: { element: document.getElementById('allPlansModal'), hasPullHandle: true },
-    contactModal: { element: document.getElementById('contactModal'), hasPullHandle: false },
+    resetPinModal: { id: 'resetPinModal', element: null, hasPullHandle: false },
+    settingsModal: { id: 'settingsModal', element: null, hasPullHandle: false },
+    helpSupportModal: { id: 'helpSupportModal', element: null, hasPullHandle: false },
+    securityModal: { id: 'securityModal', element: null, hasPullHandle: false },
+    securityPinModal: { id: 'securityPinModal', element: null, hasPullHandle: false },
+    updateProfileModal: { id: 'updateProfileModal', element: null, hasPullHandle: true },
+    pinModal: { id: 'pinModal', element: null, hasPullHandle: false },
+    allPlansModal: { id: 'allPlansModal', element: null, hasPullHandle: true },
+    contactModal: { id: 'contactModal', element: null, hasPullHandle: false },
   };
+
 
   // Modal stack to track open modals
   const openModalsStack = [];
@@ -144,6 +147,16 @@
     log('debug', `openModal: Attempting to open ${modalId}`);
 
     const modalConfig = modals[modalId];
+        // Lazy-resolve element if it wasn't present at init (handles dynamic DOM)
+    if (modalConfig && !modalConfig.element) {
+      modalConfig.element = document.getElementById(modalConfig.id || modalId) || null;
+      if (modalConfig.element) {
+        log('debug', `openModal: Lazily resolved element for ${modalId}`);
+      } else {
+        log('error', `openModal: Element not found for ${modalId} on open attempt`);
+      }
+    }
+
     if (!modalConfig || !modalConfig.element) {
       log('error', `openModal: Modal config or element not found for ${modalId}`);
       return;
@@ -396,20 +409,27 @@
   // Initialize (removed __setupPinActive from observer)
   function initialize() {
     log('info', 'initialize: Starting initialization');
-    Object.entries(modals).forEach(([modalId, { element }]) => {
-      if (!element) {
-        log('error', `initialize: Modal element not found for ${modalId}`);
+        // Resolve element references now (handles modals added after script load)
+    Object.entries(modals).forEach(([modalId, cfg]) => {
+      if (!cfg) return;
+      // If element already set, keep it; otherwise attempt to resolve from DOM
+      if (!cfg.element) {
+        cfg.element = document.getElementById(cfg.id || modalId) || null;
+      }
+      if (!cfg.element) {
+        log('warn', `initialize: Modal element not found for ${modalId} (expected id="${cfg.id || modalId}")`);
       } else {
-        log('debug', `initialize: Modal ${modalId} found`);
-        if (element.getAttribute('aria-hidden') === null || element.getAttribute('aria-hidden') === 'true') {
-          log('warn', `initialize: Modal ${modalId} has null or true aria-hidden, setting to true`);
-          element.setAttribute('aria-hidden', 'true');
-          element.setAttribute('inert', '');
-          element.classList.add('hidden');
-          element.style.display = 'none';
+        log('debug', `initialize: Modal ${modalId} resolved to element`, { id: cfg.element.id });
+        // normalize starting hidden state
+        if (cfg.element.getAttribute('aria-hidden') === null || cfg.element.getAttribute('aria-hidden') === 'true') {
+          cfg.element.setAttribute('aria-hidden', 'true');
+          cfg.element.setAttribute('inert', '');
+          cfg.element.classList.add('hidden');
+          cfg.element.style.display = 'none';
         }
       }
     });
+
 
     Object.entries(modals).forEach(([modalId, { element }]) => {
       if (!element) return;
