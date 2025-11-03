@@ -1,23 +1,29 @@
-/* resetPin.js — full file
-   - Sends correct payload { email, token } to /auth/verify-otp
-   - Debuggable request/response logging
-   - Auto-blur after entering 6 digits
-   - Resend timer + open-email improved behavior
-   - Expects modal with id="resetPinModal", OTP input(s) with class "mp-otp-input" (single input OK),
-     masked email container id="mp-masked-email" and full-email container id="mp-full-email"
+/* resetPin.js — cleaned + fixes
+   - fixes: 6-digit guard, consistent safeOpenModal usage,
+     robust fetch error handling, deduped handlers, rewire support,
+     safer mailto behavior, better logging/debug helpers
 */
-
 (function rpWireResetFlow_v4(){
   'use strict';
 
   const DEBUG = true;
   const log = (...args) => { if (DEBUG) console.debug('[RP-WIRE-v4]', ...args); };
 
+  // Guard: allow re-wire if script is already present
+  if (window.__rp_wire_reset_v4_installed) {
+    log('rpWireResetFlow_v4 already installed — re-wiring handlers');
+    if (window.__rp_wire_debug && typeof window.__rp_wire_debug.rewire === 'function') {
+      window.__rp_wire_debug.rewire();
+    }
+    return;
+  }
+  window.__rp_wire_reset_v4_installed = true;
+
   // IDs / selectors used in your HTML
   const TRIGGER_ID = 'resetPinBtn';       // Button that starts flow
   const RESET_MODAL_ID = 'resetPinModal'; // Reset modal container
   const MASKED_EMAIL_ID = 'mp-masked-email';
-  const FULL_EMAIL_ID = 'mp-full-email';  // new — element to show full email (create in modal)
+  const FULL_EMAIL_ID = 'mp-full-email';  // element to show full email
   const OTP_INPUT_SELECTOR = '.mp-otp-input'; // either single input or inputs
   const RESEND_BTN_ID = 'mp-resend-otp';
   const OPEN_EMAIL_BTN_ID = 'mp-open-email-btn';
@@ -33,6 +39,9 @@
   const qs = sel => document.querySelector(sel);
   const qsa = sel => Array.from(document.querySelectorAll(sel));
 
+  // ensure handler storage lives on window so removeEventListener works reliably
+  window.__rp_handlers = window.__rp_handlers || {};
+
   // Dev fallback keys
   function getDevEmailFallback() {
     return localStorage.getItem('mockEmail') ||
@@ -44,7 +53,6 @@
   // Prefer dashboard.getSession if available; otherwise fallbacks
   async function getUserEmail() {
     try {
-      // Prefer a global getSession if available
       const gs = window.getSession || (window.dashboard && window.dashboard.getSession) || window.getSessionFromDashboard;
       if (typeof gs === 'function') {
         try {
@@ -59,13 +67,11 @@
         }
       }
 
-      // Next fallback: server-injected global
       if (window.__SERVER_USER_DATA__ && window.__SERVER_USER_DATA__.email) {
         log('getUserEmail: using window.__SERVER_USER_DATA__');
         return window.__SERVER_USER_DATA__.email;
       }
 
-      // localStorage dev fallback
       const fb = getDevEmailFallback();
       if (fb) {
         log('getUserEmail: using localStorage fallback', fb);
@@ -80,49 +86,45 @@
     }
   }
 
-  // Enhanced fetch wrapper with debug info. returns parsed JSON or throws.
+  // Enhanced fetch wrapper with debug info. returns parsed JSON or error object.
   async function postJson(url, data, opts = {}) {
     const debugTag = '[postJsonDebug]';
     const method = opts.method || 'POST';
-    const credentials = opts.credentials ?? 'include'; // include cookies by default
-    console.debug(`${debugTag} Request ➜`, url);
-    console.debug(`${debugTag} URL:`, url);
-    console.debug(`${debugTag} Method:`, method);
-    console.debug(`${debugTag} Credentials:`, credentials);
-    console.debug(`${debugTag} Payload:`, data);
+    const credentials = opts.credentials ?? 'include';
+    console.debug(`${debugTag} Request ➜`, url, { method, credentials, payload: data });
 
-    const res = await fetch(url, {
-      method,
-      credentials,
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify(data)
-    });
-
-    const status = res.status;
-    const headers = {};
-    res.headers.forEach((v,k) => headers[k] = v);
-
-    let bodyText = '';
     try {
-      bodyText = await res.text();
-    } catch(e) {
-      bodyText = '<no body>';
-    }
+      const res = await fetch(url, {
+        method,
+        credentials,
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(data)
+      });
 
-    console.debug(`${debugTag} Response ◀ ${status}  — ${url}`);
-    console.debug(`${debugTag} Status:`, status);
-    console.debug(`${debugTag} Headers:`, headers);
-    console.debug(`${debugTag} Body:`, bodyText);
+      const status = res.status;
+      const headers = {};
+      res.headers.forEach((v,k) => headers[k] = v);
 
-    const contentType = headers['content-type'] || '';
-    if (contentType.includes('application/json')) {
-      try {
-        return { status, body: JSON.parse(bodyText), headers };
-      } catch (e) {
-        return { status, body: bodyText, headers };
+      let bodyText = '';
+      try { bodyText = await res.text(); } catch(e) { bodyText = '<no body>'; }
+
+      console.debug(`${debugTag} Response ◀ ${status}  — ${url}`);
+      console.debug(`${debugTag} Headers:`, headers);
+      console.debug(`${debugTag} Body:`, bodyText);
+
+      const contentType = (headers['content-type'] || '').toLowerCase();
+      if (contentType.includes('application/json')) {
+        try {
+          return { status, body: JSON.parse(bodyText), headers };
+        } catch (e) {
+          return { status, body: bodyText, headers };
+        }
       }
+      return { status, body: bodyText, headers };
+    } catch (err) {
+      console.error(`${debugTag} Network/fetch error`, err);
+      return { status: 0, body: { error: err.message || String(err) }, headers: {} };
     }
-    return { status, body: bodyText, headers };
   }
 
   // Show modal (tries ModalManager then fallback)
@@ -130,6 +132,13 @@
     const modalEl = $(modalId);
     if (!modalEl) {
       log('safeOpenModal: modal element not found', modalId);
+      // If ModalManager might accept something else, try calling with selector
+      try {
+        if (window.ModalManager && typeof window.ModalManager.openModal === 'function') {
+          window.ModalManager.openModal(`#${modalId}`);
+          return true;
+        }
+      } catch(e){}
       return false;
     }
 
@@ -148,7 +157,6 @@
       modalEl.classList.remove('hidden');
       modalEl.style.display = modalEl.dataset.hasPullHandle === 'true' ? 'block' : 'flex';
       modalEl.setAttribute('aria-hidden', 'false');
-      // bring to front a bit
       modalEl.style.zIndex = 20000;
       modalEl.dispatchEvent(new CustomEvent('modal:opened', { bubbles: true }));
       log('safeOpenModal: fallback shown via DOM for', modalId);
@@ -176,9 +184,8 @@
 
   // Helpers for OTP UI behavior
   function getOtpValue() {
-    // If multiple inputs exist, join them; otherwise return single input value
     const inputs = qsa(OTP_INPUT_SELECTOR);
-    if (inputs.length === 0) return '';
+    if (!inputs || inputs.length === 0) return '';
     if (inputs.length === 1) return inputs[0].value.trim();
     return inputs.map(i => i.value.trim()).join('');
   }
@@ -196,19 +203,22 @@
   function startResendCountdown(durationSec = 60) {
     const btn = $(RESEND_BTN_ID);
     if (!btn) return;
+    clearInterval(resendTimer);
     let remaining = durationSec;
     btn.disabled = true;
     btn.setAttribute('aria-disabled', 'true');
+    const origText = btn.dataset.origText ?? btn.textContent;
+    btn.dataset.origText = origText;
     btn.textContent = `Resend (${remaining}s)`;
 
-    clearInterval(resendTimer);
     resendTimer = setInterval(() => {
       remaining--;
       if (remaining <= 0) {
         clearInterval(resendTimer);
         btn.disabled = false;
         btn.removeAttribute('aria-disabled');
-        btn.textContent = 'Resend OTP';
+        btn.textContent = origText || 'Resend OTP';
+        delete btn.dataset.origText;
       } else {
         btn.textContent = `Resend (${remaining}s)`;
       }
@@ -223,16 +233,17 @@
     }
     const domain = (email.split('@')[1] || '').toLowerCase();
     if (domain === 'gmail.com' || domain.endsWith('googlemail.com')) {
-      // open Gmail web inbox
       window.open('https://mail.google.com/mail/u/0/#inbox', '_blank');
       return;
     }
-    // fallback to mailto (will open compose; reliably opening inbox is not possible cross-platform)
-    window.location.href = `mailto:${encodeURIComponent(email)}`;
+    // fallback to mailto opened in a new tab/window (less likely to navigate away)
+    window.open(`mailto:${encodeURIComponent(email)}`, '_blank');
   }
 
   // OTP verify handler — sends { email, token } as server expects
-  async function verifyOtpSubmit() {
+  async function verifyOtpSubmit(e) {
+    if (e && e.preventDefault) e.preventDefault();
+
     const email = await getUserEmail();
     if (!email) {
       alert('No email detected. Please login or set mockEmail in localStorage for dev.');
@@ -240,8 +251,7 @@
     }
 
     const token = getOtpValue();
-    if (!token || token.length < 4) {
-      // small guard
+    if (!token || token.length < 6) {
       alert('Please enter the 6-digit OTP.');
       return;
     }
@@ -258,20 +268,21 @@
       const { status, body } = await postJson(SERVER_VERIFY_OTP, { email, token });
       if (status >= 200 && status < 300) {
         log('verifyOtp: success', body);
-        // call app-specific success flows — typically server returns token + user
-        alert('OTP verified — continuing login flow.');
-        // optional: close modal
+        // Open create-pin modal (centralized)
+        const opened = safeOpenModal('createPinModal');
+        if (!opened) {
+          console.warn('Could not open createPinModal automatically — check element id or ModalManager.');
+        }
+        // Close reset modal and clean inputs
         safeCloseModal(RESET_MODAL_ID);
         clearOtpInputs();
-        // TODO: process returned token/body as your app expects
+        // optional: process returned body (token/user) per app needs
       } else {
-        // server returned error payload — show helpful message
         const errMsg = (body && body.error && body.error.message) ? body.error.message : (body && body.message) ? body.message : 'OTP verify failed';
         console.warn('verifyOtp error', status, body);
         if (status === 400 || status === 403) {
-          // If Supabase returns otp_expired, show resend suggestion
-          const errCode = body?.error?.code || body?.error?.code || null;
-          if (errCode === 'otp_expired' || errMsg.toLowerCase().includes('expired')) {
+          const errCode = body?.error?.code || null;
+          if (errCode === 'otp_expired' || (errMsg && errMsg.toLowerCase().includes('expired'))) {
             alert('OTP expired. Please resend OTP and try again.');
           } else {
             alert('OTP verification failed: ' + errMsg);
@@ -292,7 +303,8 @@
   }
 
   // Resend OTP handler
-  async function resendOtpHandler() {
+  async function resendOtpHandler(e) {
+    if (e && e.preventDefault) e.preventDefault();
     const btn = $(RESEND_BTN_ID);
     if (!btn || btn.disabled) return;
 
@@ -311,7 +323,7 @@
       if (status >= 200 && status < 300) {
         log('resend-otp success', body);
         startResendCountdown(60); // start 60s cooldown
-        alert('OTP resent to ' + email);
+        // show masked email or toast
       } else {
         const errMsg = body?.error?.message || body?.message || 'Failed to resend OTP';
         console.warn('resend-otp failed', status, body);
@@ -335,74 +347,99 @@
       return;
     }
 
-    // If a single input (most common), watch value length
+    // cleanup: remove existing handlers if previously added
+    if (window.__rp_handlers.otpInputs && Array.isArray(window.__rp_handlers.otpInputs)) {
+      window.__rp_handlers.otpInputs.forEach(({el, handlers}) => {
+        if (!el) return;
+        if (handlers && handlers.input) el.removeEventListener('input', handlers.input);
+        if (handlers && handlers.keydown) el.removeEventListener('keydown', handlers.keydown);
+      });
+    }
+    window.__rp_handlers.otpInputs = [];
+
     if (inputs.length === 1) {
       const input = inputs[0];
       input.setAttribute('inputmode', 'numeric');
       input.setAttribute('maxlength', '6');
-      input.addEventListener('input', async (e) => {
+      const onInput = async (e) => {
         const v = input.value.trim();
-        // show full email if masked element exists
         if (v.length >= 6) {
-          // auto-blur to close keyboard
           try { input.blur(); } catch(e) {}
-          // auto-submit (short delay to let keyboard close)
           setTimeout(() => { verifyOtpSubmit(); }, 120);
         }
-      });
+      };
+      input.removeEventListener('input', onInput);
+      input.addEventListener('input', onInput);
+      window.__rp_handlers.otpInputs.push({ el: input, handlers: { input: onInput } });
       return;
     }
 
-    // Multiple inputs: when all filled, join and submit
+    // multiple inputs case
     inputs.forEach((inp, idx) => {
       inp.setAttribute('inputmode', 'numeric');
       inp.setAttribute('maxlength', '1');
-      inp.addEventListener('input', (e) => {
+
+      const onInput = (e) => {
         const v = inp.value;
         if (v && idx < inputs.length - 1) {
           inputs[idx + 1].focus();
         }
-        // if all filled
         const all = inputs.map(i => i.value.trim()).join('');
         if (all.length === inputs.length) {
           blurOtpInputs();
           setTimeout(() => { verifyOtpSubmit(); }, 120);
         }
-      });
-      inp.addEventListener('keydown', (e) => {
+      };
+      const onKeydown = (e) => {
         if (e.key === 'Backspace' && !inp.value && idx > 0) {
           inputs[idx - 1].focus();
         }
-      });
+      };
+
+      inp.removeEventListener('input', onInput);
+      inp.removeEventListener('keydown', onKeydown);
+      inp.addEventListener('input', onInput);
+      inp.addEventListener('keydown', onKeydown);
+
+      window.__rp_handlers.otpInputs.push({ el: inp, handlers: { input: onInput, keydown: onKeydown } });
     });
   }
 
   // Wire UI and triggers
   async function wire() {
+    // TRIGGER
     const trigger = $(TRIGGER_ID);
     if (trigger) {
-      trigger.removeEventListener('click', onTriggerClicked);
-      trigger.addEventListener('click', onTriggerClicked);
+      // store handler so removeEventListener works
+      window.__rp_handlers.onTriggerClicked = window.__rp_handlers.onTriggerClicked || onTriggerClicked;
+      trigger.removeEventListener('click', window.__rp_handlers.onTriggerClicked);
+      trigger.addEventListener('click', window.__rp_handlers.onTriggerClicked);
     } else {
       log('wire: trigger not found', TRIGGER_ID);
     }
 
+    // RESEND
     const resendBtn = $(RESEND_BTN_ID);
     if (resendBtn) {
-      resendBtn.removeEventListener('click', resendOtpHandler);
-      resendBtn.addEventListener('click', resendOtpHandler);
+      window.__rp_handlers.resendOtpHandler = window.__rp_handlers.resendOtpHandler || resendOtpHandler;
+      resendBtn.removeEventListener('click', window.__rp_handlers.resendOtpHandler);
+      resendBtn.addEventListener('click', window.__rp_handlers.resendOtpHandler);
     }
 
+    // OPEN EMAIL
     const openEmailBtn = $(OPEN_EMAIL_BTN_ID);
     if (openEmailBtn) {
-      openEmailBtn.removeEventListener('click', onOpenEmailClick);
-      openEmailBtn.addEventListener('click', onOpenEmailClick);
+      window.__rp_handlers.onOpenEmailClick = window.__rp_handlers.onOpenEmailClick || onOpenEmailClick;
+      openEmailBtn.removeEventListener('click', window.__rp_handlers.onOpenEmailClick);
+      openEmailBtn.addEventListener('click', window.__rp_handlers.onOpenEmailClick);
     }
 
+    // VERIFY
     const verifyBtn = $(VERIFY_BTN_ID);
     if (verifyBtn) {
-      verifyBtn.removeEventListener('click', verifyOtpSubmit);
-      verifyBtn.addEventListener('click', verifyOtpSubmit);
+      window.__rp_handlers.verifyOtpSubmit = window.__rp_handlers.verifyOtpSubmit || verifyOtpSubmit;
+      verifyBtn.removeEventListener('click', window.__rp_handlers.verifyOtpSubmit);
+      verifyBtn.addEventListener('click', window.__rp_handlers.verifyOtpSubmit);
     }
 
     wireOtpInputs();
@@ -413,7 +450,7 @@
     const email = await getUserEmail();
     if (fullEmailEl && email) {
       fullEmailEl.textContent = email;
-      if (maskedEl) maskedEl.textContent = email; // show full for dev, you can mask if you want
+      if (maskedEl) maskedEl.textContent = email; // developer visibility
     } else if (maskedEl && email) {
       maskedEl.textContent = email;
     }
@@ -423,7 +460,7 @@
 
   // When reset pin button clicked: send resend-otp then open modal
   async function onTriggerClicked(e) {
-    e.preventDefault();
+    e.preventDefault && e.preventDefault();
     const btn = e.currentTarget;
     if (!btn) return;
     if (btn.disabled) return;
@@ -446,7 +483,7 @@
     try {
       const parts = email.split('@');
       if (maskedEl) maskedEl.textContent = (parts.length === 2) ? (parts[0].slice(0,2) + '…@' + parts[1]) : email;
-      if (fullEl) fullEl.textContent = email; // full visible as requested
+      if (fullEl) fullEl.textContent = email;
     } catch (err){}
 
     // send resend OTP request
@@ -456,7 +493,12 @@
         log('resend-otp response', body);
         // open modal
         const opened = safeOpenModal(RESET_MODAL_ID);
-        if (!opened) alert('Modal could not be opened automatically. Check console.');
+        if (!opened) {
+          alert('Modal could not be opened automatically. Check console.');
+        } else {
+          // ensure OTP inputs are wired now that modal is visible
+          setTimeout(() => { wireOtpInputs(); }, 40);
+        }
         // start resend countdown
         startResendCountdown(60);
       } else {
@@ -474,20 +516,23 @@
 
   // open email click handler
   async function onOpenEmailClick(e) {
-    e.preventDefault();
+    e.preventDefault && e.preventDefault();
     const email = await getUserEmail();
     openEmailClient(email);
   }
 
   // If DOM is ready, wire up
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', wire);
-  } else {
-    wire();
+  function initAutoWire() {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', wire);
+    } else {
+      wire();
+    }
   }
+  initAutoWire();
 
-  // Expose debug helpers
-  window.__rp_wire_debug = {
+  // Expose debug helpers (and rewire)
+  window.__rp_wire_debug = Object.assign(window.__rp_wire_debug || {}, {
     getUserEmail,
     safeOpenModal,
     postJson,
@@ -495,7 +540,9 @@
     SERVER_RESEND_OTP,
     SERVER_VERIFY_OTP,
     openEmailClient,
-    verifyOtpSubmit
-  };
+    verifyOtpSubmit,
+    wire,
+    rewire: wire
+  });
 
 })(); // rpWireResetFlow_v4
