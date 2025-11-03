@@ -1,6 +1,87 @@
 (function () {
   'use strict';
 
+  // compute next/top z-index for a modal so it always appears above any existing modal
+function getNextModalZIndex() {
+  const BASE = 10000; // high base to play nicely with modal CSS that uses 1000+ ranges
+  let max = BASE;
+  // consider both inline style and computed style for each modal
+  openModalsStack.forEach(item => {
+    try {
+      const el = item.modal;
+      // prefer inline style if set, otherwise computed style
+      const inline = el && el.style && el.style.zIndex ? parseInt(el.style.zIndex, 10) : NaN;
+      const computed = el ? parseInt(window.getComputedStyle(el).zIndex, 10) : NaN;
+      const candidate = (!isNaN(inline) ? inline : (!isNaN(computed) ? computed : 0));
+      if (candidate > max) max = candidate;
+    } catch (e) { /* ignore parse issues */ }
+  });
+  return max + 10;
+}
+
+// ===== Backdrop helpers (insert right after getNextModalZIndex) =====
+function ensureBackdrop(modal) {
+  if (!modal) return null;
+  let backdrop = modal.querySelector('.modal-backdrop');
+  if (!backdrop) {
+    backdrop = document.createElement('div');
+    backdrop.className = 'modal-backdrop';
+    // initial styles - not all must be here if your CSS already styles .modal-backdrop
+    backdrop.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0,0,0,0.5);
+      opacity: 0;
+      transition: opacity 0.25s ease;
+      pointer-events: auto;
+    `;
+    modal.insertBefore(backdrop, modal.firstChild);
+    log('debug', `ensureBackdrop: created backdrop for ${modal.id || '(unknown)'}`);
+  }
+
+  // compute backdrop z-index to be just under modal
+  try {
+    // prefer inline style zIndex (set by manager), then computed style, then fallback
+    const inlineZ = modal.style && modal.style.zIndex ? parseInt(modal.style.zIndex, 10) : NaN;
+    const computedZ = parseInt(window.getComputedStyle(modal).zIndex, 10);
+    const modalZ = !isNaN(inlineZ) ? inlineZ : (!isNaN(computedZ) ? computedZ : getNextModalZIndex());
+    backdrop.style.zIndex = (modalZ - 1).toString();
+  } catch (e) {
+    backdrop.style.zIndex = '9999';
+  }
+
+  return backdrop;
+}
+
+function showBackdrop(modal) {
+  const backdrop = ensureBackdrop(modal);
+  if (!backdrop) return;
+  // ensure visible by forcing a frame then switching opacity
+  requestAnimationFrame(() => {
+    backdrop.style.opacity = '1';
+  });
+}
+
+function hideBackdrop(modal) {
+  if (!modal) return;
+  const backdrop = modal.querySelector('.modal-backdrop');
+  if (!backdrop) return;
+  // fade out, but leave the element (so observers can read it). If you prefer, remove it after fade.
+  backdrop.style.opacity = '0';
+  // optional: remove after transition to keep DOM clean
+  try {
+    clearTimeout(backdrop._rmTimer);
+    backdrop._rmTimer = setTimeout(() => {
+      if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
+    }, 300); // match transition duration
+  } catch (e) { /* ignore */ }
+}
+
+
+
   // Toggle for dev logs (set to false in prod)
   const DEBUG_LOGS = true;  // ← Change to false for quiet mode
 
@@ -69,13 +150,16 @@
     const onTransitionEnd = () => {
       modal.removeEventListener('transitionend', onTransitionEnd);
       if (!show) {
-        modal.classList.add('hidden');
-        modal.style.display = 'none';
-        modal.setAttribute('aria-hidden', 'true');
-        modal.setAttribute('inert', '');
-      } else {
-        modal.removeAttribute('inert');
-      }
+  modal.classList.add('hidden');
+  modal.style.display = 'none';
+  modal.setAttribute('aria-hidden', 'true');
+  modal.setAttribute('inert', '');
+  // hide backdrop when modal fully hidden
+  try { hideBackdrop(modal); } catch (e) { /* ignore */ }
+} else {
+  modal.removeAttribute('inert');
+}
+
       // Guard: Don't log if self-triggered
       if (!isProcessingPopstate) log('debug', `applyTransition: ${modal.id} ${show ? 'shown' : 'hidden'}`);
       callback?.();
@@ -181,7 +265,13 @@
     modal.removeAttribute('inert');
 
     // Set dynamic z-index based on stack depth (ensures top modal is always visible on top)
-    modal.style.zIndex = 1050 + (openModalsStack.length * 10);
+    // Set dynamic z-index - always compute topmost
+    modal.style.zIndex = getNextModalZIndex();
+    // ensure and show backdrop directly under newly opened modal
+ensureBackdrop(modal);
+showBackdrop(modal);
+
+
 
     // Special slide-in for updateProfileModal
     if (modalId === 'updateProfileModal') {
