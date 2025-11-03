@@ -1705,7 +1705,7 @@ body:has(.pin-modal:not(.hidden)) {
   background: rgba(0,0,0,0.85); /* darker/backdrop requested */
   justify-content: center;
   align-items: center;
-  z-index: 12050; /* high enough to sit above other modals/backdrops */
+  z-index: 13050; /* high enough to sit above other modals/backdrops */
   padding: 0;
 }
 
