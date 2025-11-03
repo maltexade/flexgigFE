@@ -259,7 +259,15 @@
       if (status >= 200 && status < 300) {
         log('verifyOtp: success', body);
         // call app-specific success flows — typically server returns token + user
-        alert('OTP verified — continuing login flow.');
+        // open the create-pin modal
+if (window.ModalManager && typeof window.ModalManager.openModal === 'function') {
+  window.ModalManager.openModal('createPinModal');
+} else {
+  // fallback
+  const el = document.getElementById('createPinModal');
+  if (el) { el.classList.remove('hidden'); el.style.display='flex'; el.setAttribute('aria-hidden','false'); }
+}
+
         // optional: close modal
         safeCloseModal(RESET_MODAL_ID);
         clearOtpInputs();

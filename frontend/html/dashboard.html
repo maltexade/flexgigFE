@@ -588,6 +588,41 @@
     </div>
   </div>
 </div>
+<!-- ===== Create New PIN Modal ===== -->
+<div id="createPinModal" class="modal mp-create-modal" aria-hidden="true" role="dialog" aria-labelledby="cp-title">
+  <div class="modal-content mp-create-content" role="document">
+    <div class="mp-create-header">
+      <button class="mp-create-back" data-close type="button" aria-label="Back to OTP">
+        <!-- back-chevron (left arrow) -->
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+
+      <h2 id="cp-title" class="mp-create-title">Create New Pin</h2>
+
+      <div class="mp-create-header-spacer" aria-hidden="true"></div>
+    </div>
+
+    <div class="mp-create-body">
+      <p class="mp-create-info">Choose a 4-digit PIN for your account. Don’t share this PIN with anyone.</p>
+
+      <div class="mp-create-form">
+        <label for="cp-new-pin" class="mp-label">New PIN</label>
+        <input id="cp-new-pin" name="newPin" type="password" maxlength="4" inputmode="numeric" autocomplete="new-password" class="mp-create-input" placeholder="Enter new 4-digit PIN" />
+
+        <label for="cp-confirm-pin" class="mp-label">Confirm PIN</label>
+        <input id="cp-confirm-pin" name="confirmPin" type="password" maxlength="4" inputmode="numeric" autocomplete="new-password" class="mp-create-input" placeholder="Confirm new PIN" />
+      </div>
+
+      <div id="cp-notice" class="mp-create-notice" aria-live="polite"></div>
+
+      <div class="mp-create-actions">
+        <button id="cp-submit-btn" class="mp-btn-primary">Reset PIN</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 
 
