@@ -1470,7 +1470,7 @@
   color: white !important;
   display: flex !important;
   flex-direction: column !important;
-  z-index: 10002 !important;
+  z-index: 11002 !important;
 }
 body:has(.reauthmodal:not(.hidden)),
 body:has(.pin-modal:not(.hidden)) {
@@ -1536,7 +1536,7 @@ body:has(.pin-modal:not(.hidden)) {
   color: #fff;
   display: flex;
   flex-direction: column;
-  z-index: 10002 !important;
+  z-index: 11002 !important;
   transform: translateX(-100%);
   opacity: 0;
   transition: transform 0.35s ease, opacity 0.25s ease;
@@ -1582,7 +1582,7 @@ body:has(.pin-modal:not(.hidden)) {
   background: rgba(0,0,0,0.45);
   justify-content: center;
   align-items: center;
-  z-index: 10003;
+  z-index: 12003;
   padding: 20px;
 }
 .mp-reset-modal[aria-hidden="false"] { display: flex; }
