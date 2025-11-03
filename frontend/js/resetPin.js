@@ -98,17 +98,47 @@
     el.setAttribute('aria-hidden','true');
     return true;
   }
-  async function postJson(url, data){
-    log('POST', url, data);
+  // Verbose POST JSON helper - use instead of postJson for debugging
+async function postJson(url, data, opts = {}) {
+  const debugTag = '[postJsonDebug]';
+  try {
+    console.groupCollapsed(`${debugTag} Request ➜ ${url}`);
+    console.log('URL:', url);
+    console.log('Method: POST');
+    console.log('Credentials:', opts.credentials || 'default');
+    console.log('Payload:', data);
+    console.groupEnd();
+
     const res = await fetch(url, {
       method: 'POST',
-      credentials: 'include',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify(data)
+      credentials: opts.credentials || 'include', // include cookies by default for auth flows
+      headers: Object.assign({'Content-Type':'application/json'}, opts.headers || {}),
+      body: JSON.stringify(data),
+      mode: opts.mode || undefined,
+      cache: opts.cache || undefined,
     });
-    const txt = await res.text();
-    try { return JSON.parse(txt); } catch(e) { return txt; }
+
+    // clone so we can read the text even if caller wants JSON
+    const clone = res.clone();
+    const text = await clone.text().catch(() => '<body-read-error>');
+    let parsed;
+    try { parsed = JSON.parse(text); } catch(e) { parsed = text; }
+
+    console.groupCollapsed(`${debugTag} Response ◀ ${res.status} ${res.statusText} — ${url}`);
+    console.log('Status:', res.status, res.statusText);
+    console.log('Headers:');
+    for (const h of res.headers.entries()) console.log('  ', h[0], ':', h[1]);
+    console.log('Body:', parsed);
+    console.groupEnd();
+
+    // return parsed (if JSON) or text
+    try { return parsed; } catch (e) { return text; }
+  } catch (err) {
+    console.error('[postJsonDebug] Network/Fetch error:', err);
+    throw err;
   }
+}
+
 
   // --- robust email detection & caching ---
   let cachedEmail = null;
