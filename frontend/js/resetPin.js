@@ -1,471 +1,501 @@
-// rp-reset-pin-v4.js
-// Updated: show full email, auto-blur OTP on 6 digits, robust email detection, improved Open Email App behavior
-(function rpResetPinModule_v4(){
+/* resetPin.js — full file
+   - Sends correct payload { email, token } to /auth/verify-otp
+   - Debuggable request/response logging
+   - Auto-blur after entering 6 digits
+   - Resend timer + open-email improved behavior
+   - Expects modal with id="resetPinModal", OTP input(s) with class "mp-otp-input" (single input OK),
+     masked email container id="mp-masked-email" and full-email container id="mp-full-email"
+*/
+
+(function rpWireResetFlow_v4(){
   'use strict';
 
   const DEBUG = true;
-  const log = (...args) => { if (DEBUG) console.debug('[RP-RESET-v4]', ...args); };
+  const log = (...args) => { if (DEBUG) console.debug('[RP-WIRE-v4]', ...args); };
 
-  // --- CONFIG ---
-  const TRIGGER_ID = 'resetPinBtn';
-  const RESET_MODAL_ID = 'resetPinModal';
-  const MASKED_EMAIL_ID = 'mp-masked-email'; // we'll place full email here
-  const MP_RESEND_BTN_ID = 'mp-resend-btn';
-  const MP_OTP_FORM_ID = 'mp-otp-form';
-  const MP_OTP_INPUT_ID = 'mp-otp-input';
-  const MP_OPEN_EMAIL_BTN_ID = 'mp-open-email-btn';
-  const MP_RESET_BTN_ID = 'mp-reset-btn';
-  const DEFAULT_RESEND_SECONDS = 60;
+  // IDs / selectors used in your HTML
+  const TRIGGER_ID = 'resetPinBtn';       // Button that starts flow
+  const RESET_MODAL_ID = 'resetPinModal'; // Reset modal container
+  const MASKED_EMAIL_ID = 'mp-masked-email';
+  const FULL_EMAIL_ID = 'mp-full-email';  // new — element to show full email (create in modal)
+  const OTP_INPUT_SELECTOR = '.mp-otp-input'; // either single input or inputs
+  const RESEND_BTN_ID = 'mp-resend-otp';
+  const OPEN_EMAIL_BTN_ID = 'mp-open-email-btn';
+  const VERIFY_BTN_ID = 'mp-verify-otp-btn';
 
-  const API_BASE = (window.__SEC_API_BASE || '').replace(/\/$/, '');
-  const ENDPOINTS = {
-    resendOtp: API_BASE ? `${API_BASE}/auth/resend-otp` : '/auth/resend-otp',
-    verifyOtp: API_BASE ? `${API_BASE}/auth/verify-otp` : '/auth/verify-otp'
-  };
+  // API base
+  const API_BASE = (window.__SEC_API_BASE || '').replace(/\/$/, '') || '';
+  const SERVER_RESEND_OTP = API_BASE ? `${API_BASE}/auth/resend-otp` : '/auth/resend-otp';
+  const SERVER_VERIFY_OTP = API_BASE ? `${API_BASE}/auth/verify-otp` : '/auth/verify-otp';
 
-  // --- notifier detection (same as before) ---
-  function detectNotifier() {
-    const tries = ['notify','toast','toastr','iziToast','Flash','appNotify','showToast','showNotification','__notify'];
-    for (const name of tries) {
-      const fn = window[name];
-      if (typeof fn === 'function') return { name, fn };
-      if (window[name] && typeof window[name].info === 'function') return { name, fn: window[name].info.bind(window[name]) };
-    }
-    if (window.App && typeof window.App.notify === 'function') return { name: 'App.notify', fn: window.App.notify.bind(window.App) };
-    if (window.dashboard && typeof window.dashboard.notify === 'function') return { name: 'dashboard.notify', fn: window.dashboard.notify.bind(window.dashboard) };
-    return null;
-  }
-  const detectedNotifier = detectNotifier();
-  function notify(message, type = 'info', opts = {}) {
-    if (detectedNotifier && typeof detectedNotifier.fn === 'function') {
-      try {
-        detectedNotifier.fn(message, { type, ...opts });
-        return;
-      } catch (e) { console.warn('[RP-RESET] notifier error', e); }
-    }
-    inlineToast(message, type);
-  }
-  function inlineToast(message, type='info'){
-    try {
-      let holder = document.getElementById('__rp_inline_toast_holder');
-      if (!holder) {
-        holder = document.createElement('div');
-        holder.id = '__rp_inline_toast_holder';
-        holder.style.position = 'fixed';
-        holder.style.right = '16px';
-        holder.style.top = '16px';
-        holder.style.zIndex = 65535;
-        holder.style.pointerEvents = 'none';
-        document.body.appendChild(holder);
-      }
-      const el = document.createElement('div');
-      el.style.pointerEvents = 'auto';
-      el.style.marginTop = '8px';
-      el.style.background = (type === 'error' ? '#8b1e1e' : type === 'success' ? '#157f41' : '#243b5a');
-      el.style.color = '#fff';
-      el.style.padding = '10px 14px';
-      el.style.borderRadius = '10px';
-      el.style.boxShadow = '0 8px 24px rgba(0,0,0,0.12)';
-      el.textContent = message;
-      holder.appendChild(el);
-      setTimeout(()=>{ el.style.transition = 'transform .28s ease, opacity .28s ease'; el.style.opacity = '0'; el.style.transform = 'translateY(-8px)'; }, 3000);
-      setTimeout(()=>{ try{ holder.removeChild(el); }catch(e){} }, 3400);
-    } catch (e) { try { alert(message); } catch(e){} }
-  }
-
-  // --- helpers ---
+  // Utility short-hands
   const $ = id => document.getElementById(id);
-  function openModal(modalId){
-    if (window.ModalManager && typeof window.ModalManager.openModal === 'function') {
-      try { window.ModalManager.openModal(modalId); return true; } catch(e) { log('ModalManager.openModal threw', e); }
-    }
-    const el = $(modalId);
-    if (!el) return false;
-    el.classList.remove('hidden');
-    el.style.display = el.dataset.hasPullHandle === 'true' ? 'block' : 'flex';
-    el.setAttribute('aria-hidden','false');
-    el.style.zIndex = 12000;
-    return true;
+  const qs = sel => document.querySelector(sel);
+  const qsa = sel => Array.from(document.querySelectorAll(sel));
+
+  // Dev fallback keys
+  function getDevEmailFallback() {
+    return localStorage.getItem('mockEmail') ||
+           localStorage.getItem('__mock_email') ||
+           localStorage.getItem('dev_email') ||
+           null;
   }
-  function closeModal(modalId){
-    if (window.ModalManager && typeof window.ModalManager.closeModal === 'function') {
-      try { window.ModalManager.closeModal(modalId); return true; } catch(e) { log('ModalManager.closeModal threw', e); }
+
+  // Prefer dashboard.getSession if available; otherwise fallbacks
+  async function getUserEmail() {
+    try {
+      // Prefer a global getSession if available
+      const gs = window.getSession || (window.dashboard && window.dashboard.getSession) || window.getSessionFromDashboard;
+      if (typeof gs === 'function') {
+        try {
+          log('getUserEmail: calling getSession()');
+          const session = await gs();
+          log('getUserEmail: getSession() result', session);
+          if (session && session.email) return session.email;
+          if (session && session.user && session.user.email) return session.user.email;
+          if (session && session.data && session.data.user && session.data.user.email) return session.data.user.email;
+        } catch (err) {
+          log('getUserEmail: getSession() threw, falling back', err);
+        }
+      }
+
+      // Next fallback: server-injected global
+      if (window.__SERVER_USER_DATA__ && window.__SERVER_USER_DATA__.email) {
+        log('getUserEmail: using window.__SERVER_USER_DATA__');
+        return window.__SERVER_USER_DATA__.email;
+      }
+
+      // localStorage dev fallback
+      const fb = getDevEmailFallback();
+      if (fb) {
+        log('getUserEmail: using localStorage fallback', fb);
+        return fb;
+      }
+
+      log('getUserEmail: no email found');
+      return '';
+    } catch (e) {
+      console.error('getUserEmail error', e);
+      return '';
     }
-    const el = $(modalId);
-    if (!el) return false;
-    el.classList.add('hidden');
-    el.style.display = 'none';
-    el.setAttribute('aria-hidden','true');
-    return true;
   }
-  async function postJson(url, data){
-    log('POST', url, data);
+
+  // Enhanced fetch wrapper with debug info. returns parsed JSON or throws.
+  async function postJson(url, data, opts = {}) {
+    const debugTag = '[postJsonDebug]';
+    const method = opts.method || 'POST';
+    const credentials = opts.credentials ?? 'include'; // include cookies by default
+    console.debug(`${debugTag} Request ➜`, url);
+    console.debug(`${debugTag} URL:`, url);
+    console.debug(`${debugTag} Method:`, method);
+    console.debug(`${debugTag} Credentials:`, credentials);
+    console.debug(`${debugTag} Payload:`, data);
+
     const res = await fetch(url, {
-      method: 'POST',
-      credentials: 'include',
+      method,
+      credentials,
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify(data)
     });
-    const txt = await res.text();
-    try { return JSON.parse(txt); } catch(e) { return txt; }
-  }
 
-  // --- robust email detection & caching ---
-  let cachedEmail = null;
-  async function getUserEmail() {
-    if (cachedEmail) return cachedEmail;
-    // 1) try dashboard getSession (if exposed)
+    const status = res.status;
+    const headers = {};
+    res.headers.forEach((v,k) => headers[k] = v);
+
+    let bodyText = '';
     try {
-      const gs = window.getSession || (window.dashboard && window.dashboard.getSession);
-      if (typeof gs === 'function') {
-        try {
-          const session = await gs();
-          if (session) {
-            if (session.email) { cachedEmail = session.email; log('email from getSession()', cachedEmail); return cachedEmail; }
-            if (session.user && session.user.email) { cachedEmail = session.user.email; log('email from getSession().user', cachedEmail); return cachedEmail; }
-            if (session.data && session.data.user && session.data.user.email) { cachedEmail = session.data.user.email; log('email from getSession() nested', cachedEmail); return cachedEmail; }
-          }
-        } catch (e) { log('getSession() failed', e); }
-      }
-    } catch (e) { /* ignore */ }
-
-    // 2) server-injected global variable
-    if (window.__SERVER_USER_DATA__ && window.__SERVER_USER_DATA__.email) {
-      cachedEmail = window.__SERVER_USER_DATA__.email;
-      log('email from __SERVER_USER_DATA__', cachedEmail);
-      return cachedEmail;
+      bodyText = await res.text();
+    } catch(e) {
+      bodyText = '<no body>';
     }
 
-    // 3) common localStorage dev keys
-    const devKeys = ['mockEmail','__mock_email','dev_email','email','user_email'];
-    for (const k of devKeys) {
-      const v = localStorage.getItem(k);
-      if (v) {
-        cachedEmail = v;
-        log('email from localStorage', k, cachedEmail);
-        return cachedEmail;
+    console.debug(`${debugTag} Response ◀ ${status}  — ${url}`);
+    console.debug(`${debugTag} Status:`, status);
+    console.debug(`${debugTag} Headers:`, headers);
+    console.debug(`${debugTag} Body:`, bodyText);
+
+    const contentType = headers['content-type'] || '';
+    if (contentType.includes('application/json')) {
+      try {
+        return { status, body: JSON.parse(bodyText), headers };
+      } catch (e) {
+        return { status, body: bodyText, headers };
       }
     }
-
-    // 4) try DOM locations commonly used to inject email (optional)
-    try {
-      const el = document.querySelector('[data-user-email], meta[name="user-email"], #userEmail');
-      if (el) {
-        const val = el.getAttribute ? (el.getAttribute('data-user-email') || el.content || el.textContent) : el.textContent;
-        if (val) { cachedEmail = val; log('email from DOM element', val); return cachedEmail; }
-      }
-    } catch(e){}
-
-    // none found
-    log('getUserEmail: no email found');
-    return '';
+    return { status, body: bodyText, headers };
   }
 
-  // allow developer to set email in console during dev
-  window.__rp_reset = window.__rp_reset || {};
-  window.__rp_reset.setEmailForDev = function(email){
-    cachedEmail = email;
-    localStorage.setItem('mockEmail', email);
-    log('Dev email set to', email);
-  };
+  // Show modal (tries ModalManager then fallback)
+  function safeOpenModal(modalId) {
+    const modalEl = $(modalId);
+    if (!modalEl) {
+      log('safeOpenModal: modal element not found', modalId);
+      return false;
+    }
 
-  // --- resend timer ---
-  const timerState = { timerId: null, remaining: 0 };
-  function startResendTimer(seconds = DEFAULT_RESEND_SECONDS) {
-    const btn = $(MP_RESEND_BTN_ID);
-    if (!btn) return;
-    stopResendTimer();
-    timerState.remaining = seconds;
-    btn.disabled = true;
-    btn.setAttribute('aria-disabled','true');
-    btn.textContent = `Resend OTP (${timerState.remaining}s)`;
-    timerState.timerId = setInterval(() => {
-      timerState.remaining -= 1;
-      if (timerState.remaining <= 0) {
-        stopResendTimer();
-        if (btn) { btn.disabled = false; btn.removeAttribute('aria-disabled'); btn.textContent = 'Resend OTP'; }
+    try {
+      if (window.ModalManager && typeof window.ModalManager.openModal === 'function') {
+        log('safeOpenModal: calling ModalManager.openModal', modalId);
+        window.ModalManager.openModal(modalId);
+        return true;
+      }
+    } catch (e) {
+      log('safeOpenModal: ModalManager.openModal threw', e);
+    }
+
+    // DOM fallback
+    try {
+      modalEl.classList.remove('hidden');
+      modalEl.style.display = modalEl.dataset.hasPullHandle === 'true' ? 'block' : 'flex';
+      modalEl.setAttribute('aria-hidden', 'false');
+      // bring to front a bit
+      modalEl.style.zIndex = 20000;
+      modalEl.dispatchEvent(new CustomEvent('modal:opened', { bubbles: true }));
+      log('safeOpenModal: fallback shown via DOM for', modalId);
+      return true;
+    } catch (e) {
+      console.error('safeOpenModal fallback failed', e);
+      return false;
+    }
+  }
+
+  // Close modal (tries ModalManager then fallback)
+  function safeCloseModal(modalId) {
+    try {
+      if (window.ModalManager && typeof window.ModalManager.closeModal === 'function') {
+        window.ModalManager.closeModal(modalId);
         return;
       }
-      if (btn) btn.textContent = `Resend OTP (${timerState.remaining}s)`;
+    } catch (e) { /* ignore */ }
+    const modalEl = $(modalId);
+    if (!modalEl) return;
+    modalEl.classList.add('hidden');
+    modalEl.style.display = 'none';
+    modalEl.setAttribute('aria-hidden', 'true');
+  }
+
+  // Helpers for OTP UI behavior
+  function getOtpValue() {
+    // If multiple inputs exist, join them; otherwise return single input value
+    const inputs = qsa(OTP_INPUT_SELECTOR);
+    if (inputs.length === 0) return '';
+    if (inputs.length === 1) return inputs[0].value.trim();
+    return inputs.map(i => i.value.trim()).join('');
+  }
+
+  function clearOtpInputs() {
+    qsa(OTP_INPUT_SELECTOR).forEach(i => { i.value = ''; });
+  }
+
+  function blurOtpInputs() {
+    qsa(OTP_INPUT_SELECTOR).forEach(i => { try { i.blur(); } catch(e){} });
+  }
+
+  // Resend timer logic
+  let resendTimer = null;
+  function startResendCountdown(durationSec = 60) {
+    const btn = $(RESEND_BTN_ID);
+    if (!btn) return;
+    let remaining = durationSec;
+    btn.disabled = true;
+    btn.setAttribute('aria-disabled', 'true');
+    btn.textContent = `Resend (${remaining}s)`;
+
+    clearInterval(resendTimer);
+    resendTimer = setInterval(() => {
+      remaining--;
+      if (remaining <= 0) {
+        clearInterval(resendTimer);
+        btn.disabled = false;
+        btn.removeAttribute('aria-disabled');
+        btn.textContent = 'Resend OTP';
+      } else {
+        btn.textContent = `Resend (${remaining}s)`;
+      }
     }, 1000);
   }
-  function stopResendTimer() {
-    if (timerState.timerId) clearInterval(timerState.timerId);
-    timerState.timerId = null;
-    timerState.remaining = 0;
+
+  // "Open email" action — open Gmail inbox for gmail addresses, fallback to mailto:
+  function openEmailClient(email) {
+    if (!email) {
+      alert('No email known for this account.');
+      return;
+    }
+    const domain = (email.split('@')[1] || '').toLowerCase();
+    if (domain === 'gmail.com' || domain.endsWith('googlemail.com')) {
+      // open Gmail web inbox
+      window.open('https://mail.google.com/mail/u/0/#inbox', '_blank');
+      return;
+    }
+    // fallback to mailto (will open compose; reliably opening inbox is not possible cross-platform)
+    window.location.href = `mailto:${encodeURIComponent(email)}`;
   }
 
-  // --- open email app (try inbox schemes then fallback) ---
-  function tryOpenUrl(url, fallbackTimeout = 1200) {
-    // attempt to open url and fallback to callback if not opened. This is heuristic on browsers
-    return new Promise((resolve) => {
-      let opened = false;
-      const start = Date.now();
-      // create iframe for older browsers? we will use location assignment for simplicity
-      try {
-        window.location.href = url;
-        opened = true;
-        resolve(true);
-      } catch (e) {
-        // if assignment throws, resolve false
-        resolve(false);
-      }
-      // Note: assignment to window.location doesn't throw on many browsers; we can't reliably detect success.
-    });
-  }
-
-  async function openEmailApp() {
+  // OTP verify handler — sends { email, token } as server expects
+  async function verifyOtpSubmit() {
     const email = await getUserEmail();
     if (!email) {
-      notify('No account email found to open email app.', 'error');
+      alert('No email detected. Please login or set mockEmail in localStorage for dev.');
       return;
     }
 
-    // Try platform-specific deep links that aim to open inbox (best-effort; behavior depends on device)
-    const ua = navigator.userAgent || '';
-    log('openEmailApp userAgent', ua);
-
-    // Android: try intent to Gmail (opens app if installed)
-    if (/Android/i.test(ua)) {
-      try {
-        const intentUrl = `intent://inbox#Intent;package=com.google.android.gm;end`;
-        log('Trying Android Gmail intent', intentUrl);
-        window.location.href = intentUrl;
-        return;
-      } catch(e) {
-        log('Android intent failed', e);
-      }
+    const token = getOtpValue();
+    if (!token || token.length < 4) {
+      // small guard
+      alert('Please enter the 6-digit OTP.');
+      return;
     }
 
-    // iOS: try Gmail URL scheme
-    if (/iPhone|iPad|iPod/i.test(ua)) {
-      try {
-        const gmailUrl = `googlegmail://`;
-        log('Trying iOS Gmail url', gmailUrl);
-        window.location.href = gmailUrl;
-        return;
-      } catch(e) {
-        log('iOS gmail scheme failed', e);
-      }
+    // show some UI state
+    const verifyBtn = $(VERIFY_BTN_ID);
+    if (verifyBtn) {
+      verifyBtn.disabled = true;
+      verifyBtn.dataset.orig = verifyBtn.textContent;
+      verifyBtn.textContent = 'Verifying…';
     }
 
-    // Generic attempt: try mailto: with no subject/body - many platforms open compose; we prefer inbox, but fallback
     try {
-      // as a fallback, copy email to clipboard and notify user (so they can search in their mail app)
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(email);
-        notify('Email address copied to clipboard — open your mail app and search for it.', 'info');
-        return;
-      }
-    } catch(e){ log('clipboard failed', e); }
-
-    // final fallback: open mailto (will start compose)
-    try {
-      window.location.href = `mailto:${email}`;
-    } catch(e) {
-      notify('Unable to open email app on this device.', 'error');
-    }
-  }
-
-  // --- OTP input behavior (auto-blur on 6 digits) ---
-  function wireOtpInputAutoBlur() {
-    const input = $(MP_OTP_INPUT_ID);
-    if (!input) return;
-    // ensure maxlength=6 for safety
-    try { input.setAttribute('maxlength', '6'); } catch(e){}
-    input.removeEventListener('input', otpInputHandler);
-    input.addEventListener('input', otpInputHandler);
-
-    function otpInputHandler(e) {
-      const v = (e.target.value || '').replace(/\D/g,''); // digits only
-      // keep only first 6 digits
-      if (v.length !== e.target.value.length) e.target.value = v;
-      if (v.length >= 6) {
-        // blur to close keyboard on mobile
-        try {
-          e.target.blur();
-        } catch (err) { /* ignore */ }
-        // optionally auto-submit the form
-        try {
-          const form = $(MP_OTP_FORM_ID);
-          if (form) form.dispatchEvent(new Event('submit', { cancelable: true }));
-        } catch (err) { log('auto-submit failed', err); }
-      }
-    }
-  }
-
-  // --- main click/flow handlers ---
-  async function onTriggerClicked(e) {
-    e.preventDefault();
-    const btn = e.currentTarget || $(TRIGGER_ID);
-    if (!btn) return;
-    if (btn.disabled) return;
-    try {
-      btn.disabled = true;
-      if (!btn.dataset.origText) btn.dataset.origText = btn.textContent;
-      btn.textContent = 'Preparing…';
-
-      const email = await getUserEmail();
-      if (!email) {
-        notify('Unable to find account email. Run:\nlocalStorage.setItem(\"mockEmail\",\"you@dev.com\");', 'error');
-        btn.disabled = false;
-        if (btn.dataset.origText) { btn.textContent = btn.dataset.origText; delete btn.dataset.origText; }
-        return;
-      }
-
-      // put full email into UI (user asked)
-      const maskedEl = $(MASKED_EMAIL_ID);
-      if (maskedEl) maskedEl.textContent = email;
-
-      btn.textContent = 'Sending OTP…';
-      const resp = await postJson(ENDPOINTS.resendOtp, { email });
-      log('resend-otp response', resp);
-
-      // heuristics: look for success flags
-      if (resp && (resp.success === true || resp.status === 'ok' || resp.code === 200 || resp.message && /sent/i.test(String(resp.message)))) {
-        notify('OTP sent to your email', 'success');
+      const { status, body } = await postJson(SERVER_VERIFY_OTP, { email, token });
+      if (status >= 200 && status < 300) {
+        log('verifyOtp: success', body);
+        // call app-specific success flows — typically server returns token + user
+        alert('OTP verified — continuing login flow.');
+        // optional: close modal
+        safeCloseModal(RESET_MODAL_ID);
+        clearOtpInputs();
+        // TODO: process returned token/body as your app expects
       } else {
-        // still open modal so dev can debug; show server message if any
-        const msg = resp && resp.message ? resp.message : 'OTP request completed — check your email';
-        notify(msg, 'info');
-      }
-
-      // open modal
-      const opened = openModal(RESET_MODAL_ID);
-      if (!opened) {
-        notify('Could not open reset modal automatically.', 'error');
-      } else {
-        // ensure OTP input auto-blur is wired
-        wireOtpInputAutoBlur();
-        startResendTimer(DEFAULT_RESEND_SECONDS);
+        // server returned error payload — show helpful message
+        const errMsg = (body && body.error && body.error.message) ? body.error.message : (body && body.message) ? body.message : 'OTP verify failed';
+        console.warn('verifyOtp error', status, body);
+        if (status === 400 || status === 403) {
+          // If Supabase returns otp_expired, show resend suggestion
+          const errCode = body?.error?.code || body?.error?.code || null;
+          if (errCode === 'otp_expired' || errMsg.toLowerCase().includes('expired')) {
+            alert('OTP expired. Please resend OTP and try again.');
+          } else {
+            alert('OTP verification failed: ' + errMsg);
+          }
+        } else {
+          alert('OTP verification failed: ' + errMsg);
+        }
       }
     } catch (err) {
-      console.error('[RP-RESET] onTriggerClicked error', err);
-      notify('Failed to request OTP. See console.', 'error');
+      console.error('verifyOtpSubmit error', err);
+      alert('Network error verifying OTP — check console for details.');
     } finally {
-      const btnEl = $(TRIGGER_ID);
-      if (btnEl) {
-        btnEl.disabled = false;
-        if (btnEl.dataset.origText) { btnEl.textContent = btnEl.dataset.origText; delete btnEl.dataset.origText; }
+      if (verifyBtn) {
+        verifyBtn.disabled = false;
+        if (verifyBtn.dataset.orig) { verifyBtn.textContent = verifyBtn.dataset.orig; delete verifyBtn.dataset.orig; }
       }
     }
   }
 
-  async function onResendClicked(e) {
-    e.preventDefault();
-    const btn = e.currentTarget || $(MP_RESEND_BTN_ID);
+  // Resend OTP handler
+  async function resendOtpHandler() {
+    const btn = $(RESEND_BTN_ID);
     if (!btn || btn.disabled) return;
-    try {
-      btn.disabled = true;
-      btn.textContent = 'Resending…';
-      const email = await getUserEmail();
-      if (!email) { notify('No account email to resend to.', 'error'); btn.disabled=false; btn.textContent='Resend OTP'; return; }
-      const resp = await postJson(ENDPOINTS.resendOtp, { email });
-      log('resend result', resp);
-      notify('OTP resent. Check your email.', 'success');
-      startResendTimer(DEFAULT_RESEND_SECONDS);
-    } catch (err) {
-      console.error('Resend failed', err);
-      notify('Failed to resend OTP', 'error');
-      if (btn) { btn.disabled = false; btn.textContent = 'Resend OTP'; }
+
+    const email = await getUserEmail();
+    if (!email) {
+      alert('Unable to find your account email. For dev, run in console:\nlocalStorage.setItem("mockEmail","dev@example.com");\nwindow.__SERVER_USER_DATA__ = { email: "dev@example.com" };');
+      return;
     }
-  }
 
-  async function onOpenEmailClicked(e) {
-    e.preventDefault();
-    await openEmailApp();
-  }
-
-  async function onOtpSubmit(e) {
-    e.preventDefault();
-    const form = e.currentTarget || $(MP_OTP_FORM_ID);
-    if (!form) return;
-    const input = $(MP_OTP_INPUT_ID);
-    if (!input) return;
-    const otp = (input.value || '').trim();
-    if (!otp) { notify('Please enter the OTP', 'error'); return; }
+    btn.disabled = true;
+    btn.dataset.orig = btn.textContent;
+    btn.textContent = 'Sending…';
 
     try {
-      const payload = { otp, reason: 'reset_pin' };
-      const resp = await postJson(ENDPOINTS.verifyOtp, payload);
-      log('verifyOtp resp', resp);
-      if (resp && (resp.success === true || resp.verified === true || resp.status === 'ok')) {
-        notify('OTP verified. Proceed to reset your PIN.', 'success');
-        stopResendTimer();
-        closeModal(RESET_MODAL_ID);
-        document.dispatchEvent(new CustomEvent('rp:otp-verified', { detail: { otp, resp } }));
+      const { status, body } = await postJson(SERVER_RESEND_OTP, { email });
+      if (status >= 200 && status < 300) {
+        log('resend-otp success', body);
+        startResendCountdown(60); // start 60s cooldown
+        alert('OTP resent to ' + email);
       } else {
-        const msg = resp && resp.message ? resp.message : 'Invalid OTP. Please try again.';
-        notify(msg, 'error');
-        // shake input
-        input.classList.remove('rp-shake'); void input.offsetWidth; input.classList.add('rp-shake');
-        setTimeout(()=>input.classList.remove('rp-shake'), 600);
+        const errMsg = body?.error?.message || body?.message || 'Failed to resend OTP';
+        console.warn('resend-otp failed', status, body);
+        alert('Resend failed: ' + errMsg);
+        btn.disabled = false;
+        if (btn.dataset.orig) { btn.textContent = btn.dataset.orig; delete btn.dataset.orig; }
       }
     } catch (err) {
-      console.error('verifyOtp error', err);
-      notify('Failed to verify OTP — see console', 'error');
+      console.error('resendOtpHandler error', err);
+      alert('Network error sending OTP — check console for details.');
+      btn.disabled = false;
+      if (btn.dataset.orig) { btn.textContent = btn.dataset.orig; delete btn.dataset.orig; }
     }
   }
 
-  // --- wiring ---
-  function wire() {
+  // Wire OTP input handlers for auto-blur and auto-submit when 6 digits entered
+  function wireOtpInputs() {
+    const inputs = qsa(OTP_INPUT_SELECTOR);
+    if (!inputs || inputs.length === 0) {
+      log('wireOtpInputs: no OTP inputs found for selector', OTP_INPUT_SELECTOR);
+      return;
+    }
+
+    // If a single input (most common), watch value length
+    if (inputs.length === 1) {
+      const input = inputs[0];
+      input.setAttribute('inputmode', 'numeric');
+      input.setAttribute('maxlength', '6');
+      input.addEventListener('input', async (e) => {
+        const v = input.value.trim();
+        // show full email if masked element exists
+        if (v.length >= 6) {
+          // auto-blur to close keyboard
+          try { input.blur(); } catch(e) {}
+          // auto-submit (short delay to let keyboard close)
+          setTimeout(() => { verifyOtpSubmit(); }, 120);
+        }
+      });
+      return;
+    }
+
+    // Multiple inputs: when all filled, join and submit
+    inputs.forEach((inp, idx) => {
+      inp.setAttribute('inputmode', 'numeric');
+      inp.setAttribute('maxlength', '1');
+      inp.addEventListener('input', (e) => {
+        const v = inp.value;
+        if (v && idx < inputs.length - 1) {
+          inputs[idx + 1].focus();
+        }
+        // if all filled
+        const all = inputs.map(i => i.value.trim()).join('');
+        if (all.length === inputs.length) {
+          blurOtpInputs();
+          setTimeout(() => { verifyOtpSubmit(); }, 120);
+        }
+      });
+      inp.addEventListener('keydown', (e) => {
+        if (e.key === 'Backspace' && !inp.value && idx > 0) {
+          inputs[idx - 1].focus();
+        }
+      });
+    });
+  }
+
+  // Wire UI and triggers
+  async function wire() {
     const trigger = $(TRIGGER_ID);
     if (trigger) {
       trigger.removeEventListener('click', onTriggerClicked);
       trigger.addEventListener('click', onTriggerClicked);
-      log('Wired trigger', TRIGGER_ID);
-    } else log('Trigger not found:', TRIGGER_ID);
+    } else {
+      log('wire: trigger not found', TRIGGER_ID);
+    }
 
-    const resend = $(MP_RESEND_BTN_ID);
-    if (resend) {
-      resend.removeEventListener('click', onResendClicked);
-      resend.addEventListener('click', onResendClicked);
-      log('Wired resend', MP_RESEND_BTN_ID);
-    } else log('Resend not found:', MP_RESEND_BTN_ID);
+    const resendBtn = $(RESEND_BTN_ID);
+    if (resendBtn) {
+      resendBtn.removeEventListener('click', resendOtpHandler);
+      resendBtn.addEventListener('click', resendOtpHandler);
+    }
 
-    const openEmailBtn = $(MP_OPEN_EMAIL_BTN_ID);
+    const openEmailBtn = $(OPEN_EMAIL_BTN_ID);
     if (openEmailBtn) {
-      openEmailBtn.removeEventListener('click', onOpenEmailClicked);
-      openEmailBtn.addEventListener('click', onOpenEmailClicked);
-      log('Wired open email', MP_OPEN_EMAIL_BTN_ID);
-    } else log('Open email not found:', MP_OPEN_EMAIL_BTN_ID);
+      openEmailBtn.removeEventListener('click', onOpenEmailClick);
+      openEmailBtn.addEventListener('click', onOpenEmailClick);
+    }
 
-    const otpForm = $(MP_OTP_FORM_ID);
-    if (otpForm) {
-      otpForm.removeEventListener('submit', onOtpSubmit);
-      otpForm.addEventListener('submit', onOtpSubmit);
-      log('Wired otp form', MP_OTP_FORM_ID);
-    } else log('OTP form not found:', MP_OTP_FORM_ID);
+    const verifyBtn = $(VERIFY_BTN_ID);
+    if (verifyBtn) {
+      verifyBtn.removeEventListener('click', verifyOtpSubmit);
+      verifyBtn.addEventListener('click', verifyOtpSubmit);
+    }
 
-    // style for shake
-    if (!document.getElementById('__rp_reset_styles')) {
-      const s = document.createElement('style');
-      s.id = '__rp_reset_styles';
-      s.textContent = `
-        .rp-shake { animation: rp-shake 0.5s; }
-        @keyframes rp-shake {
-          0%{ transform: translateX(0) } 20%{ transform: translateX(-6px) } 40%{ transform: translateX(6px) } 60%{ transform: translateX(-4px) } 80%{ transform: translateX(4px) } 100%{ transform: translateX(0) }
-        }
-      `;
-      document.head.appendChild(s);
+    wireOtpInputs();
+
+    // Display full email in modal if element present
+    const fullEmailEl = $(FULL_EMAIL_ID);
+    const maskedEl = $(MASKED_EMAIL_ID);
+    const email = await getUserEmail();
+    if (fullEmailEl && email) {
+      fullEmailEl.textContent = email;
+      if (maskedEl) maskedEl.textContent = email; // show full for dev, you can mask if you want
+    } else if (maskedEl && email) {
+      maskedEl.textContent = email;
+    }
+
+    log('Wired reset trigger to send OTP then open modal. API:', SERVER_RESEND_OTP, SERVER_VERIFY_OTP);
+  }
+
+  // When reset pin button clicked: send resend-otp then open modal
+  async function onTriggerClicked(e) {
+    e.preventDefault();
+    const btn = e.currentTarget;
+    if (!btn) return;
+    if (btn.disabled) return;
+
+    btn.disabled = true;
+    if (!btn.dataset.orig) btn.dataset.orig = btn.textContent;
+    btn.textContent = 'Preparing…';
+
+    const email = await getUserEmail();
+    if (!email) {
+      btn.disabled = false;
+      if (btn.dataset.orig) { btn.textContent = btn.dataset.orig; delete btn.dataset.orig; }
+      alert('Unable to find your account email. For dev, run in console:\n\nlocalStorage.setItem("mockEmail","devtester@example.com");\nwindow.__SERVER_USER_DATA__ = { email: "devtester@example.com" };\n\nThen refresh.');
+      return;
+    }
+
+    // show masked + full email
+    const maskedEl = $(MASKED_EMAIL_ID);
+    const fullEl = $(FULL_EMAIL_ID);
+    try {
+      const parts = email.split('@');
+      if (maskedEl) maskedEl.textContent = (parts.length === 2) ? (parts[0].slice(0,2) + '…@' + parts[1]) : email;
+      if (fullEl) fullEl.textContent = email; // full visible as requested
+    } catch (err){}
+
+    // send resend OTP request
+    try {
+      const { status, body } = await postJson(SERVER_RESEND_OTP, { email });
+      if (status >= 200 && status < 300) {
+        log('resend-otp response', body);
+        // open modal
+        const opened = safeOpenModal(RESET_MODAL_ID);
+        if (!opened) alert('Modal could not be opened automatically. Check console.');
+        // start resend countdown
+        startResendCountdown(60);
+      } else {
+        const errMsg = body?.error?.message || body?.message || 'Failed to send OTP';
+        alert('Resend OTP failed: ' + errMsg);
+      }
+    } catch (err) {
+      console.error('Failed to call resend otp', err);
+      alert('Failed to send OTP. See console for details.');
+    } finally {
+      btn.disabled = false;
+      if (btn.dataset.orig) { btn.textContent = btn.dataset.orig; delete btn.dataset.orig; }
     }
   }
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire); else wire();
+  // open email click handler
+  async function onOpenEmailClick(e) {
+    e.preventDefault();
+    const email = await getUserEmail();
+    openEmailClient(email);
+  }
 
-  // expose helpers for testing
-  window.__rp_reset = window.__rp_reset || {};
-  Object.assign(window.__rp_reset, {
-    wire,
-    openModal: () => openModal(RESET_MODAL_ID),
-    closeModal: () => closeModal(RESET_MODAL_ID),
-    startResendTimer,
-    stopResendTimer,
+  // If DOM is ready, wire up
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', wire);
+  } else {
+    wire();
+  }
+
+  // Expose debug helpers
+  window.__rp_wire_debug = {
     getUserEmail,
-    setEmailForDev: (email) => { cachedEmail = email; localStorage.setItem('mockEmail', email); },
-    endpoints: ENDPOINTS,
-    detectedNotifier: detectedNotifier ? detectedNotifier.name : null
-  });
+    safeOpenModal,
+    postJson,
+    API_BASE,
+    SERVER_RESEND_OTP,
+    SERVER_VERIFY_OTP,
+    openEmailClient,
+    verifyOtpSubmit
+  };
 
-  log('rp-reset-v4 loaded', { endpoints: ENDPOINTS, notifier: window.__rp_reset.detectedNotifier });
-})();
+})(); // rpWireResetFlow_v4
