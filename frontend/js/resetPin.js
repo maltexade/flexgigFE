@@ -1,29 +1,39 @@
-// resetPin.js  — rpWireResetFlow_v4
+/* resetPin.js — full file
+   - Sends correct payload { email, token } to /auth/verify-otp
+   - Debuggable request/response logging
+   - Auto-blur after entering 6 digits
+   - Resend timer + open-email improved behavior
+   - Expects modal with id="resetPinModal", OTP input(s) with class "mp-otp-input" (single input OK),
+     masked email container id="mp-masked-email" and full-email container id="mp-full-email"
+*/
+
 (function rpWireResetFlow_v4(){
   'use strict';
 
   const DEBUG = true;
-  const log = (...a) => { if (DEBUG) console.debug('[RP-WIRE-v4]', ...a); };
+  const log = (...args) => { if (DEBUG) console.debug('[RP-WIRE-v4]', ...args); };
 
-  // IDs used in your HTML (do not change unless you changed HTML)
-  const TRIGGER_ID = 'resetPinBtn';
-  const RESET_MODAL_ID = 'resetPinModal';
+  // IDs / selectors used in your HTML
+  const TRIGGER_ID = 'resetPinBtn';       // Button that starts flow
+  const RESET_MODAL_ID = 'resetPinModal'; // Reset modal container
   const MASKED_EMAIL_ID = 'mp-masked-email';
-  const OTP_INPUT_ID = 'mp-otp-input';
-  const RESEND_BTN_ID = 'mp-resend-btn';
+  const FULL_EMAIL_ID = 'mp-full-email';  // new — element to show full email (create in modal)
+  const OTP_INPUT_SELECTOR = '.mp-otp-input'; // either single input or inputs
+  const RESEND_BTN_ID = 'mp-resend-otp';
   const OPEN_EMAIL_BTN_ID = 'mp-open-email-btn';
-  const VERIFY_BTN_ID = 'mp-reset-btn';
-  const OTP_FORM_ID = 'mp-otp-form';
+  const VERIFY_BTN_ID = 'mp-verify-otp-btn';
 
-  // API base (must be set on window)
-  const API_BASE = (window.__SEC_API_BASE || '').replace(/\/$/, '');
+  // API base
+  const API_BASE = (window.__SEC_API_BASE || '').replace(/\/$/, '') || '';
   const SERVER_RESEND_OTP = API_BASE ? `${API_BASE}/auth/resend-otp` : '/auth/resend-otp';
   const SERVER_VERIFY_OTP = API_BASE ? `${API_BASE}/auth/verify-otp` : '/auth/verify-otp';
 
-  // small element helper
+  // Utility short-hands
   const $ = id => document.getElementById(id);
+  const qs = sel => document.querySelector(sel);
+  const qsa = sel => Array.from(document.querySelectorAll(sel));
 
-  // --------- Dev fallback keys ----------
+  // Dev fallback keys
   function getDevEmailFallback() {
     return localStorage.getItem('mockEmail') ||
            localStorage.getItem('__mock_email') ||
@@ -31,26 +41,25 @@
            null;
   }
 
-  // --------- Get user email (tries dashboard.getSession, window injection, localStorage) ----------
+  // Prefer dashboard.getSession if available; otherwise fallbacks
   async function getUserEmail() {
     try {
-      // Try getSession exposed by dashboard (if available)
-      const gs = window.getSession || (window.dashboard && window.dashboard.getSession) || null;
+      // Prefer a global getSession if available
+      const gs = window.getSession || (window.dashboard && window.dashboard.getSession) || window.getSessionFromDashboard;
       if (typeof gs === 'function') {
         try {
           log('getUserEmail: calling getSession()');
           const session = await gs();
-          log('getUserEmail: getSession() returned', session);
+          log('getUserEmail: getSession() result', session);
           if (session && session.email) return session.email;
           if (session && session.user && session.user.email) return session.user.email;
-          if (session && session.data && session.data.email) return session.data.email;
           if (session && session.data && session.data.user && session.data.user.email) return session.data.user.email;
         } catch (err) {
-          log('getUserEmail: getSession threw, falling back', err);
+          log('getUserEmail: getSession() threw, falling back', err);
         }
       }
 
-      // page-injected server data
+      // Next fallback: server-injected global
       if (window.__SERVER_USER_DATA__ && window.__SERVER_USER_DATA__.email) {
         log('getUserEmail: using window.__SERVER_USER_DATA__');
         return window.__SERVER_USER_DATA__.email;
@@ -59,7 +68,7 @@
       // localStorage dev fallback
       const fb = getDevEmailFallback();
       if (fb) {
-        log('getUserEmail: using localStorage fallback');
+        log('getUserEmail: using localStorage fallback', fb);
         return fb;
       }
 
@@ -71,53 +80,65 @@
     }
   }
 
-  // --------- POST JSON helper with debug ----------
-  async function postJsonDebug(url, data, opts = {}) {
-    log('[postJsonDebug] Request ➜', url);
-    log('URL:', url);
-    log('Method: POST');
-    log('Credentials:', opts.credentials || 'default');
-    log('Payload:', data);
+  // Enhanced fetch wrapper with debug info. returns parsed JSON or throws.
+  async function postJson(url, data, opts = {}) {
+    const debugTag = '[postJsonDebug]';
+    const method = opts.method || 'POST';
+    const credentials = opts.credentials ?? 'include'; // include cookies by default
+    console.debug(`${debugTag} Request ➜`, url);
+    console.debug(`${debugTag} URL:`, url);
+    console.debug(`${debugTag} Method:`, method);
+    console.debug(`${debugTag} Credentials:`, credentials);
+    console.debug(`${debugTag} Payload:`, data);
 
     const res = await fetch(url, {
-      method: 'POST',
-      credentials: opts.credentials || 'same-origin',
+      method,
+      credentials,
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify(data),
+      body: JSON.stringify(data)
     });
 
-    const text = await res.text();
-    let parsed = text;
-    try { parsed = JSON.parse(text); } catch(e) { /* keep text */ }
+    const status = res.status;
+    const headers = {};
+    res.headers.forEach((v,k) => headers[k] = v);
 
-    log('[postJsonDebug] Response ◀', res.status, '—', url);
-    log('Status:', res.status);
-    log('Headers:');
-    // iterate headers for debug
+    let bodyText = '';
     try {
-      for (const [k,v] of res.headers.entries()) {
-        log(`   ${k} : ${v}`);
-      }
-    } catch(e){}
+      bodyText = await res.text();
+    } catch(e) {
+      bodyText = '<no body>';
+    }
 
-    log('Body:', parsed);
-    return { status: res.status, ok: res.ok, body: parsed, rawText: text };
+    console.debug(`${debugTag} Response ◀ ${status}  — ${url}`);
+    console.debug(`${debugTag} Status:`, status);
+    console.debug(`${debugTag} Headers:`, headers);
+    console.debug(`${debugTag} Body:`, bodyText);
+
+    const contentType = headers['content-type'] || '';
+    if (contentType.includes('application/json')) {
+      try {
+        return { status, body: JSON.parse(bodyText), headers };
+      } catch (e) {
+        return { status, body: bodyText, headers };
+      }
+    }
+    return { status, body: bodyText, headers };
   }
 
-  // --------- Safe modal open (ModalManager preferred) ----------
+  // Show modal (tries ModalManager then fallback)
   function safeOpenModal(modalId) {
     const modalEl = $(modalId);
     if (!modalEl) {
       log('safeOpenModal: modal element not found', modalId);
       return false;
     }
+
     try {
       if (window.ModalManager && typeof window.ModalManager.openModal === 'function') {
         log('safeOpenModal: calling ModalManager.openModal', modalId);
         window.ModalManager.openModal(modalId);
         return true;
       }
-      log('safeOpenModal: ModalManager not available, falling back to DOM show');
     } catch (e) {
       log('safeOpenModal: ModalManager.openModal threw', e);
     }
@@ -127,7 +148,8 @@
       modalEl.classList.remove('hidden');
       modalEl.style.display = modalEl.dataset.hasPullHandle === 'true' ? 'block' : 'flex';
       modalEl.setAttribute('aria-hidden', 'false');
-      modalEl.style.zIndex = 20000; // ensure on top
+      // bring to front a bit
+      modalEl.style.zIndex = 20000;
       modalEl.dispatchEvent(new CustomEvent('modal:opened', { bubbles: true }));
       log('safeOpenModal: fallback shown via DOM for', modalId);
       return true;
@@ -137,17 +159,49 @@
     }
   }
 
-  // --------- Resend timer logic ----------
+  // Close modal (tries ModalManager then fallback)
+  function safeCloseModal(modalId) {
+    try {
+      if (window.ModalManager && typeof window.ModalManager.closeModal === 'function') {
+        window.ModalManager.closeModal(modalId);
+        return;
+      }
+    } catch (e) { /* ignore */ }
+    const modalEl = $(modalId);
+    if (!modalEl) return;
+    modalEl.classList.add('hidden');
+    modalEl.style.display = 'none';
+    modalEl.setAttribute('aria-hidden', 'true');
+  }
+
+  // Helpers for OTP UI behavior
+  function getOtpValue() {
+    // If multiple inputs exist, join them; otherwise return single input value
+    const inputs = qsa(OTP_INPUT_SELECTOR);
+    if (inputs.length === 0) return '';
+    if (inputs.length === 1) return inputs[0].value.trim();
+    return inputs.map(i => i.value.trim()).join('');
+  }
+
+  function clearOtpInputs() {
+    qsa(OTP_INPUT_SELECTOR).forEach(i => { i.value = ''; });
+  }
+
+  function blurOtpInputs() {
+    qsa(OTP_INPUT_SELECTOR).forEach(i => { try { i.blur(); } catch(e){} });
+  }
+
+  // Resend timer logic
   let resendTimer = null;
-  function startResendCountdown(seconds = 60) {
+  function startResendCountdown(durationSec = 60) {
     const btn = $(RESEND_BTN_ID);
     if (!btn) return;
-    clearInterval(resendTimer);
-    let remaining = seconds;
+    let remaining = durationSec;
     btn.disabled = true;
     btn.setAttribute('aria-disabled', 'true');
-    btn.textContent = `Resend OTP (${remaining}s)`;
+    btn.textContent = `Resend (${remaining}s)`;
 
+    clearInterval(resendTimer);
     resendTimer = setInterval(() => {
       remaining--;
       if (remaining <= 0) {
@@ -155,311 +209,293 @@
         btn.disabled = false;
         btn.removeAttribute('aria-disabled');
         btn.textContent = 'Resend OTP';
-        return;
+      } else {
+        btn.textContent = `Resend (${remaining}s)`;
       }
-      btn.textContent = `Resend OTP (${remaining}s)`;
     }, 1000);
   }
 
-  // --------- Try open email app (best-effort) ----------
-  function openEmailAppPreferInbox() {
-    // Try to open Gmail app inbox on Android via intent; fallback to Gmail web inbox; final fallback to mailto
-    try {
-      // On Android Chrome: intent URL to open Gmail app (inbox)
-      const intentUrl = 'intent://mail.google.com/#Intent;package=com.google.android.gm;scheme=https;end';
-      window.location.href = intentUrl;
-      // If the above doesn't open (or on desktop) the next lines may still run; open web Gmail as fallback
-      setTimeout(() => {
-        // Desktop / web fallback to Gmail inbox
-        window.open('https://mail.google.com/mail/u/0/#inbox', '_blank');
-      }, 700);
-    } catch (e) {
-      // fallback to mailto (may open compose)
-      window.open('mailto:', '_self');
-    }
-  }
-
-  // --------- Helper: show notification area or alert ----------
-  function showUserMessage(msg, type = 'info') {
-    // Attempt to use your dashboard's notify helper if present
-    try {
-      if (window.notify) {
-        window.notify({ message: msg, type });
-        return;
-      }
-      if (window.__notify) {
-        window.__notify(msg, type);
-        return;
-      }
-    } catch (e) {}
-    // fallback
-    if (type === 'error') alert(`Error: ${msg}`);
-    else alert(msg);
-  }
-
-  // --------- Wire OTP form submit (VERIFY OTP) ----------
-  async function onOtpSubmit(e) {
-    e.preventDefault();
-    const form = e.currentTarget;
-    const otpInput = $(OTP_INPUT_ID);
-    if (!otpInput) { log('onOtpSubmit: otp input missing'); return; }
-    const otp = (otpInput.value || '').trim();
-    if (!otp || otp.length < 4) {
-      showUserMessage('Please enter the 6-digit OTP sent to your email', 'error');
-      return;
-    }
-
-    // get email (we should have it prefilled when resend was called)
-    let email = $(MASKED_EMAIL_ID)?.dataset?.fullEmail || '';
+  // "Open email" action — open Gmail inbox for gmail addresses, fallback to mailto:
+  function openEmailClient(email) {
     if (!email) {
-      email = await getUserEmail();
-    }
-    if (!email) {
-      showUserMessage('Unable to find your account email. Please refresh and try again.', 'error');
+      alert('No email known for this account.');
       return;
     }
-
-    // prepare payload matching server: { email, token }
-    const payload = { email, token: otp };
-
-    // debug / send
-    let resp;
-    try {
-      resp = await postJsonDebug(SERVER_VERIFY_OTP, payload, { credentials: 'include' });
-    } catch (err) {
-      console.error('onOtpSubmit: network error verifying OTP', err);
-      showUserMessage('Network error while verifying OTP. Check console.', 'error');
+    const domain = (email.split('@')[1] || '').toLowerCase();
+    if (domain === 'gmail.com' || domain.endsWith('googlemail.com')) {
+      // open Gmail web inbox
+      window.open('https://mail.google.com/mail/u/0/#inbox', '_blank');
       return;
     }
-
-    // handle server response
-    if (!resp.ok) {
-      // best-effort display error message from server body
-      const body = resp.body || {};
-      let msg = 'OTP verification failed';
-      if (body && body.error && body.error.message) msg = body.error.message;
-      else if (body && body.message) msg = body.message;
-      log('verify-otp failed', resp);
-      showUserMessage(msg, 'error');
-      return;
-    }
-
-    // success -> server probably returned user session or status
-    log('verify-otp success', resp.body);
-    showUserMessage('OTP verified — you may now reset your PIN.', 'info');
-
-    // blur OTP input to close keyboard on mobile
-    try { otpInput.blur(); } catch(e){}
-
-    // optionally close modal or proceed to PIN reset UI (you said next step is reset-pin button)
-    // Here we leave modal open so user can press Reset PIN; you can close if desired:
-    // safeCloseModal(RESET_MODAL_ID) or window.ModalManager.closeModal(...)
+    // fallback to mailto (will open compose; reliably opening inbox is not possible cross-platform)
+    window.location.href = `mailto:${encodeURIComponent(email)}`;
   }
 
-  // --------- OTP input handler (auto blur on full length) ----------
-  function otpInputHandler(e) {
-    const el = e.currentTarget;
-    const v = el.value || '';
-    const max = parseInt(el.getAttribute('maxlength') || '6', 10) || 6;
-    // strip non-digits
-    el.value = (v.replace(/[^\d]/g,'')).slice(0, max);
-    if (el.value.length >= max) {
-      // close keyboard on mobile by blurring
-      try { el.blur(); } catch(e){}
-      // optionally auto-submit form
-      const form = $(OTP_FORM_ID);
-      if (form) {
-        // small delay so user sees last digit
-        setTimeout(()=> form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true })), 150);
-      }
-    }
-  }
-
-  // --------- Resend button click ----------
-  async function onResendClicked(e) {
-    e.preventDefault();
-    const btn = e.currentTarget;
-    if (!btn || btn.disabled) return;
-
-    // get email
-    const maskedEl = $(MASKED_EMAIL_ID);
-    let email = maskedEl?.dataset?.fullEmail || '';
-    if (!email) email = await getUserEmail();
-    if (!email) {
-      showUserMessage('Unable to find email for resend. For dev: set localStorage mockEmail then refresh.', 'error');
-      return;
-    }
-
-    // visual feedback
-    btn.disabled = true;
-    btn.setAttribute('aria-disabled', 'true');
-    btn.textContent = 'Sending…';
-
-    // call resend
-    let resp;
-    try {
-      resp = await postJsonDebug(SERVER_RESEND_OTP, { email }, { credentials: 'include' });
-    } catch (err) {
-      console.error('Resend OTP network error', err);
-      showUserMessage('Network error. See console.', 'error');
-      btn.disabled = false;
-      btn.removeAttribute('aria-disabled');
-      btn.textContent = 'Resend OTP';
-      return;
-    }
-
-    if (!resp.ok) {
-      log('resend-otp failed', resp);
-      const body = resp.body || {};
-      const msg = (body && body.error && body.error.message) ? body.error.message : 'Failed to resend OTP';
-      showUserMessage(msg, 'error');
-      btn.disabled = false;
-      btn.removeAttribute('aria-disabled');
-      btn.textContent = 'Resend OTP';
-      return;
-    }
-
-    // success -> start countdown
-    startResendCountdown(60);
-    showUserMessage('OTP resent to your email', 'info');
-    // store full email into masked element dataset so verify will use the same
-    if (maskedEl) maskedEl.dataset.fullEmail = email;
-  }
-
-  // --------- Open Email App handler ----------
-  function onOpenEmailClicked(e) {
-    e.preventDefault();
-    openEmailAppPreferInbox();
-  }
-
-  // --------- Trigger click (Reset now) ----------
-  async function onTriggerClicked(e) {
-    e.preventDefault();
-    const btn = e.currentTarget;
-    if (!btn || btn.disabled) return;
-
-    setButtonLoading(btn, true, 'Preparing…');
-
-    // obtain email
+  // OTP verify handler — sends { email, token } as server expects
+  async function verifyOtpSubmit() {
     const email = await getUserEmail();
     if (!email) {
-      setButtonLoading(btn, false);
-      alert('Unable to find your account email. For dev, run in console:\n\nlocalStorage.setItem("mockEmail","devtester@example.com");\nwindow.__SERVER_USER_DATA__ = { email: "devtester@example.com" };\n\nThen refresh.');
+      alert('No email detected. Please login or set mockEmail in localStorage for dev.');
       return;
     }
 
-    // show the email plainly (you asked to be fully visible)
-    const maskedEl = $(MASKED_EMAIL_ID);
-    if (maskedEl) {
-      maskedEl.textContent = email;
-      maskedEl.dataset.fullEmail = email;
+    const token = getOtpValue();
+    if (!token || token.length < 4) {
+      // small guard
+      alert('Please enter the 6-digit OTP.');
+      return;
     }
 
-    setButtonLoading(btn, true, 'Sending OTP…');
+    // show some UI state
+    const verifyBtn = $(VERIFY_BTN_ID);
+    if (verifyBtn) {
+      verifyBtn.disabled = true;
+      verifyBtn.dataset.orig = verifyBtn.textContent;
+      verifyBtn.textContent = 'Verifying…';
+    }
 
-    // call resend endpoint
-    let resp;
     try {
-      resp = await postJsonDebug(SERVER_RESEND_OTP, { email }, { credentials: 'include' });
+      const { status, body } = await postJson(SERVER_VERIFY_OTP, { email, token });
+      if (status >= 200 && status < 300) {
+        log('verifyOtp: success', body);
+        // call app-specific success flows — typically server returns token + user
+        alert('OTP verified — continuing login flow.');
+        // optional: close modal
+        safeCloseModal(RESET_MODAL_ID);
+        clearOtpInputs();
+        // TODO: process returned token/body as your app expects
+      } else {
+        // server returned error payload — show helpful message
+        const errMsg = (body && body.error && body.error.message) ? body.error.message : (body && body.message) ? body.message : 'OTP verify failed';
+        console.warn('verifyOtp error', status, body);
+        if (status === 400 || status === 403) {
+          // If Supabase returns otp_expired, show resend suggestion
+          const errCode = body?.error?.code || body?.error?.code || null;
+          if (errCode === 'otp_expired' || errMsg.toLowerCase().includes('expired')) {
+            alert('OTP expired. Please resend OTP and try again.');
+          } else {
+            alert('OTP verification failed: ' + errMsg);
+          }
+        } else {
+          alert('OTP verification failed: ' + errMsg);
+        }
+      }
     } catch (err) {
-      console.error('resend-otp network error', err);
-      showUserMessage('Network error sending OTP. See console.', 'error');
-      setButtonLoading(btn, false);
-      return;
-    }
-
-    if (!resp.ok) {
-      log('resend-otp failed', resp);
-      const body = resp.body || {};
-      const msg = (body && body.error && body.error.message) ? body.error.message : 'Failed to send OTP';
-      showUserMessage(msg, 'error');
-      setButtonLoading(btn, false);
-      return;
-    }
-
-    // open modal and start countdown
-    const opened = safeOpenModal(RESET_MODAL_ID);
-    if (!opened) {
-      showUserMessage('Could not open reset modal automatically — check console.', 'error');
-      setButtonLoading(btn, false);
-      return;
-    }
-
-    startResendCountdown(60);
-    setButtonLoading(btn, false);
-    showUserMessage('OTP sent. Check your email.', 'info');
-  }
-
-  // small helper to show loading text on trigger button
-  function setButtonLoading(buttonEl, on, text) {
-    if (!buttonEl) return;
-    if (on) {
-      if (!buttonEl.dataset.origText) buttonEl.dataset.origText = buttonEl.textContent;
-      buttonEl.disabled = true;
-      buttonEl.classList.add('disabled');
-      buttonEl.textContent = text || 'Working…';
-    } else {
-      buttonEl.disabled = false;
-      buttonEl.classList.remove('disabled');
-      if (buttonEl.dataset.origText) { buttonEl.textContent = buttonEl.dataset.origText; delete buttonEl.dataset.origText; }
+      console.error('verifyOtpSubmit error', err);
+      alert('Network error verifying OTP — check console for details.');
+    } finally {
+      if (verifyBtn) {
+        verifyBtn.disabled = false;
+        if (verifyBtn.dataset.orig) { verifyBtn.textContent = verifyBtn.dataset.orig; delete verifyBtn.dataset.orig; }
+      }
     }
   }
 
-  // ----- Wire up handlers when DOM ready -----
-  function wire() {
-    // trigger (Reset now inside securityPinModal)
+  // Resend OTP handler
+  async function resendOtpHandler() {
+    const btn = $(RESEND_BTN_ID);
+    if (!btn || btn.disabled) return;
+
+    const email = await getUserEmail();
+    if (!email) {
+      alert('Unable to find your account email. For dev, run in console:\nlocalStorage.setItem("mockEmail","dev@example.com");\nwindow.__SERVER_USER_DATA__ = { email: "dev@example.com" };');
+      return;
+    }
+
+    btn.disabled = true;
+    btn.dataset.orig = btn.textContent;
+    btn.textContent = 'Sending…';
+
+    try {
+      const { status, body } = await postJson(SERVER_RESEND_OTP, { email });
+      if (status >= 200 && status < 300) {
+        log('resend-otp success', body);
+        startResendCountdown(60); // start 60s cooldown
+        alert('OTP resent to ' + email);
+      } else {
+        const errMsg = body?.error?.message || body?.message || 'Failed to resend OTP';
+        console.warn('resend-otp failed', status, body);
+        alert('Resend failed: ' + errMsg);
+        btn.disabled = false;
+        if (btn.dataset.orig) { btn.textContent = btn.dataset.orig; delete btn.dataset.orig; }
+      }
+    } catch (err) {
+      console.error('resendOtpHandler error', err);
+      alert('Network error sending OTP — check console for details.');
+      btn.disabled = false;
+      if (btn.dataset.orig) { btn.textContent = btn.dataset.orig; delete btn.dataset.orig; }
+    }
+  }
+
+  // Wire OTP input handlers for auto-blur and auto-submit when 6 digits entered
+  function wireOtpInputs() {
+    const inputs = qsa(OTP_INPUT_SELECTOR);
+    if (!inputs || inputs.length === 0) {
+      log('wireOtpInputs: no OTP inputs found for selector', OTP_INPUT_SELECTOR);
+      return;
+    }
+
+    // If a single input (most common), watch value length
+    if (inputs.length === 1) {
+      const input = inputs[0];
+      input.setAttribute('inputmode', 'numeric');
+      input.setAttribute('maxlength', '6');
+      input.addEventListener('input', async (e) => {
+        const v = input.value.trim();
+        // show full email if masked element exists
+        if (v.length >= 6) {
+          // auto-blur to close keyboard
+          try { input.blur(); } catch(e) {}
+          // auto-submit (short delay to let keyboard close)
+          setTimeout(() => { verifyOtpSubmit(); }, 120);
+        }
+      });
+      return;
+    }
+
+    // Multiple inputs: when all filled, join and submit
+    inputs.forEach((inp, idx) => {
+      inp.setAttribute('inputmode', 'numeric');
+      inp.setAttribute('maxlength', '1');
+      inp.addEventListener('input', (e) => {
+        const v = inp.value;
+        if (v && idx < inputs.length - 1) {
+          inputs[idx + 1].focus();
+        }
+        // if all filled
+        const all = inputs.map(i => i.value.trim()).join('');
+        if (all.length === inputs.length) {
+          blurOtpInputs();
+          setTimeout(() => { verifyOtpSubmit(); }, 120);
+        }
+      });
+      inp.addEventListener('keydown', (e) => {
+        if (e.key === 'Backspace' && !inp.value && idx > 0) {
+          inputs[idx - 1].focus();
+        }
+      });
+    });
+  }
+
+  // Wire UI and triggers
+  async function wire() {
     const trigger = $(TRIGGER_ID);
     if (trigger) {
       trigger.removeEventListener('click', onTriggerClicked);
       trigger.addEventListener('click', onTriggerClicked);
-      log('Wired reset trigger to send OTP then open modal. API:', SERVER_RESEND_OTP);
     } else {
-      log('Trigger not found in DOM:', TRIGGER_ID);
+      log('wire: trigger not found', TRIGGER_ID);
     }
 
-    // resend
     const resendBtn = $(RESEND_BTN_ID);
     if (resendBtn) {
-      resendBtn.removeEventListener('click', onResendClicked);
-      resendBtn.addEventListener('click', onResendClicked);
+      resendBtn.removeEventListener('click', resendOtpHandler);
+      resendBtn.addEventListener('click', resendOtpHandler);
     }
 
-    // open email
     const openEmailBtn = $(OPEN_EMAIL_BTN_ID);
     if (openEmailBtn) {
-      openEmailBtn.removeEventListener('click', onOpenEmailClicked);
-      openEmailBtn.addEventListener('click', onOpenEmailClicked);
+      openEmailBtn.removeEventListener('click', onOpenEmailClick);
+      openEmailBtn.addEventListener('click', onOpenEmailClick);
     }
 
-    // otp input
-    const otpInput = $(OTP_INPUT_ID);
-    if (otpInput) {
-      otpInput.removeEventListener('input', otpInputHandler);
-      otpInput.addEventListener('input', otpInputHandler);
+    const verifyBtn = $(VERIFY_BTN_ID);
+    if (verifyBtn) {
+      verifyBtn.removeEventListener('click', verifyOtpSubmit);
+      verifyBtn.addEventListener('click', verifyOtpSubmit);
     }
 
-    // otp form
-    const otpForm = $(OTP_FORM_ID);
-    if (otpForm) {
-      otpForm.removeEventListener('submit', onOtpSubmit);
-      otpForm.addEventListener('submit', onOtpSubmit);
+    wireOtpInputs();
+
+    // Display full email in modal if element present
+    const fullEmailEl = $(FULL_EMAIL_ID);
+    const maskedEl = $(MASKED_EMAIL_ID);
+    const email = await getUserEmail();
+    if (fullEmailEl && email) {
+      fullEmailEl.textContent = email;
+      if (maskedEl) maskedEl.textContent = email; // show full for dev, you can mask if you want
+    } else if (maskedEl && email) {
+      maskedEl.textContent = email;
     }
 
-    log('resetPin: wired UI');
+    log('Wired reset trigger to send OTP then open modal. API:', SERVER_RESEND_OTP, SERVER_VERIFY_OTP);
   }
 
-  // auto-wire on DOM ready
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire);
-  else wire();
+  // When reset pin button clicked: send resend-otp then open modal
+  async function onTriggerClicked(e) {
+    e.preventDefault();
+    const btn = e.currentTarget;
+    if (!btn) return;
+    if (btn.disabled) return;
 
-  // expose for debugging
-  window.__rp_wire_v4 = {
+    btn.disabled = true;
+    if (!btn.dataset.orig) btn.dataset.orig = btn.textContent;
+    btn.textContent = 'Preparing…';
+
+    const email = await getUserEmail();
+    if (!email) {
+      btn.disabled = false;
+      if (btn.dataset.orig) { btn.textContent = btn.dataset.orig; delete btn.dataset.orig; }
+      alert('Unable to find your account email. For dev, run in console:\n\nlocalStorage.setItem("mockEmail","devtester@example.com");\nwindow.__SERVER_USER_DATA__ = { email: "devtester@example.com" };\n\nThen refresh.');
+      return;
+    }
+
+    // show masked + full email
+    const maskedEl = $(MASKED_EMAIL_ID);
+    const fullEl = $(FULL_EMAIL_ID);
+    try {
+      const parts = email.split('@');
+      if (maskedEl) maskedEl.textContent = (parts.length === 2) ? (parts[0].slice(0,2) + '…@' + parts[1]) : email;
+      if (fullEl) fullEl.textContent = email; // full visible as requested
+    } catch (err){}
+
+    // send resend OTP request
+    try {
+      const { status, body } = await postJson(SERVER_RESEND_OTP, { email });
+      if (status >= 200 && status < 300) {
+        log('resend-otp response', body);
+        // open modal
+        const opened = safeOpenModal(RESET_MODAL_ID);
+        if (!opened) alert('Modal could not be opened automatically. Check console.');
+        // start resend countdown
+        startResendCountdown(60);
+      } else {
+        const errMsg = body?.error?.message || body?.message || 'Failed to send OTP';
+        alert('Resend OTP failed: ' + errMsg);
+      }
+    } catch (err) {
+      console.error('Failed to call resend otp', err);
+      alert('Failed to send OTP. See console for details.');
+    } finally {
+      btn.disabled = false;
+      if (btn.dataset.orig) { btn.textContent = btn.dataset.orig; delete btn.dataset.orig; }
+    }
+  }
+
+  // open email click handler
+  async function onOpenEmailClick(e) {
+    e.preventDefault();
+    const email = await getUserEmail();
+    openEmailClient(email);
+  }
+
+  // If DOM is ready, wire up
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', wire);
+  } else {
+    wire();
+  }
+
+  // Expose debug helpers
+  window.__rp_wire_debug = {
     getUserEmail,
     safeOpenModal,
-    postJsonDebug,
-    startResendCountdown,
+    postJson,
+    API_BASE,
     SERVER_RESEND_OTP,
-    SERVER_VERIFY_OTP
+    SERVER_VERIFY_OTP,
+    openEmailClient,
+    verifyOtpSubmit
   };
 
 })(); // rpWireResetFlow_v4
