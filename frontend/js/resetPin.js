@@ -1,57 +1,116 @@
-/* resetPin.js — updated with verbose logs, provider inbox handling, correct IDs
-   - Matches HTML IDs: mp-resend-btn, mp-reset-btn, mp-otp-input (class .mp-otp-input)
-   - Opens pinModal after successful verification
-   - Provider-aware "Open Email" behavior (gmail/yahoo/outlook/icloud)
-   - Heavy console logging at each step (console.log + console.debug)
+/* resetPin.js — v6
+   - Replaces alerts with notify() (prefers existing app toast libs, falls back to inline toast)
+   - Listens for 'pin-status-changed' and closes all modals (ModalManager.closeAll()) on successful PIN set
+   - Extra debug logs around pin completion & modal stack cleanup
+   - Retains previous provider inbox handling, resend timer, input wiring, and robust fetch
 */
-(function rpWireResetFlow_v5(){
+(function rpWireResetFlow_v6(){
   'use strict';
 
-  // ---- CONFIG ----
+  // ---- CONFIG / LOGGING ----
   const DEBUG = true;
-  const log = (...args) => { if (DEBUG) console.log('[RP-WIRE-v5]', ...args); };
-  const dbg = (...args) => { if (DEBUG) console.debug('[RP-WIRE-v5]', ...args); };
-  const warn = (...args) => { if (DEBUG) console.warn('[RP-WIRE-v5]', ...args); };
-  const err = (...args) => { if (DEBUG) console.error('[RP-WIRE-v5]', ...args); };
+  const tag = '[RP-WIRE-v6]';
+  const log = (...args) => { if (DEBUG) console.log(tag, ...args); };
+  const dbg = (...args) => { if (DEBUG) console.debug(tag, ...args); };
+  const warn = (...args) => { if (DEBUG) console.warn(tag, ...args); };
+  const err = (...args) => { if (DEBUG) console.error(tag, ...args); };
 
-  if (window.__rp_wire_reset_v5_installed) {
-    log('rpWireResetFlow_v5 already installed — wiring refresh');
+  if (window.__rp_wire_reset_v6_installed) {
+    log('already installed — rewire requested');
     if (window.__rp_wire_debug && typeof window.__rp_wire_debug.rewire === 'function') {
-      try { window.__rp_wire_debug.rewire(); } catch(e){ dbg('rewire threw', e); }
+      try { window.__rp_wire_debug.rewire(); } catch(e){ dbg('rewire error', e); }
     }
     return;
   }
-  window.__rp_wire_reset_v5_installed = true;
+  window.__rp_wire_reset_v6_installed = true;
 
-  // ---- Selectors (kept in sync with your HTML) ----
-  const TRIGGER_ID = 'resetPinBtn';          // "Reset now" button
-  const RESET_MODAL_ID = 'resetPinModal';    // reset modal id
-  const MASKED_EMAIL_ID = 'mp-masked-email'; // visible element in your modal
-  const FULL_EMAIL_ID = 'mp-full-email';     // optional element if you add it later
-  const OTP_INPUT_SELECTOR = '.mp-otp-input';// single input (class) or several inputs
-  const RESEND_BTN_ID = 'mp-resend-btn';     // matches your HTML id
+  // ---- Selectors & Endpoints ----
+  const TRIGGER_ID = 'resetPinBtn';
+  const RESET_MODAL_ID = 'resetPinModal';
+  const MASKED_EMAIL_ID = 'mp-masked-email';
+  const FULL_EMAIL_ID = 'mp-full-email';
+  const OTP_INPUT_SELECTOR = '.mp-otp-input';
+  const RESEND_BTN_ID = 'mp-resend-btn';
   const OPEN_EMAIL_BTN_ID = 'mp-open-email-btn';
-  const VERIFY_BTN_ID = 'mp-reset-btn';      // your "Reset PIN" submit button
-  const OTP_FORM_ID = 'mp-otp-form';         // OTP form id
+  const VERIFY_BTN_ID = 'mp-reset-btn';
+  const OTP_FORM_ID = 'mp-otp-form';
 
-  // ---- API endpoints (respect __SEC_API_BASE if present) ----
   const API_BASE = (window.__SEC_API_BASE || '').replace(/\/$/, '') || '';
   const SERVER_RESEND_OTP = API_BASE ? `${API_BASE}/auth/resend-otp` : '/auth/resend-otp';
   const SERVER_VERIFY_OTP = API_BASE ? `${API_BASE}/auth/verify-otp` : '/auth/verify-otp';
 
-  // ---- Utilities ----
   const $ = id => document.getElementById(id);
   const qsa = sel => Array.from(document.querySelectorAll(sel));
   window.__rp_handlers = window.__rp_handlers || {};
 
-  function getDevEmailFallback() {
-    return localStorage.getItem('mockEmail') ||
-           localStorage.getItem('__mock_email') ||
-           localStorage.getItem('dev_email') ||
-           null;
+  // ---- Notification helper (prefers app toasts, falls back to small inline toasts) ----
+  function notify({ type = 'info', title = '', message = '', duration = 4500 } = {}) {
+    dbg('notify:', { type, title, message, duration });
+
+    // 1) prefer global app-level notifiers if present
+    try {
+      if (typeof window.notify === 'function') { window.notify(type, message, { title, timeout: duration }); return; }
+      if (typeof window.appNotify === 'function') { window.appNotify({ type, title, message, duration }); return; }
+      if (window.toastr && typeof window.toastr[type] === 'function') { window.toastr[type](message, title); return; }
+      if (window.Toastify && typeof window.Toastify === 'function') { window.Toastify({ text: (title ? title + ' — ' : '') + message, duration }).showToast(); return; }
+      if (window.Notyf && (window._notyf instanceof window.Notyf)) { window._notyf.open({ type, message }); return; }
+    } catch (e) {
+      dbg('notify: app-level notify attempt failed', e);
+    }
+
+    // 2) Try Web Notifications (permission required) — use sparingly
+    try {
+      if (window.Notification && Notification.permission === 'granted') {
+        new Notification(title || 'Notification', { body: message });
+        return;
+      }
+      // If not granted, do not prompt here — fallback to inline toast.
+    } catch (e) {
+      dbg('notify: web Notification attempt failed', e);
+    }
+
+    // 3) Inline toast fallback
+    try {
+      let container = document.getElementById('__rp_toast_container');
+      if (!container) {
+        container = document.createElement('div');
+        container.id = '__rp_toast_container';
+        container.style.cssText = 'position:fixed;top:16px;right:16px;z-index:2147483647;display:flex;flex-direction:column;gap:10px;pointer-events:none;';
+        document.body.appendChild(container);
+      }
+
+      const toast = document.createElement('div');
+      toast.className = '__rp_toast';
+      toast.style.cssText = 'pointer-events:auto;min-width:220px;max-width:380px;padding:10px 14px;border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,0.12);font-family:system-ui,Segoe UI,Roboto,Arial;color:#fff;opacity:0;transform:translateY(-6px);transition:opacity .22s ease,transform .22s ease;';
+      // color by type
+      const bg = type === 'error' ? '#e53935' : type === 'warn' ? '#ffb300' : '#2e7d32';
+      toast.style.background = bg;
+      if (title) {
+        const t = document.createElement('div'); t.style.fontWeight = '600'; t.style.marginBottom = '4px'; t.textContent = title; toast.appendChild(t);
+      }
+      const p = document.createElement('div'); p.style.fontSize = '13px'; p.textContent = message || ''; toast.appendChild(p);
+      container.appendChild(toast);
+      // animate in
+      requestAnimationFrame(() => { toast.style.opacity = '1'; toast.style.transform = 'translateY(0)'; });
+
+      const rm = () => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(-6px)';
+        setTimeout(() => { try { toast.remove(); } catch(_){} }, 220);
+      };
+      setTimeout(rm, duration);
+    } catch (e) {
+      dbg('notify: inline fallback failed', e);
+      // Last-resort: console
+      console.log(tag, 'notify fallback:', title, message);
+    }
   }
 
-  // Attempt to resolve email from known sources
+  // ---- Email resolution helpers ----
+  function getDevEmailFallback() {
+    return localStorage.getItem('mockEmail') || localStorage.getItem('__mock_email') || localStorage.getItem('dev_email') || null;
+  }
+
   async function getUserEmail() {
     log('getUserEmail: resolving user email');
     try {
@@ -63,42 +122,38 @@
       for (const fn of candidates) {
         if (typeof fn === 'function') {
           try {
-            dbg('getUserEmail: calling session provider', fn.name || '(anonymous)');
+            dbg('getUserEmail: calling', fn.name || '(anonymous)');
             const session = await fn();
-            dbg('getUserEmail: session result', session);
-            if (!session) continue;
-            if (session.email) { log('getUserEmail: found email in session.email', session.email); return session.email; }
-            if (session.user && session.user.email) { log('getUserEmail: found email in session.user.email', session.user.email); return session.user.email; }
-            if (session.data && session.data.user && session.data.user.email) { log('getUserEmail: found email in session.data.user.email', session.data.user.email); return session.data.user.email; }
+            dbg('getUserEmail: session', session);
+            if (session && session.email) { log('getUserEmail: found', session.email); return session.email; }
+            if (session && session.user && session.user.email) { log('getUserEmail: found', session.user.email); return session.user.email; }
+            if (session && session.data && session.data.user && session.data.user.email) { log('getUserEmail: found', session.data.user.email); return session.data.user.email; }
           } catch (e) {
-            warn('getUserEmail: session provider threw, continuing', e);
+            dbg('getUserEmail: provider threw', e);
           }
         }
       }
 
       if (window.__SERVER_USER_DATA__ && window.__SERVER_USER_DATA__.email) {
-        log('getUserEmail: found email in window.__SERVER_USER_DATA__', window.__SERVER_USER_DATA__.email);
+        log('getUserEmail: found in __SERVER_USER_DATA__', window.__SERVER_USER_DATA__.email);
         return window.__SERVER_USER_DATA__.email;
       }
 
       const fb = getDevEmailFallback();
-      if (fb) {
-        log('getUserEmail: using localStorage fallback', fb);
-        return fb;
-      }
+      if (fb) { log('getUserEmail: using fallback', fb); return fb; }
 
-      log('getUserEmail: no email found — returning empty string');
+      log('getUserEmail: none found — returning empty string');
       return '';
     } catch (e) {
-      err('getUserEmail: unexpected error', e);
+      err('getUserEmail unexpected error', e);
       return '';
     }
   }
 
-  // Fetch wrapper with robust logging
+  // ---- Fetch wrapper ----
   async function postJson(url, payload = {}, opts = {}) {
-    const tag = '[postJson]';
-    dbg(`${tag} Request`, url, payload);
+    const TAG = '[postJson]';
+    dbg(TAG, 'request', url, payload);
     try {
       const res = await fetch(url, {
         method: opts.method || 'POST',
@@ -106,63 +161,43 @@
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(payload)
       });
-
       const status = res.status;
       const headers = {};
       res.headers.forEach((v,k) => headers[k] = v);
       let text = '';
-      try { text = await res.text(); } catch(e){ text = '<no body>'; }
-      dbg(`${tag} Response status=${status}`, { headers, bodyText: text });
-
+      try { text = await res.text(); } catch(e){ text = '<no-body>'; }
+      dbg(TAG, 'response', { status, headers, bodyText: text });
       const ct = (headers['content-type'] || headers['Content-Type'] || '').toLowerCase();
       if (ct.includes('application/json')) {
-        try {
-          const json = JSON.parse(text);
-          dbg(`${tag} parsed JSON`, json);
-          return { status, body: json, headers };
-        } catch (e) {
-          warn(`${tag} failed to parse JSON — returning text`, e);
-          return { status, body: text, headers };
-        }
+        try { return { status, body: JSON.parse(text), headers }; } catch (e) { return { status, body: text, headers }; }
       }
       return { status, body: text, headers };
     } catch (e) {
-      err(`${tag} network/fetch error`, e);
+      err(TAG, 'network error', e);
       return { status: 0, body: { error: e.message || String(e) }, headers: {} };
     }
   }
 
-  // OTP helpers
+  // ---- OTP helpers ----
   function getOtpValue() {
     const inputs = qsa(OTP_INPUT_SELECTOR);
-    if (!inputs || inputs.length === 0) {
-      dbg('getOtpValue: no inputs found for selector', OTP_INPUT_SELECTOR);
-      return '';
-    }
+    if (!inputs || inputs.length === 0) { dbg('getOtpValue: no inputs'); return ''; }
     if (inputs.length === 1) return inputs[0].value.trim();
     return inputs.map(i => i.value.trim()).join('');
   }
+  function clearOtpInputs(){ qsa(OTP_INPUT_SELECTOR).forEach(i => i.value = ''); dbg('clearOtpInputs'); }
+  function blurOtpInputs(){ qsa(OTP_INPUT_SELECTOR).forEach(i => { try { i.blur(); } catch(e){} }); dbg('blurOtpInputs'); }
 
-  function clearOtpInputs() {
-    qsa(OTP_INPUT_SELECTOR).forEach(i => { i.value = ''; });
-    dbg('clearOtpInputs: cleared');
-  }
-
-  function blurOtpInputs() {
-    qsa(OTP_INPUT_SELECTOR).forEach(i => { try { i.blur(); } catch(e){} });
-    dbg('blurOtpInputs: blurred');
-  }
-
-  // Resend countdown
+  // ---- Resend countdown ----
   let resendTimer = null;
   function startResendCountdown(durationSec = 60) {
     const btn = $(RESEND_BTN_ID);
-    if (!btn) { warn('startResendCountdown: button not found', RESEND_BTN_ID); return; }
-    dbg('startResendCountdown: starting', durationSec);
+    if (!btn) { warn('startResendCountdown: missing button'); return; }
+    dbg('startResendCountdown', durationSec);
     clearInterval(resendTimer);
     let remaining = Math.max(0, parseInt(durationSec, 10) || 60);
     btn.disabled = true;
-    btn.setAttribute('aria-disabled', 'true');
+    btn.setAttribute('aria-disabled','true');
     btn.dataset._origText = btn.dataset._origText || btn.textContent || 'Resend OTP';
     btn.textContent = `Resend (${remaining}s)`;
     resendTimer = setInterval(() => {
@@ -174,170 +209,169 @@
         btn.removeAttribute('aria-disabled');
         btn.textContent = btn.dataset._origText || 'Resend OTP';
         delete btn.dataset._origText;
-        log('startResendCountdown: finished, resend enabled');
+        log('startResendCountdown: finished');
       } else {
         btn.textContent = `Resend (${remaining}s)`;
       }
     }, 1000);
   }
 
-  // Provider-aware "open inbox" (best-effort)
+  // ---- Email client opener ----
   function openEmailClient(email) {
-    log('openEmailClient: trying to open inbox for', email);
-    if (!email) { warn('openEmailClient: no email provided'); alert('No email known for this account.'); return; }
+    log('openEmailClient', email);
+    if (!email) { notify({ type: 'warn', title: 'No email', message: 'No email known for this account.' }); return; }
     const domain = (email.split('@')[1] || '').toLowerCase();
     try {
-      if (domain === 'gmail.com' || domain.endsWith('googlemail.com')) {
-        window.open('https://mail.google.com/mail/u/0/#inbox', '_blank');
-        log('openEmailClient: opened Gmail inbox');
-        return;
-      }
-      if (domain.endsWith('yahoo.com') || domain.endsWith('yahoo.co')) {
-        window.open('https://mail.yahoo.com/d/folders/1', '_blank');
-        log('openEmailClient: opened Yahoo Mail');
-        return;
-      }
-      if (domain.endsWith('outlook.com') || domain.endsWith('hotmail.com') || domain.endsWith('live.com') || domain.endsWith('msn.com')) {
-        window.open('https://outlook.live.com/mail/inbox', '_blank');
-        log('openEmailClient: opened Outlook/Hotmail');
-        return;
-      }
-      if (domain.endsWith('icloud.com') || domain.endsWith('me.com') || domain.endsWith('mac.com')) {
-        window.open('https://www.icloud.com/mail', '_blank');
-        log('openEmailClient: opened iCloud Mail');
-        return;
-      }
-      // Generic fallback: open mailto in a new tab (compose, but better than navigating away)
+      if (domain === 'gmail.com' || domain.endsWith('googlemail.com')) { window.open('https://mail.google.com/mail/u/0/#inbox', '_blank'); return; }
+      if (domain.endsWith('yahoo.com')) { window.open('https://mail.yahoo.com/d/folders/1', '_blank'); return; }
+      if (domain.endsWith('outlook.com') || domain.endsWith('hotmail.com') || domain.endsWith('live.com')) { window.open('https://outlook.live.com/mail/inbox', '_blank'); return; }
+      if (domain.endsWith('icloud.com') || domain.endsWith('me.com')) { window.open('https://www.icloud.com/mail', '_blank'); return; }
       window.open(`mailto:${encodeURIComponent(email)}`, '_blank');
-      log('openEmailClient: fallback mailto opened');
     } catch (e) {
-      err('openEmailClient: error opening provider link', e);
-      // fallback to location change (last resort)
-      try { window.location.href = `mailto:${encodeURIComponent(email)}`; } catch(e2){ err('openEmailClient: fallback navigation also failed', e2); }
+      dbg('openEmailClient fallback', e);
+      try { window.location.href = `mailto:${encodeURIComponent(email)}`; } catch(e2){ dbg('openEmailClient final fallback failed', e2); }
     }
   }
 
-  // --- VERIFY OTP ---
+  // ---- OTP verify handler ----
   async function verifyOtpSubmit(e) {
     if (e && e.preventDefault) e.preventDefault();
     log('verifyOtpSubmit: start');
     const email = await getUserEmail();
-    log('verifyOtpSubmit: resolved email ->', email || '(none)');
+    dbg('verifyOtpSubmit: email', email);
     if (!email) {
-      alert('No email detected. Please login or set mockEmail in localStorage for dev.');
-      warn('verifyOtpSubmit: no email, aborting');
+      notify({ type: 'error', title: 'Email missing', message: 'No email detected. Please login or set mockEmail in localStorage for dev.' });
+      warn('verifyOtpSubmit abort: no email');
       return;
     }
 
     const token = getOtpValue();
-    dbg('verifyOtpSubmit: token raw ->', token);
+    dbg('verifyOtpSubmit token', token);
     if (!token || token.length < 6) {
-      alert('Please enter the 6-digit OTP.');
-      warn('verifyOtpSubmit: token too short', token);
+      notify({ type: 'warn', title: 'Invalid OTP', message: 'Please enter the 6-digit OTP.' });
       return;
     }
 
     const verifyBtn = $(VERIFY_BTN_ID);
-    if (verifyBtn) {
-      verifyBtn.disabled = true;
-      verifyBtn.dataset._origText = verifyBtn.textContent;
-      verifyBtn.textContent = 'Verifying…';
-      dbg('verifyOtpSubmit: verify button disabled and labelled verifying');
-    }
+    if (verifyBtn) { verifyBtn.disabled = true; verifyBtn.dataset._origText = verifyBtn.textContent; verifyBtn.textContent = 'Verifying…'; }
 
     try {
       const { status, body } = await postJson(SERVER_VERIFY_OTP, { email, token });
-      log('verifyOtpSubmit: server responded', status, body);
+      log('verifyOtpSubmit: server', status, body);
       if (status >= 200 && status < 300) {
-        log('verifyOtpSubmit: OTP verified success — opening pin modal and closing reset modal');
-        // open your pin modal (use pinModal as your create PIN UI)
-        const openedPin = (window.ModalManager && typeof window.ModalManager.openModal === 'function')
-          ? (function(){ try { window.ModalManager.openModal('pinModal'); return true; } catch(e){ dbg('ModalManager.openModal(pinModal) threw', e); return false; } })()
-          : (function(){ const el = $('pinModal'); if (el) { el.classList.remove('hidden'); el.style.display = 'flex'; el.setAttribute('aria-hidden','false'); return true; } return false; })();
-
-        if (!openedPin) warn('verifyOtpSubmit: could not open pinModal automatically; check modal id or ModalManager');
-
-        // close reset modal
-        try { if (window.ModalManager && typeof window.ModalManager.closeModal === 'function') window.ModalManager.closeModal(RESET_MODAL_ID); else safeCloseFallback(RESET_MODAL_ID); } catch(e){ dbg('close reset modal threw', e); }
+        notify({ type: 'info', title: 'OTP Verified', message: 'OTP verified. Please create your new PIN.' });
+        // Open pin modal (create-pin). If ModalManager present, use it.
+        let opened = false;
+        if (window.ModalManager && typeof window.ModalManager.openModal === 'function') {
+          try { window.ModalManager.openModal('pinModal'); opened = true; dbg('verifyOtpSubmit: opened pinModal via ModalManager'); } catch(e){ dbg('ModalManager.openModal error', e); }
+        }
+        if (!opened) {
+          const el = $('pinModal');
+          if (el) { el.classList.remove('hidden'); el.style.display = 'flex'; el.setAttribute('aria-hidden','false'); opened = true; dbg('verifyOtpSubmit: opened pinModal via DOM fallback'); }
+        }
+        // Close reset modal if open
+        try { if (window.ModalManager && typeof window.ModalManager.closeModal === 'function') window.ModalManager.closeModal(RESET_MODAL_ID); else { const r = $(RESET_MODAL_ID); if (r) { r.classList.add('hidden'); r.style.display='none'; r.setAttribute('aria-hidden','true'); } } } catch(e){ dbg('closing reset modal failed', e); }
         clearOtpInputs();
-        // Optional: process returned body for tokens etc (log it)
-        dbg('verifyOtpSubmit: success body', body);
+
+        // Setup one-time listener for final pin setup success — close all modals and notify
+        const onPinStatusChanged = (ev) => {
+          dbg('onPinStatusChanged event received', ev && ev.detail);
+          // Optionally check ev.detail for success specifics — we just close all modals to show dashboard
+          try {
+            if (window.ModalManager && typeof window.ModalManager.getOpenModals === 'function') {
+              dbg('onPinStatusChanged: open modals before closeAll ->', window.ModalManager.getOpenModals());
+            }
+            if (window.ModalManager && typeof window.ModalManager.closeAll === 'function') {
+              log('onPinStatusChanged: calling ModalManager.closeAll() to clear modal stack');
+              try { window.ModalManager.closeAll(); } catch(e){ dbg('ModalManager.closeAll threw', e); }
+            } else {
+              // fallback: attempt to close common modals by ID / by DOM
+              log('onPinStatusChanged: ModalManager.closeAll not present — applying DOM fallback to hide known modals');
+              try {
+                const known = ['pinModal','resetPinModal','securityPinModal','securityModal','settingsModal','updateProfileModal'];
+                known.forEach(id => {
+                  const el = document.getElementById(id);
+                  if (el) { el.classList.add('hidden'); el.style.display = 'none'; el.setAttribute('aria-hidden','true'); }
+                });
+                // remove any .modal-backdrop elements
+                document.querySelectorAll('.modal-backdrop').forEach(b => b.remove());
+              } catch(e){ dbg('fallback close all failed', e); }
+            }
+            dbg('onPinStatusChanged: open modals after closeAll ->', window.ModalManager && typeof window.ModalManager.getOpenModals === 'function' ? window.ModalManager.getOpenModals() : '(unknown)');
+          } catch (e) {
+            dbg('onPinStatusChanged: error during close', e);
+          } finally {
+            notify({ type: 'success', title: 'PIN set', message: 'Your new PIN was created — returning to dashboard.' });
+            // remove this listener
+            try { document.removeEventListener('pin-status-changed', onPinStatusChanged); } catch(e){ dbg('removeEventListener threw', e); }
+            // give dashboard a tick to re-render then focus main content
+            setTimeout(() => { try { const main = document.querySelector('main, #dashboard'); if (main) main.focus(); window.scrollTo({ top: 0 }); } catch(e){ dbg('focus/dashboard fallback error', e); } }, 60);
+          }
+        };
+
+        // Attach one-time listener (in case pin is created by user on the pinModal)
+        document.removeEventListener('pin-status-changed', window.__rp_handlers._pinStatusHandler);
+        window.__rp_handlers._pinStatusHandler = onPinStatusChanged;
+        document.addEventListener('pin-status-changed', onPinStatusChanged);
+        dbg('verifyOtpSubmit: pinned pin-status-changed listener to close all modals on completion');
       } else {
-        // server returned error
-        const errMsg = (body && body.error && body.error.message) ? body.error.message : (body && body.message) ? body.message : 'OTP verify failed';
-        warn('verifyOtpSubmit: server returned failure', status, errMsg);
+        const errMsg = (body && body.error && body.error.message) ? body.error.message : (body && body.message) ? body.message : 'OTP verification failed';
+        warn('verifyOtpSubmit server error', status, errMsg);
         if (status === 400 || status === 403) {
           const errCode = body?.error?.code || null;
           if (errCode === 'otp_expired' || (errMsg && String(errMsg).toLowerCase().includes('expired'))) {
-            alert('OTP expired. Please resend OTP and try again.');
+            notify({ type: 'warn', title: 'OTP expired', message: 'OTP expired. Please resend OTP and try again.' });
           } else {
-            alert('OTP verification failed: ' + errMsg);
+            notify({ type: 'error', title: 'Verification failed', message: errMsg });
           }
         } else {
-          alert('OTP verification failed: ' + errMsg);
+          notify({ type: 'error', title: 'Verification failed', message: errMsg });
         }
       }
     } catch (e) {
-      err('verifyOtpSubmit: unexpected error', e);
-      alert('Network error verifying OTP — check console for details.');
+      err('verifyOtpSubmit unexpected error', e);
+      notify({ type: 'error', title: 'Network error', message: 'Network error verifying OTP — check console.' });
     } finally {
       if (verifyBtn) {
         verifyBtn.disabled = false;
         if (verifyBtn.dataset._origText) { verifyBtn.textContent = verifyBtn.dataset._origText; delete verifyBtn.dataset._origText; }
-        dbg('verifyOtpSubmit: verify button restored');
       }
       log('verifyOtpSubmit: end');
     }
   }
 
-  // safe fallback close if ModalManager not present
-  function safeCloseFallback(modalId) {
-    const el = $(modalId);
-    if (!el) { dbg('safeCloseFallback: element not found', modalId); return; }
-    el.classList.add('hidden');
-    el.style.display = 'none';
-    el.setAttribute('aria-hidden','true');
-    dbg('safeCloseFallback: modal hidden by DOM fallback', modalId);
-  }
-
-  // --- RESEND OTP ---
+  // ---- Resend handler ----
   async function resendOtpHandler(e) {
     if (e && e.preventDefault) e.preventDefault();
     log('resendOtpHandler: start');
     const btn = $(RESEND_BTN_ID);
-    if (!btn) { warn('resendOtpHandler: resend button not found'); return; }
-    if (btn.disabled) { dbg('resendOtpHandler: button disabled - ignoring'); return; }
-
+    if (!btn) { warn('resendOtpHandler: missing button'); return; }
+    if (btn.disabled) { dbg('resendOtpHandler: button disabled'); return; }
     const email = await getUserEmail();
-    log('resendOtpHandler: email ->', email || '(none)');
+    dbg('resendOtpHandler email', email);
     if (!email) {
-      alert('Unable to find your account email. For dev, run in console:\nlocalStorage.setItem("mockEmail","dev@example.com");\nwindow.__SERVER_USER_DATA__ = { email: "dev@example.com" };');
+      notify({ type: 'warn', title: 'Email missing', message: 'Unable to find your account email. For dev: localStorage.setItem(\"mockEmail\",\"dev@example.com\")' });
       return;
     }
-
     btn.disabled = true;
     btn.dataset._origText = btn.textContent;
     btn.textContent = 'Sending…';
-
     try {
       const { status, body } = await postJson(SERVER_RESEND_OTP, { email });
-      log('resendOtpHandler: server responded', status, body);
+      dbg('resendOtpHandler response', status, body);
       if (status >= 200 && status < 300) {
-        // start cooldown
+        notify({ type: 'info', title: 'OTP sent', message: `OTP sent to ${email}` });
         startResendCountdown(60);
-        log('resendOtpHandler: OTP resent successfully to', email);
-        // optionally show a small toast
       } else {
         const errMsg = body?.error?.message || body?.message || 'Failed to resend OTP';
-        warn('resendOtpHandler: resend failed', status, errMsg);
-        alert('Resend failed: ' + errMsg);
-        // restore button
+        warn('resendOtpHandler server error', status, errMsg);
+        notify({ type: 'error', title: 'Resend failed', message: errMsg });
         btn.disabled = false;
         if (btn.dataset._origText) { btn.textContent = btn.dataset._origText; delete btn.dataset._origText; }
       }
     } catch (e) {
-      err('resendOtpHandler: network error', e);
-      alert('Network error sending OTP — check console for details.');
+      err('resendOtpHandler network error', e);
+      notify({ type: 'error', title: 'Network error', message: 'Network error sending OTP — check console.' });
       btn.disabled = false;
       if (btn.dataset._origText) { btn.textContent = btn.dataset._origText; delete btn.dataset._origText; }
     } finally {
@@ -345,18 +379,15 @@
     }
   }
 
-  // OTP input wiring: handles single input (6 digits) or multi-input
+  // ---- OTP input wiring ----
   function wireOtpInputs() {
     const inputs = qsa(OTP_INPUT_SELECTOR);
-    log('wireOtpInputs: found inputs count', inputs.length);
-    if (!inputs || inputs.length === 0) {
-      warn('wireOtpInputs: no OTP inputs found for selector', OTP_INPUT_SELECTOR);
-      return;
-    }
+    log('wireOtpInputs: count', inputs.length);
+    if (!inputs || inputs.length === 0) { warn('no otp inputs found'); return; }
 
-    // clean previous handlers
+    // cleanup old handlers
     if (Array.isArray(window.__rp_handlers.otpInputs)) {
-      window.__rp_handlers.otpInputs.forEach(({el, handlers}) => {
+      window.__rp_handlers.otpInputs.forEach(({ el, handlers }) => {
         if (!el || !handlers) return;
         if (handlers.input) el.removeEventListener('input', handlers.input);
         if (handlers.keydown) el.removeEventListener('keydown', handlers.keydown);
@@ -370,11 +401,8 @@
       input.setAttribute('maxlength','6');
       const onInput = (e) => {
         const v = input.value.trim();
-        dbg('wireOtpInputs(single): input value length', v.length);
-        if (v.length >= 6) {
-          try { input.blur(); } catch(_) {}
-          setTimeout(() => { verifyOtpSubmit(); }, 120);
-        }
+        dbg('single input length', v.length);
+        if (v.length >= 6) { try { input.blur(); } catch(_){}; setTimeout(() => verifyOtpSubmit(), 120); }
       };
       input.removeEventListener('input', onInput);
       input.addEventListener('input', onInput);
@@ -383,80 +411,60 @@
       return;
     }
 
-    // multi-input case
     inputs.forEach((inp, idx) => {
       inp.setAttribute('inputmode','numeric');
       inp.setAttribute('maxlength','1');
-
       const onInput = (e) => {
         const v = inp.value;
         if (v && idx < inputs.length - 1) {
           try { inputs[idx+1].focus(); } catch(e){ dbg('focus next failed', e); }
         }
         const all = inputs.map(i => i.value.trim()).join('');
-        dbg('wireOtpInputs(multi): collected', all);
-        if (all.length === inputs.length) {
-          blurOtpInputs();
-          setTimeout(() => { verifyOtpSubmit(); }, 120);
-        }
+        dbg('multi inputs collected', all);
+        if (all.length === inputs.length) { blurOtpInputs(); setTimeout(() => verifyOtpSubmit(), 120); }
       };
-
       const onKeydown = (e) => {
-        if (e.key === 'Backspace' && !inp.value && idx > 0) {
-          try { inputs[idx-1].focus(); } catch(e){ dbg('focus prev failed', e); }
-        }
+        if (e.key === 'Backspace' && !inp.value && idx > 0) { try { inputs[idx-1].focus(); } catch(e){ dbg('focus prev failed', e); } }
       };
-
       inp.removeEventListener('input', onInput);
       inp.removeEventListener('keydown', onKeydown);
       inp.addEventListener('input', onInput);
       inp.addEventListener('keydown', onKeydown);
       window.__rp_handlers.otpInputs.push({ el: inp, handlers: { input: onInput, keydown: onKeydown } });
     });
-    log('wireOtpInputs: wired multi-input handlers');
+    log('wireOtpInputs: wired multi inputs');
   }
 
-  // Wire up buttons/handlers
+  // ---- Wire UI handlers ----
   async function wire() {
-    log('wire: start wiring UI');
-    // trigger button (Reset now)
+    log('wire: wiring UI elements');
     const trigger = $(TRIGGER_ID);
     if (trigger) {
       window.__rp_handlers.onTriggerClicked = window.__rp_handlers.onTriggerClicked || onTriggerClicked;
       trigger.removeEventListener('click', window.__rp_handlers.onTriggerClicked);
       trigger.addEventListener('click', window.__rp_handlers.onTriggerClicked);
       log('wire: bound trigger', TRIGGER_ID);
-    } else {
-      warn('wire: trigger not found', TRIGGER_ID);
-    }
+    } else { warn('wire: trigger not found', TRIGGER_ID); }
 
-    // resend button
     const resendBtn = $(RESEND_BTN_ID);
     if (resendBtn) {
       window.__rp_handlers.resendOtpHandler = window.__rp_handlers.resendOtpHandler || resendOtpHandler;
       resendBtn.removeEventListener('click', window.__rp_handlers.resendOtpHandler);
       resendBtn.addEventListener('click', window.__rp_handlers.resendOtpHandler);
       log('wire: bound resend', RESEND_BTN_ID);
-    } else {
-      warn('wire: resend button not found', RESEND_BTN_ID);
-    }
+    } else { warn('wire: resend not found', RESEND_BTN_ID); }
 
-    // open email
     const openEmailBtn = $(OPEN_EMAIL_BTN_ID);
     if (openEmailBtn) {
       window.__rp_handlers.onOpenEmailClick = window.__rp_handlers.onOpenEmailClick || onOpenEmailClick;
       openEmailBtn.removeEventListener('click', window.__rp_handlers.onOpenEmailClick);
       openEmailBtn.addEventListener('click', window.__rp_handlers.onOpenEmailClick);
-      log('wire: bound open email', OPEN_EMAIL_BTN_ID);
-    } else {
-      warn('wire: open email button not found', OPEN_EMAIL_BTN_ID);
-    }
+      log('wire: bound open-email', OPEN_EMAIL_BTN_ID);
+    } else { warn('wire: open-email not found', OPEN_EMAIL_BTN_ID); }
 
-    // verify button (form submit)
-    const verifyBtn = $(VERIFY_BTN_ID);
     const otpForm = $(OTP_FORM_ID);
+    const verifyBtn = $(VERIFY_BTN_ID);
     if (otpForm) {
-      // prefer form submit so user pressing Enter works
       window.__rp_handlers.verifyOtpSubmit = window.__rp_handlers.verifyOtpSubmit || verifyOtpSubmit;
       otpForm.removeEventListener('submit', window.__rp_handlers.verifyOtpSubmit);
       otpForm.addEventListener('submit', window.__rp_handlers.verifyOtpSubmit);
@@ -467,135 +475,101 @@
       verifyBtn.addEventListener('click', window.__rp_handlers.verifyOtpSubmit);
       log('wire: bound verify button fallback', VERIFY_BTN_ID);
     } else {
-      warn('wire: no verify button or otp form found', VERIFY_BTN_ID, OTP_FORM_ID);
+      warn('wire: no verify button or form found');
     }
 
-    // wire OTP input(s)
     wireOtpInputs();
 
-    // show full/masked email
-    const fullEl = $(FULL_EMAIL_ID);
-    const maskedEl = $(MASKED_EMAIL_ID);
+    // Display full email if element exists
+    const fullEl = $(FULL_EMAIL_ID), maskedEl = $(MASKED_EMAIL_ID);
     const email = await getUserEmail();
-    log('wire: user email for display ->', email || '(none)');
+    log('wire: display email', email);
+    if (fullEl && email) { fullEl.textContent = email; if (maskedEl) maskedEl.textContent = email; log('wire: wrote full email'); }
+    else if (maskedEl && email) { maskedEl.textContent = email; log('wire: wrote masked element with full email'); }
+    else dbg('wire: no place to show email or no email');
 
-    if (fullEl && email) {
-      fullEl.textContent = email;
-      if (maskedEl) maskedEl.textContent = email;
-      log('wire: wrote email to full-email element and masked element');
-    } else if (maskedEl && email) {
-      // prefer showing full email as requested
-      maskedEl.textContent = email;
-      log('wire: wrote email to masked element (as full)', MASKED_EMAIL_ID);
-    } else {
-      dbg('wire: no elements to display email or no email available');
-    }
-
-    log('wire: completed wiring');
+    log('wire: complete');
   }
 
-  // Trigger handler: send resend-otp and open modal
+  // ---- Trigger clicked: send resend + show modal ----
   async function onTriggerClicked(e) {
     e && e.preventDefault && e.preventDefault();
-    log('onTriggerClicked: invoked');
+    log('onTriggerClicked: start');
     const btn = e && e.currentTarget ? e.currentTarget : $(TRIGGER_ID);
-    if (!btn) { warn('onTriggerClicked: no button element'); return; }
-    if (btn.disabled) { dbg('onTriggerClicked: button disabled'); return; }
-
+    if (!btn) { warn('onTriggerClicked: missing btn'); return; }
+    if (btn.disabled) { dbg('onTriggerClicked: disabled'); return; }
     btn.disabled = true;
-    if (!btn.dataset._origText) btn.dataset._origText = btn.textContent || '';
+    btn.dataset._origText = btn.dataset._origText || btn.textContent || '';
     btn.textContent = 'Preparing…';
 
     const email = await getUserEmail();
-    log('onTriggerClicked: email ->', email || '(none)');
+    dbg('onTriggerClicked email', email);
     if (!email) {
+      notify({ type: 'warn', title: 'Email missing', message: 'Unable to find your account email. For dev: localStorage.setItem("mockEmail","dev@example.com")' });
       btn.disabled = false;
       if (btn.dataset._origText) { btn.textContent = btn.dataset._origText; delete btn.dataset._origText; }
-      alert('Unable to find your account email. Set mockEmail in localStorage for dev.');
-      warn('onTriggerClicked: no email, abort');
       return;
     }
 
-    // show email in modal if present
-    const maskedEl = $(MASKED_EMAIL_ID);
-    const fullEl = $(FULL_EMAIL_ID);
+    // show email
     try {
-      const parts = email.split('@');
-      if (maskedEl) maskedEl.textContent = email; // show full as requested
+      const maskedEl = $(MASKED_EMAIL_ID), fullEl = $(FULL_EMAIL_ID);
+      if (maskedEl) maskedEl.textContent = email;
       if (fullEl) fullEl.textContent = email;
-      dbg('onTriggerClicked: displayed email in modal elements', { masked: !!maskedEl, full: !!fullEl });
-    } catch (e) { warn('onTriggerClicked: failed to display email', e); }
+      dbg('onTriggerClicked: email displayed in modal elements');
+    } catch (e) { dbg('onTriggerClicked display email failed', e); }
 
-    // send request to server to resend OTP
+    // call resend API and open modal
     try {
       const { status, body } = await postJson(SERVER_RESEND_OTP, { email });
-      log('onTriggerClicked: resend-otp response', status, body);
+      dbg('onTriggerClicked resend response', status, body);
       if (status >= 200 && status < 300) {
-        // open modal
-        const opened = (window.ModalManager && typeof window.ModalManager.openModal === 'function')
-          ? (function(){ try { window.ModalManager.openModal(RESET_MODAL_ID); return true; } catch(e){ dbg('ModalManager.openModal failed', e); return false; } })()
-          : (function(){ const el = $(RESET_MODAL_ID); if (el) { el.classList.remove('hidden'); el.style.display = 'flex'; el.setAttribute('aria-hidden','false'); return true; } return false; })();
-
-        if (!opened) {
-          alert('Modal could not be opened automatically. Check console.');
-          warn('onTriggerClicked: failed to open reset modal');
-        } else {
-          dbg('onTriggerClicked: reset modal opened; wiring OTP inputs after small delay');
-          setTimeout(() => { try { wireOtpInputs(); } catch(e){ dbg('wireOtpInputs after open threw', e); } }, 40);
+        // open reset modal
+        let opened = false;
+        if (window.ModalManager && typeof window.ModalManager.openModal === 'function') {
+          try { window.ModalManager.openModal(RESET_MODAL_ID); opened = true; dbg('onTriggerClicked opened reset modal via manager'); } catch(e){ dbg('ModalManager.openModal threw', e); }
         }
-
-        // start resend cooldown
+        if (!opened) {
+          const el = $(RESET_MODAL_ID);
+          if (el) { el.classList.remove('hidden'); el.style.display = 'flex'; el.setAttribute('aria-hidden','false'); opened = true; dbg('onTriggerClicked opened reset modal via DOM fallback'); }
+        }
+        if (opened) setTimeout(() => { try { wireOtpInputs(); } catch(e){ dbg('wireOtpInputs after open failed', e); } }, 40);
         startResendCountdown(60);
+        notify({ type: 'info', title: 'OTP sent', message: `OTP sent to ${email}` });
       } else {
         const errMsg = body?.error?.message || body?.message || 'Failed to send OTP';
-        alert('Resend OTP failed: ' + errMsg);
-        warn('onTriggerClicked: resend failed', status, errMsg);
+        notify({ type: 'error', title: 'Resend failed', message: errMsg });
       }
     } catch (e) {
-      err('onTriggerClicked: failed to call resend otp', e);
-      alert('Failed to send OTP. See console for details.');
+      err('onTriggerClicked resend OTP network error', e);
+      notify({ type: 'error', title: 'Network error', message: 'Failed to send OTP — check console.' });
     } finally {
       btn.disabled = false;
       if (btn.dataset._origText) { btn.textContent = btn.dataset._origText; delete btn.dataset._origText; }
-      log('onTriggerClicked: finished');
+      log('onTriggerClicked: end');
     }
   }
 
-  // open-email button handler
-  async function onOpenEmailClick(e) {
-    e && e.preventDefault && e.preventDefault();
-    log('onOpenEmailClick: start');
-    const email = await getUserEmail();
-    log('onOpenEmailClick: resolved email ->', email || '(none)');
-    openEmailClient(email);
-    log('onOpenEmailClick: end');
-  }
+  async function onOpenEmailClick(e) { e && e.preventDefault && e.preventDefault(); log('onOpenEmailClick'); const email = await getUserEmail(); openEmailClient(email); }
 
-  // Init wiring once DOM ready
+  // Auto wire
   function initAutoWire() {
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', wire);
-      log('initAutoWire: waiting for DOMContentLoaded');
+      log('initAutoWire: waiting DOMContentLoaded');
     } else {
       wire();
-      log('initAutoWire: wired immediately (DOM ready)');
+      log('initAutoWire: wired immediately');
     }
   }
   initAutoWire();
 
   // Expose debug helpers
   window.__rp_wire_debug = Object.assign(window.__rp_wire_debug || {}, {
-    getUserEmail,
-    openEmailClient,
-    postJson,
-    SERVER_RESEND_OTP,
-    SERVER_VERIFY_OTP,
-    wire,
-    rewire: wire,
-    verifyOtpSubmit,
-    resendOtpHandler,
-    startResendCountdown
+    getUserEmail, openEmailClient, postJson, SERVER_RESEND_OTP, SERVER_VERIFY_OTP,
+    wire, rewire: wire, verifyOtpSubmit, resendOtpHandler, startResendCountdown, notify
   });
 
-  log('resetPin module v5 loaded');
+  log('resetPin module v6 loaded — waiting for OTP & PIN flow events');
+
 })();
