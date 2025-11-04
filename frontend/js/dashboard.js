@@ -1007,47 +1007,50 @@ function applySessionToDOM(user) {
 
 // Helper: Update localStorage with user data
 function updateLocalStorageFromUser(user) {
-  try {
-    const userData = {
-      uid: user.uid || user.id || '',
-      email: user.email || '',
-      username: user.username || '',
-      fullName: user.fullName || '',
-      firstName: user.firstName || user.fullName?.split(' ')[0] || 'User',
-      phoneNumber: user.phoneNumber || '',
-      address: user.address || '',
-      profilePicture: user.profilePicture || '',
-      hasPin: user.hasPin || false,
-      hasBiometrics: user.hasBiometrics || false,
-      profileCompleted: user.profileCompleted || false,
-      fullNameEdited: user.fullNameEdited || false,
-      lastUsernameUpdate: user.lastUsernameUpdate || '',
-      cachedAt: Date.now()
-    };
+  // --- Guarded merge (replace unconditional writes) ---
+try {
+  const existingRaw = localStorage.getItem('userData');
+  const existing = existingRaw ? JSON.parse(existingRaw) : {};
 
-    localStorage.setItem('userData', JSON.stringify(userData));
-    localStorage.setItem('userEmail', user.email || '');
-    localStorage.setItem('userId', user.uid || user.id || '');
-    localStorage.setItem('firstName', userData.firstName);
-    localStorage.setItem('username', user.username || '');
-    localStorage.setItem('fullName', user.fullName || '');
-    localStorage.setItem('phoneNumber', user.phoneNumber || '');
-    localStorage.setItem('address', user.address || '');
-    localStorage.setItem('profilePicture', user.profilePicture || '');
-    localStorage.setItem('hasPin', user.hasPin ? 'true' : 'false');
-    localStorage.setItem('biometricsEnabled', user.hasBiometrics ? 'true' : 'false');
-    localStorage.setItem('profileCompleted', user.profileCompleted ? 'true' : 'false');
-    localStorage.setItem('fullNameEdited', user.fullNameEdited ? 'true' : 'false');
-    localStorage.setItem('lastUsernameUpdate', user.lastUsernameUpdate || '');
+  const safeUsername = (typeof user.username === 'string' && user.username.trim() !== '') ? user.username : (existing.username || '');
+  const safeFullName = (typeof user.fullName === 'string' && user.fullName.trim() !== '') ? user.fullName : (existing.fullName || '');
+  const safeFirstName = (typeof user.firstName === 'string' && user.firstName.trim() !== '') ? user.firstName : (existing.firstName || (safeFullName.split(' ')[0] || 'User'));
 
-    console.log('[DEBUG] updateLocalStorageFromUser: Updated', {
-      hasPin: user.hasPin,
-      hasBiometrics: user.hasBiometrics,
-      profileCompleted: user.profileCompleted
-    });
-  } catch (err) {
-    console.warn('[WARN] updateLocalStorageFromUser: Failed', err);
-  }
+  // Build merged object for cache
+  const userData = Object.assign({}, existing, {
+    uid: user.uid || user.id || existing.uid || '',
+    email: user.email || existing.email || '',
+    username: safeUsername,
+    fullName: safeFullName,
+    firstName: safeFirstName,
+    phoneNumber: user.phoneNumber || existing.phoneNumber || '',
+    address: user.address || existing.address || '',
+    profilePicture: user.profilePicture || existing.profilePicture || '',
+    hasPin: (typeof user.hasPin !== 'undefined') ? user.hasPin : (existing.hasPin || false),
+    hasBiometrics: (typeof user.hasBiometrics !== 'undefined') ? user.hasBiometrics : (existing.hasBiometrics || false),
+    profileCompleted: (typeof user.profileCompleted !== 'undefined') ? user.profileCompleted : (existing.profileCompleted || false),
+    fullNameEdited: (typeof user.fullNameEdited !== 'undefined') ? user.fullNameEdited : (existing.fullNameEdited || false),
+    lastUsernameUpdate: user.lastUsernameUpdate || existing.lastUsernameUpdate || '',
+    cachedAt: Date.now()
+  });
+
+  localStorage.setItem('userData', JSON.stringify(userData));
+  localStorage.setItem('userEmail', userData.email || '');
+  localStorage.setItem('userId', userData.uid || '');
+  localStorage.setItem('firstName', userData.firstName);
+  localStorage.setItem('username', userData.username || '');
+  localStorage.setItem('fullName', userData.fullName || '');
+  localStorage.setItem('phoneNumber', userData.phoneNumber || '');
+  localStorage.setItem('address', userData.address || '');
+  localStorage.setItem('profilePicture', userData.profilePicture || '');
+  localStorage.setItem('hasPin', userData.hasPin ? 'true' : 'false');
+  localStorage.setItem('biometricsEnabled', userData.hasBiometrics ? 'true' : 'false');
+  localStorage.setItem('profileCompleted', userData.profileCompleted ? 'true' : 'false');
+  localStorage.setItem('fullNameEdited', userData.fullNameEdited ? 'true' : 'false');
+  localStorage.setItem('lastUsernameUpdate', userData.lastUsernameUpdate || '');
+} catch (err) {
+  console.warn('[WARN] updateLocalStorageFromUser: Failed merge', err);
+}
 }
 
 
