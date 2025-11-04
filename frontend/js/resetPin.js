@@ -351,6 +351,26 @@
         window.__rp_handlers._pinStatusHandler = onPinStatusChanged;
         document.addEventListener('pin-status-changed', onPinStatusChanged);
         dbg('verifyOtpSubmit: Attached pin-status-changed listener to close all modals on completion');
+        // 🆕 ADDED — Force close all modals if this was a PIN update (user already had a PIN)
+const hasExistingPin = localStorage.getItem('hasPin') === 'true';
+if (hasExistingPin) {
+  log('Existing PIN detected → force-closing all modals');
+  try {
+    if (window.ModalManager?.closeAll) {
+      window.ModalManager.closeAll();
+    } else {
+      // fallback: manually hide all modals and backdrops
+      document.querySelectorAll('.modal, .modal-backdrop').forEach(el => {
+        el.style.display = 'none';
+        el.classList.add('hidden');
+        el.setAttribute('aria-hidden','true');
+      });
+    }
+  } catch (e) {
+    warn('force close error', e);
+  }
+}
+
         
       } else {
         const errMsg = (body && body.error && body.error.message) ? body.error.message : (body && body.message) ? body.message : 'OTP verification failed';
