@@ -1470,7 +1470,7 @@
   color: white !important;
   display: flex !important;
   flex-direction: column !important;
-  z-index: 11002 !important;
+  z-index: 14002 !important;
 }
 body:has(.reauthmodal:not(.hidden)),
 body:has(.pin-modal:not(.hidden)) {

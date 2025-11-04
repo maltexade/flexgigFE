@@ -1,56 +1,32 @@
 (function () {
   'use strict';
 
-// ===== Replacements: getNextModalZIndex + backdrop helpers + openModal zIndex usage =====
-
+  // compute next/top z-index for a modal so it always appears above any existing modal
 function getNextModalZIndex() {
-  const BASE = 10000; // keep high so normal page stuff stays under
+  const BASE = 10000; // high base to play nicely with modal CSS that uses 1000+ ranges
   let max = BASE;
-
-  // 1) check what's in our stack
+  // consider both inline style and computed style for each modal
   openModalsStack.forEach(item => {
     try {
       const el = item.modal;
+      // prefer inline style if set, otherwise computed style
       const inline = el && el.style && el.style.zIndex ? parseInt(el.style.zIndex, 10) : NaN;
       const computed = el ? parseInt(window.getComputedStyle(el).zIndex, 10) : NaN;
       const candidate = (!isNaN(inline) ? inline : (!isNaN(computed) ? computed : 0));
       if (candidate > max) max = candidate;
-      // log candidate
-      log('debug', `getNextModalZIndex: stack candidate for ${item.id}: inline=${inline}, computed=${computed}, used=${candidate}`);
     } catch (e) { /* ignore parse issues */ }
   });
-
-  // 2) defensive scan: check any DOM elements that look like modals (covers !important CSS values etc)
-  try {
-    const modalSelectors = [
-      '.modal', '.pin-modal', '.security-modal', '.mp-reset-modal',
-      '.settings-modal', '.help-support-modal', '.security-pin-modal',
-      '.plan-modal-content', '#checkoutModal'
-    ];
-    document.querySelectorAll(modalSelectors.join(',')).forEach(el => {
-      try {
-        const inline = el.style && el.style.zIndex ? parseInt(el.style.zIndex, 10) : NaN;
-        const computed = parseInt(window.getComputedStyle(el).zIndex, 10);
-        const candidate = (!isNaN(inline) ? inline : (!isNaN(computed) ? computed : 0));
-        if (candidate > max) max = candidate;
-        log('debug', `getNextModalZIndex: DOM candidate ${el.id || el.className}: inline=${inline}, computed=${computed}, used=${candidate}`);
-      } catch (e) { /* ignore */ }
-    });
-  } catch (err) {
-    log('warn', 'getNextModalZIndex: defensive DOM scan failed', { err: err.message });
-  }
-
-  const chosen = max + 10;
-  log('info', `getNextModalZIndex: chosen top z-index = ${chosen} (base ${BASE}, max found ${max})`);
-  return chosen;
+  return max + 10;
 }
 
+// ===== Backdrop helpers (insert right after getNextModalZIndex) =====
 function ensureBackdrop(modal) {
   if (!modal) return null;
   let backdrop = modal.querySelector('.modal-backdrop');
   if (!backdrop) {
     backdrop = document.createElement('div');
     backdrop.className = 'modal-backdrop';
+    // initial styles - not all must be here if your CSS already styles .modal-backdrop
     backdrop.style.cssText = `
       position: fixed;
       top: 0;
@@ -66,17 +42,15 @@ function ensureBackdrop(modal) {
     log('debug', `ensureBackdrop: created backdrop for ${modal.id || '(unknown)'}`);
   }
 
-  // compute backdrop z-index to be just under modal; prefer inline modal z-index if available
+  // compute backdrop z-index to be just under modal
   try {
+    // prefer inline style zIndex (set by manager), then computed style, then fallback
     const inlineZ = modal.style && modal.style.zIndex ? parseInt(modal.style.zIndex, 10) : NaN;
     const computedZ = parseInt(window.getComputedStyle(modal).zIndex, 10);
     const modalZ = !isNaN(inlineZ) ? inlineZ : (!isNaN(computedZ) ? computedZ : getNextModalZIndex());
-    const backdropZ = Math.max(modalZ - 1, 0);
-    backdrop.style.zIndex = String(backdropZ);
-    log('debug', `ensureBackdrop: modalZ=${modalZ}, backdropZ=${backdropZ} for ${modal.id || '(unknown)'}`);
+    backdrop.style.zIndex = (modalZ - 1).toString();
   } catch (e) {
     backdrop.style.zIndex = '9999';
-    log('warn', 'ensureBackdrop: fallback backdrop.zIndex used (9999)', { err: e?.message });
   }
 
   return backdrop;
@@ -84,10 +58,10 @@ function ensureBackdrop(modal) {
 
 function showBackdrop(modal) {
   const backdrop = ensureBackdrop(modal);
-  if (!backdrop) { log('warn', 'showBackdrop: no backdrop found'); return; }
+  if (!backdrop) return;
+  // ensure visible by forcing a frame then switching opacity
   requestAnimationFrame(() => {
     backdrop.style.opacity = '1';
-    log('debug', `showBackdrop: backdrop shown for ${modal.id || '(unknown)'}`);
   });
 }
 
@@ -95,25 +69,16 @@ function hideBackdrop(modal) {
   if (!modal) return;
   const backdrop = modal.querySelector('.modal-backdrop');
   if (!backdrop) return;
+  // fade out, but leave the element (so observers can read it). If you prefer, remove it after fade.
   backdrop.style.opacity = '0';
-  log('debug', `hideBackdrop: fading backdrop for ${modal.id || '(unknown)'}`);
+  // optional: remove after transition to keep DOM clean
   try {
     clearTimeout(backdrop._rmTimer);
     backdrop._rmTimer = setTimeout(() => {
       if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
-      log('debug', `hideBackdrop: removed backdrop from DOM for ${modal.id || '(unknown)'}`);
-    }, 300);
-  } catch (e) { log('warn', 'hideBackdrop: cleanup timer error', { err: e?.message }); }
+    }, 300); // match transition duration
+  } catch (e) { /* ignore */ }
 }
-
-// inside openModal(...) after you compute modal and before applyTransition:
-modal.style.zIndex = String(getNextModalZIndex());
-log('debug', `openModal: applied z-index ${modal.style.zIndex} to ${modalId}`);
-
-// now ensure backdrop sits below it and show it:
-try { showBackdrop(modal); } catch(e) { log('warn', 'openModal: showBackdrop threw', { err: e?.message }); }
-
-// --- and in your close flow, call hideBackdrop(modal) after transition ---
 
 
 
@@ -256,6 +221,7 @@ try { showBackdrop(modal); } catch(e) { log('warn', 'openModal: showBackdrop thr
         log('debug', 'forceCloseModal: Restored focus to document body');
       }
     });
+    hideBackdrop(modal);
   }
 
   // Open modal (added dynamic z-index for stack robustness)
@@ -399,6 +365,7 @@ try { showBackdrop(modal); } catch(e) { log('warn', 'openModal: showBackdrop thr
         log('debug', 'closeModal: Restored focus to document body');
       }
     });
+    hideBackdrop(modal);
 
     // Handle history if needed
     if (history.state && history.state.modalId === modalId) {
