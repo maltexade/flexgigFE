@@ -636,3 +636,63 @@ if (hasExistingPin) {
   log('resetPin module v7 loaded – PIN reset flow ready');
 
 })();
+
+// change password js file
+
+/* Show/hide "Change password" based on server-provided hasPassword flag.
+   Assumes you already set:*/
+const API_BASE = (window.__SEC_API_BASE || '').replace(/\/$/, '') || '';
+
+(function () {
+  console.log('[ChangePWVisibility]📧📧📧📧📧📧📧📧 checking password presence');
+  const PROFILE_ENDPOINT = (typeof API_BASE !== 'undefined' && API_BASE)
+    ? `${API_BASE}/api/profile`
+    : '/api/profile';
+
+  const changeRow = document.getElementById('changePW');
+  const pwdFormWrap = document.getElementById('pwdFormWrap');
+
+  if (!changeRow) {
+    console.warn('changePW element not found; skipping password visibility check.');
+    return;
+  }
+
+  async function applyVisibility() {
+    try {
+      const res = await fetch(PROFILE_ENDPOINT, {
+        method: 'GET',
+        credentials: 'include',
+        headers: { 'Accept': 'application/json' }
+      });
+
+      if (!res.ok) {
+        // safe default: hide the control if we can't confirm the user has a password
+        console.warn('Failed to fetch profile for password check:', res.status);
+        changeRow.style.display = 'none';
+        if (pwdFormWrap) pwdFormWrap.hidden = true;
+        return;
+      }
+
+      const payload = await res.json();
+      const hasPassword = payload && payload.hasPassword === true;
+
+      if (hasPassword) {
+        changeRow.style.display = ''; // show
+      } else {
+        changeRow.style.display = 'none'; // hide for social/otp-only users
+        if (pwdFormWrap) pwdFormWrap.hidden = true;
+      }
+    } catch (err) {
+      console.error('Error while checking password presence:', err);
+      changeRow.style.display = 'none';
+      if (pwdFormWrap) pwdFormWrap.hidden = true;
+    }
+  }
+
+  // Run after page load; if you already have an auth-ready hook, call applyVisibility there instead
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', applyVisibility);
+  } else {
+    applyVisibility();
+  }
+})();

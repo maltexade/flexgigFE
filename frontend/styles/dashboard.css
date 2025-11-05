@@ -3075,7 +3075,7 @@ a[style*="color: #f00"] { color: var(--danger); }
   transform: translateX(-50%);
   min-width: 320px;
   max-width: 96%;
-  z-index: 99999;
+  z-index: 9999999;
   border-radius: 8px;
   box-shadow: 0 8px 24px rgba(0,0,0,0.15);
   padding: 12px 16px;
