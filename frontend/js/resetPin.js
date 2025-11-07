@@ -827,8 +827,32 @@ const API_BASE = (window.__SEC_API_BASE || '').replace(/\/$/, '') || (typeof API
     return { ok: true, data: { current, new: nw } };
   }
 
-  // submit
+    // submit (REPLACEMENT) - robust response parsing and friendlier messages
   let isSubmitting = false;
+
+  // helper: parse response body (json preferred, fallback to text)
+  async function parseResponseBody(resp) {
+    try {
+      const ct = (resp.headers && resp.headers.get) ? (resp.headers.get('content-type') || '') : '';
+      if (ct.toLowerCase().includes('application/json')) {
+        // safe json parse
+        return await resp.json();
+      }
+    } catch (e) {
+      // ignore and fall through to text
+      console.warn('[changePWD] parseResponseBody: json parse failed', e);
+    }
+
+    try {
+      const text = await resp.text();
+      // try to parse as JSON anyway
+      try { return JSON.parse(text); } catch (_) { return text || ''; }
+    } catch (e) {
+      console.warn('[changePWD] parseResponseBody: text read failed', e);
+      return '';
+    }
+  }
+
   async function submitChangePassword(ev) {
     if (ev && ev.preventDefault) ev.preventDefault();
     if (isSubmitting) return;
@@ -857,19 +881,34 @@ const API_BASE = (window.__SEC_API_BASE || '').replace(/\/$/, '') || (typeof API
         body: JSON.stringify({ currentPassword: validation.data.current, newPassword: validation.data.new })
       }, 10000);
 
-      const text = await resp.text();
-      let json;
-      try { json = text ? JSON.parse(text) : {}; } catch (e) { json = { raw: text }; }
+      // parse body robustly
+      const body = await parseResponseBody(resp);
+      console.debug('[changePWD] submitChangePassword response', { status: resp.status, body });
 
       if (!resp.ok) {
-        const msg = (json && (json.message || json.error)) ? (json.message || json.error) : `Server error (${resp.status})`;
-        showToast(msg, 'error', 5000);
-        console.error('[changePWD] change failed', resp.status, json);
+        // try common shapes: { message }, { error }, { error: { message } }, plain string
+        const serverMsg =
+          (body && (body.message || body.error && body.error.message || body.error || body.msg || body.detail)) ||
+          (typeof body === 'string' && body) ||
+          `Server error (${resp.status})`;
+
+        // if body is an object and we couldn't pick a field, stringify a small preview
+        const preview = (typeof body === 'object' && body !== null && !serverMsg)
+          ? JSON.stringify(body)
+          : null;
+
+        showToast(serverMsg || preview || `Server error (${resp.status})`, 'error', 6000);
+        console.error('[changePWD] change failed', resp.status, body);
         isSubmitting = false;
         return;
       }
 
-      showToast((json && json.message) ? json.message : 'Password changed successfully.', 'success', 3500);
+      // success path
+      const successMsg =
+        (body && (body.message || body.msg || body.success)) ||
+        'Password changed successfully.';
+
+      showToast(successMsg, 'success', 3500);
       formEl.reset();
       isSubmitting = false;
 
@@ -881,11 +920,12 @@ const API_BASE = (window.__SEC_API_BASE || '').replace(/\/$/, '') || (typeof API
       }
     } catch (err) {
       console.error('[changePWD] change request error', err);
-      if (err.name === 'AbortError') showToast('Request timed out. Try again.', 'error', 4500);
+      if (err && err.name === 'AbortError') showToast('Request timed out. Try again.', 'error', 4500);
       else showToast('Failed to change password. Check connection.', 'error', 4500);
       isSubmitting = false;
     }
   }
+
 
   // reset handler (forgot password)
   function handleResetPassword(ev) {
