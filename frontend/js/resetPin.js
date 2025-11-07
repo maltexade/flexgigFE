@@ -2058,44 +2058,44 @@ const { status, body } = await withLoader(async () => {
 
   // attempt to POST to set endpoint, fallback to change endpoint on 404
     // helper: try to find uid and token from common places (URL, hidden inputs, globals, localStorage, cookies)
-  function findUidAndToken() {
-    // 1) URL params: ?uid=... & ?token=...
+  // prefer the same names used by the login flow: accessToken, userUid
+function findUidAndToken() {
+  try {
+    // 1) window globals set by login page
+    if (window.accessToken || window.userUid) {
+      return { uid: window.userUid || null, token: window.accessToken || null };
+    }
+
+    // 2) URL params (reset link style ?email=...&code=... could contain token or uid)
     try {
       const url = new URL(window.location.href);
       const uidFromUrl = url.searchParams.get('uid') || url.searchParams.get('u');
-      const tokenFromUrl = url.searchParams.get('token') || url.searchParams.get('t');
-      if (uidFromUrl || tokenFromUrl) return { uid: uidFromUrl, token: tokenFromUrl };
-    } catch (e) { /* ignore */ }
+      const tokenFromUrl = url.searchParams.get('token') || url.searchParams.get('t') || url.searchParams.get('code');
+      if (uidFromUrl || tokenFromUrl) return { uid: uidFromUrl || null, token: tokenFromUrl || null };
+    } catch (e) {}
 
-    // 2) hidden inputs in the modal (useful if server rendered them into the page)
+    // 3) cookies — login page writes `token` and `rt`/`refreshToken`
     try {
-      const uidInput = document.querySelector('input[name="uid"], input[id="spw-uid"], input[name="userId"]');
-      const tokenInput = document.querySelector('input[name="token"], input[id="spw-token"]');
-      if (uidInput || tokenInput) return { uid: uidInput?.value || null, token: tokenInput?.value || null };
-    } catch (e) { /* ignore */ }
+      const cookies = document.cookie || '';
+      const tokenMatch = cookies.match(/(?:^|;\s*)token=([^;]+)/);
+      const rtMatch = cookies.match(/(?:^|;\s*)rt=([^;]+)/);
+      const token = tokenMatch ? decodeURIComponent(tokenMatch[1]) : (rtMatch ? decodeURIComponent(rtMatch[1]) : null);
+      // uid is less likely in cookie; keep null
+      if (token) return { uid: null, token };
+    } catch (e) {}
 
-    // 3) window globals (app might place reset info there)
+    // 4) localStorage (login flows sometimes persist these)
     try {
-      if (window.__resetUid || window.__uid) return { uid: window.__resetUid || window.__uid, token: window.__resetToken || window.__rt || null };
-    } catch(e){}
+      const tokenLs = localStorage.getItem('accessToken') || localStorage.getItem('token') || localStorage.getItem('rt');
+      const uidLs = localStorage.getItem('userUid') || localStorage.getItem('uid');
+      if (tokenLs || uidLs) return { uid: uidLs || null, token: tokenLs || null };
+    } catch (e) {}
 
-    // 4) localStorage (dev flows sometimes store token there temporarily)
-    try {
-      const uidLs = localStorage.getItem('reset_uid') || localStorage.getItem('uid');
-      const tokenLs = localStorage.getItem('reset_token') || localStorage.getItem('rt') || localStorage.getItem('token');
-      if (uidLs || tokenLs) return { uid: uidLs || null, token: tokenLs || null };
-    } catch(e){}
+  } catch (e) { /* ignore */ }
 
-    // 5) cookies (server-side expects cookie 'rt' sometimes)
-    try {
-      const cookieStr = document.cookie || '';
-      const match = cookieStr.match(/(?:^|;\s*)rt=([^;]+)/);
-      if (match) return { uid: null, token: decodeURIComponent(match[1]) };
-    } catch(e){}
+  return { uid: null, token: null };
+}
 
-    // default: nothing found
-    return { uid: null, token: null };
-  }
 
   // attempt to POST to set endpoint, fallback to change endpoint on 404
   async function postPassword(newPwd) {
