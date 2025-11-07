@@ -424,6 +424,41 @@ function startResendCountdown(durationSec = 60) {
       });
       log('verifyOtpSubmit: server', status, body);
       if (status >= 200 && status < 300) {
+
+  // <<< INSERT THIS SNIPPET AT THE TOP OF THE SUCCESS BRANCH >>>
+  try {
+    // 1) try to extract token + user id from response body (works for typical shapes)
+    const respToken = body?.token || body?.accessToken || body?.data?.token || null;
+    const respRefresh = body?.refreshToken || body?.refresh || null;
+    const respUid = body?.user?.uid || body?.user?.id || body?.uid || body?.userId || body?.data?.user?.uid || null;
+
+    // 2) set login-style globals (login page expects window.accessToken & window.userUid)
+    if (respToken) {
+      window.accessToken = respToken;
+      try { document.cookie = `token=${encodeURIComponent(respToken)}; path=/; secure; samesite=none`; } catch(e){ dbg('cookie set failed', e); }
+    }
+    if (respRefresh) {
+      try { document.cookie = `rt=${encodeURIComponent(respRefresh)}; path=/; secure; samesite=none; httponly`; } catch(e){ /* ignore */ }
+    }
+    if (respUid) {
+      window.userUid = respUid;
+      try { localStorage.setItem('userUid', respUid); } catch(e){ dbg('localStorage set failed', e); }
+    }
+
+    // 3) preserve the server-embedded shape your postPassword currently checks
+    window.__SERVER_USER_DATA__ = window.__SERVER_USER_DATA__ || {};
+    if (respUid) window.__SERVER_USER_DATA__.uid = respUid;
+    // optionally set email if present (helps other flows)
+    if (!window.__SERVER_USER_DATA__.email && (body?.user?.email || body?.email || body?.data?.user?.email)) {
+      window.__SERVER_USER_DATA__.email = body?.user?.email || body?.email || body?.data?.user?.email;
+    }
+
+    dbg('verifyOtpSubmit: set token/uid globals', { respToken: !!respToken, respUid });
+  } catch (e) {
+    dbg('verifyOtpSubmit: failed to set token/uid globals', e);
+  }
+  // <<< END INSERT >>>
+
         notify({ type: 'info', title: 'OTP Verified', message: 'OTP verified. Please create your new PIN.' });
         
         // Open pin modal (create-pin). If ModalManager present, use it.
