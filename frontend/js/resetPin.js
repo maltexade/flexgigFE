@@ -1,3 +1,5 @@
+import { withLoader } from "./dashboard";
+
 /* resetPin.js – v7
    - FIXED: closeAll() modals after PIN creation (smooth transition to dashboard)
    - FIXED: Resend counter now shows "Resend OTP" cleanly after countdown
@@ -14,6 +16,7 @@
   const dbg = (...args) => { if (DEBUG) console.debug(tag, ...args); };
   const warn = (...args) => { if (DEBUG) console.warn(tag, ...args); };
   const err = (...args) => { if (DEBUG) console.error(tag, ...args); };
+  
 
   if (window.__rp_wire_reset_v7_installed) {
     log('already installed – rewire requested');
@@ -265,7 +268,9 @@ function startResendCountdown(durationSec = 60) {
     if (verifyBtn) { verifyBtn.disabled = true; verifyBtn.dataset._origText = verifyBtn.textContent; verifyBtn.textContent = 'Verifying…'; }
 
     try {
-      const { status, body } = await postJson(SERVER_VERIFY_OTP, { email, token });
+      const { status, body } = await withLoader(async () => {
+        return await postJson(SERVER_VERIFY_OTP, { email, token });
+      });
       log('verifyOtpSubmit: server', status, body);
       if (status >= 200 && status < 300) {
         notify({ type: 'info', title: 'OTP Verified', message: 'OTP verified. Please create your new PIN.' });
@@ -423,7 +428,9 @@ if (hasExistingPin) {
     btn.textContent = 'Sending…';
     
     try {
-      const { status, body } = await postJson(SERVER_RESEND_OTP, { email });
+const { status, body } = await withLoader(async () => {
+        return await postJson(SERVER_RESEND_OTP, { email });
+      });
       dbg('resendOtpHandler response', status, body);
       if (status >= 200 && status < 300) {
         notify({ type: 'info', title: 'OTP sent', message: `OTP sent to ${email}` });
@@ -589,7 +596,9 @@ if (hasExistingPin) {
 
     // call resend API and open modal
     try {
-      const { status, body } = await postJson(SERVER_RESEND_OTP, { email });
+      const { status, body } = await withLoader(async () => {
+        return await postJson(SERVER_RESEND_OTP, { email });
+      });
       dbg('onTriggerClicked resend response', status, body);
       if (status >= 200 && status < 300) {
         // open reset modal
@@ -1463,7 +1472,9 @@ function startResendCountdown(durationSec = 60) {
   if (verifyBtn) { verifyBtn.disabled = true; verifyBtn.dataset._origText = verifyBtn.textContent; verifyBtn.textContent = 'Verifying…'; }
 
   try {
-    const { status, body } = await postJson(SERVER_VERIFY_OTP, { email, token });
+    const { status, body } = await withLoader(async () => {
+        return await postJson(SERVER_VERIFY_OTP, { email, token });
+      });
     dbg('verifyOtpSubmit server', status, body);
 
     if (status >= 200 && status < 300) {
@@ -1576,7 +1587,9 @@ function startResendCountdown(durationSec = 60) {
     const origText = btn.dataset._origText || btn.textContent;
     btn.textContent = 'Sending…';
     try {
-      const { status, body } = await postJson(SERVER_RESEND_OTP, { email });
+const { status, body } = await withLoader(async () => {
+        return await postJson(SERVER_RESEND_OTP, { email });
+      });
       dbg('resend response', status, body);
       if (status >= 200 && status < 300) {
         notify({ type:'info', title:'OTP sent', message:`OTP sent to ${email}` });
@@ -1705,7 +1718,9 @@ function startResendCountdown(durationSec = 60) {
     const email = await getUserEmail();
     if (!email) { notify({ type:'warn', title:'Email missing', message:'Unable to find your account email.' }); btn.disabled = false; if (btn.dataset._origText) { btn.textContent = btn.dataset._origText; delete btn.dataset._origText; } return; }
     try {
-      const { status, body } = await postJson(SERVER_RESEND_OTP, { email });
+const { status, body } = await withLoader(async () => {
+        return await postJson(SERVER_RESEND_OTP, { email });
+      });      
       dbg('onTrigger resend', status, body);
       if (status >=200 && status < 300) {
         // open modal
