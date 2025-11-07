@@ -853,7 +853,7 @@ const API_BASE = (window.__SEC_API_BASE || '').replace(/\/$/, '') || (typeof API
     }
   }
 
-  async function submitChangePassword(ev) {
+    async function submitChangePassword(ev) {
     if (ev && ev.preventDefault) ev.preventDefault();
     if (isSubmitting) return;
     const formEl = $('changePwdForm');
@@ -868,6 +868,19 @@ const API_BASE = (window.__SEC_API_BASE || '').replace(/\/$/, '') || (typeof API
       else $('currentPwd')?.focus();
       return;
     }
+
+    // ---- BLUR inputs to close soft keyboard / remove focus immediately ----
+    try {
+      const toBlur = ['currentPwd', 'newPwd', 'confirmPwd'];
+      toBlur.forEach(id => { const el = document.getElementById(id); if (el && typeof el.blur === 'function') el.blur(); });
+      // fallback: blur activeElement if still an input/textarea
+      if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) {
+        try { document.activeElement.blur(); } catch(_) { /* ignore */ }
+      }
+    } catch (e) {
+      console.warn('[changePWD] blur fallback failed', e);
+    }
+    // --------------------------------------------------------------------
 
     isSubmitting = true;
     showToast('Changing password…', 'info', 2000);
@@ -886,28 +899,18 @@ const API_BASE = (window.__SEC_API_BASE || '').replace(/\/$/, '') || (typeof API
       console.debug('[changePWD] submitChangePassword response', { status: resp.status, body });
 
       if (!resp.ok) {
-        // try common shapes: { message }, { error }, { error: { message } }, plain string
         const serverMsg =
-          (body && (body.message || body.error && body.error.message || body.error || body.msg || body.detail)) ||
+          (body && (body.message || (body.error && body.error.message) || body.error || body.msg || body.detail)) ||
           (typeof body === 'string' && body) ||
           `Server error (${resp.status})`;
-
-        // if body is an object and we couldn't pick a field, stringify a small preview
-        const preview = (typeof body === 'object' && body !== null && !serverMsg)
-          ? JSON.stringify(body)
-          : null;
-
+        const preview = (typeof body === 'object' && body !== null && !serverMsg) ? JSON.stringify(body) : null;
         showToast(serverMsg || preview || `Server error (${resp.status})`, 'error', 6000);
         console.error('[changePWD] change failed', resp.status, body);
         isSubmitting = false;
         return;
       }
 
-      // success path
-      const successMsg =
-        (body && (body.message || body.msg || body.success)) ||
-        'Password changed successfully.';
-
+      const successMsg = (body && (body.message || body.msg || body.success)) || 'Password changed successfully.';
       showToast(successMsg, 'success', 3500);
       formEl.reset();
       isSubmitting = false;
@@ -927,12 +930,118 @@ const API_BASE = (window.__SEC_API_BASE || '').replace(/\/$/, '') || (typeof API
   }
 
 
+
   // reset handler (forgot password)
-  function handleResetPassword(ev) {
-    if (ev && ev.preventDefault) ev.preventDefault();
-    showToast('Reset password flow started. Check your email/phone.', 'info', 4000);
-    // Call your reset endpoint or open reset modal here
+  // --- Add/replace these helpers in your change-password.js ---
+
+// Try to resolve the user's email from embedded server data or profile endpoint
+async function getEmailForReset() {
+  // 1) prefer server-embedded user data (fast)
+  try {
+    const s = window.__SERVER_USER_DATA__;
+    if (s && s.email && typeof s.email === 'string') return s.email;
+  } catch (e) { /* ignore */ }
+
+  // 2) try to call profile endpoints used by probe (best-effort)
+  const probeUrls = [
+    (API_BASE ? `${API_BASE}/api/profile` : '/api/profile'),
+    (API_BASE ? `${API_BASE}/profile` : '/profile'),
+    (API_BASE ? `${API_BASE}/auth/profile` : '/auth/profile')
+  ];
+
+  for (const url of probeUrls) {
+    try {
+      const r = await fetchWithTimeout(url, {
+        method: 'GET',
+        credentials: 'include',
+        headers: { 'Accept': 'application/json' }
+      }, 6000);
+      if (!r.ok) continue;
+      const txt = await r.text();
+      if (!txt) continue;
+      try {
+        const j = JSON.parse(txt);
+        // common shapes: { email }, { user: { email } }, etc.
+        if (j.email) return j.email;
+        if (j.user && j.user.email) return j.user.email;
+        if (j.payload && j.payload.email) return j.payload.email;
+      } catch (_) {
+        // try next
+      }
+    } catch (_) { /* ignore and try next probe url */ }
   }
+
+  // 3) last resort: look for an input or meta tag, or return empty
+  const meta = document.querySelector('meta[name="user-email"]');
+  if (meta && meta.content) return meta.content;
+  return '';
+}
+
+// Replace handleResetPassword with this function
+async function handleResetPassword(ev) {
+  if (ev && ev.preventDefault) ev.preventDefault();
+
+  // immediate UX feedback
+  showToast('Sending OTP to your email…', 'info', 2500);
+
+  // resolve email
+  const email = (await getEmailForReset()) || '';
+
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    showToast('Unable to determine your account email. Please check your profile.', 'error', 5000);
+    return;
+  }
+
+  const endpoint = API_BASE ? `${API_BASE}/auth/resend-otp` : '/auth/resend-otp';
+
+  try {
+    const resp = await fetchWithTimeout(endpoint, {
+      method: 'POST',
+      credentials: 'include', // your server expects session/cookies
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({ email })
+    }, 10000);
+
+    // parse body robustly (reuse parseResponseBody if present)
+    let body = null;
+    try { body = resp.headers && resp.headers.get && resp.headers.get('content-type') && resp.headers.get('content-type').includes('application/json') ? await resp.json() : await resp.text(); }
+    catch (e) { body = await resp.text().catch(() => null); }
+
+    if (!resp.ok) {
+      const errMsg = (body && (body.message || (body.error && body.error.message) || body.error)) || `Failed to send OTP (${resp.status})`;
+      showToast(errMsg, 'error', 6000);
+      console.error('[changePWD] resend-otp failed', resp.status, body);
+      return;
+    }
+
+    // success
+    showToast((body && (body.message || body.status === 'sent' ? 'OTP sent to your email.' : body)) || 'OTP sent to your email.', 'success', 3500);
+
+    // open reset modal (ModalManager preferred)
+    let opened = false;
+    if (window.ModalManager && typeof window.ModalManager.openModal === 'function') {
+      try { window.ModalManager.openModal('resetPinModal'); opened = true; }
+      catch (e) { console.warn('[changePWD] ModalManager.openModal failed', e); }
+    }
+    if (!opened) {
+      const el = document.getElementById('resetPinModal');
+      if (el) { el.setAttribute('aria-hidden', 'false'); el.style.display = 'flex'; opened = true; }
+    }
+
+    // optionally wire OTP inputs / start resend countdown if that logic exists in resetPin module
+    try { if (typeof window.__rp_wire_debug?.startResendCountdown === 'function') window.__rp_wire_debug.startResendCountdown(60); } catch (e) { /* ignore */ }
+    // attempt to call any known hook to wire OTP inputs
+    try { if (window.__rp_wire_debug?.wire) window.__rp_wire_debug.wire(); } catch (e) { /* ignore */ }
+
+  } catch (err) {
+    console.error('[changePWD] resend-otp request error', err);
+    showToast('Network error while sending OTP. Try again.', 'error', 5000);
+  }
+}
+
 
   /* Eye toggle logic */
   function togglePasswordVisibility(targetId, btn) {
@@ -960,6 +1069,17 @@ const API_BASE = (window.__SEC_API_BASE || '').replace(/\/$/, '') || (typeof API
       const curV = $('currentPwd')?.value || '';
 
       if (!newV || !confV || !curV) return;
+
+            // before calling submitChangePassword(), blur active inputs so keyboard closes
+      try {
+        ['currentPwd','newPwd','confirmPwd'].forEach(id => { const el = document.getElementById(id); if (el && typeof el.blur === 'function') el.blur(); });
+        if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) {
+          try { document.activeElement.blur(); } catch(_) {}
+        }
+      } catch (e) { /* ignore */ }
+
+      submitChangePassword();
+
 
       // condition A: exact match
       if (newV === confV) {
