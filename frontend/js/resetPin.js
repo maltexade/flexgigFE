@@ -1943,9 +1943,10 @@ const { status, body } = await withLoader(async () => {
   if (window.__spw_installed) return;
   window.__spw_installed = true;
 
-  const API_BASE = (window.__SEC_API_BASE || '').replace(/\/$/, '') || (typeof API_BASE !== 'undefined' ? API_BASE : '');
-  const SET_ENDPOINT = API_BASE ? `${API_BASE}/auth/set-password` : '/auth/set-password';
-  const CHANGE_ENDPOINT = API_BASE ? `${API_BASE}/auth/change-password` : '/auth/change-password';
+  // Use the same API_BASE as dashboard.js
+  const API_BASE = window.API_BASE || 'https://api.flexgig.com.ng';
+  const SET_ENDPOINT = `${API_BASE}/auth/set-password`;
+  const CHANGE_ENDPOINT = `${API_BASE}/auth/change-password`;
 
   const $ = id => document.getElementById(id);
   const qsa = s => Array.from(document.querySelectorAll(s));
@@ -2049,19 +2050,24 @@ const { status, body } = await withLoader(async () => {
 
   // Helper to get UID from multiple sources
   async function getUserId() {
-    // Try server-embedded data first
-    if (window.__SERVER_USER_DATA__?.uid) {
-      return window.__SERVER_USER_DATA__.uid;
-    }
-    
-    // Try global user object
+    // Try global user object first (from dashboard.js)
     if (window.user?.uid) {
+      console.log('[spw] Using UID from window.user:', window.user.uid);
       return window.user.uid;
     }
     
-    // Try to fetch from session endpoint
+    // Try server-embedded data
+    if (window.__SERVER_USER_DATA__?.uid) {
+      console.log('[spw] Using UID from __SERVER_USER_DATA__:', window.__SERVER_USER_DATA__.uid);
+      return window.__SERVER_USER_DATA__.uid;
+    }
+    
+    // Try to fetch from session endpoint (use correct API_BASE)
     try {
-      const sessionResp = await fetchWithTimeoutLocal('/api/session', {
+      const sessionUrl = `${API_BASE}/api/session`;
+      console.log('[spw] Fetching user from:', sessionUrl);
+      
+      const sessionResp = await fetchWithTimeoutLocal(sessionUrl, {
         method: 'GET',
         credentials: 'include',
         headers: { 'Accept': 'application/json' }
@@ -2070,6 +2076,7 @@ const { status, body } = await withLoader(async () => {
       if (sessionResp.ok) {
         const sessionData = await sessionResp.json();
         if (sessionData?.user?.uid) {
+          console.log('[spw] Using UID from session API:', sessionData.user.uid);
           return sessionData.user.uid;
         }
       }
