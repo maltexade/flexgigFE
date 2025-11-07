@@ -1938,6 +1938,11 @@ const { status, body } = await withLoader(async () => {
    - Requires your spw HTML (ids/classes used in the HTML you already inserted).
    - Uses showToast() if present, otherwise falls back to rp notify().
 */
+/* set-password.js
+   Wires the Set Password modal (spw- prefix).
+   - Requires your spw HTML (ids/classes used in the HTML you already inserted).
+   - Uses showToast() if present, otherwise falls back to rp notify().
+*/
 (function spwModule(){
   'use strict';
   if (window.__spw_installed) return;
@@ -2058,12 +2063,26 @@ const { status, body } = await withLoader(async () => {
 
   // attempt to POST to set endpoint, fallback to change endpoint on 404
   async function postPassword(newPwd) {
-    // Fetch uid from embedded server data (assumes we're in dashboard.html or similar context)
-    const uid = window.__SERVER_USER_DATA__?.uid;
-    if (!uid) {
-      throw new Error('Missing user UID - cannot set password without authenticated session');
+    let uid;
+    try {
+        const sessionResp = await fetchWithTimeoutLocal('/api/session', {
+            method: 'GET',
+            credentials: 'include',
+            headers: {'Accept':'application/json'},
+        });
+        if (!sessionResp.ok) {
+            throw new Error('Session fetch failed');
+        }
+        const sessionBody = await sessionResp.json();
+        uid = sessionBody?.user?.uid;
+        if (!uid) {
+            throw new Error('Missing UID in session');
+        }
+    } catch (err) {
+        toast('Failed to get session: ' + (err.message || 'unknown'), 'error');
+        return { ok: false, error: err };
     }
-    const payload = { uid, password: newPwd }; // Use 'password' key to match server expectation
+    const payload = { uid, password: newPwd };
     const timeout = 12000;
     try {
       // try set-password first
@@ -2078,14 +2097,14 @@ const { status, body } = await withLoader(async () => {
         resp = await fetchWithTimeoutLocal(CHANGE_ENDPOINT, {
           method: 'POST', credentials: 'include',
           headers: {'Content-Type':'application/json','Accept':'application/json'},
-          body: JSON.stringify({ uid, currentPassword: '', password: newPwd }) // some servers require current; expected to error but we'll try
+          body: JSON.stringify({ uid, currentPassword: '', newPassword: newPwd }) // some servers require current; expected to error but we'll try
         }, timeout);
       }
 
       // parse response sensibly
       let body = null;
       try {
-        const ct = resp.headers.headers.get ? (resp.headers.get('content-type') || '') : '';
+        const ct = resp.headers && resp.headers.get ? (resp.headers.get('content-type') || '') : '';
         if (ct.toLowerCase().includes('application/json')) body = await resp.json();
         else body = await resp.text();
       } catch (e) { body = null; }
