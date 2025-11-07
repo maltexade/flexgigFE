@@ -2057,23 +2057,82 @@ const { status, body } = await withLoader(async () => {
   }
 
   // attempt to POST to set endpoint, fallback to change endpoint on 404
-  async function postPassword(newPwd) {
-    const payload = { newPassword: newPwd };
-    const timeout = 12000;
+    // helper: try to find uid and token from common places (URL, hidden inputs, globals, localStorage, cookies)
+  function findUidAndToken() {
+    // 1) URL params: ?uid=... & ?token=...
     try {
+      const url = new URL(window.location.href);
+      const uidFromUrl = url.searchParams.get('uid') || url.searchParams.get('u');
+      const tokenFromUrl = url.searchParams.get('token') || url.searchParams.get('t');
+      if (uidFromUrl || tokenFromUrl) return { uid: uidFromUrl, token: tokenFromUrl };
+    } catch (e) { /* ignore */ }
+
+    // 2) hidden inputs in the modal (useful if server rendered them into the page)
+    try {
+      const uidInput = document.querySelector('input[name="uid"], input[id="spw-uid"], input[name="userId"]');
+      const tokenInput = document.querySelector('input[name="token"], input[id="spw-token"]');
+      if (uidInput || tokenInput) return { uid: uidInput?.value || null, token: tokenInput?.value || null };
+    } catch (e) { /* ignore */ }
+
+    // 3) window globals (app might place reset info there)
+    try {
+      if (window.__resetUid || window.__uid) return { uid: window.__resetUid || window.__uid, token: window.__resetToken || window.__rt || null };
+    } catch(e){}
+
+    // 4) localStorage (dev flows sometimes store token there temporarily)
+    try {
+      const uidLs = localStorage.getItem('reset_uid') || localStorage.getItem('uid');
+      const tokenLs = localStorage.getItem('reset_token') || localStorage.getItem('rt') || localStorage.getItem('token');
+      if (uidLs || tokenLs) return { uid: uidLs || null, token: tokenLs || null };
+    } catch(e){}
+
+    // 5) cookies (server-side expects cookie 'rt' sometimes)
+    try {
+      const cookieStr = document.cookie || '';
+      const match = cookieStr.match(/(?:^|;\s*)rt=([^;]+)/);
+      if (match) return { uid: null, token: decodeURIComponent(match[1]) };
+    } catch(e){}
+
+    // default: nothing found
+    return { uid: null, token: null };
+  }
+
+  // attempt to POST to set endpoint, fallback to change endpoint on 404
+  async function postPassword(newPwd) {
+    const timeout = 12000;
+    // find uid & token automatically
+    const found = findUidAndToken();
+    const uid = found.uid;
+    const token = found.token;
+
+    // Build payload exactly as backend expects
+    const payload = { password: newPwd };
+    if (uid) payload.uid = uid;
+
+    try {
+      console.debug('[spw] POST', SET_ENDPOINT, 'payload', payload, 'tokenPresent=', !!token);
+
+      const headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
       // try set-password first
       let resp = await fetchWithTimeoutLocal(SET_ENDPOINT, {
         method: 'POST', credentials: 'include',
-        headers: {'Content-Type':'application/json','Accept':'application/json'},
+        headers,
         body: JSON.stringify(payload)
       }, timeout);
 
       if (resp.status === 404) {
-        // fallback to change-password
+        console.debug('[spw] set-password 404, falling back to change-password');
+        // fallback to change-password — include currentPassword empty (server may still reject)
+        const changePayload = { currentPassword: '', newPassword: newPwd };
+        let changeHeaders = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
+        if (token) changeHeaders['Authorization'] = `Bearer ${token}`;
+
         resp = await fetchWithTimeoutLocal(CHANGE_ENDPOINT, {
           method: 'POST', credentials: 'include',
-          headers: {'Content-Type':'application/json','Accept':'application/json'},
-          body: JSON.stringify({ currentPassword: '', newPassword: newPwd }) // some servers require current; expected to error but we'll try
+          headers: changeHeaders,
+          body: JSON.stringify(changePayload)
         }, timeout);
       }
 
@@ -2083,13 +2142,16 @@ const { status, body } = await withLoader(async () => {
         const ct = resp.headers && resp.headers.get ? (resp.headers.get('content-type') || '') : '';
         if (ct.toLowerCase().includes('application/json')) body = await resp.json();
         else body = await resp.text();
-      } catch (e) { body = null; }
+      } catch (e) { body = await resp.text().catch(()=>null); }
 
+      console.debug('[spw] response', resp.status, body);
       return { ok: resp.ok, status: resp.status, body };
     } catch (err) {
+      console.error('[spw] request error', err);
       return { ok:false, status: 0, error: err };
     }
   }
+
 
   // handle form submit
   async function onSpwSubmit(e) {
