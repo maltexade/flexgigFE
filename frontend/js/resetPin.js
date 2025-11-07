@@ -1,5 +1,3 @@
-import { withLoader } from "./dashboard";
-
 /* resetPin.js – v7
    - FIXED: closeAll() modals after PIN creation (smooth transition to dashboard)
    - FIXED: Resend counter now shows "Resend OTP" cleanly after countdown
@@ -16,7 +14,6 @@ import { withLoader } from "./dashboard";
   const dbg = (...args) => { if (DEBUG) console.debug(tag, ...args); };
   const warn = (...args) => { if (DEBUG) console.warn(tag, ...args); };
   const err = (...args) => { if (DEBUG) console.error(tag, ...args); };
-  
 
   if (window.__rp_wire_reset_v7_installed) {
     log('already installed – rewire requested');
