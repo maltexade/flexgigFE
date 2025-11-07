@@ -1685,3 +1685,292 @@ function scheduleAutoSubmitIfNeeded() {
 
   log('rp reset-password module ready');
 })();
+
+
+/* set-password.js
+   Wires the Set Password modal (spw- prefix).
+   - Requires your spw HTML (ids/classes used in the HTML you already inserted).
+   - Uses showToast() if present, otherwise falls back to rp notify().
+*/
+(function spwModule(){
+  'use strict';
+  if (window.__spw_installed) return;
+  window.__spw_installed = true;
+
+  const API_BASE = (window.__SEC_API_BASE || '').replace(/\/$/, '') || (typeof API_BASE !== 'undefined' ? API_BASE : '');
+  const SET_ENDPOINT = API_BASE ? `${API_BASE}/api/set-password` : '/api/set-password';
+  const CHANGE_ENDPOINT = API_BASE ? `${API_BASE}/api/change-password` : '/api/change-password';
+
+  const $ = id => document.getElementById(id);
+  const qsa = s => Array.from(document.querySelectorAll(s));
+
+  // Prefer your existing showToast, otherwise fallback to notify from rpResetPasswordModule
+  function toast(msg, type = 'info', ttl = 3500) {
+    if (typeof showToast === 'function') return showToast(msg, type, ttl);
+    if (window.__rp_pwd_debug && typeof window.__rp_pwd_debug.notify === 'function') {
+      const t = type === 'error' ? 'error' : type === 'success' ? 'success' : (type === 'warn' ? 'warn' : 'info');
+      try { window.__rp_pwd_debug.notify({ type: t, message: msg, title: '' , duration: ttl}); return; } catch(e) { /* ignore */ }
+    }
+    // minimal fallback
+    try { alert((type.toUpperCase()? type + ': ' : '') + msg); } catch(e){ console.log(type, msg); }
+  }
+
+  // small fetch-with-timeout helper (safe fallback if not defined)
+  async function fetchWithTimeoutLocal(url, opts = {}, ms = 10000) {
+    const c = new AbortController();
+    const id = setTimeout(() => c.abort(), ms);
+    try {
+      const r = await fetch(url, Object.assign({}, opts, { signal: c.signal }));
+      clearTimeout(id);
+      return r;
+    } catch (err) {
+      clearTimeout(id);
+      throw err;
+    }
+  }
+
+  // DOM references
+  const MODAL_ID = 'spwModal';
+  const FORM_ID = 'spwForm';
+  const NEW_ID = 'spw-newPwd';
+  const CONFIRM_ID = 'spw-confirmPwd';
+  const CREATE_BTN_ID = 'spwCreateBtn';
+  const CLOSE_BTN_SELECTOR = '.spw-close-btn';
+  const PWD_TOGGLE_SELECTOR = '.spw-pwd-toggle';
+
+  // helper to safely open/close modals (tries ModalManager if available)
+  function safeOpenModal(id) {
+    try {
+      if (window.ModalManager && typeof window.ModalManager.openModal === 'function') {
+        return window.ModalManager.openModal(id);
+      }
+    } catch (e) { console.warn('[spw] ModalManager.openModal failed', e); }
+    const el = $(id);
+    if (el) { el.setAttribute('aria-hidden','false'); el.style.display = 'flex'; }
+  }
+  function safeCloseModal(id) {
+    try {
+      if (window.ModalManager && typeof window.ModalManager.closeModal === 'function') {
+        return window.ModalManager.closeModal(id);
+      }
+    } catch (e) { console.warn('[spw] ModalManager.closeModal failed', e); }
+    const el = $(id);
+    if (el) { el.setAttribute('aria-hidden','true'); el.style.display = 'none'; }
+  }
+  function safeCloseAll() {
+    try {
+      if (window.ModalManager && typeof window.ModalManager.closeAll === 'function') {
+        return window.ModalManager.closeAll();
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  // toggle eyes
+  function wireEyeToggles() {
+    qsa(PWD_TOGGLE_SELECTOR).forEach(btn => {
+      if (btn.__wired) return;
+      const target = btn.getAttribute('data-target');
+      btn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        const input = document.getElementById(target);
+        if (!input) return;
+        const isPwd = input.type === 'password';
+        input.type = isPwd ? 'text' : 'password';
+        const openSvg = btn.querySelector('.eye-open');
+        const closedSvg = btn.querySelector('.eye-closed');
+        if (openSvg && closedSvg) {
+          if (isPwd) { openSvg.style.display = 'none'; closedSvg.style.display = 'inline'; }
+          else { openSvg.style.display = 'inline'; closedSvg.style.display = 'none'; }
+        }
+      }, { passive: false });
+      btn.__wired = true;
+    });
+  }
+
+  // blur inputs to close soft keyboard
+  function blurInputs() {
+    try {
+      [NEW_ID, CONFIRM_ID].forEach(id => {
+        const el = document.getElementById(id);
+        if (el && typeof el.blur === 'function') el.blur();
+      });
+      if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) {
+        try { document.activeElement.blur(); } catch(_) {}
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  // validation
+  function validateSetPassword(newPwd, confirmPwd) {
+    if (!newPwd || !confirmPwd) return { ok:false, reason: 'All fields are required.' };
+    if (newPwd.length < 8) return { ok:false, reason: 'Password must be at least 8 characters.' };
+    if (newPwd !== confirmPwd) return { ok:false, reason: 'Passwords do not match.' };
+    return { ok:true };
+  }
+
+  // attempt to POST to set endpoint, fallback to change endpoint on 404
+  async function postPassword(newPwd) {
+    const payload = { newPassword: newPwd };
+    const timeout = 12000;
+    try {
+      // try set-password first
+      let resp = await fetchWithTimeoutLocal(SET_ENDPOINT, {
+        method: 'POST', credentials: 'include',
+        headers: {'Content-Type':'application/json','Accept':'application/json'},
+        body: JSON.stringify(payload)
+      }, timeout);
+
+      if (resp.status === 404) {
+        // fallback to change-password
+        resp = await fetchWithTimeoutLocal(CHANGE_ENDPOINT, {
+          method: 'POST', credentials: 'include',
+          headers: {'Content-Type':'application/json','Accept':'application/json'},
+          body: JSON.stringify({ currentPassword: '', newPassword: newPwd }) // some servers require current; expected to error but we'll try
+        }, timeout);
+      }
+
+      // parse response sensibly
+      let body = null;
+      try {
+        const ct = resp.headers && resp.headers.get ? (resp.headers.get('content-type') || '') : '';
+        if (ct.toLowerCase().includes('application/json')) body = await resp.json();
+        else body = await resp.text();
+      } catch (e) { body = null; }
+
+      return { ok: resp.ok, status: resp.status, body };
+    } catch (err) {
+      return { ok:false, status: 0, error: err };
+    }
+  }
+
+  // handle form submit
+  async function onSpwSubmit(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    const btn = $(CREATE_BTN_ID);
+    const newPwd = $(NEW_ID)?.value || '';
+    const confirmPwd = $(CONFIRM_ID)?.value || '';
+
+    const v = validateSetPassword(newPwd, confirmPwd);
+    if (!v.ok) { toast(v.reason, 'error', 4500); try { if (v.reason.toLowerCase().includes('match')) $(CONFIRM_ID).focus(); else $(NEW_ID).focus(); } catch(e){}; return; }
+
+    // blur to close keyboard
+    blurInputs();
+
+    // disable UI
+    if (btn) { btn.disabled = true; btn.dataset._orig = btn.textContent; btn.textContent = 'Creating…'; }
+
+    toast('Creating password…', 'info', 2500);
+
+    const res = await postPassword(newPwd);
+
+    if (!res.ok) {
+      const body = res.body;
+      const msg = (body && (body.message || body.error || body.msg)) || (res.status ? `Server error (${res.status})` : 'Network error');
+      toast(msg, 'error', 6000);
+      if (btn) { btn.disabled = false; btn.textContent = btn.dataset._orig || 'Create password'; }
+      return;
+    }
+
+    // success
+    const successMsg = (res.body && (res.body.message || res.body.msg || res.body.status)) || 'Password created successfully.';
+    toast(successMsg, 'success', 3500);
+
+    // clear form and close modal
+    try {
+      const form = $(FORM_ID); if (form) form.reset();
+    } catch(e){/*ignore*/}
+
+    // close reset modal if open to avoid duplicates (defensive)
+    try { safeCloseModal('resetPinModal'); } catch(e){}
+
+    // close this modal
+    try { safeCloseModal(MODAL_ID); } catch(e){}
+
+    // cleanup UI
+    if (btn) { btn.disabled = false; btn.textContent = btn.dataset._orig || 'Create password'; delete btn.dataset._orig; }
+
+    // optional: call a global hook if app needs it (e.g. refresh session)
+    try { if (typeof window.onPasswordSet === 'function') window.onPasswordSet(newPwd); } catch(e){/*ignore*/}
+  }
+
+  // wire close button to close modal
+  function wireCloseButtons() {
+    qsa(CLOSE_BTN_SELECTOR).forEach(b => {
+      if (b.__spwCloseWired) return;
+      b.addEventListener('click', (ev) => {
+        ev && ev.preventDefault && ev.preventDefault();
+        safeCloseModal(MODAL_ID);
+      });
+      b.__spwCloseWired = true;
+    });
+  }
+
+  // wire create button + form
+  function wireForm() {
+    const form = $(FORM_ID);
+    const btn = $(CREATE_BTN_ID);
+    if (form && !form.__spwFormWired) {
+      form.addEventListener('submit', onSpwSubmit);
+      form.__spwFormWired = true;
+    }
+    if (btn && !btn.__spwBtnWired) {
+      // clicking the button will submit the form thanks to form="spwForm" attribute in your HTML
+      btn.addEventListener('click', (e) => { /* let form handler run */ }, { passive: true });
+      btn.__spwBtnWired = true;
+    }
+  }
+
+  // expose helper to open modal programmatically (closes other modals to avoid duplicates)
+  function openSpwModal() {
+    // close potential modals that might open automatically (defensive)
+    try { safeCloseModal('changePwdModal'); } catch (e) {}
+    try { safeCloseModal('resetPinModal'); } catch (e) {}
+    safeOpenModal(MODAL_ID);
+    setTimeout(() => {
+      // focus first input
+      try { const el = $(NEW_ID); if (el) { el.focus(); } } catch(e){}
+    }, 60);
+    // wire eye toggles and form (in case modal was injected after)
+    wireEyeToggles();
+    wireCloseButtons();
+    wireForm();
+  }
+
+  // auto-wire on DOM ready or if modal inserted later
+  function initAutoWire() {
+    // wire anything already present
+    wireEyeToggles();
+    wireCloseButtons();
+    wireForm();
+
+    // observe for modal insertion so we can wire later
+    const mo = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        if (!m.addedNodes || !m.addedNodes.length) continue;
+        for (const n of m.addedNodes) {
+          try {
+            if (n.nodeType !== 1) continue;
+            if (n.id === MODAL_ID || (n.querySelector && (n.querySelector(`#${FORM_ID}`) || n.querySelector(PWD_TOGGLE_SELECTOR)))) {
+              setTimeout(() => { wireEyeToggles(); wireCloseButtons(); wireForm(); }, 40);
+              return;
+            }
+          } catch (e) {}
+        }
+      }
+    });
+    mo.observe(document.documentElement || document.body, { childList: true, subtree: true });
+  }
+
+  // expose debug helpers
+  window.__spw_helpers = {
+    open: openSpwModal,
+    close: () => safeCloseModal(MODAL_ID),
+    validate: validateSetPassword,
+    postPassword,
+    SET_ENDPOINT, CHANGE_ENDPOINT
+  };
+
+  // kick off
+  initAutoWire();
+  console.log('[spw] set-password module ready. Helpers: window.__spw_helpers');
+})();

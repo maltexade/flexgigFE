@@ -1061,6 +1061,81 @@
     </div>
   </div>
 </div>
+
+<!-- Set Password Modal (full screen) -->
+<div id="spwModal" class="spw-modal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="spwTitle">
+  <div class="spw-backdrop" aria-hidden="true"></div>
+
+  <div class="spw-panel" role="document">
+    <header class="spw-header">
+      <button class="spw-close-btn" data-close aria-label="Close create password modal" type="button">
+        <!-- close / back arrow svg -->
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
+          <path d="M15 18l-6-6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+
+      <h2 id="spwTitle" class="spw-title">Create a new password</h2>
+
+      <div class="spw-header-spacer" aria-hidden="true"></div>
+    </header>
+
+    <div class="spw-body">
+      <p class="spw-intro">Choose a strong password for your account. You'll use this to sign in going forward.</p>
+
+      <form id="spwForm" class="spw-form" autocomplete="off" novalidate>
+        <div class="spw-field">
+          <label for="spw-newPwd" class="spw-label">New password</label>
+          <div class="spw-input-wrap">
+            <input id="spw-newPwd" name="newPwd" type="password" autocomplete="new-password" required
+                   class="spw-input" aria-describedby="spw-new-help" />
+            <button class="spw-pwd-toggle" type="button" aria-label="Show password" data-target="spw-newPwd">
+              <!-- eye icons (JS will toggle display) -->
+              <svg class="spw-eye-eye-open eye-open" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              <svg class="spw-eye-eye-closed eye-closed" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="display:none;">
+                <path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a21.5 21.5 0 0 1 5.11-6.56" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M1 1l22 22" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+          </div>
+          <div id="spw-new-help" class="spw-hint">At least 8 characters recommended.</div>
+        </div>
+
+        <div class="spw-field">
+          <label for="spw-confirmPwd" class="spw-label">Confirm password</label>
+          <div class="spw-input-wrap">
+            <input id="spw-confirmPwd" name="confirmPwd" type="password" autocomplete="new-password" required
+                   class="spw-input" aria-describedby="spw-confirm-help" />
+            <button class="spw-pwd-toggle" type="button" aria-label="Show confirmation password" data-target="spw-confirmPwd">
+              <svg class="spw-eye-eye-open eye-open" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              <svg class="spw-eye-eye-closed eye-closed" width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="display:none;">
+                <path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a21.5 21.5 0 0 1 5.11-6.56" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M1 1l22 22" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+          </div>
+          <div id="spw-confirm-help" class="spw-hint">Type the same password again to confirm.</div>
+        </div>
+
+        <!-- spacer so the bottom button doesn't overlap fields on small screens -->
+        <div style="height: 84px;" aria-hidden="true"></div>
+      </form>
+    </div>
+
+    <div class="spw-footer">
+      <div class="spw-footer-inner">
+        <button id="spwCreateBtn" type="submit" form="spwForm" class="spw-create-btn">Create password</button>
+      </div>
+    </div>
+  </div>
+</div>
+
         <!-- ================= End Change Password Modal ================= -->
 
 
