@@ -93,6 +93,7 @@ function hideBackdrop(modal) {
   // Modal configuration
     // Modal configuration (use id strings and resolve elements later)
   const modals = {
+    spwModal: { id: 'spwModal', element: null, hasPullHandle: false },
     resetPinModal: { id: 'resetPinModal', element: null, hasPullHandle: false },
     settingsModal: { id: 'settingsModal', element: null, hasPullHandle: false },
     helpSupportModal: { id: 'helpSupportModal', element: null, hasPullHandle: false },
