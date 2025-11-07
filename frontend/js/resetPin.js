@@ -637,62 +637,840 @@ if (hasExistingPin) {
 
 })();
 
-// change password js file
+/* change-password.js
+   Merged: robust changePWD visibility controller + Change Password modal logic (validation + toasts)
+   Assumes you set: window.__SEC_API_BASE or API_BASE constant before this runs (or uses relative paths).
+*/
 
-/* Show/hide "Change password" based on server-provided hasPassword flag.
-   Assumes you already set:*/
-const API_BASE = (window.__SEC_API_BASE || '').replace(/\/$/, '') || '';
+/* change-password.js
+   Merged: visibility controller + full-screen change password modal logic
+   - Adds eye toggles for current/new/confirm inputs
+   - Auto-submit when confirm matches new OR when confirm length == new length (debounced)
+   - Reset button acts as "forgot/reset"
+   - Change button pinned to bottom
+   Include after modalManager.js and after any window.__SEC_API_BASE definition.
+*/
+
+const API_BASE = (window.__SEC_API_BASE || '').replace(/\/$/, '') || (typeof API_BASE !== 'undefined' ? API_BASE : '');
 
 (function () {
-  console.log('[ChangePWVisibility]📧📧📧📧📧📧📧📧 checking password presence');
-  const PROFILE_ENDPOINT = (typeof API_BASE !== 'undefined' && API_BASE)
-    ? `${API_BASE}/api/profile`
-    : '/api/profile';
+  'use strict';
+  console.log('[changePWD] ▶️ init merged controller + modal (full-screen + eye toggles + auto-submit)');
 
-  const changeRow = document.getElementById('changePW');
-  const pwdFormWrap = document.getElementById('pwdFormWrap');
-
-  if (!changeRow) {
-    console.warn('changePW element not found; skipping password visibility check.');
-    return;
+  /* ---------------------------
+     SECTION A: Visibility Controller (unchanged)
+     --------------------------- */
+  const resolvedBase = API_BASE || '';
+  const endpoints = [
+    resolvedBase ? `${resolvedBase}/api/profile` : '/api/profile',
+    resolvedBase ? `${resolvedBase}/profile` : '/profile',
+    resolvedBase ? `${resolvedBase}/auth/profile` : '/auth/profile'
+  ];
+  function hideAllChangeControls() {
+    const list = document.querySelectorAll('#changePWD');
+    list.forEach(el => {
+      el.style.display = 'none';
+      const wrap = el.nextElementSibling && el.nextElementSibling.id === 'pwdFormWrap'
+        ? el.nextElementSibling
+        : document.getElementById('pwdFormWrap');
+      if (wrap) wrap.hidden = true;
+    });
   }
+  function showAllChangeControls() {
+    const list = document.querySelectorAll('#changePWD');
+    list.forEach(el => {
+      el.style.display = '';
+      const wrap = el.nextElementSibling && el.nextElementSibling.id === 'pwdFormWrap'
+        ? el.nextElementSibling
+        : document.getElementById('pwdFormWrap');
+      if (wrap) wrap.hidden = false;
+    });
+  }
+  hideAllChangeControls();
+  const globalObserver = new MutationObserver((mutations) => {
+    for (const m of mutations) {
+      if (!m.addedNodes || !m.addedNodes.length) continue;
+      for (const node of m.addedNodes) {
+        try {
+          if (node.nodeType !== 1) continue;
+          if (node.id === 'changePWD') {
+            node.style.display = 'none';
+            const wrap = document.getElementById('pwdFormWrap');
+            if (wrap) wrap.hidden = true;
+            console.log('[changePWD] 🔍 New #changePWD injected — hidden (awaiting server confirmation).');
+          }
+          const inside = node.querySelector && node.querySelector('#changePWD');
+          if (inside) {
+            inside.style.display = 'none';
+            const wrap = document.getElementById('pwdFormWrap');
+            if (wrap) wrap.hidden = true;
+            console.log('[changePWD] 🔍 #changePWD found inside new node — hidden (awaiting server).');
+          }
+        } catch (err) {
+          console.warn('[changePWD] observer error', err);
+        }
+      }
+    }
+  });
+  globalObserver.observe(document.documentElement || document.body, { childList: true, subtree: true });
 
-  async function applyVisibility() {
+  // fetch with timeout helper
+  async function fetchWithTimeout(url, opts = {}, ms = 7000) {
+    const c = new AbortController();
+    const t = setTimeout(() => c.abort(), ms);
     try {
-      const res = await fetch(PROFILE_ENDPOINT, {
-        method: 'GET',
-        credentials: 'include',
-        headers: { 'Accept': 'application/json' }
-      });
-
-      if (!res.ok) {
-        // safe default: hide the control if we can't confirm the user has a password
-        console.warn('Failed to fetch profile for password check:', res.status);
-        changeRow.style.display = 'none';
-        if (pwdFormWrap) pwdFormWrap.hidden = true;
-        return;
-      }
-
-      const payload = await res.json();
-      const hasPassword = payload && payload.hasPassword === true;
-
-      if (hasPassword) {
-        changeRow.style.display = ''; // show
-      } else {
-        changeRow.style.display = 'none'; // hide for social/otp-only users
-        if (pwdFormWrap) pwdFormWrap.hidden = true;
-      }
+      const resp = await fetch(url, Object.assign({}, opts, { signal: c.signal }));
+      clearTimeout(t);
+      return resp;
     } catch (err) {
-      console.error('Error while checking password presence:', err);
-      changeRow.style.display = 'none';
-      if (pwdFormWrap) pwdFormWrap.hidden = true;
+      clearTimeout(t);
+      throw err;
     }
   }
 
-  // Run after page load; if you already have an auth-ready hook, call applyVisibility there instead
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', applyVisibility);
-  } else {
-    applyVisibility();
+  async function probeProfile() {
+    for (let i = 0; i < endpoints.length; i++) {
+      const url = endpoints[i];
+      try {
+        const resp = await fetchWithTimeout(url, {
+          method: 'GET',
+          credentials: 'include',
+          headers: { 'Accept': 'application/json' }
+        }, 8000);
+
+        if (resp.status === 401 || resp.status === 403) {
+          return { ok: false, reason: `auth(${resp.status})` };
+        }
+        const text = await resp.text();
+        if (!text) return { ok: false, reason: 'empty' };
+        try {
+          const payload = JSON.parse(text);
+          return { ok: true, hasPassword: payload?.hasPassword === true, payload };
+        } catch (jErr) {
+          return { ok: false, reason: 'json-parse-failed', raw: text };
+        }
+      } catch (err) {
+        // try next endpoint
+      }
+    }
+    return { ok: false, reason: 'all-failed' };
   }
+
+  async function evaluateOnce() {
+    const r = await probeProfile();
+    if (r.ok && r.hasPassword === true) {
+      showAllChangeControls();
+    } else {
+      hideAllChangeControls();
+    }
+  }
+  evaluateOnce().catch(err => { hideAllChangeControls(); });
+  window.__changePWDControl = { recheck: evaluateOnce, revealNow: showAllChangeControls, hideNow: hideAllChangeControls };
+
+  /* ---------------------------
+     SECTION B: Modal + Validation + Toasts + Eye toggles + Auto-submit
+     --------------------------- */
+  function $(id) { return document.getElementById(id); }
+
+  // Toasts container
+  const toastContainerId = 'cp-toast-container';
+  function ensureToastContainer() {
+    let c = document.getElementById(toastContainerId);
+    if (!c) {
+      c = document.createElement('div');
+      c.id = toastContainerId;
+      Object.assign(c.style, {
+        position: 'fixed',
+        top: '16px',
+        right: '16px',
+        zIndex: 35000,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '10px',
+        pointerEvents: 'none'
+      });
+      document.body.appendChild(c);
+    }
+    return c;
+  }
+  function showToast(message, type = 'info', ttl = 3500) {
+    const container = ensureToastContainer();
+    const t = document.createElement('div');
+    t.className = `cp-toast ${type}`;
+    Object.assign(t.style, {
+      minWidth: '220px', maxWidth: '360px', padding: '10px 12px',
+      borderRadius: '8px', color: '#fff', fontSize: '0.95rem',
+      boxShadow: '0 10px 30px rgba(0,0,0,0.5)', pointerEvents: 'auto',
+      opacity: '0', transform: 'translateY(-6px)', transition: 'opacity .25s ease, transform .25s ease'
+    });
+    if (type === 'success') t.style.background = 'linear-gradient(90deg,#2bbf7a,#1f9f66)';
+    else if (type === 'error') t.style.background = 'linear-gradient(90deg,#ff6b6b,#e85a5a)';
+    else t.style.background = 'linear-gradient(90deg,#2c7ef3,#1160d9)';
+    t.textContent = message;
+    container.appendChild(t);
+    requestAnimationFrame(() => { t.style.opacity = '1'; t.style.transform = 'translateY(0)'; });
+    setTimeout(() => {
+      t.style.opacity = '0'; t.style.transform = 'translateY(-6px)';
+      setTimeout(() => { if (t.parentNode) t.parentNode.removeChild(t); }, 260);
+    }, ttl);
+    return t;
+  }
+
+  // validation
+  function validatePasswordsFromDOM() {
+    const current = $('currentPwd')?.value || '';
+    const nw = $('newPwd')?.value || '';
+    const conf = $('confirmPwd')?.value || '';
+    if (!current.trim() || !nw.trim() || !conf.trim()) return { ok: false, reason: 'All fields are required.' };
+    if (current === nw) return { ok: false, reason: 'New password must be different from current password.' };
+    if (nw !== conf) return { ok: false, reason: 'New password and confirmation do not match.' };
+    return { ok: true, data: { current, new: nw } };
+  }
+
+  // submit
+  let isSubmitting = false;
+  async function submitChangePassword(ev) {
+    if (ev && ev.preventDefault) ev.preventDefault();
+    if (isSubmitting) return;
+    const formEl = $('changePwdForm');
+    if (!formEl) { showToast('Change password form not found.', 'error'); return; }
+
+    const validation = validatePasswordsFromDOM();
+    if (!validation.ok) {
+      showToast(validation.reason, 'error');
+      const reason = (validation.reason || '').toLowerCase();
+      if (reason.includes('confirmation')) $('confirmPwd')?.focus();
+      else if (reason.includes('different')) $('newPwd')?.focus();
+      else $('currentPwd')?.focus();
+      return;
+    }
+
+    isSubmitting = true;
+    showToast('Changing password…', 'info', 2000);
+    const endpoint = (API_BASE ? `${API_BASE}/api/change-password` : '/api/change-password');
+
+    try {
+      const resp = await fetchWithTimeout(endpoint, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ currentPassword: validation.data.current, newPassword: validation.data.new })
+      }, 10000);
+
+      const text = await resp.text();
+      let json;
+      try { json = text ? JSON.parse(text) : {}; } catch (e) { json = { raw: text }; }
+
+      if (!resp.ok) {
+        const msg = (json && (json.message || json.error)) ? (json.message || json.error) : `Server error (${resp.status})`;
+        showToast(msg, 'error', 5000);
+        console.error('[changePWD] change failed', resp.status, json);
+        isSubmitting = false;
+        return;
+      }
+
+      showToast((json && json.message) ? json.message : 'Password changed successfully.', 'success', 3500);
+      formEl.reset();
+      isSubmitting = false;
+
+      if (window.ModalManager && typeof window.ModalManager.closeModal === 'function') {
+        try { window.ModalManager.closeModal('changePwdModal'); }
+        catch (err) { console.warn('[changePWD] ModalManager close failed', err); }
+      } else {
+        const modal = $('changePwdModal'); if (modal) modal.style.display = 'none';
+      }
+    } catch (err) {
+      console.error('[changePWD] change request error', err);
+      if (err.name === 'AbortError') showToast('Request timed out. Try again.', 'error', 4500);
+      else showToast('Failed to change password. Check connection.', 'error', 4500);
+      isSubmitting = false;
+    }
+  }
+
+  // reset handler (forgot password)
+  function handleResetPassword(ev) {
+    if (ev && ev.preventDefault) ev.preventDefault();
+    showToast('Reset password flow started. Check your email/phone.', 'info', 4000);
+    // Call your reset endpoint or open reset modal here
+  }
+
+  /* Eye toggle logic */
+  function togglePasswordVisibility(targetId, btn) {
+    const input = document.getElementById(targetId);
+    if (!input) return;
+    const isPwd = input.type === 'password';
+    input.type = isPwd ? 'text' : 'password';
+    // swap icons
+    const openSvg = btn.querySelector('.eye-open');
+    const closedSvg = btn.querySelector('.eye-closed');
+    if (openSvg && closedSvg) {
+      if (isPwd) { openSvg.style.display = 'none'; closedSvg.style.display = 'inline'; }
+      else { openSvg.style.display = 'inline'; closedSvg.style.display = 'none'; }
+    }
+  }
+
+  /* Auto-submit behavior (debounced) */
+  let autoSubmitTimer = null;
+  function scheduleAutoSubmitIfNeeded() {
+    // cancel previous
+    if (autoSubmitTimer) clearTimeout(autoSubmitTimer);
+    autoSubmitTimer = setTimeout(() => {
+      const newV = $('newPwd')?.value || '';
+      const confV = $('confirmPwd')?.value || '';
+      const curV = $('currentPwd')?.value || '';
+
+      if (!newV || !confV || !curV) return;
+
+      // condition A: exact match
+      if (newV === confV) {
+        // validation will pass for new vs confirm but will still check current != new on submit
+        submitChangePassword();
+        return;
+      }
+
+      // condition B: same length (user requested)
+      if (newV.length === confV.length) {
+        // attempt submit (validation will fail if they are different)
+        submitChangePassword();
+        return;
+      }
+    }, 220); // 220ms debounce
+  }
+
+  // live inline check visuals & attach auto-submit
+  function attachLiveChecksAndAutoSubmit() {
+    const newInput = $('newPwd'); const confirmInput = $('confirmPwd');
+    if (!newInput || !confirmInput) return;
+
+    const syncValidation = () => {
+      if (!newInput.value || !confirmInput.value) {
+        newInput.style.outline = ''; confirmInput.style.outline = ''; return;
+      }
+      if (newInput.value !== confirmInput.value) {
+        confirmInput.style.outline = '2px solid rgba(255,120,120,0.18)';
+      } else {
+        confirmInput.style.outline = '2px solid rgba(80,220,140,0.14)';
+      }
+    };
+
+    newInput.addEventListener('input', (e) => {
+      syncValidation();
+      scheduleAutoSubmitIfNeeded();
+    });
+    confirmInput.addEventListener('input', (e) => {
+      syncValidation();
+      scheduleAutoSubmitIfNeeded();
+    });
+  }
+
+  // Wire up events (works if modal inserted later)
+  function wireModalEventsOnce() {
+    const form = $('changePwdForm');
+    if (form && !form.__changePwdWired) {
+      form.addEventListener('submit', submitChangePassword);
+      form.__changePwdWired = true;
+    }
+
+    const resetBtn = $('resetPwdBtn');
+    if (resetBtn && !resetBtn.__wiredReset) {
+      resetBtn.addEventListener('click', handleResetPassword);
+      resetBtn.__wiredReset = true;
+    }
+
+    // wire eye toggles
+    const toggles = document.querySelectorAll('.pwd-toggle');
+    toggles.forEach(btn => {
+      if (btn.__wired) return;
+      const target = btn.getAttribute('data-target');
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        togglePasswordVisibility(target, btn);
+      });
+      btn.__wired = true;
+    });
+
+    attachLiveChecksAndAutoSubmit();
+  }
+
+  // initial attempt to wire
+  try { wireModalEventsOnce(); } catch (e) { /* continue */ }
+
+  // observe for modal/form injection to wire later if needed
+  const modalObserver = new MutationObserver((mutations) => {
+    for (const m of mutations) {
+      if (!m.addedNodes || !m.addedNodes.length) continue;
+      for (const node of m.addedNodes) {
+        try {
+          if (node.nodeType !== 1) continue;
+          if (node.id === 'changePwdModal' || (node.querySelector && node.querySelector('#changePwdForm'))) {
+            setTimeout(wireModalEventsOnce, 40);
+            return;
+          }
+        } catch (err) { /* ignore */ }
+      }
+    }
+  });
+  modalObserver.observe(document.documentElement || document.body, { childList: true, subtree: true });
+
+  /* Dev helpers */
+  window.__changePwdHelpers = {
+    showToast,
+    validatePasswords: validatePasswordsFromDOM,
+    openForTest: () => {
+      if (window.ModalManager && typeof window.ModalManager.openModal === 'function') {
+        try { window.ModalManager.openModal('changePwdModal'); }
+        catch (err) { console.warn('[changePWD] ModalManager open failed', err); }
+      } else {
+        const m = $('changePwdModal'); if (m) m.style.display = '';
+      }
+      setTimeout(wireModalEventsOnce, 60);
+    }
+  };
+
+  console.log('[changePWD] Module ready. Helpers: window.__changePWDControl, window.__changePwdHelpers');
+})();
+
+
+
+
+
+
+
+
+/* reset-password.js — Reset Password OTP flow (rp- prefix)
+   - OTP resend + countdown
+   - OTP verify
+   - Open email app helper
+   - Uses endpoints: /auth/resend-otp and /auth/verify-otp (prefixable via __SEC_API_BASE)
+   - Exposes debug helpers at window.__rp_pwd_debug
+   - Works with ModalManager (openModal / closeModal / closeAll)
+*/
+
+(function rpResetPasswordModule(){
+  'use strict';
+
+  // ---- config ----
+  const DEBUG = true;
+  const tag = '[RP-PWD]';
+  const log = (...a) => { if (DEBUG) console.log(tag, ...a); };
+  const dbg = (...a) => { if (DEBUG) console.debug(tag, ...a); };
+  const warn = (...a) => { if (DEBUG) console.warn(tag, ...a); };
+  const err = (...a) => { if (DEBUG) console.error(tag, ...a); };
+
+  // guard against multiple installs
+  if (window.__rp_pwd_installed) {
+    log('already installed');
+    return;
+  }
+  window.__rp_pwd_installed = true;
+
+  // IDs & selectors (rp- prefix)
+  const RESET_MODAL_ID = 'rpResetModal';
+  const MASKED_EMAIL_ID = 'rp-masked-email';
+  const OTP_INPUT_SELECTOR = '.rp-otp-input';
+  const RESEND_BTN_ID = 'rp-resend-btn';
+  const OPEN_EMAIL_BTN_ID = 'rp-open-email-btn';
+  const VERIFY_BTN_ID = 'rp-reset-btn';
+  const OTP_FORM_ID = 'rp-otp-form';
+  const TRIGGER_ID = 'rpTriggerResetPassword'; // optional trigger id in your page (not required)
+
+  const API_BASE = (window.__SEC_API_BASE || '').replace(/\/$/, '') || '';
+  const SERVER_RESEND_OTP = API_BASE ? `${API_BASE}/auth/resend-otp` : '/auth/resend-otp';
+  const SERVER_VERIFY_OTP = API_BASE ? `${API_BASE}/auth/verify-otp` : '/auth/verify-otp';
+
+  const $ = id => document.getElementById(id);
+  const qsa = sel => Array.from(document.querySelectorAll(sel));
+
+  // ---- Notification helper (prefers app notify) ----
+  function notify({ type = 'info', title = '', message = '', duration = 4500 } = {}) {
+    dbg('notify:', { type, title, message, duration });
+    try {
+      if (typeof window.notify === 'function') { window.notify(type, message, { title, timeout: duration }); return; }
+      if (typeof window.appNotify === 'function') { window.appNotify({ type, title, message, duration }); return; }
+      if (window.toastr && typeof window.toastr[type] === 'function') { window.toastr[type](message, title); return; }
+      if (window.Toastify && typeof window.Toastify === 'function') { window.Toastify({ text: (title ? title + ' – ' : '') + message, duration }).showToast(); return; }
+    } catch (e) { dbg('app-notify failed', e); }
+
+    // inline fallback
+    try {
+      let container = document.getElementById('__rp_pwd_toast');
+      if (!container) {
+        container = document.createElement('div');
+        container.id = '__rp_pwd_toast';
+        container.style.cssText = 'position:fixed;top:16px;right:16px;z-index:2147483647;display:flex;flex-direction:column;gap:10px;pointer-events:none;';
+        document.body.appendChild(container);
+      }
+      const toast = document.createElement('div');
+      toast.style.cssText = 'pointer-events:auto;min-width:220px;max-width:380px;padding:10px 14px;border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,0.12);font-family:system-ui,Segoe UI,Roboto,Arial;color:#fff;opacity:0;transform:translateY(-6px);transition:opacity .22s ease,transform .22s ease;';
+      const bg = type === 'error' ? '#e53935' : type === 'warn' ? '#ffb300' : type === 'success' ? '#2e7d32' : '#1976d2';
+      toast.style.background = bg;
+      if (title) {
+        const t = document.createElement('div'); t.style.fontWeight = '600'; t.style.marginBottom = '4px'; t.textContent = title; toast.appendChild(t);
+      }
+      const p = document.createElement('div'); p.style.fontSize = '13px'; p.textContent = message || ''; toast.appendChild(p);
+      container.appendChild(toast);
+      requestAnimationFrame(() => { toast.style.opacity = '1'; toast.style.transform = 'translateY(0)'; });
+      setTimeout(() => { toast.style.opacity = '0'; toast.style.transform = 'translateY(-6px)'; setTimeout(()=>toast.remove(),220); }, duration);
+    } catch (e) {
+      dbg('notify fallback error', e);
+      console.log(tag, title, message);
+    }
+  }
+
+  // ---- email resolution helpers ----
+  function getDevEmailFallback() {
+    return localStorage.getItem('mockEmail') || localStorage.getItem('__mock_email') || localStorage.getItem('dev_email') || null;
+  }
+
+  async function getUserEmail() {
+    dbg('getUserEmail: resolving');
+    // try known session getters non-exceptionally
+    const candidates = [ window.getSession, (window.dashboard && window.dashboard.getSession), window.getSessionFromDashboard ];
+    for (const fn of candidates) {
+      if (typeof fn === 'function') {
+        try {
+          const session = await fn();
+          if (session && session.email) return session.email;
+          if (session && session.user && session.user.email) return session.user.email;
+          if (session && session.data && session.data.user && session.data.user.email) return session.data.user.email;
+        } catch (e) { dbg('session provider threw', e); }
+      }
+    }
+    if (window.__SERVER_USER_DATA__ && window.__SERVER_USER_DATA__.email) return window.__SERVER_USER_DATA__.email;
+    const fb = getDevEmailFallback(); if (fb) return fb;
+    return '';
+  }
+
+  // ---- network helpers ----
+  async function postJson(url, payload = {}, opts = {}) {
+    dbg('[postJson] request', url, payload);
+    try {
+      const res = await fetch(url, {
+        method: opts.method || 'POST',
+        credentials: opts.credentials ?? 'include',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      });
+      const status = res.status;
+      let text = '';
+      try { text = await res.text(); } catch(e){ text = ''; }
+      dbg('[postJson] response', { status, text });
+      const ct = (res.headers.get('content-type') || '').toLowerCase();
+      if (ct.includes('application/json')) {
+        try { return { status, body: JSON.parse(text), headers: res.headers }; } catch(e) { return { status, body: text, headers: res.headers }; }
+      }
+      return { status, body: text, headers: res.headers };
+    } catch (e) {
+      err('[postJson] network error', e);
+      return { status: 0, body: { error: e.message || String(e) }, headers: {} };
+    }
+  }
+
+  // ---- OTP helpers ----
+  function getOtpValue() {
+    const inputs = qsa(OTP_INPUT_SELECTOR);
+    if (!inputs || inputs.length === 0) return '';
+    if (inputs.length === 1) return inputs[0].value.trim();
+    return inputs.map(i => i.value.trim()).join('');
+  }
+  function clearOtpInputs(){ qsa(OTP_INPUT_SELECTOR).forEach(i => i.value = ''); }
+  function blurOtpInputs(){ qsa(OTP_INPUT_SELECTOR).forEach(i => { try { i.blur(); } catch(e){} }); }
+
+  // ---- resend countdown ----
+  let resendTimer = null;
+  function startResendCountdown(durationSec = 60) {
+    const btn = $(RESEND_BTN_ID);
+    if (!btn) { warn('startResendCountdown: no button'); return; }
+    clearInterval(resendTimer);
+    let remaining = Math.max(0, parseInt(durationSec, 10) || 60);
+    btn.disabled = true; btn.setAttribute('aria-disabled','true');
+    if (!btn.dataset._origText) btn.dataset._origText = btn.textContent || 'Resend OTP';
+    btn.textContent = `Resend (${remaining}s)`;
+    resendTimer = setInterval(() => {
+      remaining--;
+      if (remaining <= 0) {
+        clearInterval(resendTimer); resendTimer = null;
+        btn.disabled = false; btn.removeAttribute('aria-disabled');
+        btn.textContent = btn.dataset._origText || 'Resend OTP';
+      } else {
+        btn.textContent = `Resend (${remaining}s)`;
+      }
+    }, 1000);
+  }
+
+  // ---- open email client helper ----
+  function openEmailClient(email) {
+    if (!email) { notify({ type:'warn', title:'No email', message:'No email known for this account.' }); return; }
+    const domain = (email.split('@')[1] || '').toLowerCase();
+    try {
+      if (domain === 'gmail.com' || domain.endsWith('googlemail.com')) { window.open('https://mail.google.com/mail/u/0/#inbox', '_blank'); return; }
+      if (domain.endsWith('yahoo.com')) { window.open('https://mail.yahoo.com/d/folders/1', '_blank'); return; }
+      if (domain.endsWith('outlook.com') || domain.endsWith('hotmail.com') || domain.endsWith('live.com')) { window.open('https://outlook.live.com/mail/inbox', '_blank'); return; }
+      if (domain.endsWith('icloud.com') || domain.endsWith('me.com')) { window.open('https://www.icloud.com/mail', '_blank'); return; }
+      window.open(`mailto:${encodeURIComponent(email)}`, '_blank');
+    } catch (e) {
+      dbg('openEmailClient fallback', e);
+      try { window.location.href = `mailto:${encodeURIComponent(email)}`; } catch(e2){ dbg('final fallback failed', e2); }
+    }
+  }
+
+  // ---- verify OTP submit ----
+  async function verifyOtpSubmit(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    log('verifyOtpSubmit start');
+    const email = await getUserEmail();
+    if (!email) { notify({ type:'error', title:'Email missing', message:'No email detected. Please login or set mockEmail in localStorage for dev.' }); return; }
+    const token = getOtpValue();
+    if (!token || token.length < 6) { notify({ type:'warn', title:'Invalid OTP', message:'Please enter the 6-digit OTP.' }); return; }
+
+    const verifyBtn = $(VERIFY_BTN_ID);
+    if (verifyBtn) { verifyBtn.disabled = true; verifyBtn.dataset._origText = verifyBtn.textContent; verifyBtn.textContent = 'Verifying…'; }
+
+    try {
+      const { status, body } = await postJson(SERVER_VERIFY_OTP, { email, token });
+      dbg('verifyOtpSubmit server', status, body);
+      if (status >= 200 && status < 300) {
+        notify({ type:'info', title:'OTP Verified', message:'OTP verified. Proceed to change your password.' });
+
+        // close reset modal
+        try {
+          if (window.ModalManager && typeof window.ModalManager.openModal === 'function') {
+            // optionally open change-password modal if you have it (common flow)
+            if (typeof window.ModalManager.openModal === 'function') {
+              try { window.ModalManager.openModal('changePwdModal'); } catch(e){ dbg('open changePwdModal failed', e); }
+            }
+            // close this modal
+            try { window.ModalManager.closeModal(RESET_MODAL_ID); } catch(e){ dbg('close reset modal via ModalManager failed', e); }
+          } else {
+            const r = $(RESET_MODAL_ID); if (r) { r.setAttribute('aria-hidden','true'); r.style.display='none'; }
+          }
+        } catch(e){ dbg('modal open/close flow failed', e); }
+
+        clearOtpInputs();
+      } else {
+        const errMsg = (body && (body.error?.message || body.message)) || 'OTP verification failed';
+        if (status === 400 || status === 403) {
+          const errCode = body?.error?.code || null;
+          if (errCode === 'otp_expired' || (errMsg && String(errMsg).toLowerCase().includes('expired'))) {
+            notify({ type:'warn', title:'OTP expired', message:'OTP expired. Please resend OTP and try again.' });
+          } else {
+            notify({ type:'error', title:'Verification failed', message: errMsg });
+          }
+        } else {
+          notify({ type:'error', title:'Verification failed', message: errMsg });
+        }
+      }
+    } catch (e) {
+      err('verifyOtpSubmit error', e);
+      notify({ type:'error', title:'Network error', message:'Network error verifying OTP – check console.' });
+    } finally {
+      if (verifyBtn) {
+        verifyBtn.disabled = false;
+        if (verifyBtn.dataset._origText) { verifyBtn.textContent = verifyBtn.dataset._origText; delete verifyBtn.dataset._origText; }
+      }
+      log('verifyOtpSubmit end');
+    }
+  }
+
+  // ---- resend handler ----
+  async function resendOtpHandler(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    log('resendOtpHandler start');
+    const btn = $(RESEND_BTN_ID);
+    if (!btn) return;
+    if (btn.disabled) { dbg('resend disabled'); return; }
+    const email = await getUserEmail();
+    if (!email) { notify({ type:'warn', title:'Email missing', message:'Unable to find your account email. For dev: localStorage.setItem(\"mockEmail\",\"dev@example.com\")' }); return; }
+    btn.disabled = true;
+    const origText = btn.dataset._origText || btn.textContent;
+    btn.textContent = 'Sending…';
+    try {
+      const { status, body } = await postJson(SERVER_RESEND_OTP, { email });
+      dbg('resend response', status, body);
+      if (status >= 200 && status < 300) {
+        notify({ type:'info', title:'OTP sent', message:`OTP sent to ${email}` });
+        btn.dataset._origText = origText;
+        startResendCountdown(60);
+      } else {
+        const errMsg = body?.error?.message || body?.message || 'Failed to resend OTP';
+        notify({ type:'error', title:'Resend failed', message: errMsg });
+        btn.disabled = false; btn.textContent = origText;
+      }
+    } catch (e) {
+      err('resendOtpHandler error', e);
+      notify({ type:'error', title:'Network error', message:'Network error sending OTP – check console.' });
+      btn.disabled = false; btn.textContent = origText;
+    } finally { log('resendOtpHandler end'); }
+  }
+
+  // ---- OTP input wiring (supports single or multi inputs) ----
+  window.__rp_pwd_handlers = window.__rp_pwd_handlers || {};
+  function wireOtpInputs() {
+    const inputs = qsa(OTP_INPUT_SELECTOR);
+    dbg('wireOtpInputs count', inputs.length);
+    // cleanup old handlers
+    if (Array.isArray(window.__rp_pwd_handlers.otpInputs)) {
+      window.__rp_pwd_handlers.otpInputs.forEach(({ el, handlers }) => {
+        if (!el || !handlers) return;
+        if (handlers.input) el.removeEventListener('input', handlers.input);
+        if (handlers.keydown) el.removeEventListener('keydown', handlers.keydown);
+      });
+    }
+    window.__rp_pwd_handlers.otpInputs = [];
+
+    if (inputs.length === 0) { warn('no otp inputs'); return; }
+
+    if (inputs.length === 1) {
+      const input = inputs[0];
+      input.setAttribute('inputmode','numeric');
+      input.setAttribute('maxlength','6');
+      const onInput = () => {
+        const v = input.value.trim();
+        dbg('single input value length', v.length);
+        if (v.length >= 6) { try { input.blur(); } catch(_){}; setTimeout(() => verifyOtpSubmit(), 120); }
+      };
+      input.addEventListener('input', onInput);
+      window.__rp_pwd_handlers.otpInputs.push({ el: input, handlers: { input: onInput } });
+      dbg('wired single input auto-submit');
+      return;
+    }
+
+    inputs.forEach((inp, idx) => {
+      inp.setAttribute('inputmode','numeric');
+      inp.setAttribute('maxlength','1');
+      const onInput = () => {
+        const v = inp.value;
+        if (v && idx < inputs.length - 1) { try { inputs[idx+1].focus(); } catch(e){ dbg('focus next failed', e); } }
+        const all = inputs.map(i => i.value.trim()).join('');
+        dbg('multi inputs', all);
+        if (all.length === inputs.length) { blurOtpInputs(); setTimeout(() => verifyOtpSubmit(), 120); }
+      };
+      const onKeydown = (e) => {
+        if (e.key === 'Backspace' && !inp.value && idx > 0) { try { inputs[idx-1].focus(); } catch(e){ dbg('focus prev failed', e); } }
+      };
+      inp.addEventListener('input', onInput);
+      inp.addEventListener('keydown', onKeydown);
+      window.__rp_pwd_handlers.otpInputs.push({ el: inp, handlers: { input: onInput, keydown: onKeydown } });
+    });
+    dbg('wired multi inputs');
+  }
+
+  // ---- UI wiring ----
+  async function wire() {
+    log('wire: start');
+    // optional trigger
+    const trigger = $(TRIGGER_ID);
+    if (trigger) {
+      window.__rp_pwd_handlers.onTrigger = window.__rp_pwd_handlers.onTrigger || onTriggerClicked;
+      trigger.removeEventListener('click', window.__rp_pwd_handlers.onTrigger);
+      trigger.addEventListener('click', window.__rp_pwd_handlers.onTrigger);
+    }
+
+    const resendBtn = $(RESEND_BTN_ID);
+    if (resendBtn) {
+      window.__rp_pwd_handlers.resend = window.__rp_pwd_handlers.resend || resendOtpHandler;
+      resendBtn.removeEventListener('click', window.__rp_pwd_handlers.resend);
+      resendBtn.addEventListener('click', window.__rp_pwd_handlers.resend);
+    }
+
+    const openEmailBtn = $(OPEN_EMAIL_BTN_ID);
+    if (openEmailBtn) {
+      window.__rp_pwd_handlers.openEmail = window.__rp_pwd_handlers.openEmail || (async (e)=>{ e && e.preventDefault(); const em = await getUserEmail(); openEmailClient(em); });
+      openEmailBtn.removeEventListener('click', window.__rp_pwd_handlers.openEmail);
+      openEmailBtn.addEventListener('click', window.__rp_pwd_handlers.openEmail);
+    }
+
+    const otpForm = $(OTP_FORM_ID);
+    const verifyBtn = $(VERIFY_BTN_ID);
+    if (otpForm) {
+      window.__rp_pwd_handlers.verifySubmit = window.__rp_pwd_handlers.verifySubmit || verifyOtpSubmit;
+      otpForm.removeEventListener('submit', window.__rp_pwd_handlers.verifySubmit);
+      otpForm.addEventListener('submit', window.__rp_pwd_handlers.verifySubmit);
+    } else if (verifyBtn) {
+      window.__rp_pwd_handlers.verifySubmit = window.__rp_pwd_handlers.verifySubmit || verifyOtpSubmit;
+      verifyBtn.removeEventListener('click', window.__rp_pwd_handlers.verifySubmit);
+      verifyBtn.addEventListener('click', window.__rp_pwd_handlers.verifySubmit);
+    }
+
+    wireOtpInputs();
+
+    // show email in modal masks
+    const maskedEl = $(MASKED_EMAIL_ID);
+    const email = await getUserEmail();
+    dbg('wire: email', email);
+    if (maskedEl && email) maskedEl.textContent = email;
+
+    log('wire: done');
+  }
+
+  // optional: trigger flow to resend OTP then open modal (similar to your resetPin flow)
+  async function onTriggerClicked(e) {
+    e && e.preventDefault && e.preventDefault();
+    log('onTriggerClicked');
+    const btn = e && e.currentTarget ? e.currentTarget : $(TRIGGER_ID);
+    if (!btn) { warn('no trigger'); return; }
+    if (btn.disabled) { dbg('trigger disabled'); return; }
+    btn.disabled = true; btn.dataset._origText = btn.dataset._origText || btn.textContent || ''; btn.textContent = 'Preparing…';
+    const email = await getUserEmail();
+    if (!email) { notify({ type:'warn', title:'Email missing', message:'Unable to find your account email.' }); btn.disabled = false; if (btn.dataset._origText) { btn.textContent = btn.dataset._origText; delete btn.dataset._origText; } return; }
+    try {
+      const { status, body } = await postJson(SERVER_RESEND_OTP, { email });
+      dbg('onTrigger resend', status, body);
+      if (status >=200 && status < 300) {
+        // open modal
+        let opened = false;
+        if (window.ModalManager && typeof window.ModalManager.openModal === 'function') {
+          try { window.ModalManager.openModal(RESET_MODAL_ID); opened = true; } catch(e){ dbg('ModalManager.openModal failed', e); }
+        }
+        if (!opened) {
+          const el = $(RESET_MODAL_ID);
+          if (el) { el.setAttribute('aria-hidden','false'); el.style.display = 'flex'; opened = true; }
+        }
+        if (opened) { setTimeout(() => { wireOtpInputs(); }, 40); }
+        startResendCountdown(60);
+        notify({ type:'info', title:'OTP sent', message:`OTP sent to ${email}` });
+      } else {
+        const errMsg = body?.error?.message || body?.message || 'Failed to send OTP';
+        notify({ type:'error', title:'Resend failed', message: errMsg });
+      }
+    } catch (e) {
+      err('onTriggerClicked error', e);
+      notify({ type:'error', title:'Network error', message:'Failed to send OTP – check console.' });
+    } finally {
+      btn.disabled = false; if (btn.dataset._origText) { btn.textContent = btn.dataset._origText; delete btn.dataset._origText; }
+    }
+  }
+
+  // ---- auto-wire on DOM ready, and also observe insertions ----
+  function initAutoWire() {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', wire);
+    } else wire();
+  }
+  initAutoWire();
+
+  // also attempt to wire if modal inserted later
+  const mo = new MutationObserver((mutations) => {
+    for (const m of mutations) {
+      if (!m.addedNodes || !m.addedNodes.length) continue;
+      for (const n of m.addedNodes) {
+        try {
+          if (n.nodeType !== 1) continue;
+          if (n.id === RESET_MODAL_ID || (n.querySelector && n.querySelector(OTP_INPUT_SELECTOR))) {
+            setTimeout(() => { try { wire(); } catch(e){ dbg('wire after insert failed', e); } }, 40);
+            return;
+          }
+        } catch (e) {}
+      }
+    }
+  });
+  mo.observe(document.documentElement || document.body, { childList: true, subtree: true });
+
+  // expose debug helpers
+  window.__rp_pwd_debug = Object.assign(window.__rp_pwd_debug || {}, {
+    getUserEmail, openEmailClient, postJson, SERVER_RESEND_OTP, SERVER_VERIFY_OTP,
+    wire, verifyOtpSubmit, resendOtpHandler, startResendCountdown, notify
+  });
+
+  log('rp reset-password module ready');
 })();

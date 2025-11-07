@@ -102,6 +102,8 @@ function hideBackdrop(modal) {
     pinModal: { id: 'pinModal', element: null, hasPullHandle: false },
     allPlansModal: { id: 'allPlansModal', element: null, hasPullHandle: true },
     contactModal: { id: 'contactModal', element: null, hasPullHandle: false },
+    changePwdModal: { id: 'changePwdModal', element: null, hasPullHandle: false },
+    rpResetModal: { id: 'rpResetModal', element: null, hasPullHandle: false },
   };
 
 
@@ -549,6 +551,8 @@ function hideBackdrop(modal) {
       securityPinRow: 'securityPinModal',
       helpSupportBtn: 'helpSupportModal',
       'see-all-plans': 'allPlansModal',
+      changePWD: 'changePwdModal',
+      resetPwdBtn: 'rpResetModal',
     };
 
     // Bind triggers to open modals (retained Smart Button skip for securityPinRow)
