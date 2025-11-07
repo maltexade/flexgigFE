@@ -2057,101 +2057,44 @@ const { status, body } = await withLoader(async () => {
   }
 
   // attempt to POST to set endpoint, fallback to change endpoint on 404
-    // helper: try to find uid and token from common places (URL, hidden inputs, globals, localStorage, cookies)
-  // prefer the same names used by the login flow: accessToken, userUid
-function findUidAndToken() {
-  try {
-    // 1) window globals set by login page
-    if (window.accessToken || window.userUid) {
-      return { uid: window.userUid || null, token: window.accessToken || null };
-    }
-
-    // 2) URL params (reset link style ?email=...&code=... could contain token or uid)
-    try {
-      const url = new URL(window.location.href);
-      const uidFromUrl = url.searchParams.get('uid') || url.searchParams.get('u');
-      const tokenFromUrl = url.searchParams.get('token') || url.searchParams.get('t') || url.searchParams.get('code');
-      if (uidFromUrl || tokenFromUrl) return { uid: uidFromUrl || null, token: tokenFromUrl || null };
-    } catch (e) {}
-
-    // 3) cookies — login page writes `token` and `rt`/`refreshToken`
-    try {
-      const cookies = document.cookie || '';
-      const tokenMatch = cookies.match(/(?:^|;\s*)token=([^;]+)/);
-      const rtMatch = cookies.match(/(?:^|;\s*)rt=([^;]+)/);
-      const token = tokenMatch ? decodeURIComponent(tokenMatch[1]) : (rtMatch ? decodeURIComponent(rtMatch[1]) : null);
-      // uid is less likely in cookie; keep null
-      if (token) return { uid: null, token };
-    } catch (e) {}
-
-    // 4) localStorage (login flows sometimes persist these)
-    try {
-      const tokenLs = localStorage.getItem('accessToken') || localStorage.getItem('token') || localStorage.getItem('rt');
-      const uidLs = localStorage.getItem('userUid') || localStorage.getItem('uid');
-      if (tokenLs || uidLs) return { uid: uidLs || null, token: tokenLs || null };
-    } catch (e) {}
-
-  } catch (e) { /* ignore */ }
-
-  return { uid: null, token: null };
-}
-
-
-  // attempt to POST to set endpoint, fallback to change endpoint on 404
   async function postPassword(newPwd) {
+    // Fetch uid from embedded server data (assumes we're in dashboard.html or similar context)
+    const uid = window.__SERVER_USER_DATA__?.uid;
+    if (!uid) {
+      throw new Error('Missing user UID - cannot set password without authenticated session');
+    }
+    const payload = { uid, password: newPwd }; // Use 'password' key to match server expectation
     const timeout = 12000;
-    // find uid & token automatically
-    const found = findUidAndToken();
-    const uid = found.uid;
-    const token = found.token;
-
-    // Build payload exactly as backend expects
-    const payload = { password: newPwd };
-    if (uid) payload.uid = uid;
-
     try {
-      console.debug('[spw] POST', SET_ENDPOINT, 'payload', payload, 'tokenPresent=', !!token);
-
-      const headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-
       // try set-password first
       let resp = await fetchWithTimeoutLocal(SET_ENDPOINT, {
         method: 'POST', credentials: 'include',
-        headers,
+        headers: {'Content-Type':'application/json','Accept':'application/json'},
         body: JSON.stringify(payload)
       }, timeout);
 
       if (resp.status === 404) {
-        console.debug('[spw] set-password 404, falling back to change-password');
-        // fallback to change-password — include currentPassword empty (server may still reject)
-        const changePayload = { currentPassword: '', newPassword: newPwd };
-        let changeHeaders = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
-        if (token) changeHeaders['Authorization'] = `Bearer ${token}`;
-
+        // fallback to change-password
         resp = await fetchWithTimeoutLocal(CHANGE_ENDPOINT, {
           method: 'POST', credentials: 'include',
-          headers: changeHeaders,
-          body: JSON.stringify(changePayload)
+          headers: {'Content-Type':'application/json','Accept':'application/json'},
+          body: JSON.stringify({ uid, currentPassword: '', password: newPwd }) // some servers require current; expected to error but we'll try
         }, timeout);
       }
 
       // parse response sensibly
       let body = null;
       try {
-        const ct = resp.headers && resp.headers.get ? (resp.headers.get('content-type') || '') : '';
+        const ct = resp.headers.headers.get ? (resp.headers.get('content-type') || '') : '';
         if (ct.toLowerCase().includes('application/json')) body = await resp.json();
         else body = await resp.text();
-      } catch (e) { body = await resp.text().catch(()=>null); }
+      } catch (e) { body = null; }
 
-      console.debug('[spw] response', resp.status, body);
       return { ok: resp.ok, status: resp.status, body };
     } catch (err) {
-      console.error('[spw] request error', err);
       return { ok:false, status: 0, error: err };
     }
   }
-
 
   // handle form submit
   async function onSpwSubmit(e) {
