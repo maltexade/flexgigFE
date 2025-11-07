@@ -981,14 +981,19 @@ async function getEmailForReset() {
 async function handleResetPassword(ev) {
   if (ev && ev.preventDefault) ev.preventDefault();
 
-  // immediate UX feedback
+  const triggerBtn = ev && ev.currentTarget ? ev.currentTarget : document.getElementById('resetPwdBtn');
+  if (triggerBtn) {
+    triggerBtn.disabled = true;
+    triggerBtn.dataset._origText = triggerBtn.dataset._origText || triggerBtn.textContent || '';
+    triggerBtn.textContent = 'Sending…';
+  }
+
   showToast('Sending OTP to your email…', 'info', 2500);
 
-  // resolve email
   const email = (await getEmailForReset()) || '';
-
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     showToast('Unable to determine your account email. Please check your profile.', 'error', 5000);
+    if (triggerBtn) { triggerBtn.disabled = false; triggerBtn.textContent = triggerBtn.dataset._origText || 'Reset password'; }
     return;
   }
 
@@ -997,30 +1002,27 @@ async function handleResetPassword(ev) {
   try {
     const resp = await fetchWithTimeout(endpoint, {
       method: 'POST',
-      credentials: 'include', // your server expects session/cookies
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      },
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
       body: JSON.stringify({ email })
     }, 10000);
 
-    // parse body robustly (reuse parseResponseBody if present)
-    let body = null;
-    try { body = resp.headers && resp.headers.get && resp.headers.get('content-type') && resp.headers.get('content-type').includes('application/json') ? await resp.json() : await resp.text(); }
-    catch (e) { body = await resp.text().catch(() => null); }
+    const body = await (async () => {
+      try { return resp.headers && resp.headers.get && resp.headers.get('content-type') && resp.headers.get('content-type').includes('application/json') ? await resp.json() : await resp.text(); }
+      catch (e) { try { return await resp.text(); } catch (_) { return null; } }
+    })();
 
     if (!resp.ok) {
       const errMsg = (body && (body.message || (body.error && body.error.message) || body.error)) || `Failed to send OTP (${resp.status})`;
       showToast(errMsg, 'error', 6000);
       console.error('[changePWD] resend-otp failed', resp.status, body);
+      if (triggerBtn) { triggerBtn.disabled = false; triggerBtn.textContent = triggerBtn.dataset._origText || 'Reset password'; }
       return;
     }
 
-    // success
-    showToast((body && (body.message || body.status === 'sent' ? 'OTP sent to your email.' : body)) || 'OTP sent to your email.', 'success', 3500);
+    // success: open reset modal only after server confirms OTP send
+    showToast((body && (body.message || body.status === 'sent' ? 'OTP sent to your email.' : body)) || 'OTP sent to your email.', 'success', 2500);
 
-    // open reset modal (ModalManager preferred)
     let opened = false;
     if (window.ModalManager && typeof window.ModalManager.openModal === 'function') {
       try { window.ModalManager.openModal('resetPinModal'); opened = true; }
@@ -1031,16 +1033,49 @@ async function handleResetPassword(ev) {
       if (el) { el.setAttribute('aria-hidden', 'false'); el.style.display = 'flex'; opened = true; }
     }
 
-    // optionally wire OTP inputs / start resend countdown if that logic exists in resetPin module
-    try { if (typeof window.__rp_wire_debug?.startResendCountdown === 'function') window.__rp_wire_debug.startResendCountdown(60); } catch (e) { /* ignore */ }
-    // attempt to call any known hook to wire OTP inputs
-    try { if (window.__rp_wire_debug?.wire) window.__rp_wire_debug.wire(); } catch (e) { /* ignore */ }
+    // start robust countdown for the reset modal's button id 'mp-resend-btn' (your reset markup)
+    try {
+      if (window.__resendCountdown && typeof window.__resendCountdown.start === 'function') {
+        window.__resendCountdown.start('mp-resend-btn', 60);
+      } else if (window.__rp_wire_debug && typeof window.__rp_wire_debug.startResendCountdown === 'function') {
+        window.__rp_wire_debug.startResendCountdown(60);
+      } else {
+        // fallback: update button directly if present
+        const btn = document.getElementById('mp-resend-btn') || document.getElementById('rp-resend-btn');
+        if (btn) {
+          btn.disabled = true;
+          btn.setAttribute('aria-disabled','true');
+          btn.dataset._origText = btn.dataset._origText || btn.textContent || 'Resend OTP';
+          btn.textContent = 'Resend (60s)';
+          // lightweight fallback timer (cleans itself)
+          let rem = 60;
+          const tid = setInterval(() => {
+            rem--;
+            if (rem <= 0) {
+              clearInterval(tid);
+              try { btn.disabled = false; btn.removeAttribute('aria-disabled'); btn.textContent = btn.dataset._origText || 'Resend OTP'; } catch(_) {}
+            } else {
+              try { btn.textContent = `Resend (${rem}s)`; } catch(_) {}
+            }
+          }, 1000);
+        }
+      }
+    } catch (e) {
+      console.warn('[changePWD] startResendCountdown failed', e);
+    }
 
   } catch (err) {
     console.error('[changePWD] resend-otp request error', err);
     showToast('Network error while sending OTP. Try again.', 'error', 5000);
+  } finally {
+    if (triggerBtn) {
+      // restore trigger button text (the reset button in the change modal should go back to its label)
+      triggerBtn.disabled = false;
+      triggerBtn.textContent = triggerBtn.dataset._origText || 'Reset password';
+    }
   }
 }
+
 
 
   /* Eye toggle logic */
@@ -1059,18 +1094,30 @@ async function handleResetPassword(ev) {
   }
 
   /* Auto-submit behavior (debounced) */
-  let autoSubmitTimer = null;
-  function scheduleAutoSubmitIfNeeded() {
-    // cancel previous
-    if (autoSubmitTimer) clearTimeout(autoSubmitTimer);
-    autoSubmitTimer = setTimeout(() => {
-      const newV = $('newPwd')?.value || '';
-      const confV = $('confirmPwd')?.value || '';
-      const curV = $('currentPwd')?.value || '';
+  // Auto-submit (fixed)
+let autoSubmitTimer = null;
+function scheduleAutoSubmitIfNeeded() {
+  if (autoSubmitTimer) clearTimeout(autoSubmitTimer);
+  autoSubmitTimer = setTimeout(() => {
+    const newV = $('newPwd')?.value || '';
+    const confV = $('confirmPwd')?.value || '';
+    const curV = $('currentPwd')?.value || '';
 
-      if (!newV || !confV || !curV) return;
+    // nothing to do until user typed something in all fields
+    if (!newV || !confV || !curV) return;
 
-            // before calling submitChangePassword(), blur active inputs so keyboard closes
+    // sync visual validation (keeps outline logic consistent)
+    try {
+      const newInput = $('newPwd'), confirmInput = $('confirmPwd');
+      if (newInput && confirmInput) {
+        if (newV !== confV) confirmInput.style.outline = '2px solid rgba(255,120,120,0.18)';
+        else confirmInput.style.outline = '2px solid rgba(80,220,140,0.14)';
+      }
+    } catch (e) { /* ignore visual sync errors */ }
+
+    // Condition A: exact match (auto-submit immediately)
+    if (newV === confV) {
+      // blur inputs to close keyboard
       try {
         ['currentPwd','newPwd','confirmPwd'].forEach(id => { const el = document.getElementById(id); if (el && typeof el.blur === 'function') el.blur(); });
         if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) {
@@ -1079,23 +1126,27 @@ async function handleResetPassword(ev) {
       } catch (e) { /* ignore */ }
 
       submitChangePassword();
+      return;
+    }
 
+    // Condition B: same length AND new password long enough to avoid accidental submits
+    const MIN_AUTO_SUBMIT_LENGTH = 8; // adjust to your policy
+    if (newV.length === confV.length && newV.length >= MIN_AUTO_SUBMIT_LENGTH) {
+      try {
+        ['currentPwd','newPwd','confirmPwd'].forEach(id => { const el = document.getElementById(id); if (el && typeof el.blur === 'function') el.blur(); });
+        if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) {
+          try { document.activeElement.blur(); } catch(_) {}
+        }
+      } catch (e) { /* ignore */ }
 
-      // condition A: exact match
-      if (newV === confV) {
-        // validation will pass for new vs confirm but will still check current != new on submit
-        submitChangePassword();
-        return;
-      }
+      submitChangePassword();
+      return;
+    }
 
-      // condition B: same length (user requested)
-      if (newV.length === confV.length) {
-        // attempt submit (validation will fail if they are different)
-        submitChangePassword();
-        return;
-      }
-    }, 220); // 220ms debounce
-  }
+    // otherwise, do nothing (user still typing)
+  }, 220);
+}
+
 
   // live inline check visuals & attach auto-submit
   function attachLiveChecksAndAutoSubmit() {
