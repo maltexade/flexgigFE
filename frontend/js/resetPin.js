@@ -1025,11 +1025,11 @@ async function handleResetPassword(ev) {
 
     let opened = false;
     if (window.ModalManager && typeof window.ModalManager.openModal === 'function') {
-      try { window.ModalManager.openModal('resetPinModal'); opened = true; }
+      try { window.ModalManager.openModal('rpResetModal'); opened = true; }
       catch (e) { console.warn('[changePWD] ModalManager.openModal failed', e); }
     }
     if (!opened) {
-      const el = document.getElementById('resetPinModal');
+      const el = document.getElementById('rpResetModal');
       if (el) { el.setAttribute('aria-hidden', 'false'); el.style.display = 'flex'; opened = true; }
     }
 
@@ -1944,7 +1944,7 @@ function scheduleAutoSubmitIfNeeded() {
     } catch(e){/*ignore*/}
 
     // close reset modal if open to avoid duplicates (defensive)
-    try { safeCloseModal('resetPinModal'); } catch(e){}
+    try { safeCloseModal('rpResetModal'); } catch(e){}
 
     // close this modal
     try { safeCloseModal(MODAL_ID); } catch(e){}
@@ -1987,7 +1987,7 @@ function scheduleAutoSubmitIfNeeded() {
   function openSpwModal() {
     // close potential modals that might open automatically (defensive)
     try { safeCloseModal('changePwdModal'); } catch (e) {}
-    try { safeCloseModal('resetPinModal'); } catch (e) {}
+    try { safeCloseModal('rpResetModal'); } catch (e) {}
     safeOpenModal(MODAL_ID);
     setTimeout(() => {
       // focus first input
