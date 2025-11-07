@@ -1938,11 +1938,6 @@ const { status, body } = await withLoader(async () => {
    - Requires your spw HTML (ids/classes used in the HTML you already inserted).
    - Uses showToast() if present, otherwise falls back to rp notify().
 */
-/* set-password.js
-   Wires the Set Password modal (spw- prefix).
-   - Requires your spw HTML (ids/classes used in the HTML you already inserted).
-   - Uses showToast() if present, otherwise falls back to rp notify().
-*/
 (function spwModule(){
   'use strict';
   if (window.__spw_installed) return;
@@ -2062,60 +2057,119 @@ const { status, body } = await withLoader(async () => {
   }
 
   // attempt to POST to set endpoint, fallback to change endpoint on 404
-  async function postPassword(newPwd) {
-    let uid;
+    // --- helper: find uid & token from many places (login page style + fallbacks) ---
+  function findUidAndToken() {
     try {
-        const sessionResp = await fetchWithTimeoutLocal('/api/session', {
-            method: 'GET',
-            credentials: 'include',
-            headers: {'Accept':'application/json'},
-        });
-        if (!sessionResp.ok) {
-            throw new Error('Session fetch failed');
-        }
-        const sessionBody = await sessionResp.json();
-        uid = sessionBody?.user?.uid;
-        if (!uid) {
-            throw new Error('Missing UID in session');
-        }
-    } catch (err) {
-        toast('Failed to get session: ' + (err.message || 'unknown'), 'error');
-        return { ok: false, error: err };
+      // 1) server-embedded user data (dashboard context)
+      const serverUid = window.__SERVER_USER_DATA__?.uid || null;
+      if (serverUid) return { uid: serverUid, token: null };
+
+      // 2) login-style globals (after OTP verify)
+      if (window.userUid || window.accessToken) {
+        return { uid: window.userUid || null, token: window.accessToken || null };
+      }
+
+      // 3) URL params (reset link might include uid/token/code)
+      try {
+        const u = new URL(window.location.href);
+        const uidFromUrl = u.searchParams.get('uid') || u.searchParams.get('u') || null;
+        const tokenFromUrl = u.searchParams.get('token') || u.searchParams.get('t') || u.searchParams.get('code') || null;
+        if (uidFromUrl || tokenFromUrl) return { uid: uidFromUrl, token: tokenFromUrl };
+      } catch (e) {}
+
+      // 4) hidden inputs in page/modal
+      try {
+        const uidInput = document.querySelector('input[name="uid"], input[id="spw-uid"], input[name="userId"]');
+        const tokenInput = document.querySelector('input[name="token"], input[id="spw-token"]');
+        if (uidInput || tokenInput) return { uid: uidInput?.value || null, token: tokenInput?.value || null };
+      } catch (e) {}
+
+      // 5) cookies (server checks cookie 'rt' or 'token')
+      try {
+        const cookies = document.cookie || '';
+        const tokenMatch = cookies.match(/(?:^|;\s*)(?:token|rt)=([^;]+)/);
+        const token = tokenMatch ? decodeURIComponent(tokenMatch[1]) : null;
+        if (token) return { uid: null, token };
+      } catch (e) {}
+
+      // 6) localStorage
+      try {
+        const tokenLs = localStorage.getItem('accessToken') || localStorage.getItem('token') || localStorage.getItem('rt');
+        const uidLs = localStorage.getItem('userUid') || localStorage.getItem('uid');
+        if (tokenLs || uidLs) return { uid: uidLs || null, token: tokenLs || null };
+      } catch (e) {}
+
+    } catch (e) {
+      console.warn('[spw] findUidAndToken failed', e);
     }
-    const payload = { uid, password: newPwd };
+    return { uid: null, token: null };
+  }
+
+  // --- POST password with sensible fallback and debug logs ---
+  async function postPassword(newPwd) {
     const timeout = 12000;
+    const found = findUidAndToken();
+    const uid = found.uid;
+    const token = found.token;
+
+    // Build payload that the backend expects
+    const payload = {};
+    if (uid) payload.uid = uid;
+    payload.password = newPwd; // backend expects 'password'
+
+    // if neither uid nor token found, do not proceed blindly
+    if (!uid && !token) {
+      const err = new Error('Missing reset token or user id. Complete OTP verification or open the reset link from your email.');
+      err.code = 'MISSING_TOKEN_UID';
+      throw err;
+    }
+
     try {
+      console.debug('[spw] set-password request ->', { endpoint: SET_ENDPOINT, payload, tokenPresent: !!token });
+
+      const headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
       // try set-password first
       let resp = await fetchWithTimeoutLocal(SET_ENDPOINT, {
-        method: 'POST', credentials: 'include',
-        headers: {'Content-Type':'application/json','Accept':'application/json'},
+        method: 'POST',
+        credentials: 'include',
+        headers,
         body: JSON.stringify(payload)
       }, timeout);
 
       if (resp.status === 404) {
-        // fallback to change-password
+        console.debug('[spw] set-password returned 404 — trying change-password fallback');
+        // fallback to change-password (may require currentPassword)
+        const changePayload = { uid: uid || undefined, currentPassword: '', password: newPwd };
+        const changeHeaders = Object.assign({}, headers);
         resp = await fetchWithTimeoutLocal(CHANGE_ENDPOINT, {
-          method: 'POST', credentials: 'include',
-          headers: {'Content-Type':'application/json','Accept':'application/json'},
-          body: JSON.stringify({ uid, currentPassword: '', newPassword: newPwd }) // some servers require current; expected to error but we'll try
+          method: 'POST',
+          credentials: 'include',
+          headers: changeHeaders,
+          body: JSON.stringify(changePayload)
         }, timeout);
       }
 
-      // parse response sensibly
+      // parse response
       let body = null;
       try {
-        const ct = resp.headers && resp.headers.get ? (resp.headers.get('content-type') || '') : '';
+        const ct = resp.headers && typeof resp.headers.get === 'function' ? (resp.headers.get('content-type') || '') : '';
         if (ct.toLowerCase().includes('application/json')) body = await resp.json();
         else body = await resp.text();
-      } catch (e) { body = null; }
+      } catch (e) {
+        try { body = await resp.text(); } catch (_) { body = null; }
+      }
 
+      console.debug('[spw] set-password response', { status: resp.status, body });
       return { ok: resp.ok, status: resp.status, body };
     } catch (err) {
-      return { ok:false, status: 0, error: err };
+      console.error('[spw] set-password network/error', err);
+      return { ok: false, status: 0, error: err };
     }
   }
 
-  // handle form submit
+  // --- Robust onSpwSubmit: catches thrown errors and shows friendly UI ---
   async function onSpwSubmit(e) {
     if (e && e.preventDefault) e.preventDefault();
     const btn = $(CREATE_BTN_ID);
@@ -2125,45 +2179,51 @@ const { status, body } = await withLoader(async () => {
     const v = validateSetPassword(newPwd, confirmPwd);
     if (!v.ok) { toast(v.reason, 'error', 4500); try { if (v.reason.toLowerCase().includes('match')) $(CONFIRM_ID).focus(); else $(NEW_ID).focus(); } catch(e){}; return; }
 
-    // blur to close keyboard
     blurInputs();
-
-    // disable UI
     if (btn) { btn.disabled = true; btn.dataset._orig = btn.textContent; btn.textContent = 'Creating…'; }
-
     toast('Creating password…', 'info', 2500);
 
-    const res = await postPassword(newPwd);
-
-    if (!res.ok) {
-      const body = res.body;
-      const msg = (body && (body.message || body.error || body.msg)) || (res.status ? `Server error (${res.status})` : 'Network error');
-      toast(msg, 'error', 6000);
+    let res;
+    try {
+      res = await postPassword(newPwd);
+    } catch (err) {
+      // handle thrown errors (like missing token/uid)
+      console.warn('[spw] postPassword threw', err);
+      toast(err.message || 'Unable to set password', 'error', 7000);
       if (btn) { btn.disabled = false; btn.textContent = btn.dataset._orig || 'Create password'; }
       return;
     }
 
-    // success
+    if (!res.ok) {
+      const body = res.body;
+      let msg = 'Server error';
+      if (!res.status) msg = (res.error && res.error.message) ? res.error.message : 'Network error';
+      else if (body) {
+        if (typeof body === 'string') msg = body;
+        else if (body.message) msg = body.message;
+        else if (body.error) msg = (typeof body.error === 'string') ? body.error : (body.error.message || JSON.stringify(body.error));
+        else if (body.msg) msg = body.msg;
+        else msg = JSON.stringify(body);
+      } else {
+        msg = `Server error (${res.status})`;
+      }
+      console.warn('[spw] set-password failed', { status: res.status, body: res.body });
+      toast(msg, 'error', 8000);
+      if (btn) { btn.disabled = false; btn.textContent = btn.dataset._orig || 'Create password'; }
+      return;
+    }
+
     const successMsg = (res.body && (res.body.message || res.body.msg || res.body.status)) || 'Password created successfully.';
     toast(successMsg, 'success', 3500);
 
-    // clear form and close modal
-    try {
-      const form = $(FORM_ID); if (form) form.reset();
-    } catch(e){/*ignore*/}
-
-    // close reset modal if open to avoid duplicates (defensive)
+    try { const form = $(FORM_ID); if (form) form.reset(); } catch(e){/*ignore*/}
     try { safeCloseModal('rpResetModal'); } catch(e){}
-
-    // close this modal
     try { safeCloseModal(MODAL_ID); } catch(e){}
 
-    // cleanup UI
     if (btn) { btn.disabled = false; btn.textContent = btn.dataset._orig || 'Create password'; delete btn.dataset._orig; }
-
-    // optional: call a global hook if app needs it (e.g. refresh session)
     try { if (typeof window.onPasswordSet === 'function') window.onPasswordSet(newPwd); } catch(e){/*ignore*/}
   }
+
 
   // wire close button to close modal
   function wireCloseButtons() {
