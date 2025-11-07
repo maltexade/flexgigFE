@@ -552,7 +552,7 @@ function hideBackdrop(modal) {
       helpSupportBtn: 'helpSupportModal',
       'see-all-plans': 'allPlansModal',
       changePWD: 'changePwdModal',
-      resetPwdBtn: 'rpResetModal',
+      // resetPwdBtn: 'rpResetModal',
     };
 
     // Bind triggers to open modals (retained Smart Button skip for securityPinRow)
