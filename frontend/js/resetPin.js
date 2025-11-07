@@ -1944,10 +1944,8 @@ const { status, body } = await withLoader(async () => {
   window.__spw_installed = true;
 
   const API_BASE = (window.__SEC_API_BASE || '').replace(/\/$/, '') || (typeof API_BASE !== 'undefined' ? API_BASE : '');
-    // use same endpoints as login.html
   const SET_ENDPOINT = API_BASE ? `${API_BASE}/auth/set-password` : '/auth/set-password';
   const CHANGE_ENDPOINT = API_BASE ? `${API_BASE}/auth/change-password` : '/auth/change-password';
-
 
   const $ = id => document.getElementById(id);
   const qsa = s => Array.from(document.querySelectorAll(s));
@@ -2005,13 +2003,6 @@ const { status, body } = await withLoader(async () => {
     const el = $(id);
     if (el) { el.setAttribute('aria-hidden','true'); el.style.display = 'none'; }
   }
-  function safeCloseAll() {
-    try {
-      if (window.ModalManager && typeof window.ModalManager.closeAll === 'function') {
-        return window.ModalManager.closeAll();
-      }
-    } catch (e) { /* ignore */ }
-  }
 
   // toggle eyes
   function wireEyeToggles() {
@@ -2056,39 +2047,92 @@ const { status, body } = await withLoader(async () => {
     return { ok:true };
   }
 
+  // Helper to get UID from multiple sources
+  async function getUserId() {
+    // Try server-embedded data first
+    if (window.__SERVER_USER_DATA__?.uid) {
+      return window.__SERVER_USER_DATA__.uid;
+    }
+    
+    // Try global user object
+    if (window.user?.uid) {
+      return window.user.uid;
+    }
+    
+    // Try to fetch from session endpoint
+    try {
+      const sessionResp = await fetchWithTimeoutLocal('/api/session', {
+        method: 'GET',
+        credentials: 'include',
+        headers: { 'Accept': 'application/json' }
+      }, 8000);
+      
+      if (sessionResp.ok) {
+        const sessionData = await sessionResp.json();
+        if (sessionData?.user?.uid) {
+          return sessionData.user.uid;
+        }
+      }
+    } catch (err) {
+      console.warn('[spw] Failed to fetch user from session:', err);
+    }
+    
+    return null;
+  }
+
   // attempt to POST to set endpoint, fallback to change endpoint on 404
   async function postPassword(newPwd) {
-    // Fetch uid from embedded server data (assumes we're in dashboard.html or similar context)
-    const uid = window.__SERVER_USER_DATA__?.uid;
+    // Get uid from multiple sources
+    const uid = await getUserId();
+    
     if (!uid) {
-      throw new Error('Missing user UID - cannot set password without authenticated session');
+      throw new Error('Unable to retrieve user ID. Please refresh the page and try again.');
     }
-    const payload = { uid, password: newPwd }; // Use 'password' key to match server expectation
+    
+    const payload = { uid, password: newPwd };
     const timeout = 12000;
+    
     try {
       // try set-password first
       let resp = await fetchWithTimeoutLocal(SET_ENDPOINT, {
-        method: 'POST', credentials: 'include',
-        headers: {'Content-Type':'application/json','Accept':'application/json'},
+        method: 'POST', 
+        credentials: 'include',
+        headers: {
+          'Content-Type':'application/json',
+          'Accept':'application/json'
+        },
         body: JSON.stringify(payload)
       }, timeout);
 
       if (resp.status === 404) {
         // fallback to change-password
         resp = await fetchWithTimeoutLocal(CHANGE_ENDPOINT, {
-          method: 'POST', credentials: 'include',
-          headers: {'Content-Type':'application/json','Accept':'application/json'},
-          body: JSON.stringify({ uid, currentPassword: '', password: newPwd }) // some servers require current; expected to error but we'll try
+          method: 'POST', 
+          credentials: 'include',
+          headers: {
+            'Content-Type':'application/json',
+            'Accept':'application/json'
+          },
+          body: JSON.stringify({ 
+            uid, 
+            currentPassword: '', 
+            password: newPwd 
+          })
         }, timeout);
       }
 
       // parse response sensibly
       let body = null;
       try {
-        const ct = resp.headers.headers.get ? (resp.headers.get('content-type') || '') : '';
-        if (ct.toLowerCase().includes('application/json')) body = await resp.json();
-        else body = await resp.text();
-      } catch (e) { body = null; }
+        const ct = resp.headers.get ? (resp.headers.get('content-type') || '') : '';
+        if (ct.toLowerCase().includes('application/json')) {
+          body = await resp.json();
+        } else {
+          body = await resp.text();
+        }
+      } catch (e) { 
+        body = null; 
+      }
 
       return { ok: resp.ok, status: resp.status, body };
     } catch (err) {
@@ -2104,13 +2148,24 @@ const { status, body } = await withLoader(async () => {
     const confirmPwd = $(CONFIRM_ID)?.value || '';
 
     const v = validateSetPassword(newPwd, confirmPwd);
-    if (!v.ok) { toast(v.reason, 'error', 4500); try { if (v.reason.toLowerCase().includes('match')) $(CONFIRM_ID).focus(); else $(NEW_ID).focus(); } catch(e){}; return; }
+    if (!v.ok) { 
+      toast(v.reason, 'error', 4500); 
+      try { 
+        if (v.reason.toLowerCase().includes('match')) $(CONFIRM_ID).focus(); 
+        else $(NEW_ID).focus(); 
+      } catch(e){}
+      return; 
+    }
 
     // blur to close keyboard
     blurInputs();
 
     // disable UI
-    if (btn) { btn.disabled = true; btn.dataset._orig = btn.textContent; btn.textContent = 'Creating…'; }
+    if (btn) { 
+      btn.disabled = true; 
+      btn.dataset._orig = btn.textContent; 
+      btn.textContent = 'Creating…'; 
+    }
 
     toast('Creating password…', 'info', 2500);
 
@@ -2118,19 +2173,25 @@ const { status, body } = await withLoader(async () => {
 
     if (!res.ok) {
       const body = res.body;
-      const msg = (body && (body.message || body.error || body.msg)) || (res.status ? `Server error (${res.status})` : 'Network error');
+      const msg = (body && (body.message || body.error || body.msg)) || 
+                  (res.status ? `Server error (${res.status})` : 'Network error');
       toast(msg, 'error', 6000);
-      if (btn) { btn.disabled = false; btn.textContent = btn.dataset._orig || 'Create password'; }
+      if (btn) { 
+        btn.disabled = false; 
+        btn.textContent = btn.dataset._orig || 'Create password'; 
+      }
       return;
     }
 
     // success
-    const successMsg = (res.body && (res.body.message || res.body.msg || res.body.status)) || 'Password created successfully.';
+    const successMsg = (res.body && (res.body.message || res.body.msg || res.body.status)) || 
+                       'Password created successfully.';
     toast(successMsg, 'success', 3500);
 
     // clear form and close modal
     try {
-      const form = $(FORM_ID); if (form) form.reset();
+      const form = $(FORM_ID); 
+      if (form) form.reset();
     } catch(e){/*ignore*/}
 
     // close reset modal if open to avoid duplicates (defensive)
@@ -2140,10 +2201,16 @@ const { status, body } = await withLoader(async () => {
     try { safeCloseModal(MODAL_ID); } catch(e){}
 
     // cleanup UI
-    if (btn) { btn.disabled = false; btn.textContent = btn.dataset._orig || 'Create password'; delete btn.dataset._orig; }
+    if (btn) { 
+      btn.disabled = false; 
+      btn.textContent = btn.dataset._orig || 'Create password'; 
+      delete btn.dataset._orig; 
+    }
 
     // optional: call a global hook if app needs it (e.g. refresh session)
-    try { if (typeof window.onPasswordSet === 'function') window.onPasswordSet(newPwd); } catch(e){/*ignore*/}
+    try { 
+      if (typeof window.onPasswordSet === 'function') window.onPasswordSet(newPwd); 
+    } catch(e){/*ignore*/}
   }
 
   // wire close button to close modal
@@ -2167,7 +2234,6 @@ const { status, body } = await withLoader(async () => {
       form.__spwFormWired = true;
     }
     if (btn && !btn.__spwBtnWired) {
-      // clicking the button will submit the form thanks to form="spwForm" attribute in your HTML
       btn.addEventListener('click', (e) => { /* let form handler run */ }, { passive: true });
       btn.__spwBtnWired = true;
     }
@@ -2220,7 +2286,9 @@ const { status, body } = await withLoader(async () => {
     close: () => safeCloseModal(MODAL_ID),
     validate: validateSetPassword,
     postPassword,
-    SET_ENDPOINT, CHANGE_ENDPOINT
+    getUserId,
+    SET_ENDPOINT, 
+    CHANGE_ENDPOINT
   };
 
   // kick off
