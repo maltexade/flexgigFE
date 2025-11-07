@@ -1,4 +1,155 @@
-import { withLoader } from "./dashboard";
+// ---------- Loader (refcounted, idempotent) - FIXED for Modal Manager ----------
+(function () {
+  let __loaderRefCount = 0;
+  let __loaderSavedState = null;
+  let __loaderBackHandlerInstalled = false;
+
+  function _saveAndDisableInteractive() {
+    __loaderSavedState = new Map();
+    const els = Array.from(document.querySelectorAll('button, input, select, textarea, a'));
+    els.forEach(el => {
+      try {
+        __loaderSavedState.set(el, !!el.disabled);
+        el.disabled = true;
+      } catch (e) { /* ignore elements that throw */ }
+    });
+  }
+
+  function _restoreInteractive() {
+    if (!__loaderSavedState) return;
+    try {
+      __loaderSavedState.forEach((wasDisabled, el) => {
+        try {
+          el.disabled = !!wasDisabled;
+        } catch (e) { /* ignore */ }
+      });
+    } finally {
+      __loaderSavedState = null;
+    }
+  }
+
+  window.showLoader = function showLoader() {
+    const loader = document.getElementById('appLoader');
+    if (!loader) return;
+    __loaderRefCount++;
+
+    if (__loaderRefCount === 1) {
+      loader.hidden = false;
+      _saveAndDisableInteractive();
+
+      // CRITICAL FIX: Only lock scroll if ModalManager isn't already locking it
+      const modalManagerActive = window.ModalManager && window.ModalManager.isScrollLocked && window.ModalManager.isScrollLocked();
+      if (!modalManagerActive) {
+        // Loader can lock scroll (lightweight - just overflow)
+        document.body.style.setProperty('--loader-scroll-lock', 'hidden', 'important');
+        document.body.classList.add('loader-active');
+      }
+
+      if (!__loaderBackHandlerInstalled) {
+        __backHandler = function () {
+          history.pushState(null, '', location.href);
+        };
+        window.addEventListener('popstate', __backHandler);
+        history.pushState(null, '', location.href);
+        __loaderBackHandlerInstalled = true;
+      }
+    }
+  };
+
+  window.hideLoader = function hideLoader(forceReset = false) {
+    const loader = document.getElementById('appLoader');
+    if (!loader) return;
+
+    if (forceReset) {
+      __loaderRefCount = 0;
+    } else {
+      __loaderRefCount = Math.max(0, __loaderRefCount - 1);
+    }
+
+    if (__loaderRefCount === 0) {
+      loader.hidden = true;
+      _restoreInteractive();
+
+      // CRITICAL FIX: Only unlock if ModalManager isn't using it
+      const modalManagerActive = window.ModalManager && window.ModalManager.isScrollLocked && window.ModalManager.isScrollLocked();
+      if (!modalManagerActive) {
+        document.body.style.removeProperty('--loader-scroll-lock');
+        document.body.classList.remove('loader-active');
+      }
+
+      if (__loaderBackHandlerInstalled && typeof __backHandler === 'function') {
+        window.removeEventListener('popstate', __backHandler);
+        __backHandler = null;
+        __loaderBackHandlerInstalled = false;
+      }
+    }
+  };
+})();
+
+
+
+
+async function withLoader(task) {
+  const start = Date.now();
+
+  // Try to extract caller info from the stack trace
+  let callerInfo = 'unknown';
+  try {
+    const rawStack = (new Error()).stack || '';
+    const lines = rawStack.split('\n').map(l => l.trim()).filter(Boolean);
+
+    // Find the first stack frame that is NOT inside withLoader itself
+    // The stack usually looks like:
+    // Error
+    // at withLoader (file:line:col)
+    // at callerFunction (file:line:col)
+    let callerLine = lines.find(l => !/withLoader/.test(l) && !/Error/.test(l));
+    // Fallback to the second line if above didn't work
+    if (!callerLine && lines.length >= 2) callerLine = lines[1];
+
+    if (callerLine) {
+      // Try to match common V8/Chromium stack frame: "at funcName (fileURL:line:col)"
+      let m = callerLine.match(/at\s+(.*)\s+\((.*):(\d+):(\d+)\)/);
+      if (m) {
+        const func = m[1];
+        const file = m[2].split('/').pop(); // keep filename for readability
+        const line = m[3];
+        const col = m[4];
+        callerInfo = `${func} @ ${file}:${line}:${col}`;
+      } else {
+        // Try Firefox-like format: "funcName@fileURL:line:col"
+        m = callerLine.match(/(.*)@(.+):(\d+):(\d+)/);
+        if (m) {
+          const func = m[1] || '(anonymous)';
+          const file = m[2].split('/').pop();
+          const line = m[3];
+          const col = m[4];
+          callerInfo = `${func} @ ${file}:${line}:${col}`;
+        } else {
+          // Last resort: just use the raw frame string
+          callerInfo = callerLine;
+        }
+      }
+    }
+  } catch (e) {
+    callerInfo = 'unknown';
+  }
+
+  console.log(`[DEBUG ⌛⌛⌛] withLoader: Starting task (called from ${callerInfo})`);
+  showLoader();
+  try {
+    const result = await task();
+    const duration = Date.now() - start;
+    console.log(`[DEBUG ⌛⌛⌛] withLoader: Task completed (duration: ${duration}ms) (called from ${callerInfo})`);
+    return result;
+  } catch (err) {
+    const duration = Date.now() - start;
+    console.error(`[DEBUG ⌛⌛⌛] withLoader: Task failed after ${duration}ms (called from ${callerInfo})`, err);
+    throw err;
+  } finally {
+    try { hideLoader(); } catch (e) { /* ignore */ }
+  }
+}
 
 /* resetPin.js – v7
    - FIXED: closeAll() modals after PIN creation (smooth transition to dashboard)
