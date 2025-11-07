@@ -1427,61 +1427,124 @@ function scheduleAutoSubmitIfNeeded() {
 
   // ---- verify OTP submit ----
   async function verifyOtpSubmit(e) {
-    if (e && e.preventDefault) e.preventDefault();
-    log('verifyOtpSubmit start');
-    const email = await getUserEmail();
-    if (!email) { notify({ type:'error', title:'Email missing', message:'No email detected. Please login or set mockEmail in localStorage for dev.' }); return; }
-    const token = getOtpValue();
-    if (!token || token.length < 6) { notify({ type:'warn', title:'Invalid OTP', message:'Please enter the 6-digit OTP.' }); return; }
+  if (e && e.preventDefault) e.preventDefault();
+  log('verifyOtpSubmit start');
 
-    const verifyBtn = $(VERIFY_BTN_ID);
-    if (verifyBtn) { verifyBtn.disabled = true; verifyBtn.dataset._origText = verifyBtn.textContent; verifyBtn.textContent = 'Verifying…'; }
+  const email = await getUserEmail();
+  if (!email) {
+    notify({ type:'error', title:'Email missing', message:'No email detected. Please login or set mockEmail in localStorage for dev.' });
+    return;
+  }
 
-    try {
-      const { status, body } = await postJson(SERVER_VERIFY_OTP, { email, token });
-      dbg('verifyOtpSubmit server', status, body);
-      if (status >= 200 && status < 300) {
-        notify({ type:'info', title:'OTP Verified', message:'OTP verified. Proceed to change your password.' });
+  const token = getOtpValue();
+  if (!token || token.length < 6) {
+    notify({ type:'warn', title:'Invalid OTP', message:'Please enter the 6-digit OTP.' });
+    return;
+  }
 
-        // close reset modal
+  const verifyBtn = $(VERIFY_BTN_ID);
+  if (verifyBtn) { verifyBtn.disabled = true; verifyBtn.dataset._origText = verifyBtn.textContent; verifyBtn.textContent = 'Verifying…'; }
+
+  try {
+    const { status, body } = await postJson(SERVER_VERIFY_OTP, { email, token });
+    dbg('verifyOtpSubmit server', status, body);
+
+    if (status >= 200 && status < 300) {
+      notify({ type:'info', title:'OTP Verified', message:'OTP verified. Proceed to set your password.' });
+
+      // clear inputs (best-effort)
+      clearOtpInputs();
+
+      // === Defensive modal handling: close reset modal and other possible modals first ===
+      try {
+        if (window.ModalManager && typeof window.ModalManager.closeModal === 'function') {
+          try { window.ModalManager.closeModal(RESET_MODAL_ID); } catch(e){ dbg('close reset via ModalManager failed', e); }
+          try { window.ModalManager.closeModal('pinModal'); } catch(_) {}
+          try { window.ModalManager.closeModal('changePwdModal'); } catch(_) {}
+        } else {
+          const r = document.getElementById(RESET_MODAL_ID);
+          if (r) { r.setAttribute('aria-hidden','true'); r.style.display = 'none'; }
+          ['pinModal','changePwdModal'].forEach(id => {
+            const m = document.getElementById(id);
+            if (m) { m.setAttribute('aria-hidden','true'); m.style.display = 'none'; }
+          });
+        }
+      } catch (closeErr) { dbg('modal close defensive errs', closeErr); }
+
+      // === Open the Set Password modal (spwModal) ===
+      let opened = false;
+
+      // 1) ModalManager.openModal if present
+      try {
+        if (window.ModalManager && typeof window.ModalManager.openModal === 'function') {
+          try {
+            window.ModalManager.openModal('spwModal');
+            opened = true;
+          } catch (e) { dbg('ModalManager.openModal spwModal failed', e); }
+        }
+      } catch (e) { dbg('ModalManager check failed', e); }
+
+      // 2) __spw_helpers.open() if available
+      if (!opened && window.__spw_helpers && typeof window.__spw_helpers.open === 'function') {
         try {
-          if (window.ModalManager && typeof window.ModalManager.openModal === 'function') {
-            // optionally open change-password modal if you have it (common flow)
-            if (typeof window.ModalManager.openModal === 'function') {
-              try { window.ModalManager.openModal('changePwdModal'); } catch(e){ dbg('open changePwdModal failed', e); }
-            }
-            // close this modal
-            try { window.ModalManager.closeModal(RESET_MODAL_ID); } catch(e){ dbg('close reset modal via ModalManager failed', e); }
-          } else {
-            const r = $(RESET_MODAL_ID); if (r) { r.setAttribute('aria-hidden','true'); r.style.display='none'; }
-          }
-        } catch(e){ dbg('modal open/close flow failed', e); }
+          window.__spw_helpers.open();
+          opened = true;
+        } catch (e) { dbg('window.__spw_helpers.open() failed', e); }
+      }
 
-        clearOtpInputs();
-      } else {
-        const errMsg = (body && (body.error?.message || body.message)) || 'OTP verification failed';
-        if (status === 400 || status === 403) {
-          const errCode = body?.error?.code || null;
-          if (errCode === 'otp_expired' || (errMsg && String(errMsg).toLowerCase().includes('expired'))) {
-            notify({ type:'warn', title:'OTP expired', message:'OTP expired. Please resend OTP and try again.' });
-          } else {
-            notify({ type:'error', title:'Verification failed', message: errMsg });
+      // 3) DOM fallback
+      if (!opened) {
+        try {
+          const spw = document.getElementById('spwModal');
+          if (spw) {
+            spw.setAttribute('aria-hidden','false');
+            spw.style.display = 'flex';
+            opened = true;
           }
+        } catch (e) { dbg('DOM fallback open spwModal failed', e); }
+      }
+
+      // if opened, focus first input and wire things (best-effort)
+      if (opened) {
+        setTimeout(() => {
+          try {
+            const first = document.getElementById('spw-newPwd') || document.getElementById('spw-new-password');
+            if (first && typeof first.focus === 'function') first.focus();
+            // wire spw helpers if present (they normally auto-wire, but call defensively)
+            if (window.__spw_helpers && typeof window.__spw_helpers.open === 'function') {
+              try { /* already called */ } catch (e) { dbg('spw_helpers.open call ignored', e); }
+            }
+          } catch (e) { dbg('focus spw input failed', e); }
+        }, 60);
+      } else {
+        dbg('failed to open spwModal by any method');
+      }
+
+    } else {
+      const errMsg = (body && (body.error?.message || body.message)) || 'OTP verification failed';
+      if (status === 400 || status === 403) {
+        const errCode = body?.error?.code || null;
+        if (errCode === 'otp_expired' || (errMsg && String(errMsg).toLowerCase().includes('expired'))) {
+          notify({ type:'warn', title:'OTP expired', message:'OTP expired. Please resend OTP and try again.' });
         } else {
           notify({ type:'error', title:'Verification failed', message: errMsg });
         }
+      } else {
+        notify({ type:'error', title:'Verification failed', message: errMsg });
       }
-    } catch (e) {
-      err('verifyOtpSubmit error', e);
-      notify({ type:'error', title:'Network error', message:'Network error verifying OTP – check console.' });
-    } finally {
-      if (verifyBtn) {
-        verifyBtn.disabled = false;
-        if (verifyBtn.dataset._origText) { verifyBtn.textContent = verifyBtn.dataset._origText; delete verifyBtn.dataset._origText; }
-      }
-      log('verifyOtpSubmit end');
     }
+  } catch (e) {
+    err('verifyOtpSubmit error', e);
+    notify({ type:'error', title:'Network error', message:'Network error verifying OTP – check console.' });
+  } finally {
+    if (verifyBtn) {
+      verifyBtn.disabled = false;
+      if (verifyBtn.dataset._origText) { verifyBtn.textContent = verifyBtn.dataset._origText; delete verifyBtn.dataset._origText; }
+    }
+    log('verifyOtpSubmit end');
   }
+}
+
 
   // ---- resend handler ----
   async function resendOtpHandler(e) {
