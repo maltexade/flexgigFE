@@ -1,3 +1,5 @@
+import { withLoader } from "./dashboard";
+
 /* resetPin.js – v7
    - FIXED: closeAll() modals after PIN creation (smooth transition to dashboard)
    - FIXED: Resend counter now shows "Resend OTP" cleanly after countdown
@@ -187,38 +189,43 @@
   function blurOtpInputs(){ qsa(OTP_INPUT_SELECTOR).forEach(i => { try { i.blur(); } catch(e){} }); dbg('blurOtpInputs'); }
 
   // ---- Resend countdown (FIXED: Clean display after countdown) ----
-  let resendTimer = null;
-  function startResendCountdown(durationSec = 60) {
-    const btn = $(RESEND_BTN_ID);
-    if (!btn) { warn('startResendCountdown: missing button'); return; }
-    dbg('startResendCountdown', durationSec);
-    clearInterval(resendTimer);
-    let remaining = Math.max(0, parseInt(durationSec, 10) || 60);
-    btn.disabled = true;
-    btn.setAttribute('aria-disabled','true');
-    
-    // Store original text if not already stored
-    if (!btn.dataset._origText) {
-      btn.dataset._origText = btn.textContent || 'Resend OTP';
-    }
-    
-    btn.textContent = `Resend (${remaining}s)`;
-    
-    resendTimer = setInterval(() => {
-      remaining--;
-      if (remaining <= 0) {
-        clearInterval(resendTimer);
-        resendTimer = null;
-        btn.disabled = false;
-        btn.removeAttribute('aria-disabled');
-        // FIXED: Show clean "Resend OTP" text without seconds
-        btn.textContent = btn.dataset._origText || 'Resend OTP';
-        log('startResendCountdown: finished - button now shows:', btn.textContent);
-      } else {
-        btn.textContent = `Resend (${remaining}s)`;
-      }
-    }, 1000);
+let resendTimer = null;
+function startResendCountdown(durationSec = 60) {
+  const btn = $(RESEND_BTN_ID);
+  if (!btn) { warn('startResendCountdown: missing button'); return; }
+
+  dbg('startResendCountdown', durationSec);
+  clearInterval(resendTimer);
+
+  let remaining = Math.max(0, parseInt(durationSec, 10) || 60);
+
+  // Store clean original text (strip any existing countdown)
+  if (!btn.dataset._origText) {
+    btn.dataset._origText = (btn.textContent || '').replace(/\s*\(\d+s\)\s*$/, '').trim() || 'Resend OTP';
   }
+
+  btn.disabled = true;
+  btn.setAttribute('aria-disabled', 'true');
+  btn.textContent = `${btn.dataset._origText} (${remaining}s)`;
+
+  resendTimer = setInterval(() => {
+    remaining--;
+    if (remaining <= 0) {
+      clearInterval(resendTimer);
+      resendTimer = null;
+
+      btn.disabled = false;
+      btn.removeAttribute('aria-disabled');
+
+      // Restore clean text without countdown
+      btn.textContent = btn.dataset._origText || 'Resend OTP';
+      log('startResendCountdown: finished - restored text:', btn.textContent);
+    } else {
+      btn.textContent = `${btn.dataset._origText} (${remaining}s)`;
+    }
+  }, 1000);
+}
+
 
   // ---- Email client opener ----
   function openEmailClient(email) {
@@ -260,7 +267,9 @@
     if (verifyBtn) { verifyBtn.disabled = true; verifyBtn.dataset._origText = verifyBtn.textContent; verifyBtn.textContent = 'Verifying…'; }
 
     try {
-      const { status, body } = await postJson(SERVER_VERIFY_OTP, { email, token });
+      const { status, body } = await withLoader(() =>
+        postJson(SERVER_VERIFY_OTP, { email, token })
+      );
       log('verifyOtpSubmit: server', status, body);
       if (status >= 200 && status < 300) {
         notify({ type: 'info', title: 'OTP Verified', message: 'OTP verified. Please create your new PIN.' });
@@ -418,7 +427,9 @@ if (hasExistingPin) {
     btn.textContent = 'Sending…';
     
     try {
-      const { status, body } = await postJson(SERVER_RESEND_OTP, { email });
+      const { status, body } = await withLoader(() =>
+        postJson(SERVER_RESEND_OTP, { email })
+      );
       dbg('resendOtpHandler response', status, body);
       if (status >= 200 && status < 300) {
         notify({ type: 'info', title: 'OTP sent', message: `OTP sent to ${email}` });
@@ -584,7 +595,10 @@ if (hasExistingPin) {
 
     // call resend API and open modal
     try {
-      const { status, body } = await postJson(SERVER_RESEND_OTP, { email });
+      const { status, body } = await withLoader(() =>
+  postJson(SERVER_RESEND_OTP, { email })
+);
+
       dbg('onTriggerClicked resend response', status, body);
       if (status >= 200 && status < 300) {
         // open reset modal
@@ -1389,25 +1403,37 @@ function scheduleAutoSubmitIfNeeded() {
 
   // ---- resend countdown ----
   let resendTimer = null;
-  function startResendCountdown(durationSec = 60) {
-    const btn = $(RESEND_BTN_ID);
-    if (!btn) { warn('startResendCountdown: no button'); return; }
-    clearInterval(resendTimer);
-    let remaining = Math.max(0, parseInt(durationSec, 10) || 60);
-    btn.disabled = true; btn.setAttribute('aria-disabled','true');
-    if (!btn.dataset._origText) btn.dataset._origText = btn.textContent || 'Resend OTP';
-    btn.textContent = `Resend (${remaining}s)`;
-    resendTimer = setInterval(() => {
-      remaining--;
-      if (remaining <= 0) {
-        clearInterval(resendTimer); resendTimer = null;
-        btn.disabled = false; btn.removeAttribute('aria-disabled');
-        btn.textContent = btn.dataset._origText || 'Resend OTP';
-      } else {
-        btn.textContent = `Resend (${remaining}s)`;
-      }
-    }, 1000);
+function startResendCountdown(durationSec = 60) {
+  const btn = $(RESEND_BTN_ID);
+  if (!btn) { warn('startResendCountdown: no button'); return; }
+
+  clearInterval(resendTimer);
+  let remaining = Math.max(0, parseInt(durationSec, 10) || 60);
+
+  // Store original text (strip any leftover "(..s)" if present)
+  if (!btn.dataset._origText) {
+    btn.dataset._origText = (btn.textContent || '').replace(/\s*\(\d+s\)\s*$/, '').trim() || 'Resend OTP';
   }
+
+  btn.disabled = true;
+  btn.setAttribute('aria-disabled', 'true');
+  btn.textContent = `${btn.dataset._origText} (${remaining}s)`;
+
+  resendTimer = setInterval(() => {
+    remaining--;
+    if (remaining <= 0) {
+      clearInterval(resendTimer);
+      resendTimer = null;
+      btn.disabled = false;
+      btn.removeAttribute('aria-disabled');
+      // restore original text without the countdown
+      btn.textContent = btn.dataset._origText;
+    } else {
+      btn.textContent = `${btn.dataset._origText} (${remaining}s)`;
+    }
+  }, 1000);
+}
+
 
   // ---- open email client helper ----
   function openEmailClient(email) {
@@ -1446,7 +1472,9 @@ function scheduleAutoSubmitIfNeeded() {
   if (verifyBtn) { verifyBtn.disabled = true; verifyBtn.dataset._origText = verifyBtn.textContent; verifyBtn.textContent = 'Verifying…'; }
 
   try {
-    const { status, body } = await postJson(SERVER_VERIFY_OTP, { email, token });
+const { status, body } = await withLoader(() =>
+        postJson(SERVER_VERIFY_OTP, { email, token })
+      );
     dbg('verifyOtpSubmit server', status, body);
 
     if (status >= 200 && status < 300) {
@@ -1559,7 +1587,9 @@ function scheduleAutoSubmitIfNeeded() {
     const origText = btn.dataset._origText || btn.textContent;
     btn.textContent = 'Sending…';
     try {
-      const { status, body } = await postJson(SERVER_RESEND_OTP, { email });
+const { status, body } = await withLoader(() =>
+        postJson(SERVER_RESEND_OTP, { email })
+      );      
       dbg('resend response', status, body);
       if (status >= 200 && status < 300) {
         notify({ type:'info', title:'OTP sent', message:`OTP sent to ${email}` });
@@ -1688,8 +1718,9 @@ function scheduleAutoSubmitIfNeeded() {
     const email = await getUserEmail();
     if (!email) { notify({ type:'warn', title:'Email missing', message:'Unable to find your account email.' }); btn.disabled = false; if (btn.dataset._origText) { btn.textContent = btn.dataset._origText; delete btn.dataset._origText; } return; }
     try {
-      const { status, body } = await postJson(SERVER_RESEND_OTP, { email });
-      dbg('onTrigger resend', status, body);
+const { status, body } = await withLoader(() =>
+  postJson(SERVER_RESEND_OTP, { email })
+);      dbg('onTrigger resend', status, body);
       if (status >=200 && status < 300) {
         // open modal
         let opened = false;
@@ -1761,8 +1792,10 @@ function scheduleAutoSubmitIfNeeded() {
   window.__spw_installed = true;
 
   const API_BASE = (window.__SEC_API_BASE || '').replace(/\/$/, '') || (typeof API_BASE !== 'undefined' ? API_BASE : '');
-  const SET_ENDPOINT = API_BASE ? `${API_BASE}/api/set-password` : '/api/set-password';
-  const CHANGE_ENDPOINT = API_BASE ? `${API_BASE}/api/change-password` : '/api/change-password';
+    // use same endpoints as login.html
+  const SET_ENDPOINT = API_BASE ? `${API_BASE}/auth/set-password` : '/auth/set-password';
+  const CHANGE_ENDPOINT = API_BASE ? `${API_BASE}/auth/change-password` : '/auth/change-password';
+
 
   const $ = id => document.getElementById(id);
   const qsa = s => Array.from(document.querySelectorAll(s));

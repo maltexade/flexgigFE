@@ -3444,11 +3444,12 @@ a[style*="color: #f00"] { color: var(--danger); }
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 18px;
+  bottom: calc(env(safe-area-inset-bottom, 20px) + 18px); /* lifted above phone nav */
   display: flex;
   justify-content: center;
   pointer-events: none; /* let the button manage pointer events only */
 }
+
 
 .btnPWD-change {
   pointer-events: auto;
@@ -3787,10 +3788,11 @@ a[style*="color: #f00"] { color: var(--danger); }
   position: sticky;
   bottom: 0;
   background: linear-gradient(180deg, rgba(0,0,0,0.0), rgba(8,8,8,0.98));
-  padding: 14px 12px;
+  padding: 14px 12px calc(env(safe-area-inset-bottom, 20px) + 10px); /* lift above phone nav */
   border-top: 1px solid rgba(255,255,255,0.03);
   z-index: 3;
 }
+
 
 .spw-footer-inner {
   max-width: 980px;
