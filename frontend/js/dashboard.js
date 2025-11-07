@@ -384,7 +384,7 @@ async function tryImmediateReauthWithFreshOptions(freshOpts, attemptLimit = 1) {
 
 
 
-async function withLoader(task) {
+export async function withLoader(task) {
   const start = Date.now();
 
   // Try to extract caller info from the stack trace
