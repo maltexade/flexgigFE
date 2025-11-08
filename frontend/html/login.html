@@ -275,11 +275,6 @@
   // --- CONFIG ---
   const API_BASE = 'https://api.flexgig.com.ng';
   const WEB_BASE = 'https://www.flexgig.com.ng';
-  // Remove Supabase client initialization since we’re using server API
-  // const SUPABASE_URL = "...";
-  // const SUPABASE_ANON_KEY = "...";
-  // const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
   // --- STATE ---
   let currentEmail = '';
   let accessToken = ''; // For set-password
@@ -289,11 +284,11 @@
 
   // Helpers
   const qs = (s) => document.querySelector(s);
-  const show = (id) => { 
-    hideAll(); 
-    const el = qs(id); 
-    el.classList.remove('hidden'); 
-    el.classList.add('fade'); 
+  const show = (id) => {
+    hideAll();
+    const el = qs(id);
+    el.classList.remove('hidden');
+    el.classList.add('fade');
     saveState(id);
   };
   const hideAll = () => ['#step-email', '#step-password', '#step-otp', '#step-setpwd', '#step-resetpwd'].forEach(s => qs(s).classList.add('hidden'));
@@ -332,7 +327,6 @@
       qs('#pwdFor').textContent = `for ${currentEmail}`;
       qs('#password').value = '';
       show('#step-password');
-      // focus password when restoring so the user sees the prompt immediately
       setTimeout(() => qs('#password').focus(), 50);
     } else if (state.step === '#step-otp') {
       qs('#otpSentTo').textContent = `Enter the OTP sent to your email ${maskEmail(currentEmail)}`;
@@ -433,7 +427,7 @@
     }, 1000);
   };
 
-  // Step 1: Email continue (robust)
+  // Step 1: Email continue (robust and handles 400 'Password required')
   qs('#emailContinue').addEventListener('click', async () => {
     const email = qs('#email').value.trim().toLowerCase();
     qs('#emailErr').textContent = '';
@@ -457,7 +451,19 @@
         credentials: 'include',
       });
       const body = await resp.json();
-      console.info('login-check response:', body); // <-- helpful for debugging
+      console.info('login-check response:', body);
+
+      // If 400 with "Password required" — treat as password-needed
+      if (!resp.ok && body?.error && (body.error.message === 'Password required' || body.error.code === 'INVALID_INPUT')) {
+        qs('#pwdFor').textContent = `for ${email}`;
+        qs('#password').value = '';
+        // surface the server message in the password error slot so user sees it
+        qs('#passwordErr').textContent = body.error.message || 'Password required';
+        show('#step-password');
+        saveState('#step-password');
+        setTimeout(() => qs('#password').focus(), 50);
+        return;
+      }
 
       if (!resp.ok) throw new Error(body.error?.message || body.message || 'Server error');
 
