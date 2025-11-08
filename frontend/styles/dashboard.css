@@ -3822,3 +3822,37 @@ a[style*="color: #f00"] { color: var(--danger); }
   .spw-panel { max-width: 520px; margin: 36px auto; border-radius: 12px; height: auto; max-height: 90vh; overflow: auto; }
   .spw-modal[aria-hidden="false"] { align-items: center; justify-content: center; }
 }
+
+
+/* Make masked and real balance occupy same space */
+.balance p {
+  position: relative;
+  display: inline-block;
+  min-height: 1.2em; /* prevent height collapse */
+}
+
+.balance-masked,
+.balance-real {
+  /* Both always display:inline, positioned in same flow */
+  display: inline !important;
+  
+  /* Prevent any layout shifts */
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Optional: if you want them to overlap perfectly (absolute positioning) */
+.balance p {
+  position: relative;
+  display: inline-block;
+}
+
+.balance-masked,
+.balance-real {
+  /* Position absolutely so they stack on top of each other */
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: inline-block !important;
+  white-space: nowrap;
+}

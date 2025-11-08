@@ -4217,6 +4217,7 @@ payBtn.addEventListener('click', () => {
 
 
 /* --- BALANCE MANAGEMENT (keep original globals intact) --- */
+/* --- BALANCE MANAGEMENT (keep original globals intact) --- */
 // keep same global names so other functions still work
 let userBalance = parseFloat(localStorage.getItem('userBalance')) || 50000; // Initialize to ₦50,000
 const balanceEl = document.querySelector('.balance p'); // same selector you used before
@@ -4261,114 +4262,14 @@ window.setUserBalance = function(amount) {
 // initialize balance display (same as your previous code)
 updateBalanceDisplay();
 
-/* --- VISIBILITY / EYE TOGGLE (uses existing DOM ids/classes) --- */
-(function () {
-  const container = document.querySelector('.balance');
-  if (!container) return;
-
-  const toggle = container.querySelector('.balance-eye-toggle');
-  const eyeOpen = toggle && toggle.querySelector('.eye-open-svg');
-  const eyeClosed = toggle && toggle.querySelector('.eye-closed-svg');
-  const masked = maskedSpan || container.querySelector('.balance-masked'); // reuse found earlier
-  const real = realSpan || container.querySelector('.balance-real');
-  const p = balanceEl; // use your original reference
-
-  // read saved visibility (default: masked/hidden)
-  let visible = localStorage.getItem('balanceVisible') === 'true';
-
-  // prepare svg default styles if present (ensures smooth transitions)
-  if (eyeOpen) {
-    eyeOpen.style.transformOrigin = eyeOpen.style.transformOrigin || '50% 50%';
-    if (!eyeOpen.style.transform) eyeOpen.style.transform = 'translate(-50%,-50%) scaleY(.25)';
-    if (!eyeOpen.style.transition) eyeOpen.style.transition = 'transform 650ms cubic-bezier(.2,.9,.3,1), opacity 420ms ease';
-    eyeOpen.style.left = eyeOpen.style.left || '50%';
-    eyeOpen.style.top = eyeOpen.style.top || '50%';
-  }
-  if (eyeClosed) {
-    eyeClosed.style.transformOrigin = eyeClosed.style.transformOrigin || '50% 50%';
-    if (!eyeClosed.style.transform) eyeClosed.style.transform = 'translate(-50%,-50%) scaleY(1)';
-    if (!eyeClosed.style.transition) eyeClosed.style.transition = 'transform 520ms cubic-bezier(.2,.9,.3,1), opacity 320ms ease';
-    eyeClosed.style.left = eyeClosed.style.left || '50%';
-    eyeClosed.style.top = eyeClosed.style.top || '50%';
-  }
-
-  // animation helpers (match your centered transforms)
-  function animateToOpen() {
-    if (!eyeOpen || !eyeClosed) return;
-    eyeOpen.style.opacity = '1';
-    eyeOpen.style.transform = 'translate(-50%,-50%) scaleY(1) translateY(0)';
-    eyeClosed.style.opacity = '0';
-    eyeClosed.style.transform = 'translate(-50%,-50%) scaleY(.3) translateY(0)';
-  }
-  function animateToClosed() {
-    if (!eyeOpen || !eyeClosed) return;
-    eyeClosed.style.opacity = '1';
-    eyeClosed.style.transform = 'translate(-50%,-50%) scaleY(1) translateY(0)';
-    eyeOpen.style.opacity = '0';
-    eyeOpen.style.transform = 'translate(-50%,-50%) scaleY(.25) translateY(0)';
-  }
-
-  // single setter to update UI + persist state
-  function setState(v) {
-    visible = !!v;
-
-    if (visible) {
-      // show real amount
-      if (masked) masked.style.display = 'none';
-      if (real) {
-        real.style.display = 'inline';
-        setTimeout(() => { real.style.opacity = '1'; }, 10);
-      } else if (p) {
-        // if no .balance-real, update p text to formatted value (we already do that via updateBalanceDisplay)
-        p.style.opacity = '1';
-      }
-
-      setTimeout(animateToOpen, 60);
-      if (toggle) { toggle.setAttribute('aria-pressed', 'true'); toggle.setAttribute('aria-label', 'Hide balance'); }
-    } else {
-      // animate close then mask
-      animateToClosed();
-
-      if (real) {
-        real.style.opacity = '0';
-        setTimeout(() => {
-          real.style.display = 'none';
-          if (masked) masked.style.display = 'inline';
-        }, 360);
-      } else if (p) {
-        // fallback: fade the p content (keeping old behavior)
-        p.style.opacity = '0';
-        setTimeout(() => { p.style.opacity = '1'; if (masked) masked.style.display = 'inline'; }, 360);
-      }
-
-      if (toggle) { toggle.setAttribute('aria-pressed', 'false'); toggle.setAttribute('aria-label', 'Show balance'); }
-    }
-
-    try { localStorage.setItem('balanceVisible', visible); } catch (e) { /* ignore storage errors */ }
-  }
-
-  // wire toggle handlers
-  if (toggle) {
-    toggle.addEventListener('click', () => setState(!visible));
-    toggle.addEventListener('keydown', (e) => {
-      if (e.key === ' ' || e.key === 'Enter') {
-        e.preventDefault();
-        setState(!visible);
-      }
-    });
-  }
-
-  // initialize UI based on stored visibility
-  setState(visible);
-
-  // If other code modifies the global userBalance variable directly (older approach),
-  // call updateBalanceDisplay() afterwards or use window.setUserBalance(newAmount).
-})();
+/* --- REMOVED VISIBILITY TOGGLE SECTION ---
+   Document 1 (balance sync V3) handles ALL visibility logic.
+   This script now ONLY handles balance updates and formatting.
+   DO NOT include any eye toggle logic here to avoid conflicts.
+*/
 
 
 
-  // Initialize balance display
-  updateBalanceDisplay();
 
   // --- RECENT TRANSACTIONS ---
   // --- RECENT TRANSACTIONS ---
@@ -14408,6 +14309,240 @@ window.addEventListener('storage', function(e) {
     manageDashboardCards();
   }
 });
+
+/* Balance sync V3 — pinned-position friendly (no layout moves, opacity-only, single-state) */
+(function () {
+  const STORAGE_KEY = 'fg_show_balance';
+  const TOGGLE_SELECTORS = ['#balanceSwitch', '.balance-eye-toggle', '.security-balance-toggle', '[data-balance-toggle]'];
+  const BALANCE_CARD_SELECTOR = '.balance';
+  const MASK_SEL = '.balance-masked';
+  const REAL_SEL = '.balance-real';
+
+  // internal state
+  let state = true;       // visible by default
+  let updating = false;   // lock while applying update
+  const ANIM_MS = 420;    // animation length (ms)
+
+  function readStored() {
+    try {
+      const v = localStorage.getItem(STORAGE_KEY);
+      if (v === null) return true;
+      return v === 'true';
+    } catch (e) { return true; }
+  }
+  function writeStored(v) {
+    try { localStorage.setItem(STORAGE_KEY, v ? 'true' : 'false'); } catch (e) {}
+  }
+
+  function allToggles() {
+    const els = [];
+    TOGGLE_SELECTORS.forEach(sel => {
+      try { document.querySelectorAll(sel).forEach(el => { if (!els.includes(el)) els.push(el); }); } catch (_) {}
+    });
+    return els;
+  }
+
+  // Reserve min-width for balance wrapper so toggling opacity doesn't change layout
+  function reserveWidths() {
+    document.querySelectorAll(BALANCE_CARD_SELECTOR).forEach(card => {
+      try {
+        const wrapper = card.querySelector('p') || card;
+        const real = card.querySelector(REAL_SEL);
+        if (!wrapper || !real) return;
+        // ensure wrapper is inline-block so minWidth applies
+        const prevDisplay = wrapper.style.display;
+        wrapper.style.display = wrapper.style.display || 'inline-block';
+
+        // Make sure real is visible to measure accurately (temporarily)
+        const prevRealOpacity = real.style.opacity;
+        real.style.opacity = '1';
+        // measure required width
+        const needed = wrapper.offsetWidth || real.offsetWidth || 0;
+        if (needed) wrapper.style.minWidth = wrapper.style.minWidth || `${needed}px`;
+        // restore
+        real.style.opacity = prevRealOpacity || (state ? '1' : '0');
+        // Defensive: ensure mask has initial opacity (if not set)
+        const mask = card.querySelector(MASK_SEL);
+        if (mask && (mask.style.opacity === '')) mask.style.opacity = state ? '0' : '1';
+      } catch (e) { /* ignore measurement failures */ }
+    });
+  }
+
+  function animateEyeBtn(btn, visible) {
+    if (!btn) return;
+    const openSvg = btn.querySelector('.eye-open-svg');
+    const closedSvg = btn.querySelector('.eye-closed-svg');
+    if (openSvg && closedSvg) {
+      openSvg.style.transition = openSvg.style.transition || 'transform 420ms cubic-bezier(.2,.9,.3,1), opacity 320ms ease';
+      closedSvg.style.transition = closedSvg.style.transition || 'transform 420ms cubic-bezier(.2,.9,.3,1), opacity 320ms ease';
+      requestAnimationFrame(() => {
+        if (visible) {
+          openSvg.style.transform = 'translate(-50%,-50%) scaleY(1)'; openSvg.style.opacity = '1';
+          closedSvg.style.transform = 'translate(-50%,-50%) scaleY(.25)'; closedSvg.style.opacity = '0';
+        } else {
+          openSvg.style.transform = 'translate(-50%,-50%) scaleY(.25)'; openSvg.style.opacity = '0';
+          closedSvg.style.transform = 'translate(-50%,-50%) scaleY(1)'; closedSvg.style.opacity = '1';
+        }
+      });
+    } else {
+      if (visible) btn.classList.remove('eye-closed'); else btn.classList.add('eye-closed');
+    }
+  }
+
+  function applyToAllToggles(visible) {
+    const toggles = allToggles();
+    toggles.forEach(btn => {
+      try {
+        if (btn.id === 'balanceSwitch') {
+          btn.setAttribute('aria-checked', visible ? 'true' : 'false');
+          if (visible) btn.classList.remove('off'); else btn.classList.add('off');
+        } else {
+          btn.setAttribute('aria-pressed', visible ? 'false' : 'true');
+          btn.setAttribute('data-balance-visible', visible ? 'true' : 'false');
+        }
+        animateEyeBtn(btn, visible);
+      } catch (e) {}
+    });
+  }
+
+  // Core: toggle opacity only — NO display changes, NO positioning changes
+  function applyToBalances(visible) {
+    const cards = Array.from(document.querySelectorAll(BALANCE_CARD_SELECTOR));
+    cards.forEach(card => {
+      try {
+        const mask = card.querySelector(MASK_SEL);
+        const real = card.querySelector(REAL_SEL);
+
+        if (real && mask) {
+          // Ensure transitions present (only opacity)
+          real.style.transition = real.style.transition || `opacity ${ANIM_MS}ms ease`;
+          mask.style.transition = mask.style.transition || `opacity ${Math.floor(ANIM_MS * 0.66)}ms ease`;
+
+          // Do not change display/layout. Only animate opacity and pointer-events.
+          if (visible) {
+            // Make real visible (opacity), mask hidden (opacity 0)
+            real.style.opacity = '1';
+            mask.style.opacity = '0';
+            // pointer events toggled after a short delay so immediate clicks don't hit hidden element
+            setTimeout(() => { real.style.pointerEvents = ''; mask.style.pointerEvents = 'none'; }, 30);
+          } else {
+            mask.style.opacity = '1';
+            real.style.opacity = '0';
+            setTimeout(() => { mask.style.pointerEvents = ''; real.style.pointerEvents = 'none'; }, 30);
+          }
+        } else {
+          // fallback: toggle visibility property for safety (keeps layout)
+          const valueEl = card.querySelector('[data-balance]') || card.querySelector('.amount') || card.querySelector('p');
+          if (valueEl) {
+            valueEl.style.visibility = visible ? 'visible' : 'hidden';
+          }
+        }
+      } catch (e) {}
+    });
+  }
+
+  // authoritative updater — idempotent
+  function updateAll(visible, source = 'program') {
+    if (state === !!visible) return;
+    state = !!visible;
+    updating = true;
+
+    // Apply reserved widths only once (helps prevent jumps)
+    reserveWidths();
+
+    // optimistically apply UI
+    applyToAllToggles(state);
+    applyToBalances(state);
+
+    // persist new state
+    writeStored(state);
+
+    // small reapply to override other handlers
+    setTimeout(() => { applyToAllToggles(state); applyToBalances(state); }, 40);
+
+    // unlock after animations expected to complete
+    setTimeout(() => { updating = false; }, ANIM_MS + 60);
+
+    // notify others
+    try { window.dispatchEvent(new CustomEvent('fg:balance-visibility-changed', { detail: { visible: state, source } })); } catch(e) {}
+  }
+
+  // capture-phase UI handler to prevent conflicting handlers
+  function uiHandler(e) {
+    if (e.button && e.button !== 0) return;
+    try { e.stopImmediatePropagation(); } catch (err) {}
+    e.preventDefault();
+
+    if (updating) return;
+    const next = !state;
+    updateAll(next, 'user');
+  }
+
+  function wire() {
+    const toggles = allToggles();
+    toggles.forEach(el => {
+      if (el.__balanceSyncBound) return;
+      el.addEventListener('click', uiHandler, { passive: false, capture: true });
+      el.addEventListener('keydown', (ev) => {
+        if (ev.key === ' ' || ev.key === 'Enter') {
+          try { ev.stopImmediatePropagation(); } catch(_) {}
+          ev.preventDefault();
+          if (!updating) updateAll(!state, 'keyboard');
+        }
+      }, { passive: false, capture: true });
+      el.__balanceSyncBound = true;
+    });
+  }
+
+  function init() {
+    // measure and reserve widths after fonts.ready if available
+    const start = () => {
+      reserveWidths();
+      state = readStored();
+      applyToAllToggles(state);
+      applyToBalances(state);
+      wire();
+
+      // observe dynamic inserts
+      const mo = new MutationObserver((mutations) => {
+        let needsReserve = false, needsWire = false;
+        for (const m of mutations) {
+          if (!m.addedNodes) continue;
+          for (const n of m.addedNodes) {
+            if (n.nodeType !== 1) continue;
+            try {
+              if (n.matches && n.matches(BALANCE_CARD_SELECTOR)) needsReserve = true;
+              if (n.querySelector && n.querySelector(BALANCE_CARD_SELECTOR)) needsReserve = true;
+              if (TOGGLE_SELECTORS.some(s => { try { return n.matches && n.matches(s); } catch(_) { return false; } })) needsWire = true;
+              if (n.querySelector && TOGGLE_SELECTORS.some(s => n.querySelector(s))) needsWire = true;
+            } catch (_) {}
+          }
+        }
+        if (needsReserve) setTimeout(reserveWidths, 30);
+        if (needsWire) setTimeout(wire, 30);
+      });
+      try { mo.observe(document.body, { subtree: true, childList: true }); } catch (e) {}
+    };
+
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(start).catch(start);
+    } else {
+      setTimeout(start, 20);
+    }
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else setTimeout(init, 10);
+
+  // public API
+  window.__fg_balance_visibility = {
+    isVisible: () => state,
+    set: (v) => updateAll(!!v, 'api'),
+    toggle: () => { if (!updating) updateAll(!state, 'api-toggle'); }
+  };
+})();
+
+
 
 
 
