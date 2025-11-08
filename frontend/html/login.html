@@ -328,8 +328,12 @@
       qs('#email').value = currentEmail;
       show('#step-email');
     } else if (state.step === '#step-password') {
+      currentEmail = state.email || currentEmail;
       qs('#pwdFor').textContent = `for ${currentEmail}`;
+      qs('#password').value = '';
       show('#step-password');
+      // focus password when restoring so the user sees the prompt immediately
+      setTimeout(() => qs('#password').focus(), 50);
     } else if (state.step === '#step-otp') {
       qs('#otpSentTo').textContent = `Enter the OTP sent to your email ${maskEmail(currentEmail)}`;
       const boxes = otpGrid.querySelectorAll('input');
@@ -429,38 +433,61 @@
     }, 1000);
   };
 
-  // Step 1: Email continue
+  // Step 1: Email continue (robust)
   qs('#emailContinue').addEventListener('click', async () => {
     const email = qs('#email').value.trim().toLowerCase();
     qs('#emailErr').textContent = '';
     qs('#emailLoading').classList.add('active');
     qs('#emailContinue').setAttribute('disabled', true);
+
     if (!/^\S+@\S+\.\S+$/.test(email)) {
       qs('#emailErr').textContent = 'Enter a valid email address';
       qs('#emailLoading').classList.remove('active');
       qs('#emailContinue').removeAttribute('disabled');
       return;
     }
+
     currentEmail = email;
+
     try {
-      // Check if account exists and has password
-      const loginRes = await fetch(`${API_BASE}/auth/login`, {
+      const resp = await fetch(`${API_BASE}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email }),
         credentials: 'include',
       });
-      const loginData = await loginRes.json();
-      if (!loginRes.ok) throw new Error(loginData.error?.message || 'Server error');
-      if (loginData.status === 'otp_sent') {
+      const body = await resp.json();
+      console.info('login-check response:', body); // <-- helpful for debugging
+
+      if (!resp.ok) throw new Error(body.error?.message || body.message || 'Server error');
+
+      // OTP path (new user / OTP factor)
+      if (body.status === 'otp_sent' || body.otp_sent || body.requires_otp) {
         qs('#otpSentTo').textContent = `Enter the OTP sent to your email ${maskEmail(email)}`;
-        otpGrid.querySelector('input')?.focus();
         startResendCountdown();
         show('#step-otp');
-      } else {
-        qs('#pwdFor').textContent = `for ${email}`;
-        show('#step-password');
+        saveState('#step-otp');
+        otpGrid.querySelector('input')?.focus();
+        return;
       }
+
+      // Password path (existing user)
+      if (body.status === 'password_required' || body.hasPassword === true || body.requires_password === true || body.status === 'has_password') {
+        qs('#pwdFor').textContent = `for ${email}`;
+        qs('#password').value = '';
+        if (body.message) qs('#passwordErr').textContent = body.message;
+        show('#step-password');
+        saveState('#step-password');
+        setTimeout(() => qs('#password').focus(), 50);
+        return;
+      }
+
+      // fallback: show password input
+      qs('#pwdFor').textContent = `for ${email}`;
+      qs('#password').value = '';
+      show('#step-password');
+      saveState('#step-password');
+      setTimeout(() => qs('#password').focus(), 50);
     } catch (err) {
       qs('#emailErr').textContent = err.message || 'Error checking email';
     } finally {
@@ -490,7 +517,7 @@
         credentials: 'include',
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error?.message || 'Login failed');
+      if (!res.ok) throw new Error(data.error?.message || data.message || 'Login failed');
       if (data.status === 'otp_sent') {
         qs('#otpSentTo').textContent = `Enter the OTP sent to your email ${maskEmail(currentEmail)}`;
         otpGrid.querySelector('input')?.focus();
@@ -503,7 +530,7 @@
         window.location.href = `${WEB_BASE}/dashboard`;
       }
     } catch (err) {
-      qs('#passwordErr').textContent = err.message;
+      qs('#passwordErr').textContent = err.message || 'Login failed';
     }
   });
 
@@ -682,5 +709,6 @@
     }
   });
 </script>
+
 </body>
 </html>
