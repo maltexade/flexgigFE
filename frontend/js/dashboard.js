@@ -4648,9 +4648,18 @@ updateBalanceDisplay();
     processing = true;
     return withLoader(async () => {
       try {
+        // Build headers and include short-lived reset token if available
+        const headers = { 'Content-Type': 'application/json' };
+        const resetToken = (window.__rp_handlers && typeof window.__rp_handlers.getResetToken === 'function')
+          ? window.__rp_handlers.getResetToken()
+          : (window.__rp_reset_token || null);
+        if (resetToken) {
+          headers['x-reset-token'] = resetToken;
+        }
+
         const res = await fetch('https://api.flexgig.com.ng/api/save-pin', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: JSON.stringify({ pin: currentPin }),
           credentials: 'include',
         });
@@ -4659,6 +4668,23 @@ updateBalanceDisplay();
 
         console.log('[dashboard.js] PIN setup successfully');
         localStorage.setItem('hasPin', 'true'); // PIN successfully set
+
+        // --- CLEAR short-lived reset token (security) ---
+        try {
+          if (window.__rp_reset_token) {
+            delete window.__rp_reset_token;
+            if (window.__rp_handlers && typeof window.__rp_handlers.getResetToken === 'function') {
+              window.__rp_handlers.getResetToken = () => null;
+            }
+            console.debug('Cleared __rp_reset_token after save-pin');
+          } else {
+            console.debug('No __rp_reset_token present to clear after save-pin');
+          }
+        } catch (e) {
+          console.debug('Error clearing __rp_reset_token', e);
+        }
+        // --- end clear token ---
+
         onPinSetupSuccess();
 
         const dashboardPinCard = document.getElementById('dashboardPinCard');
@@ -4666,7 +4692,7 @@ updateBalanceDisplay();
         if (accountPinStatus) accountPinStatus.textContent = 'PIN set';
 
         showToast('PIN updated successfully', 'success', 2400);
-        pinModal.classList.add('hidden');
+        if (pinModal) pinModal.classList.add('hidden');
         resetInputs();
       } catch (err) {
         console.error('[dashboard.js] PIN save error:', err);
@@ -4711,7 +4737,7 @@ updateBalanceDisplay();
           await updateBalanceDisplay();
         }
 
-        pinModal.classList.add('hidden');
+        if (pinModal) pinModal.classList.add('hidden');
         resetInputs();
         console.log('[dashboard.js] PIN re-auth: Session restored');
       } catch (err) {
@@ -4726,33 +4752,47 @@ updateBalanceDisplay();
 }
 
 function onPinSetupSuccess() {
-    console.log('[PIN Setup] Success - updating flags and UI');
-    
-    // Update localStorage (instant + persistent)
-    localStorage.setItem('hasPin', 'true');
-    
-    // Dispatch custom event so other components can react
-    window.dispatchEvent(new CustomEvent('pin-status-changed', { 
-        detail: { hasPin: true } 
-    }));
-    
-    // Hide the dashboard Setup Pin card immediately
-    const pinCard = document.getElementById('dashboardPinCard');
-    if (pinCard) {
-        pinCard.style.display = 'none';
+  console.log('[PIN Setup] Success - updating flags and UI');
+
+  // First: clear any short-lived reset token (idempotent safety-net)
+  try {
+    if (window.__rp_reset_token) {
+      delete window.__rp_reset_token;
     }
-    
-    // Update Account PIN status in security modal
-    const accountPinStatus = document.getElementById('accountPinStatus');
-    if (accountPinStatus) {
-        accountPinStatus.textContent = 'PIN set. You can change your PIN here';
+    if (window.__rp_handlers && typeof window.__rp_handlers.getResetToken === 'function') {
+      window.__rp_handlers.getResetToken = () => null;
     }
-    
-    // Optionally notify user
-    if (typeof notify === 'function') {
-        notify('PIN set up successfully!', 'success');
-    }
+    console.debug('onPinSetupSuccess: cleared __rp_reset_token');
+  } catch (e) {
+    console.debug('onPinSetupSuccess: error clearing __rp_reset_token', e);
+  }
+
+  // Update localStorage (instant + persistent)
+  localStorage.setItem('hasPin', 'true');
+
+  // Dispatch custom event so other components can react
+  window.dispatchEvent(new CustomEvent('pin-status-changed', {
+    detail: { hasPin: true }
+  }));
+
+  // Hide the dashboard Setup Pin card immediately
+  const pinCard = document.getElementById('dashboardPinCard');
+  if (pinCard) {
+    pinCard.style.display = 'none';
+  }
+
+  // Update Account PIN status in security modal
+  const accountPinStatusEl = document.getElementById('accountPinStatus');
+  if (accountPinStatusEl) {
+    accountPinStatusEl.textContent = 'PIN set. You can change your PIN here';
+  }
+
+  // Optionally notify user
+  if (typeof notify === 'function') {
+    notify('PIN set up successfully!', 'success');
+  }
 }
+
 
 
 

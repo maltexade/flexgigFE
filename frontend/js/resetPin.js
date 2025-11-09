@@ -425,6 +425,26 @@ function startResendCountdown(durationSec = 60) {
       log('verifyOtpSubmit: server', status, body);
       if (status >= 200 && status < 300) {
         notify({ type: 'info', title: 'OTP Verified', message: 'OTP verified. Please create your new PIN.' });
+        // after successful verify-otp response (inside the success branch)
+try {
+  // server should return the short-lived reset token as `body.token`
+  // (make sure your server returns it on successful OTP verify)
+  if (body && body.token) {
+    // store on window for other modules (dashboard.js will pick this up)
+    window.__rp_reset_token = body.token;
+
+    // expose helper getter on rp_handlers (create object if needed)
+    window.__rp_handlers = window.__rp_handlers || {};
+    window.__rp_handlers.getResetToken = () => window.__rp_reset_token || null;
+
+    dbg('verifyOtpSubmit: stored reset token on window.__rp_reset_token');
+  } else {
+    dbg('verifyOtpSubmit: no reset token present in response (body)', body);
+  }
+} catch (e) {
+  console.debug('verifyOtpSubmit: failed to store reset token', e);
+}
+
         
         // Open pin modal (create-pin). If ModalManager present, use it.
         let opened = false;
