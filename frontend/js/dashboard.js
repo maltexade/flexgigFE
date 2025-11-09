@@ -71,6 +71,38 @@ async function guardedHideReauthModal() {
   }
 }
 
+async function fullClientLogout() {
+  try {
+    // Tell backend to logout
+    await fetch('/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
+
+    // Clear all frontend state
+    localStorage.clear();
+    sessionStorage.clear();
+    window.currentUser = null;
+    window.currentEmail = null;
+    window.__rp_reset_token = null;
+
+    // Clear IndexedDB
+    if (window.indexedDB && indexedDB.databases) {
+      const dbs = await indexedDB.databases();
+      dbs.forEach(db => { if (db.name) indexedDB.deleteDatabase(db.name); });
+    }
+
+    // Clear non-HttpOnly cookies
+    document.cookie.split(';').forEach(c => {
+      document.cookie = c.replace(/^ +/, '').replace(/=.*/, `=;expires=${new Date(0).toUTCString()};path=/`);
+    });
+
+    // Reload / redirect to login
+    window.location.href = '/';
+  } catch (err) {
+    console.error('Logout failed', err);
+    window.location.href = '/';
+  }
+}
+
+
 
 // ===== Sticky reauth bootstrap (drop near top of dashboard.js, BEFORE initFlow boot) =====
 (function ensurePersistentReauthBootstrap(){
@@ -7786,8 +7818,7 @@ if (logoutBtnModal) {
 
     try {
       // Clear local + session storage
-      localStorage.clear();
-      sessionStorage.clear();
+      fullClientLogout()
 
       // Clear IndexedDB (all databases)
       if (window.indexedDB) {
@@ -11942,8 +11973,7 @@ async function bioVerifyAndFinalize(assertion) {
           showLoader();
           try {
             await fetch('https://api.flexgig.com.ng/auth/logout', { method: 'POST', credentials: 'include' }).catch(()=>{});
-            localStorage.clear();
-            sessionStorage.clear();
+            fullClientLogout()
             if (window.indexedDB && indexedDB.databases) {
               const dbs = await indexedDB.databases();
               dbs.forEach(db => { if (db.name) indexedDB.deleteDatabase(db.name); });
