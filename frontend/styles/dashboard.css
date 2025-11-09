@@ -1463,7 +1463,16 @@
 }
 
 /* Fullscreen modal */
-.pin-modal, .reauthmodal {
+.pin-modal {
+  position: fixed !important;
+  inset: 0 !important;
+  background: black !important;
+  color: white !important;
+  display: flex !important;
+  flex-direction: column !important;
+  z-index: 16002 !important;
+}
+.reauthmodal {
   position: fixed !important;
   inset: 0 !important;
   background: black !important;

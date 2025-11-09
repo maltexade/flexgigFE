@@ -11916,165 +11916,124 @@ async function bioVerifyAndFinalize(assertion) {
         link.__bound = true;
       }
     });
-// Replace existing forgetPinLinkPin binding with OTP-first opener
+// OTP-first opener — REPLACE your existing [forgetPinLinkBio, forgetPinLinkPin] binding with this
 [forgetPinLinkBio, forgetPinLinkPin].forEach((link) => {
-  if (link && !link.__bound) {
-    link.addEventListener('click', async (ev) => {
-      ev.preventDefault();
+  if (!link) return;
+  if (link.__bound) return;
+  link.addEventListener('click', async (ev) => {
+    ev.preventDefault();
 
-      // Clear legacy reauth flag (keep old behaviour)
-      try { localStorage.removeItem('reauthPending'); } catch(e){}
+    try {
+      // keep old behaviour: clear reauth flag
+      try { localStorage.removeItem('reauthPending'); } catch(_) {}
 
-      // Helper: determine best email to use
+      // Helper to resolve a usable email
       const resolveEmail = async () => {
+        try { if (typeof currentEmail === 'string' && currentEmail) return currentEmail; } catch(_) {}
+        try { if (window.currentUser && window.currentUser.email) return window.currentUser.email; } catch(_) {}
         try {
-          if (typeof currentEmail === 'string' && currentEmail) return currentEmail;
+          const saved = localStorage.getItem('userEmail') || localStorage.getItem('email') || (localStorage.getItem('loginState') && JSON.parse(localStorage.getItem('loginState') || '{}').email);
+          if (saved) return saved;
         } catch(_) {}
-        try {
-          if (window.currentUser && window.currentUser.email) return window.currentUser.email;
-        } catch(_) {}
-        try {
-          const stored = localStorage.getItem('userEmail') || localStorage.getItem('email') || localStorage.getItem('loginState') && JSON.parse(localStorage.getItem('loginState') || '{}').email;
-          if (stored) return stored;
-        } catch(_) {}
-        // last resort: prompt
-        const p = prompt('Enter the account email to receive OTP for resetting PIN:');
-        return p ? p.trim().toLowerCase() : '';
+        return '';
       };
 
-      // Helper: POST to resend-otp endpoint
-      const sendOtp = async (email) => {
-        if (!email) throw new Error('No email available to send OTP');
-        const base = (window.API_BASE || window.__API_BASE || 'https://api.flexgig.com.ng').replace(/\/$/, '');
-        const url = `${base}/auth/resend-otp`;
-        const resp = await fetch(url, {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-          body: JSON.stringify({ email })
-        });
-        const body = await (resp.headers.get && resp.headers.get('content-type') && resp.headers.get('content-type').includes('application/json') ? await resp.json() : await resp.text());
-        if (!resp.ok) {
-          const msg = body?.error?.message || body?.message || `Failed to send OTP (${resp.status})`;
-          throw new Error(msg);
-        }
-        return { ok: true, info: body };
-      };
-
-      try {
-        // 1) Preferred: call resetPin.js handler that sends OTP then opens modal
-        if (window.__rp_handlers && typeof window.__rp_handlers.onTrigger === 'function') {
-          try {
-            await window.__rp_handlers.onTrigger(ev);
-            return;
-          } catch (e) {
-            console.debug('__rp_handlers.onTrigger failed', e);
-          }
-        }
-        if (window.__rp_handlers && typeof window.__rp_handlers.onTriggerClicked === 'function') {
-          try {
-            await window.__rp_handlers.onTriggerClicked(ev);
-            return;
-          } catch (e) {
-            console.debug('__rp_handlers.onTriggerClicked failed', e);
-          }
-        }
-
-        // 2) Click the resetPinBtn trigger (resetPin.js usually wires this to send OTP+open)
-        const trigger = document.getElementById('resetPinBtn');
-        if (trigger) {
-          try {
-            trigger.click();
-            return;
-          } catch (e) {
-            console.debug('trigger.click failed', e);
-          }
-        }
-
-        // 3) If __rp_openResetModal exists but doesn't send OTP, send OTP ourselves then open it
-        if (typeof window.__rp_openResetModal === 'function') {
-          try {
-            const email = await resolveEmail();
-            if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-              throw new Error('Valid email required to send OTP.');
-            }
-            await sendOtp(email);
-            // open modal
-            const opened = await window.__rp_openResetModal();
-            if (!opened) {
-              // if opener returned falsy, also try ModalManager fallback
-              if (window.ModalManager && typeof window.ModalManager.openModal === 'function') {
-                window.ModalManager.openModal('resetPinModal');
-              } else {
-                const m = document.getElementById('resetPinModal');
-                if (m) { m.classList.remove('hidden'); m.style.display = 'flex'; m.setAttribute('aria-hidden','false'); }
-              }
-            }
-            // notify
-            if (typeof notify === 'function') notify('info', `OTP sent to ${email}`, { title: 'OTP sent' });
-            else alert(`OTP sent to ${email}`);
-            return;
-          } catch (e) {
-            console.debug('__rp_openResetModal path failed', e);
-          }
-        }
-
-        // 4) If ModalManager exists but no wiring, send OTP then open modal
-        if (window.ModalManager && typeof window.ModalManager.openModal === 'function') {
-          try {
-            const email = await resolveEmail();
-            if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-              throw new Error('Valid email required to send OTP.');
-            }
-            await sendOtp(email);
-            ModalManager.openModal('resetPinModal');
-            if (typeof notify === 'function') notify('info', `OTP sent to ${email}`, { title: 'OTP sent' });
-            else alert(`OTP sent to ${email}`);
-            return;
-          } catch (e) {
-            console.debug('ModalManager + sendOtp failed', e);
-          }
-        }
-
-        // 5) DOM fallback: send OTP then show resetPinModal
-        try {
-          const email = await resolveEmail();
-          if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-            if (typeof notify === 'function') notify('warn', 'Valid email required to send OTP.', { title: 'Email needed' });
-            else alert('Valid email required to send OTP.');
-            return;
-          }
-          await sendOtp(email);
-
-          const modal = document.getElementById('resetPinModal');
-          if (modal) {
-            modal.classList.remove('hidden');
-            modal.style.display = 'flex';
-            modal.setAttribute('aria-hidden', 'false');
-            setTimeout(()=> { try { modal.querySelector('input, button, [autofocus]')?.focus(); } catch(e){} }, 40);
-            if (typeof notify === 'function') notify('info', `OTP sent to ${email}`, { title: 'OTP sent' });
-            else alert(`OTP sent to ${email}`);
-            return;
-          }
-        } catch (e) {
-          console.debug('DOM fallback sendOtp/openModal failed', e);
-        }
-
-        // Final fallback: user-friendly message
-        if (typeof notify === 'function') {
-          notify('Unable to start Reset PIN flow. Please open Reset PIN from settings.', 'warn');
-        } else {
-          alert('Unable to open reset PIN flow. Please go to Settings → Reset PIN.');
-        }
-      } catch (e) {
-        console.warn('forgetPinLink click opener failed', e);
-        if (typeof notify === 'function') notify('error', e.message || 'Failed to start Reset PIN flow');
-        else alert(e.message || 'Failed to start Reset PIN flow');
+      // Preferred path: call resetPin.js handler that already sends OTP then opens the reset modal
+      if (window.__rp_handlers && typeof window.__rp_handlers.onTrigger === 'function') {
+        try { await window.__rp_handlers.onTrigger(ev); return; } catch (e) { console.debug('onTrigger failed', e); /* fall through */ }
       }
-    });
-    link.__bound = true;
-  }
+      if (window.__rp_handlers && typeof window.__rp_handlers.onTriggerClicked === 'function') {
+        try { await window.__rp_handlers.onTriggerClicked(ev); return; } catch (e) { console.debug('onTriggerClicked failed', e); /* fall through */ }
+      }
+
+      // If we reach here it means the reset module wasn't available. We'll send OTP ourselves, then open reset modal.
+      // Do NOT open modal until server confirms.
+      const email = await resolveEmail();
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        // Try to prompt the user as last resort
+        const p = prompt('Enter the account email to receive OTP for resetting PIN:');
+        if (!p || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p)) {
+          if (typeof notify === 'function') notify('warn', 'Valid email required to send OTP.', { title: 'Email needed' });
+          else alert('Valid email required to send OTP.');
+          return;
+        }
+        // normalize
+        const emailPrompt = p.trim().toLowerCase();
+        // proceed with prompt value
+        await (async (em) => {
+          const base = (window.API_BASE || window.__SEC_API_BASE || 'https://api.flexgig.com.ng').replace(/\/$/, '');
+          const url = `${base}/auth/resend-otp`;
+          const resp = await fetch(url, {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ email: em })
+          });
+          let body;
+          try { body = resp.headers.get('content-type') && resp.headers.get('content-type').includes('application/json') ? await resp.json() : await resp.text(); } catch(_) { body = null; }
+          if (!resp.ok) throw new Error((body && (body.error?.message || body.message)) || `Failed to send OTP (${resp.status})`);
+          // open reset modal after success
+          let opened = false;
+          try {
+            if (window.ModalManager && typeof window.ModalManager.openModal === 'function') { window.ModalManager.openModal('resetPinModal'); opened = true; }
+          } catch(e){ console.debug('ModalManager.openModal failed', e); }
+          if (!opened) {
+            const el = document.getElementById('resetPinModal');
+            if (el) { el.classList.remove('hidden'); el.style.display = 'flex'; el.setAttribute('aria-hidden','false'); opened = true; }
+          }
+          // if reset module exists later, wire inputs
+          if (opened && window.__rp_handlers && typeof window.__rp_handlers.wire === 'function') {
+            try { window.__rp_handlers.wire(); } catch(e){ console.debug('rp_handlers.wire failed', e); }
+          }
+          if (typeof notify === 'function') notify('info', `OTP sent to ${em}`, { title: 'OTP sent' });
+          else alert(`OTP sent to ${em}`);
+        })(emailPrompt);
+        return;
+      }
+
+      // send OTP using resolved email
+      const base = (window.API_BASE || window.__SEC_API_BASE || 'https://api.flexgig.com.ng').replace(/\/$/, '');
+      const url = `${base}/auth/resend-otp`;
+      const resp = await fetch(url, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ email })
+      });
+      let body;
+      try { body = resp.headers.get('content-type') && resp.headers.get('content-type').includes('application/json') ? await resp.json() : await resp.text(); } catch(_) { body = null; }
+
+      if (!resp.ok) {
+        const msg = (body && (body.error?.message || body.message)) || `Failed to send OTP (${resp.status})`;
+        if (typeof notify === 'function') notify('error', msg, { title: 'Resend failed' });
+        else alert(msg);
+        return;
+      }
+
+      // Only after server confirms OTP sent do we open the reset modal
+      let opened = false;
+      try {
+        if (window.ModalManager && typeof window.ModalManager.openModal === 'function') { window.ModalManager.openModal('resetPinModal'); opened = true; }
+      } catch (e) { console.debug('ModalManager.openModal fail', e); }
+      if (!opened) {
+        const el = document.getElementById('resetPinModal');
+        if (el) { el.classList.remove('hidden'); el.style.display = 'flex'; el.setAttribute('aria-hidden','false'); opened = true; }
+      }
+      // wire OTP inputs if rp module present
+      try { if (window.__rp_handlers && typeof window.__rp_handlers.wire === 'function') window.__rp_handlers.wire(); } catch(e){ console.debug('rp wire after open failed', e); }
+
+      if (typeof notify === 'function') notify('info', `OTP sent to ${email}`, { title: 'OTP sent' });
+      else alert(`OTP sent to ${email}`);
+
+    } catch (e) {
+      console.warn('forgetPin open flow failed', e);
+      if (typeof notify === 'function') notify('error', e.message || 'Failed to start Reset PIN flow');
+      else alert(e.message || 'Failed to start Reset PIN flow');
+    }
+  });
+  link.__bound = true;
 });
+
 
 
   } catch (e) { console.warn('logout/forget setup failed', e); }
