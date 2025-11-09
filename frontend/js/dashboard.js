@@ -7955,6 +7955,8 @@ async function loadProfileToSettings(force = false) {
   return finalProfile;
 }
 
+window.loadProfileToSettings = window.loadProfileToSettings || loadProfileToSettings;
+
 
 // initial load (safe to call multiple times)
 loadProfileToSettings().catch(e => console.warn('loadProfileToSettings failed', e));
