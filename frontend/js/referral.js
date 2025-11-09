@@ -1,97 +1,22 @@
-/* ===== production-ready referral modal JS with raw logs =====
-   Logging: console + on-page debug panel (#ref-debug-log)
-   Toggle verbose: window.__REF_MODAL_VERBOSE = true/false (default true)
-*/
+// ReferralModule — production-ready client for referral modal
+// Preserves your IDs/classes and logs to console only.
 
 (() => {
-  // toggle verbose from console if needed
-  if (window.__REF_MODAL_VERBOSE === undefined) window.__REF_MODAL_VERBOSE = true;
+  const LOG_PREFIX = '[REF-MOD]';
+  const base = (window.__SEC_API_BASE || (window.API_BASE || location.origin)).replace(/\/$/, '');
 
-  // create a small on-page log panel for raw logs (helps on mobile/inspector-less devices)
-  function ensureLogPanel() {
-    if (document.getElementById('ref-debug-log')) return document.getElementById('ref-debug-log');
-    const panel = document.createElement('div');
-    panel.id = 'ref-debug-log';
-    Object.assign(panel.style, {
-      position: 'fixed',
-      right: '12px',
-      bottom: '12px',
-      width: '320px',
-      maxHeight: '40vh',
-      overflow: 'auto',
-      background: 'rgba(0,0,0,0.7)',
-      color: '#fff',
-      padding: '8px',
-      fontSize: '12px',
-      zIndex: 16000,
-      borderRadius: '8px',
-      boxShadow: '0 6px 24px rgba(0,0,0,0.6)'
-    });
-    const title = document.createElement('div');
-    title.textContent = 'RefModal Logs';
-    Object.assign(title.style, { fontWeight: 700, marginBottom: '6px', fontSize: '13px' });
-    panel.appendChild(title);
-    const clearBtn = document.createElement('button');
-    clearBtn.textContent = 'Clear';
-    Object.assign(clearBtn.style, { position: 'absolute', right: '8px', top: '6px', fontSize: '11px' });
-    clearBtn.addEventListener('click', () => { panel.querySelectorAll('.ref-log-line').forEach(n => n.remove()); });
-    panel.appendChild(clearBtn);
-    document.body.appendChild(panel);
-    return panel;
-  }
-
-  function writeToPanel(level, text) {
-    try {
-      const panel = ensureLogPanel();
-      const line = document.createElement('div');
-      line.className = 'ref-log-line';
-      const ts = new Date().toISOString();
-      line.textContent = `[${ts}] ${level.toUpperCase()}: ${text}`;
-      Object.assign(line.style, { marginBottom: '6px', whiteSpace: 'pre-wrap' });
-      panel.appendChild(line);
-      // keep recent only
-      const lines = panel.querySelectorAll('.ref-log-line');
-      if (lines.length > 200) lines[0].remove();
-    } catch (e) {
-      // ignore panel errors
-      console.warn('[ref-log] panel write failed', e);
+  // helpers: use dashboard fetchWithAutoRefresh if present (it handles /auth/refresh)
+  async function doFetch(url, opts = {}) {
+    const full = url.startsWith('http') ? url : `${base}${url.startsWith('/') ? '' : '/'}${url}`;
+    if (typeof fetchWithAutoRefresh === 'function') {
+      console.debug(`${LOG_PREFIX} doFetch -> fetchWithAutoRefresh`, full, opts.method || 'GET');
+      return fetchWithAutoRefresh(full, opts);
     }
+    console.debug(`${LOG_PREFIX} doFetch -> fetch`, full, opts.method || 'GET');
+    return fetch(full, Object.assign({ credentials: 'include' }, opts));
   }
 
-  function logRaw(level, ...args) {
-    if (!window.__REF_MODAL_VERBOSE) return;
-    // console
-    if (level === 'error') console.error(...args);
-    else if (level === 'warn') console.warn(...args);
-    else if (level === 'info') console.info(...args);
-    else console.log(...args);
-
-    // stringify args for panel
-    try {
-      const payload = args.map(a => {
-        try { return (typeof a === 'string') ? a : JSON.stringify(a, getCircularReplacer(), 2); } catch { return String(a); }
-      }).join(' ');
-      writeToPanel(level, payload);
-    } catch (e) {
-      console.warn('[ref-log] stringify failed', e);
-    }
-  }
-
-  // helper to safely stringify circular objects
-  function getCircularReplacer() {
-    const seen = new WeakSet();
-    return (key, value) => {
-      if (typeof value === 'object' && value !== null) {
-        if (seen.has(value)) return '[Circular]';
-        seen.add(value);
-      }
-      return value;
-    };
-  }
-
-  // cached DOM (we'll log presence)
-  const tabs = document.querySelectorAll('.referral-modal-tab');
-  const views = document.querySelectorAll('[data-view]');
+  // UI elements (preserve original IDs/classes)
   const refEarningsEl = document.getElementById('referral-modal-refEarnings');
   const refCodeEl = document.getElementById('referral-modal-refCode');
   const refLinkInput = document.getElementById('referral-modal-refLinkInput');
@@ -101,478 +26,381 @@
   const moveToWalletBtn = document.getElementById('referral-modal-moveToWallet');
   const referralsListEl = document.getElementById('referral-modal-referralsList');
   const viewHistoryBtn = document.getElementById('referral-modal-viewHistory');
+  const tabs = Array.from(document.querySelectorAll('.referral-modal-tab') || []);
+  const views = Array.from(document.querySelectorAll('[data-view]') || []);
 
-  logRaw('info', 'DOM lookup results:',
-    {
-      tabs: tabs.length,
-      views: views.length,
-      refEarningsEl: !!refEarningsEl,
-      refCodeEl: !!refCodeEl,
-      refLinkInput: !!refLinkInput,
-      copyLinkBtn: !!copyLinkBtn,
-      shareWhatsAppBtn: !!shareWhatsAppBtn,
-      shareOtherBtn: !!shareOtherBtn,
-      moveToWalletBtn: !!moveToWalletBtn,
-      referralsListEl: !!referralsListEl,
-      viewHistoryBtn: !!viewHistoryBtn
-    });
-
-  // small UI helpers
-  function formatCurrency(n) {
-    try { return Number(n).toLocaleString(); } catch { return String(n); }
-  }
-  function formatDateISO(iso) {
-    try { return new Date(iso).toLocaleString(); } catch { return iso || '—'; }
-  }
-
-  // Toast notifications (simple, accessible)
-  function showToast(msg, { type = 'info', duration = 3000 } = {}) {
-    logRaw('info', `TOAST (${type}): ${msg}`);
-    const id = `toast-${Date.now()}`;
-    const container = document.createElement('div');
-    container.id = id;
-    container.className = `ref-toast ref-toast-${type}`;
-    container.textContent = msg;
-    document.body.appendChild(container);
-    Object.assign(container.style, {
-      position: 'fixed', bottom: '20px', left: '50%', transform: 'translateX(-50%)',
-      background: 'rgba(0,0,0,0.8)', color: '#fff', padding: '8px 14px',
-      borderRadius: '10px', zIndex: 14000, fontSize: '13px'
-    });
-    setTimeout(() => {
-      container.style.transition = 'opacity .28s ease';
-      container.style.opacity = '0';
-      setTimeout(() => container.remove(), 300);
-    }, duration);
-  }
-
-  // Safe fetch wrapper: uses credentials, auto-refreshes token once if 401
-  async function apiFetch(path, opts = {}, { retryOnAuth = true } = {}) {
-    logRaw('info', `apiFetch start: ${path}`, { opts, retryOnAuth });
-    const defaultHeaders = { 'Content-Type': 'application/json' };
-    const fetchOpts = Object.assign({
-      credentials: 'include',
-      headers: Object.assign({}, defaultHeaders, opts.headers || {}),
-      method: opts.method || 'GET',
-    }, opts.body ? { body: JSON.stringify(opts.body) } : {});
-    logRaw('debug', 'fetch options:', fetchOpts);
-
-    let res;
-    try {
-      res = await fetch(path, fetchOpts);
-      logRaw('info', `apiFetch response status: ${res.status} for ${path}`);
-    } catch (netErr) {
-      logRaw('error', `Network error during fetch ${path}`, netErr);
-      throw netErr;
-    }
-
-    // If unauthenticated, try refresh once (server provides /auth/refresh)
-    if (res.status === 401 && retryOnAuth) {
-      logRaw('warn', `${path} returned 401 — attempting token refresh (/auth/refresh)`);
-      try {
-        const refreshRes = await fetch('/auth/refresh', { method: 'POST', credentials: 'include' });
-        logRaw('info', '/auth/refresh status', refreshRes.status);
-      } catch (refreshErr) {
-        logRaw('error', 'Token refresh failed', refreshErr);
-      }
-      // retry once
-      try {
-        res = await fetch(path, fetchOpts);
-        logRaw('info', `Retry fetch status: ${res.status} for ${path}`);
-      } catch (retryErr) {
-        logRaw('error', `Retry fetch failed for ${path}`, retryErr);
-        throw retryErr;
-      }
-    }
-
-    let json = null;
-    try {
-      // attempt to parse json; if not json, leave as null and continue
-      const text = await res.text();
-      logRaw('debug', `Raw response text for ${path}:`, text ? (text.length > 2000 ? text.slice(0,2000) + '... (truncated)' : text) : '(empty)');
-      try { json = text ? JSON.parse(text) : null; }
-      catch (e) { logRaw('debug', `Response not JSON for ${path}`); json = null; }
-    } catch (e) {
-      logRaw('warn', `Error reading response text for ${path}`, e);
-    }
-
-    if (!res.ok) {
-      const errMsg = json?.error?.message || json?.message || res.statusText || 'Request failed';
-      logRaw('error', `apiFetch non-ok: ${res.status} ${errMsg}`, { path, json });
-      const err = new Error(errMsg);
-      err.status = res.status;
-      err.body = json;
-      throw err;
-    }
-
-    logRaw('info', `apiFetch success for ${path}`, json);
-    return json;
-  }
-
-  // API convenience functions (use server endpoints where available)
-  const API = {
-    profile: () => apiFetch('/api/profile'),
-    getReferrals: () => apiFetch('/api/referrals').catch(e => {
-      logRaw('warn', '/api/referrals error fallback', e);
-      if (e.status === 404 || e.status === 405) return { referrals: [] };
-      throw e;
-    }),
-    getReferralHistory: () => apiFetch('/api/referrals/history').catch(e => {
-      logRaw('warn', '/api/referrals/history error fallback', e);
-      if (e.status === 404) return { history: [] };
-      throw e;
-    }),
-    moveToWallet: () => apiFetch('/api/referrals/move-to-wallet', { method: 'POST' }),
-    getEarnings: async () => {
-      logRaw('info', 'API.getEarnings called');
-      try {
-        const res = await apiFetch('/api/referrals/earnings');
-        if (res && typeof res.total === 'number') {
-          logRaw('info', '/api/referrals/earnings returned', res);
-          return res.total;
-        }
-      } catch (e) {
-        logRaw('debug', '/api/referrals/earnings unavailable, falling back', e);
-      }
-      const r = await API.getReferrals();
-      const list = r.referrals || r || [];
-      const total = (list.reduce((s, it) => s + Number(it.amountEarned || it.amount || 0), 0) || 0);
-      logRaw('info', 'Earnings computed from referrals list', { total, count: list.length });
-      return total;
-    }
+  // small formatting
+  const fmt = n => {
+    try { return Number(n || 0).toLocaleString(); } catch { return String(n || 0); }
+  };
+  const fmtDate = d => {
+    try { return new Date(d).toLocaleString(); } catch { return d || '—'; }
   };
 
-  // derive site base (use server injected WEB_BASE if available; fallback to location.origin)
-  const WEB_BASE = (window.__SERVER_CONFIG__ && window.__SERVER_CONFIG__.WEB_BASE) || location.origin;
-  logRaw('info', 'WEB_BASE determined', WEB_BASE);
-
-  // ---------- UI actions ----------
-  async function loadCampaign() {
-    logRaw('info', 'loadCampaign start');
-    try {
-      // Prefer embedded server data if available (server injects __SERVER_USER_DATA__)
-      const serverUser = window.__SERVER_USER_DATA__ || null;
-      let profile;
-      if (serverUser && serverUser.username !== undefined) {
-        profile = serverUser;
-        logRaw('info', 'Using server injected user data', { serverUser });
-      } else {
-        logRaw('info', 'Fetching profile from API');
-        profile = await API.profile();
-        logRaw('info', 'Profile fetched', profile);
-      }
-
-      // Calculate earnings (server endpoint or compute)
-      const earnings = await API.getEarnings();
-      logRaw('info', 'Earnings resolved', earnings);
-      if (refEarningsEl) {
-        refEarningsEl.textContent = `₦${formatCurrency(earnings)}`;
-        logRaw('info', 'Updated DOM: refEarningsEl', refEarningsEl.textContent);
-      } else logRaw('warn', 'refEarningsEl not found');
-
-      // referral code: prefer username; fallback to uid-based stable code.
-      let referralCode;
-      if (profile && profile.username) {
-        referralCode = `FG-${sanitizeCode(profile.username)}`;
-        logRaw('info', 'Referral code from username', referralCode);
-      } else if (profile && (profile.uid || profile.id)) {
-        referralCode = `FG-${shortHash(profile.uid || profile.id)}`;
-        logRaw('info', 'Referral code from uid', referralCode);
-      } else {
-        referralCode = `FG-${shortHash(navigator.userAgent + Date.now())}`;
-        logRaw('warn', 'Referral code fallback (random)', referralCode);
-      }
-
-      if (refCodeEl) {
-        refCodeEl.textContent = referralCode;
-        logRaw('info', 'Updated DOM: refCodeEl', referralCode);
-      } else {
-        logRaw('error', 'refCodeEl element missing — cannot set referral code');
-      }
-
-      const link = `${WEB_BASE.replace(/\/$/, '')}/signup?ref=${encodeURIComponent(referralCode)}`;
-      if (refLinkInput) {
-        refLinkInput.value = link;
-        logRaw('info', 'Updated DOM: refLinkInput', link);
-      } else {
-        logRaw('error', 'refLinkInput element missing — cannot set referral link', link);
-      }
-
-      logRaw('info', 'loadCampaign finished');
-      return { referralCode, link, earnings };
-    } catch (err) {
-      logRaw('error', '[referral] loadCampaign error', err);
-      showToast('Failed to load referral data', { type: 'error' });
-      throw err;
-    }
-  }
-
-  // small sanitizers
-  function sanitizeCode(str) {
-    return String(str || '').trim().replace(/\s+/g, '').replace(/[^A-Za-z0-9\-_]/g, '').toUpperCase().slice(0, 20);
+  // sanitizers & shortHash (deterministic client-side)
+  function sanitizeCode(s) {
+    return String(s || '').trim().replace(/\s+/g, '').replace(/[^A-Za-z0-9\-_]/g, '').toUpperCase().slice(0, 20);
   }
   function shortHash(input) {
     let h = 0;
-    for (let i = 0; i < input.length; i++) h = (h << 5) - h + input.charCodeAt(i) | 0;
+    const s = String(input || '');
+    for (let i = 0; i < s.length; i++) h = (h << 5) - h + s.charCodeAt(i) | 0;
     return Math.abs(h).toString(36).slice(0, 8).toUpperCase();
   }
 
-  // copy link
-  copyLinkBtn?.addEventListener('click', async () => {
-    logRaw('info', 'copyLinkBtn clicked');
-    try {
-      if (!refLinkInput) throw new Error('refLinkInput missing');
-      await navigator.clipboard.writeText(refLinkInput.value);
-      showToast('Link copied', { type: 'success' });
-      logRaw('info', 'referral link copied', refLinkInput.value);
-    } catch (e) {
-      logRaw('error', 'copy failed', e);
-      showToast('Copy failed', { type: 'error' });
+  // loader wrapper (use your withLoader if available for consistent UX)
+  async function runWithLoader(fn) {
+    if (typeof withLoader === 'function') {
+      return withLoader(fn);
     }
-  });
+    // fallback: just run
+    return fn();
+  }
 
-  // whatsapp share
-  shareWhatsAppBtn?.addEventListener('click', () => {
-    logRaw('info', 'shareWhatsAppBtn clicked');
+  // Build referral link and code locally (pure client)
+  function buildReferralCode(profile) {
+    if (profile && profile.username) return `FG-${sanitizeCode(profile.username)}`;
+    if (profile && (profile.uid || profile.id)) return `FG-${shortHash(profile.uid || profile.id)}`;
+    // fallback: user agent + timestamp
+    return `FG-${shortHash(navigator.userAgent + Date.now())}`;
+  }
+
+  // Load campaign (profile + earnings)
+  async function loadCampaign() {
+    console.info(`${LOG_PREFIX} loadCampaign start`);
     try {
-      const text = `${refCodeEl?.textContent || '[no-code]'} — ${refLinkInput?.value || '[no-link]'}\nJoin Flexgig and get great data deals!`;
-      const encoded = encodeURIComponent(text);
-      const url = `https://wa.me/?text=${encoded}`;
-      logRaw('info', 'Opening WhatsApp URL', url);
-      window.open(url, '_blank', 'noopener');
-    } catch (e) {
-      logRaw('error', 'WhatsApp share failed', e);
-      showToast('Cannot open WhatsApp share.', { type: 'error' });
-    }
-  });
-
-  // "More" share: Web Share API first, fallback to share sheet
-  shareOtherBtn?.addEventListener('click', async () => {
-    logRaw('info', 'shareOtherBtn clicked');
-    const title = 'Join Flexgig';
-    const text = `Use my referral code ${refCodeEl?.textContent || '[no-code]'} to sign up — ${refLinkInput?.value || '[no-link]'}`;
-    const url = refLinkInput?.value || window.location.href;
-    logRaw('debug', 'share payload', { title, text, url });
-
-    if (navigator.share) {
-      try {
-        logRaw('info', 'Using Web Share API', { title, text, url });
-        await navigator.share({ title, text, url });
-        showToast('Shared', { type: 'success' });
-        logRaw('info', 'Web Share API success');
-        return;
-      } catch (e) {
-        logRaw('warn', 'Web Share API failed or cancelled', e);
-      }
-    }
-
-    // Fallback prompt
-    try {
-      const choice = prompt('Share via:\n1) Email\n2) Telegram\n3) Twitter\n4) SMS\nEnter 1-4');
-      logRaw('info', 'User share choice', choice);
-      const encodedText = encodeURIComponent(text);
-      const encodedUrl = encodeURIComponent(url);
-      if (!choice) {
-        logRaw('info', 'User cancelled share prompt');
-        return;
-      }
-      switch (choice.trim()) {
-        case '1':
-          logRaw('info', 'Sharing via Email');
-          window.open(`mailto:?subject=${encodeURIComponent(title)}&body=${encodedText}`, '_blank', 'noopener');
-          break;
-        case '2':
-          logRaw('info', 'Sharing via Telegram');
-          window.open(`https://t.me/share/url?url=${encodedUrl}&text=${encodedText}`, '_blank', 'noopener');
-          break;
-        case '3':
-          logRaw('info', 'Sharing via Twitter');
-          window.open(`https://twitter.com/intent/tweet?text=${encodedText}%20-%20${encodedUrl}`, '_blank', 'noopener');
-          break;
-        case '4':
-          logRaw('info', 'Sharing via SMS');
-          window.open(`sms:?body=${encodedText} ${encodedUrl}`, '_blank', 'noopener');
-          break;
-        default:
-          logRaw('warn', 'Unknown choice, falling back to copy');
-          try { await navigator.clipboard.writeText(url); showToast('Link copied'); logRaw('info', 'Fallback: link copied', url); }
-          catch { showToast('Could not share', { type: 'error' }); logRaw('error', 'Fallback copy failed'); }
-      }
-    } catch (e) {
-      logRaw('error', 'shareOther fallback error', e);
-    }
-  });
-
-  // move earnings to wallet — confirmation + server call
-  moveToWalletBtn?.addEventListener('click', async () => {
-    logRaw('info', 'moveToWalletBtn clicked');
-    try {
-      const currentText = refEarningsEl?.textContent || '₦0';
-      logRaw('info', 'current earnings text', currentText);
-      const confirmMsg = `Move ${currentText} to your wallet?`;
-      if (!confirm(confirmMsg)) {
-        logRaw('info', 'User cancelled move to wallet');
-        return;
-      }
-
-      moveToWalletBtn.disabled = true;
-      moveToWalletBtn.textContent = 'Moving...';
-
-      logRaw('info', 'Calling API.moveToWallet()');
-      const res = await API.moveToWallet();
-      logRaw('info', 'moveToWallet response', res);
-
-      if (res && (res.moved || res.amountMoved)) {
-        const moved = res.moved || res.amountMoved;
-        refEarningsEl.textContent = `₦${formatCurrency(res.remaining || 0)}`;
-        showToast(`Moved ₦${formatCurrency(moved)} to wallet`, { type: 'success' });
-        logRaw('info', `Moved ${moved} to wallet, remaining: ${res.remaining || 0}`);
+      // Prefer server injected data
+      const serverUser = window.__SERVER_USER_DATA__ || null;
+      let profile = null;
+      if (serverUser && (serverUser.username || serverUser.uid)) {
+        profile = serverUser;
+        console.debug(`${LOG_PREFIX} loadCampaign: using __SERVER_USER_DATA__`);
       } else {
-        const earnings = await API.getEarnings();
-        refEarningsEl.textContent = `₦${formatCurrency(earnings)}`;
-        showToast('Moved to wallet', { type: 'success' });
-        logRaw('info', 'Moved to wallet but server returned no moved amount, refreshed earnings', earnings);
-      }
-    } catch (err) {
-      logRaw('error', 'moveToWallet error', err);
-      showToast(err.message || 'Failed to move to wallet', { type: 'error' });
-    } finally {
-      moveToWalletBtn.disabled = false;
-      moveToWalletBtn.textContent = 'Move referral bonus to wallet';
-    }
-  });
+        // try getSession if available (returns { user })
+        try {
+          if (typeof getSession === 'function') {
+            const sess = await getSession();
+            profile = sess?.user || null;
+            console.debug(`${LOG_PREFIX} loadCampaign: getSession used`);
+          }
+        } catch (e) {
+          console.debug(`${LOG_PREFIX} loadCampaign: getSession failed, will fallback to /api/profile`, e);
+        }
 
-  // load referral list
-  async function loadReferrals() {
-    logRaw('info', 'loadReferrals start');
-    if (referralsListEl) referralsListEl.innerHTML = '<div class="referral-modal-small">Loading…</div>';
-    try {
-      const payload = await API.getReferrals();
-      logRaw('info', 'getReferrals returned', payload);
-      const list = payload.referrals || payload || [];
-      if (!list.length) {
-        if (referralsListEl) referralsListEl.innerHTML = '<div class="referral-modal-small">No referrals yet. Share your link to start earning.</div>';
-        logRaw('info', 'No referrals found');
-        return;
+        if (!profile) {
+          // fallback to direct profile endpoint
+          const res = await doFetch('/api/profile', { method: 'GET' });
+          const json = await (res.ok ? res.json() : Promise.reject(new Error(`Profile fetch failed ${res.status}`)));
+          profile = json || null;
+          console.debug(`${LOG_PREFIX} loadCampaign: /api/profile fetched`);
+        }
       }
-      if (referralsListEl) referralsListEl.innerHTML = ''; // clear
-      for (const r of list) {
-        logRaw('debug', 'render referral item', r);
-        const item = document.createElement('div');
-        item.className = 'referral-modal-ref-item';
-        item.innerHTML = `
-          <div class="referral-modal-ref-left">
-            <div class="referral-modal-ref-avatar">${(r.username || 'U').charAt(0).toUpperCase()}</div>
-            <div class="referral-modal-ref-meta">
-              <div style="font-weight:600">${r.username || r.email || 'Unknown'}</div>
-              <div class="referral-modal-muted">Joined: ${formatDateISO(r.joined || r.created_at || r.registered_at)}</div>
-            </div>
-          </div>
-          <div class="referral-modal-ref-amount">₦${formatCurrency(r.amountEarned || r.amount || 0)}</div>
-        `;
-        referralsListEl.appendChild(item);
+
+      // earnings: try dedicated endpoint, otherwise compute from referrals
+      let earnings = 0;
+      try {
+        const res = await doFetch('/api/referrals/earnings', { method: 'GET' });
+        if (res.ok) {
+          const j = await res.json();
+          if (j && typeof j.total === 'number') earnings = j.total;
+          console.debug(`${LOG_PREFIX} earnings from /api/referrals/earnings`, j);
+        } else {
+          console.debug(`${LOG_PREFIX} /api/referrals/earnings missing or returned ${res.status}`);
+        }
+      } catch (e) {
+        console.debug(`${LOG_PREFIX} /api/referrals/earnings error, will fallback`, e);
       }
-      logRaw('info', `Rendered ${list.length} referrals`);
+
+      if (!earnings) {
+        // fallback: compute from referrals list
+        try {
+          const res = await doFetch('/api/referrals', { method: 'GET' });
+          if (res.ok) {
+            const j = await res.json();
+            const list = Array.isArray(j.referrals) ? j.referrals : (Array.isArray(j) ? j : (j.referrals || []));
+            earnings = list.reduce((s, it) => s + Number(it.amountEarned || it.amount || 0), 0);
+            console.debug(`${LOG_PREFIX} earnings computed from referrals list. count=${list.length}`);
+          } else {
+            console.debug(`${LOG_PREFIX} /api/referrals returned`, res.status);
+          }
+        } catch (e) {
+          console.debug(`${LOG_PREFIX} fallback /api/referrals error`, e);
+        }
+      }
+
+      // set UI
+      if (refEarningsEl) refEarningsEl.textContent = `₦${fmt(earnings)}`;
+      const code = buildReferralCode(profile || {});
+      if (refCodeEl) refCodeEl.textContent = code;
+      const link = `${base}/signup?ref=${encodeURIComponent(code)}`;
+      if (refLinkInput) refLinkInput.value = link;
+
+      console.info(`${LOG_PREFIX} loadCampaign done — code=${code} earnings=₦${fmt(earnings)}`);
+      return { code, link, earnings, profile };
     } catch (err) {
-      logRaw('error', 'loadReferrals error', err);
-      if (referralsListEl) referralsListEl.innerHTML = '<div class="referral-modal-small">Failed to load referrals.</div>';
+      console.error(`${LOG_PREFIX} loadCampaign error`, err);
+      throw err;
     }
   }
 
-  // referral history modal rendering (in-modal)
-  async function viewReferralHistory() {
-    logRaw('info', 'viewReferralHistory start');
+  // Copy link
+  async function copyLink() {
     try {
-      const histPayload = await API.getReferralHistory();
-      logRaw('info', 'getReferralHistory returned', histPayload);
-      const hist = histPayload.history || histPayload || [];
-      if (!hist.length) {
-        showToast('No referral history yet');
-        logRaw('info', 'No referral history found');
+      const text = refLinkInput?.value || '';
+      if (!text) {
+        console.warn(`${LOG_PREFIX} copyLink: no link present`);
+        return;
+      }
+      await navigator.clipboard.writeText(text);
+      console.info(`${LOG_PREFIX} Link copied to clipboard`);
+    } catch (err) {
+      console.error(`${LOG_PREFIX} copyLink failed`, err);
+    }
+  }
+
+  // WhatsApp share
+  function shareWhatsApp() {
+    const code = (refCodeEl?.textContent || '').trim();
+    const link = (refLinkInput?.value || '').trim();
+    const message = `${code} — ${link}\nJoin Flexgig for great data deals!`;
+    const url = `https://wa.me/?text=${encodeURIComponent(message)}`;
+    console.info(`${LOG_PREFIX} Opening WhatsApp share`, url);
+    window.open(url, '_blank', 'noopener');
+  }
+
+  // More share: Web Share API preferred, fallbacks to manual links
+  async function shareMore() {
+    const code = (refCodeEl?.textContent || '').trim();
+    const link = (refLinkInput?.value || '').trim();
+    const title = 'Join Flexgig';
+    const text = `Use my referral code ${code} to sign up — ${link}`;
+    const url = link;
+
+    if (navigator.share) {
+      try {
+        await navigator.share({ title, text, url });
+        console.info(`${LOG_PREFIX} Shared via navigator.share`);
+        return;
+      } catch (e) {
+        console.debug(`${LOG_PREFIX} navigator.share failed or cancelled`, e);
+      }
+    }
+
+    // fallback choices (open in new window)
+    const options = {
+      email: `mailto:?subject=${encodeURIComponent(title)}&body=${encodeURIComponent(text)}`,
+      telegram: `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`,
+      twitter: `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`
+    };
+
+    // simple prompt fallback (fine for production short-term; you can replace with custom UI)
+    try {
+      const choice = prompt('Share via:\n1) Email\n2) Telegram\n3) Twitter\nEnter 1,2,3');
+      if (!choice) { console.info(`${LOG_PREFIX} shareMore cancelled`); return; }
+      const idx = String(choice).trim();
+      if (idx === '1') window.open(options.email, '_blank', 'noopener');
+      else if (idx === '2') window.open(options.telegram, '_blank', 'noopener');
+      else if (idx === '3') window.open(options.twitter, '_blank', 'noopener');
+      else {
+        await navigator.clipboard.writeText(url);
+        console.info(`${LOG_PREFIX} Link copied as fallback`);
+      }
+    } catch (err) {
+      console.error(`${LOG_PREFIX} shareMore error`, err);
+    }
+  }
+
+  // Move earnings to wallet
+  async function moveToWallet() {
+    console.info(`${LOG_PREFIX} moveToWallet start`);
+    try {
+      if (!confirm('Move your referral earnings to wallet?')) {
+        console.info(`${LOG_PREFIX} moveToWallet cancelled by user`);
         return;
       }
 
+      await runWithLoader(async () => {
+        const res = await doFetch('/api/referrals/move-to-wallet', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+        if (!res.ok) {
+          const t = await res.text().catch(() => '');
+          throw new Error(`move-to-wallet failed ${res.status} ${t}`);
+        }
+        const json = await res.json().catch(() => null);
+        // Expect { moved: number, remaining: number } or similar
+        const moved = json?.moved || json?.amountMoved || json?.movedAmount || null;
+        const remaining = json?.remaining || 0;
+        // Refresh display
+        if (refEarningsEl) refEarningsEl.textContent = `₦${fmt(remaining)}`;
+        console.info(`${LOG_PREFIX} moveToWallet success`, { moved, remaining });
+      });
+    } catch (err) {
+      console.error(`${LOG_PREFIX} moveToWallet failed`, err);
+    }
+  }
+
+  // Load referrals list
+  async function loadReferrals() {
+    console.info(`${LOG_PREFIX} loadReferrals start`);
+    try {
+      // show loading state in console
+      console.debug(`${LOG_PREFIX} requesting /api/referrals`);
+      const res = await doFetch('/api/referrals', { method: 'GET' });
+      if (!res.ok) {
+        if (res.status === 404) {
+          console.info(`${LOG_PREFIX} /api/referrals not found (404) — no referrals endpoint on server`);
+          if (referralsListEl) referralsListEl.innerHTML = '<div class="referral-modal-small">No referrals yet.</div>';
+          return [];
+        }
+        const txt = await res.text().catch(()=>'');
+        throw new Error(`referrals fetch failed ${res.status} ${txt}`);
+      }
+      const j = await res.json().catch(() => null);
+      const list = Array.isArray(j.referrals) ? j.referrals : (Array.isArray(j) ? j : (j.referrals || []));
+      console.info(`${LOG_PREFIX} loadReferrals success — count=${list.length}`);
+
+      if (!referralsListEl) return list;
+      referralsListEl.innerHTML = '';
+      if (!list.length) {
+        referralsListEl.innerHTML = '<div class="referral-modal-small">No referrals yet. Share your link to start earning.</div>';
+        return list;
+      }
+
+      // sort by earned desc
+      list.sort((a, b) => (Number(b.amountEarned || b.amount || 0) - Number(a.amountEarned || a.amount || 0)));
+
+      for (const r of list) {
+        const el = document.createElement('div');
+        el.className = 'referral-modal-ref-item';
+        el.innerHTML = `
+          <div class="referral-modal-ref-left">
+            <div class="referral-modal-ref-avatar">${((r.username||r.email||'U').charAt(0)||'U').toUpperCase()}</div>
+            <div class="referral-modal-ref-meta">
+              <div style="font-weight:600">${r.username || r.email || 'Unknown'}</div>
+              <div class="referral-modal-muted">Joined: ${fmtDate(r.joined || r.created_at || r.registered_at)}</div>
+            </div>
+          </div>
+          <div class="referral-modal-ref-amount">₦${fmt(r.amountEarned || r.amount || 0)}</div>
+        `;
+        referralsListEl.appendChild(el);
+      }
+      return list;
+    } catch (err) {
+      console.error(`${LOG_PREFIX} loadReferrals error`, err);
+      if (referralsListEl) referralsListEl.innerHTML = '<div class="referral-modal-small">Failed to load referrals.</div>';
+      return [];
+    }
+  }
+
+  // View referral history (renders into modal-body area as a panel)
+  async function viewReferralHistory() {
+    console.info(`${LOG_PREFIX} viewReferralHistory start`);
+    try {
+      const res = await doFetch('/api/referrals/history', { method: 'GET' });
+      if (!res.ok) {
+        console.debug(`${LOG_PREFIX} /api/referrals/history returned`, res.status);
+        alert('No referral history available.');
+        return;
+      }
+      const j = await res.json().catch(() => null);
+      const hist = Array.isArray(j.history) ? j.history : (Array.isArray(j) ? j : (j.history || []));
+      if (!hist.length) { console.info(`${LOG_PREFIX} empty history`); alert('No referral history yet.'); return; }
+
+      // render inside modal body (append panel)
+      const body = document.querySelector('.referral-modal-body');
+      if (!body) {
+        console.warn(`${LOG_PREFIX} viewReferralHistory: modal body not found`);
+        return;
+      }
+      // remove old panel if present
+      const existing = document.querySelector('.referral-modal-history-panel');
+      if (existing) existing.remove();
+
       const panel = document.createElement('div');
       panel.className = 'referral-modal-history-panel';
-      Object.assign(panel.style, { padding: '12px', maxHeight: '60vh', overflowY: 'auto' });
+      panel.style.padding = '12px';
+      panel.style.maxHeight = '55vh';
+      panel.style.overflowY = 'auto';
+      panel.style.background = 'rgba(255,255,255,0.02)';
+      panel.style.borderRadius = '8px';
+      panel.style.marginTop = '12px';
 
       for (const h of hist) {
-        logRaw('debug', 'render history row', h);
         const row = document.createElement('div');
         row.className = 'ref-history-row';
-        Object.assign(row.style, { display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.03)' });
+        row.style.display = 'flex';
+        row.style.justifyContent = 'space-between';
+        row.style.padding = '10px 0';
+        row.style.borderBottom = '1px solid rgba(255,255,255,0.03)';
         const left = document.createElement('div');
-        left.innerHTML = `<div style="font-weight:600">${h.type === 'move' ? 'Moved to wallet' : 'Referral earned'}</div>
-                          <div class="referral-modal-muted" style="font-size:12px">${formatDateISO(h.date || h.created_at)}</div>`;
+        left.innerHTML = `<div style="font-weight:600">${h.type === 'move' ? 'Moved to wallet' : 'Referral earned'}</div><div class="referral-modal-muted" style="font-size:12px">${fmtDate(h.date || h.created_at)}</div>`;
         const right = document.createElement('div');
-        right.innerHTML = `<div style="font-weight:700">₦${formatCurrency(h.amount)}</div>`;
+        right.innerHTML = `<div style="font-weight:700">₦${fmt(h.amount)}</div>`;
         row.appendChild(left);
         row.appendChild(right);
         panel.appendChild(row);
       }
 
-      const body = document.querySelector('.referral-modal-body');
-      const existing = document.querySelector('.referral-modal-history-panel');
-      if (existing) existing.remove();
-      if (body) {
-        body.appendChild(panel);
-        panel.scrollIntoView({ behavior: 'smooth' });
-        logRaw('info', 'History panel appended to modal body');
-      } else {
-        logRaw('warn', 'Modal body not found - opening history in new window');
-        const w = window.open('', '_blank', 'noopener,width=420,height=600');
-        w.document.write(`<pre style="font-family:system-ui,monospace;padding:12px">${JSON.stringify(hist, getCircularReplacer(), 2)}</pre>`);
-      }
+      body.appendChild(panel);
+      panel.scrollIntoView({ behavior: 'smooth' });
+      console.info(`${LOG_PREFIX} viewReferralHistory rendered (${hist.length} rows)`);
     } catch (err) {
-      logRaw('error', 'viewReferralHistory error', err);
-      showToast('Failed to load history', { type: 'error' });
+      console.error(`${LOG_PREFIX} viewReferralHistory error`, err);
+      alert('Failed to load history.');
     }
   }
 
-  // Tab switching (preserve user IDs/classes) - log events
-  tabs.forEach(tab => {
-    tab.addEventListener('click', () => {
-      logRaw('info', 'tab click', tab.dataset.tab);
-      tabs.forEach(t => t.classList.remove('active'));
-      tab.classList.add('active');
-      const target = tab.dataset.tab;
-      views.forEach(view => {
-        const show = view.dataset.view === target;
-        view.style.display = show ? '' : 'none';
+  // Tab wiring (preserve your tab classes/data attributes)
+  function wireTabs() {
+    if (!tabs.length) return;
+    tabs.forEach(tab => {
+      tab.addEventListener('click', async () => {
+        tabs.forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        const target = tab.dataset.tab;
+        views.forEach(view => view.style.display = (view.dataset.view === target) ? '' : 'none');
+        if (target === 'campaign') await loadCampaign();
+        if (target === 'referrals') await loadReferrals();
       });
-      if (target === 'campaign') loadCampaign();
-      if (target === 'referrals') loadReferrals();
     });
-  });
-
-  // attach history button
-  if (viewHistoryBtn) {
-    viewHistoryBtn.addEventListener('click', viewReferralHistory);
-    logRaw('info', 'viewHistoryBtn attached');
-  } else {
-    logRaw('warn', 'viewHistoryBtn missing, cannot attach history handler');
   }
 
-  // auto-load campaign initially (if campaign tab active)
-  (async () => {
-    try {
-      const active = document.querySelector('.referral-modal-tab.active')?.dataset?.tab || 'campaign';
-      logRaw('info', 'Initial active tab', active);
-      if (active === 'campaign') await loadCampaign();
-      if (active === 'referrals') await loadReferrals();
-    } catch (e) {
-      logRaw('error', 'Initial load error', e);
-    }
-  })();
+  // Attach events
+  if (copyLinkBtn) copyLinkBtn.addEventListener('click', copyLink);
+  if (shareWhatsAppBtn) shareWhatsAppBtn.addEventListener('click', shareWhatsApp);
+  if (shareOtherBtn) shareOtherBtn.addEventListener('click', shareMore);
+  if (moveToWalletBtn) moveToWalletBtn.addEventListener('click', moveToWallet);
+  if (viewHistoryBtn) viewHistoryBtn.addEventListener('click', viewReferralHistory);
 
-  // Expose a tiny debug helper (optional)
-  window.__RefModal = {
-    reloadCampaign: async () => { logRaw('info', '__RefModal.reloadCampaign called'); return loadCampaign(); },
-    reloadReferrals: async () => { logRaw('info', '__RefModal.reloadReferrals called'); return loadReferrals(); },
-    viewReferralHistory: async () => { logRaw('info', '__RefModal.viewReferralHistory called'); return viewReferralHistory(); },
-    rawLog: (lvl, ...args) => logRaw(lvl || 'info', ...args)
+  // initial load: campaign by default or the active tab
+  async function init() {
+    console.info(`${LOG_PREFIX} init start`);
+    wireTabs();
+    // if tabs exist, pick active one
+    const activeTab = document.querySelector('.referral-modal-tab.active')?.dataset?.tab || 'campaign';
+    try {
+      if (activeTab === 'campaign') await loadCampaign();
+      else if (activeTab === 'referrals') await loadReferrals();
+      console.info(`${LOG_PREFIX} init done (activeTab=${activeTab})`);
+    } catch (err) {
+      console.error(`${LOG_PREFIX} init error`, err);
+    }
+  }
+
+  // Expose module for debugging and programmatic calls
+  window.ReferralModule = {
+    init,
+    reloadCampaign: loadCampaign,
+    reloadReferrals: loadReferrals,
+    viewReferralHistory,
+    moveToWallet
   };
 
-  logRaw('info', 'Referral modal script initialized. Verbose:', window.__REF_MODAL_VERBOSE);
+  // Auto init after DOM ready (defensive)
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => { setTimeout(init, 30); });
+  } else {
+    setTimeout(init, 30);
+  }
 
+  console.info(`${LOG_PREFIX} module loaded`);
 })();
