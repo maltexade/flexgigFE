@@ -6283,6 +6283,11 @@ parsedData.message)) || rawText || `HTTP ${response.status}`;
       if (notification) {
         notification.textContent = 'Profile updated successfully!';
         onProfileUpdateSuccess();
+        // after upload/update success:
+invalidateProfileCache();             // allow next call to fetch fresh
+loadProfileToSettings(true);          // force fresh fetch & UI update
+// or simply loadProfileToSettings(true).catch(...)
+
         notification.classList.add('active');
         setTimeout(() => notification.classList.remove('active'), 3000);
       }
@@ -7674,7 +7679,35 @@ function updateAvatar(el, newUrl, fallbackLetter) {
 // In-memory cache for profile to avoid multiple server calls
 let _cachedProfilePromise = null;
 
-async function loadProfileToSettings() {
+// small helper to force browsers to re-request the avatar image
+function addCacheBuster(url) {
+  if (!url) return url;
+  try {
+    const u = new URL(url, window.location.origin);
+    u.searchParams.set('cb', Date.now().toString());
+    return u.toString();
+  } catch (e) {
+    // non-absolute URL fallback
+    return url + (url.includes('?') ? '&' : '?') + 'cb=' + Date.now();
+  }
+}
+
+// Call this when you want to force next call to fetch fresh data
+function invalidateProfileCache() {
+  _cachedProfilePromise = null;
+}
+
+// other tabs notify us when profile changed there
+window.addEventListener('storage', (ev) => {
+  if (ev.key === 'profile_refreshed_at') {
+    // another tab updated profile -> invalidate and refresh silently
+    invalidateProfileCache();
+    // don't await here; just refresh in background
+    loadProfileToSettings().catch(() => {});
+  }
+});
+
+async function loadProfileToSettings(force = false) {
   const settingsAvatar = document.getElementById('settingsAvatar');
   const settingsUsername = document.getElementById('settingsUsername');
   const settingsEmail = document.getElementById('settingsEmail');
@@ -7702,11 +7735,15 @@ async function loadProfileToSettings() {
     localProfile.profilePicture || '/frontend/img/avatar-placeholder.png';
   const fallbackLetter = (displayName.charAt(0) || 'U').toUpperCase();
 
-  updateAvatar(settingsAvatar, avatarUrl, fallbackLetter);
+  // make sure to show cache-busted avatar where available (helps immediate update if local changed)
+  updateAvatar(settingsAvatar, addCacheBuster(avatarUrl), fallbackLetter);
   settingsUsername.textContent = displayName;
   settingsUsername.classList.add('fade-in');
   settingsEmail.textContent = localProfile.email || 'Not set';
   settingsEmail.classList.add('fade-in');
+
+  // if force requested, drop the cached promise so we fetch fresh
+  if (force) _cachedProfilePromise = null;
 
   // Only fetch from server **once per session** (cache promise)
   if (!_cachedProfilePromise) {
@@ -7719,6 +7756,7 @@ async function loadProfileToSettings() {
             headers: {
               Authorization: `Bearer ${localStorage.getItem('authToken') || ''}`,
             },
+            cache: 'no-store'
           }
         );
 
@@ -7761,14 +7799,27 @@ async function loadProfileToSettings() {
           email: serverProfile.email || localProfile.email || '',
         };
 
-        // Save to localStorage
-        if (mergedProfile.profilePicture) localStorage.setItem('profilePicture', mergedProfile.profilePicture);
-        if (mergedProfile.username) localStorage.setItem('username', mergedProfile.username);
-        if (mergedProfile.fullName) {
-          localStorage.setItem('fullName', mergedProfile.fullName);
-          localStorage.setItem('firstName', mergedProfile.fullName.split(' ')[0] || '');
+        // Save to localStorage (only if changed)
+        try {
+          if (mergedProfile.profilePicture && mergedProfile.profilePicture !== localProfile.profilePicture) {
+            localStorage.setItem('profilePicture', mergedProfile.profilePicture);
+          }
+          if (mergedProfile.username && mergedProfile.username !== localProfile.username) {
+            localStorage.setItem('username', mergedProfile.username);
+          }
+          if (mergedProfile.fullName && mergedProfile.fullName !== localProfile.fullName) {
+            localStorage.setItem('fullName', mergedProfile.fullName);
+            localStorage.setItem('firstName', (mergedProfile.fullName.split && mergedProfile.fullName.split(' ')[0]) || '');
+          }
+          if (mergedProfile.email && mergedProfile.email !== localProfile.email) {
+            localStorage.setItem('userEmail', mergedProfile.email);
+          }
+
+          // stamp profile refresh so other tabs know
+          try { localStorage.setItem('profile_refreshed_at', Date.now().toString()); } catch(_) {}
+        } catch (e) {
+          console.warn('Could not save mergedProfile to localStorage', e);
         }
-        if (mergedProfile.email) localStorage.setItem('userEmail', mergedProfile.email);
 
         return mergedProfile;
       } catch (err) {
@@ -7784,13 +7835,19 @@ async function loadProfileToSettings() {
   // Update UI with server data if different
   const finalAvatarUrl = finalProfile.profilePicture || '/frontend/img/avatar-placeholder.png';
   const finalFallbackLetter = (finalProfile.username?.charAt(0) || finalProfile.firstName?.charAt(0) || 'U').toUpperCase();
-  updateAvatar(settingsAvatar, finalAvatarUrl, finalFallbackLetter);
+  // IMPORTANT: use cache-busted avatar to force browser to request new file
+  updateAvatar(settingsAvatar, addCacheBuster(finalAvatarUrl), finalFallbackLetter);
 
   const finalDisplayName = finalProfile.username || finalProfile.firstName || (finalProfile.email ? finalProfile.email.split('@')[0] : 'User');
   settingsUsername.textContent = finalDisplayName;
   settingsEmail.textContent = finalProfile.email || 'Not set';
+
+  return finalProfile;
 }
-loadProfileToSettings(); // initial load
+
+// initial load (safe to call multiple times)
+loadProfileToSettings().catch(e => console.warn('loadProfileToSettings failed', e));
+
 
 
   // Edit profile action
