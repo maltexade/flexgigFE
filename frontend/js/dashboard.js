@@ -7696,6 +7696,7 @@ function addCacheBuster(url) {
 function invalidateProfileCache() {
   _cachedProfilePromise = null;
 }
+window.invalidateProfileCache =  window.invalidateProfileCache || invalidateProfileCache;
 
 // other tabs notify us when profile changed there
 window.addEventListener('storage', (ev) => {
@@ -7828,6 +7829,8 @@ async function loadProfileToSettings(force = false) {
       }
     })();
   }
+
+  window.loadProfileToSettings = window.loadProfileToSettings || loadProfileToSettings;
 
   // Wait for cached fetch to resolve
   const finalProfile = await _cachedProfilePromise;
