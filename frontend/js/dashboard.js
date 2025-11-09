@@ -7865,17 +7865,46 @@ async function loadProfileToSettings(force = false) {
   // Wait for cached fetch to resolve
   const finalProfile = await _cachedProfilePromise;
 
-  // Update UI with server data if different
-  const finalAvatarUrl = finalProfile.profilePicture || '/frontend/img/avatar-placeholder.png';
-  const finalFallbackLetter = (finalProfile.username?.charAt(0) || finalProfile.firstName?.charAt(0) || 'U').toUpperCase();
-  // IMPORTANT: use cache-busted avatar to force browser to request new file
-  updateAvatar(settingsAvatar, addCacheBuster(finalAvatarUrl), finalFallbackLetter);
+  // Compare server result with what we already have in localStorage
+  const localProfileAfterFetch = {
+    profilePicture: localStorage.getItem('profilePicture') || '',
+    username: localStorage.getItem('username') || '',
+    fullName: localStorage.getItem('fullName') || '',
+    firstName: localStorage.getItem('firstName') || '',
+    email: localStorage.getItem('userEmail') || '',
+  };
 
-  const finalDisplayName = finalProfile.username || finalProfile.firstName || (finalProfile.email ? finalProfile.email.split('@')[0] : 'User');
-  settingsUsername.textContent = finalDisplayName;
-  settingsEmail.textContent = finalProfile.email || 'Not set';
+  // Avatar: only update (and cache-bust) if URL actually changed
+  const serverPic = finalProfile.profilePicture || '';
+  const localPic = localProfileAfterFetch.profilePicture || '';
+  if (serverPic && serverPic !== localPic) {
+    // server has a new image — update localStorage and force reload of image
+    try { localStorage.setItem('profilePicture', serverPic); } catch(_) {}
+    updateAvatar(settingsAvatar, addCacheBuster(serverPic), (finalProfile.username || finalProfile.firstName || 'U').charAt(0).toUpperCase());
+  } else {
+    // Keep the existing avatar as-is (no cache-buster, no DOM shake)
+    // but ensure fallback letter is present if there's no image
+    if (!localPic) {
+      updateAvatar(settingsAvatar, '/frontend/img/avatar-placeholder.png', (finalProfile.username || finalProfile.firstName || 'U').charAt(0).toUpperCase());
+    }
+  }
+
+  // Name & email: only update text nodes if they changed (avoid reflows/animations)
+  const newDisplayName = finalProfile.username || finalProfile.firstName || (finalProfile.email ? finalProfile.email.split('@')[0] : 'User');
+  const currentName = settingsUsername.textContent || '';
+  if (newDisplayName && newDisplayName !== currentName) {
+    settingsUsername.textContent = newDisplayName;
+    settingsUsername.classList.add('fade-in');
+  }
+
+  const newEmail = finalProfile.email || 'Not set';
+  if (newEmail !== (settingsEmail.textContent || '')) {
+    settingsEmail.textContent = newEmail;
+    settingsEmail.classList.add('fade-in');
+  }
 
   return finalProfile;
+
 }
 
 // initial load (safe to call multiple times)
