@@ -1,13 +1,12 @@
-// ReferralModule — production-ready client for referral modal
-// Preserves your IDs/classes and logs to console only.
-
+// ReferralModule — production-ready client for referral modal (updated: site link + username-only code + native WhatsApp)
 (() => {
   const LOG_PREFIX = '[REF-MOD]';
-  const base = (window.__SEC_API_BASE || (window.API_BASE || location.origin)).replace(/\/$/, '');
+  const API_BASE = (window.__SEC_API_BASE || (window.API_BASE || location.origin)).replace(/\/$/, '');
+  const SITE_BASE = (window.__SITE_BASE || window.__SITE_URL || 'https://flexgig.com.ng').replace(/\/$/, '');
 
   // helpers: use dashboard fetchWithAutoRefresh if present (it handles /auth/refresh)
   async function doFetch(url, opts = {}) {
-    const full = url.startsWith('http') ? url : `${base}${url.startsWith('/') ? '' : '/'}${url}`;
+    const full = url.startsWith('http') ? url : `${API_BASE}${url.startsWith('/') ? '' : '/'}${url}`;
     if (typeof fetchWithAutoRefresh === 'function') {
       console.debug(`${LOG_PREFIX} doFetch -> fetchWithAutoRefresh`, full, opts.method || 'GET');
       return fetchWithAutoRefresh(full, opts);
@@ -30,22 +29,19 @@
   const views = Array.from(document.querySelectorAll('[data-view]') || []);
 
   // small formatting
-  const fmt = n => {
-    try { return Number(n || 0).toLocaleString(); } catch { return String(n || 0); }
-  };
-  const fmtDate = d => {
-    try { return new Date(d).toLocaleString(); } catch { return d || '—'; }
-  };
+  const fmt = n => { try { return Number(n || 0).toLocaleString(); } catch { return String(n || 0); } };
+  const fmtDate = d => { try { return new Date(d).toLocaleString(); } catch { return d || '—'; } };
 
   // sanitizers & shortHash (deterministic client-side)
-  function sanitizeCode(s) {
-    return String(s || '').trim().replace(/\s+/g, '').replace(/[^A-Za-z0-9\-_]/g, '').toUpperCase().slice(0, 20);
+  function sanitizeUsername(s) {
+    // allow lowercase letters, numbers, dot, dash, underscore; trim and lowercase
+    return String(s || '').trim().toLowerCase().replace(/\s+/g, '').replace(/[^a-z0-9._-]/g, '').slice(0, 40) || null;
   }
   function shortHash(input) {
     let h = 0;
     const s = String(input || '');
     for (let i = 0; i < s.length; i++) h = (h << 5) - h + s.charCodeAt(i) | 0;
-    return Math.abs(h).toString(36).slice(0, 8).toUpperCase();
+    return Math.abs(h).toString(36).slice(0, 8);
   }
 
   // loader wrapper (use your withLoader if available for consistent UX)
@@ -53,16 +49,17 @@
     if (typeof withLoader === 'function') {
       return withLoader(fn);
     }
-    // fallback: just run
     return fn();
   }
 
-  // Build referral link and code locally (pure client)
+  // Build referral code (username-only). If username missing, fallback to short hash.
   function buildReferralCode(profile) {
-    if (profile && profile.username) return `FG-${sanitizeCode(profile.username)}`;
-    if (profile && (profile.uid || profile.id)) return `FG-${shortHash(profile.uid || profile.id)}`;
-    // fallback: user agent + timestamp
-    return `FG-${shortHash(navigator.userAgent + Date.now())}`;
+    if (profile && profile.username) {
+      const u = sanitizeUsername(profile.username);
+      if (u) return u;
+    }
+    if (profile && (profile.uid || profile.id)) return shortHash(profile.uid || profile.id);
+    return shortHash(navigator.userAgent + Date.now());
   }
 
   // Load campaign (profile + earnings)
@@ -89,10 +86,17 @@
 
         if (!profile) {
           // fallback to direct profile endpoint
-          const res = await doFetch('/api/profile', { method: 'GET' });
-          const json = await (res.ok ? res.json() : Promise.reject(new Error(`Profile fetch failed ${res.status}`)));
-          profile = json || null;
-          console.debug(`${LOG_PREFIX} loadCampaign: /api/profile fetched`);
+          try {
+            const res = await doFetch('/api/profile', { method: 'GET' });
+            if (res.ok) {
+              profile = await res.json();
+              console.debug(`${LOG_PREFIX} loadCampaign: /api/profile fetched`);
+            } else {
+              console.debug(`${LOG_PREFIX} /api/profile returned`, res.status);
+            }
+          } catch (e) {
+            console.debug(`${LOG_PREFIX} /api/profile fetch failed`, e);
+          }
         }
       }
 
@@ -132,10 +136,10 @@
       if (refEarningsEl) refEarningsEl.textContent = `₦${fmt(earnings)}`;
       const code = buildReferralCode(profile || {});
       if (refCodeEl) refCodeEl.textContent = code;
-      const link = `${base}/signup?ref=${encodeURIComponent(code)}`;
+      const link = `${SITE_BASE}/r/${encodeURIComponent(code)}`;
       if (refLinkInput) refLinkInput.value = link;
 
-      console.info(`${LOG_PREFIX} loadCampaign done — code=${code} earnings=₦${fmt(earnings)}`);
+      console.info(`${LOG_PREFIX} loadCampaign done — code=${code} link=${link} earnings=₦${fmt(earnings)}`);
       return { code, link, earnings, profile };
     } catch (err) {
       console.error(`${LOG_PREFIX} loadCampaign error`, err);
@@ -158,14 +162,38 @@
     }
   }
 
-  // WhatsApp share
+  // WhatsApp share - prefer native app, fallback to wa.me
   function shareWhatsApp() {
-    const code = (refCodeEl?.textContent || '').trim();
-    const link = (refLinkInput?.value || '').trim();
-    const message = `${code} — ${link}\nJoin Flexgig for great data deals!`;
-    const url = `https://wa.me/?text=${encodeURIComponent(message)}`;
-    console.info(`${LOG_PREFIX} Opening WhatsApp share`, url);
-    window.open(url, '_blank', 'noopener');
+    try {
+      const code = (refCodeEl?.textContent || '').trim();
+      const link = (refLinkInput?.value || '').trim();
+      const message = `${code} — ${link}\nJoin Flexgig for great data deals!`;
+      const encoded = encodeURIComponent(message);
+
+      const appUri = `whatsapp://send?text=${encoded}`;
+      const webUri = `https://wa.me/?text=${encoded}`;
+
+      // Try to open native app (most mobile platforms will try to open)
+      const newWin = window.open(appUri, '_blank');
+
+      // After short delay, fallback to web link (prevents user stuck)
+      setTimeout(() => {
+        try {
+          // Some browsers block window.open for custom protocols; always open fallback
+          window.open(webUri, '_blank', 'noopener');
+          console.info(`${LOG_PREFIX} whatsapp fallback opened wa.me`);
+        } catch (e) {
+          console.debug(`${LOG_PREFIX} whatsapp fallback error`, e);
+        }
+      }, 900);
+
+      console.info(`${LOG_PREFIX} shareWhatsApp attempted appUri`, appUri);
+    } catch (err) {
+      console.error(`${LOG_PREFIX} shareWhatsApp error`, err);
+      // final fallback
+      const fallback = `https://wa.me/?text=${encodeURIComponent('Join Flexgig: ' + SITE_BASE)}`;
+      window.open(fallback, '_blank', 'noopener');
+    }
   }
 
   // More share: Web Share API preferred, fallbacks to manual links
@@ -193,7 +221,6 @@
       twitter: `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`
     };
 
-    // simple prompt fallback (fine for production short-term; you can replace with custom UI)
     try {
       const choice = prompt('Share via:\n1) Email\n2) Telegram\n3) Twitter\nEnter 1,2,3');
       if (!choice) { console.info(`${LOG_PREFIX} shareMore cancelled`); return; }
@@ -242,7 +269,6 @@
   async function loadReferrals() {
     console.info(`${LOG_PREFIX} loadReferrals start`);
     try {
-      // show loading state in console
       console.debug(`${LOG_PREFIX} requesting /api/referrals`);
       const res = await doFetch('/api/referrals', { method: 'GET' });
       if (!res.ok) {
@@ -265,7 +291,6 @@
         return list;
       }
 
-      // sort by earned desc
       list.sort((a, b) => (Number(b.amountEarned || b.amount || 0) - Number(a.amountEarned || a.amount || 0)));
 
       for (const r of list) {
@@ -305,13 +330,11 @@
       const hist = Array.isArray(j.history) ? j.history : (Array.isArray(j) ? j : (j.history || []));
       if (!hist.length) { console.info(`${LOG_PREFIX} empty history`); alert('No referral history yet.'); return; }
 
-      // render inside modal body (append panel)
       const body = document.querySelector('.referral-modal-body');
       if (!body) {
         console.warn(`${LOG_PREFIX} viewReferralHistory: modal body not found`);
         return;
       }
-      // remove old panel if present
       const existing = document.querySelector('.referral-modal-history-panel');
       if (existing) existing.remove();
 
@@ -375,7 +398,6 @@
   async function init() {
     console.info(`${LOG_PREFIX} init start`);
     wireTabs();
-    // if tabs exist, pick active one
     const activeTab = document.querySelector('.referral-modal-tab.active')?.dataset?.tab || 'campaign';
     try {
       if (activeTab === 'campaign') await loadCampaign();
@@ -402,5 +424,5 @@
     setTimeout(init, 30);
   }
 
-  console.info(`${LOG_PREFIX} module loaded`);
+  console.info(`${LOG_PREFIX} module loaded — SITE_BASE=${SITE_BASE} API_BASE=${API_BASE}`);
 })();
