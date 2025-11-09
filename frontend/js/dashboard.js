@@ -7600,7 +7600,6 @@ if (profilePictureInput && profilePicturePreview) {
   const logoutBtnModal = document.getElementById('logoutBtnModal');
   const helpSupportBtn = document.getElementById('helpSupportBtn');
   const securityBtn = document.getElementById('securityBtn');
-  const referralsBtn = document.getElementById('referralsBtn');
   const themeToggle = document.getElementById('themeToggle');
   const settingsAvatar = document.getElementById('settingsAvatar');
   const settingsUsername = document.getElementById('settingsUsername');
@@ -7984,11 +7983,7 @@ loadProfileToSettings().catch(e => console.warn('loadProfileToSettings failed', 
     });
   }
 
-  // Referrals
-  if (referralsBtn)
-    referralsBtn.addEventListener('click', () => {
-      window.location.href = '/referrals.html';
-    });
+
 
 // ✅ IMPROVED: Logout button handler with better UX
 if (logoutBtnModal) {

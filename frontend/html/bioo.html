@@ -1,212 +1,252 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>FlexGig — Biometric Auth Hex Debug</title>
-<style>
-  body { font-family: system-ui, -apple-system, Roboto, Arial; max-width: 720px; margin: 32px auto; padding: 0 16px; color: #111; }
-  button { padding: 10px 14px; border-radius: 8px; border: 1px solid #ddd; background: #fff; cursor: pointer; margin-right: 8px; }
-  pre { background:#f7f7f8; padding:12px; border-radius:6px; overflow:auto; }
-  .ok { color: green; }
-  .err { color: #b00020; }
-  .row { margin-bottom: 12px; }
-</style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Referral Modal (Flexgig)</title>
+  <style>
+    :root{--bg:rgba(0,0,0,0.75);--card:#0b0b0b;--muted:#9aa3ad;--accent:#ffd166;--white:#fff}
+    body{font-family:Inter,system-ui,Segoe UI,Roboto,Arial;}
+    /* overlay */
+    .fg-modal-overlay{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:12000}
+    /* card */
+    .fg-modal{width:760px;max-width:95%;background:linear-gradient(180deg,#0b0b0b,#0a0a0a);border-radius:12px;padding:18px;color:var(--white);box-shadow:0 10px 40px rgba(0,0,0,0.6);}
+    .fg-header{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+    .fg-close{width:36px;height:36px;border-radius:8px;background:transparent;border:none;color:var(--white);cursor:pointer;font-size:20px;display:flex;align-items:center;justify-content:center}
+    .fg-title{flex:1;text-align:center;font-weight:600;font-size:18px}
+    /* tabs */
+    .fg-tabs{display:flex;gap:8px;margin:10px 0 18px}
+    .fg-tab{padding:10px 14px;border-radius:10px;cursor:pointer;background:transparent;color:var(--muted);border:1px solid transparent}
+    .fg-tab.active{background:rgba(255,255,255,0.03);color:var(--white);border-color:rgba(255,255,255,0.04)}
+    /* campaign layout */
+    .campaign{display:flex;gap:20px;align-items:flex-start}
+    .campaign-left{flex:1}
+    .campaign-right{width:320px;background:rgba(255,255,255,0.02);padding:12px;border-radius:10px}
+    .earn-box{background:linear-gradient(90deg,#111 0%, #0f0f0f 100%);padding:18px;border-radius:10px;margin-bottom:12px}
+
+    .earn-amount{font-size:28px;font-weight:700;margin-top:6px}
+    .btn{display:inline-flex;align-items:center;gap:8px;padding:10px 12px;border-radius:10px;border:none;cursor:pointer}
+    .btn-primary{background:var(--accent);color:#000}
+    .btn-ghost{background:transparent;color:var(--white);border:1px solid rgba(255,255,255,0.06)}
+
+    .speaker-icon{width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#ffd166,#ff9f1c);display:flex;align-items:center;justify-content:center;color:#000;font-weight:700;margin-bottom:12px}
+    .muted{color:var(--muted);font-size:13px}
+
+    .refcode{display:flex;gap:8px;align-items:center;margin-top:8px}
+    .refcode .code{background:#0a0a0a;padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);font-weight:600}
+    .copy-box{display:flex;gap:8px;margin-top:10px}
+    .copy-input{flex:1;padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:transparent;color:var(--white)}
+
+    .share-row{display:flex;gap:8px;margin-top:10px}
+    .share-btn{flex:1}
+
+    /* referrals list */
+    .referrals-list{max-height:360px;overflow:auto;padding:6px 0;margin-top:6px}
+    .ref-item{display:flex;justify-content:space-between;align-items:center;padding:10px;border-radius:8px;margin-bottom:8px;background:rgba(255,255,255,0.02)}
+    .ref-left{display:flex;gap:12px;align-items:center}
+    .ref-avatar{width:40px;height:40px;border-radius:50%;background:#222;display:flex;align-items:center;justify-content:center;color:var(--muted);font-weight:700}
+    .ref-meta{line-height:1}
+    .ref-amount{font-weight:700}
+
+    /* small notes */
+    .small{font-size:12px;color:var(--muted);margin-top:8px}
+
+    @media (max-width:720px){.fg-modal{padding:14px}.campaign{flex-direction:column}.campaign-right{width:100%}}
+  </style>
 </head>
 <body>
-<h2>FlexGig — Biometric Debug Hex Login</h2>
-<div class="row">
-  <button id="checkBtn">Check Biometric Availability</button>
-  <button id="registerBtn">Register Biometric</button>
-  <button id="authBtn">Authenticate</button>
-  <button id="removeBtn">Clear Local Data</button>
+
+<!-- Modal (hidden by default in your app) -->
+<div class="fg-modal-overlay" id="referralModal" style="display:none;">
+  <div class="fg-modal" role="dialog" aria-modal="true" aria-labelledby="referralTitle">
+    <div class="fg-header">
+      <button class="fg-close" id="referralClose" aria-label="Close"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <div id="referralTitle" class="fg-title">Referral</div>
+      <div style="width:36px"></div>
+    </div>
+
+    <div class="fg-tabs" role="tablist">
+      <button class="fg-tab active" data-tab="campaign">Campaign</button>
+      <button class="fg-tab" data-tab="referrals">Referrals</button>
+    </div>
+
+    <div id="tabContent">
+      <!-- Campaign View -->
+      <div data-view="campaign">
+        <div class="campaign">
+          <div class="campaign-left">
+            <div class="earn-box">
+              <div class="muted">Referral Earnings</div>
+              <div class="earn-amount" id="refEarnings">₦0</div>
+              <div style="margin-top:10px">
+                <button class="btn btn-primary" id="moveToWallet">Move referral bonus to wallet</button>
+                <button class="btn btn-ghost" id="viewHistory" style="margin-left:8px">View history</button>
+              </div>
+            </div>
+
+            <div style="display:flex;gap:12px;align-items:flex-start">
+              <div class="speaker-icon">📣</div>
+              <div style="flex:1">
+                <div style="font-weight:700">Refer friends to Flexgig and earn 1% commissions on every purchase by them for life!</div>
+                <div class="small">Share your unique referral link and get paid every time someone you referred buys data. Commissions are added to your referral balance and can be moved to your wallet.</div>
+              </div>
+            </div>
+
+            <div class="small" style="margin-top:14px">Your referral code</div>
+            <div class="refcode">
+              <div class="code" id="refCode">--</div>
+              <div style="flex:1"></div>
+            </div>
+
+            <div class="copy-box">
+              <input type="text" readonly class="copy-input" id="refLinkInput" value="--">
+              <button class="btn btn-ghost" id="copyLinkBtn">Copy</button>
+            </div>
+
+            <div class="share-row">
+              <button class="btn btn-primary share-btn" id="shareWhatsApp">Share on WhatsApp</button>
+              <button class="btn btn-ghost share-btn" id="shareOther">More</button>
+            </div>
+
+          </div>
+
+          <div class="campaign-right">
+            <div style="font-size:14px;font-weight:600;margin-bottom:8px">How it works</div>
+            <div class="small">• You get ₦10 for every ₦1000 spent by people who sign up with your link (1%).</div>
+            <div class="small">• Commissions are credited instantly after a successful purchase.</div>
+            <div class="small">• Move earnings to your wallet when you are ready.</div>
+            <div style="margin-top:12px">
+              <div style="font-weight:600">Tips to share</div>
+              <div class="small">• Share on WhatsApp groups and status.</div>
+              <div class="small">• Personalize the message for better conversion.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Referrals View -->
+      <div data-view="referrals" style="display:none">
+        <div style="font-weight:600;margin-bottom:8px">Your referrals</div>
+        <div class="referrals-list" id="referralsList">
+          <!-- items injected here -->
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
-<div class="row"><strong>Status:</strong> <span id="status">idle</span></div>
-<div class="row"><strong>Output:</strong></div>
-<pre id="out">No credential yet.</pre>
 
 <script>
-const API_BASE = 'https://api.flexgig.com.ng';
-
-/* ---------- Helpers ---------- */
-function toBase64Url(buffer) {
-  const bytes = new Uint8Array(buffer);
-  let str = '';
-  for (let i = 0; i < bytes.length; i++) str += String.fromCharCode(bytes[i]);
-  return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
-function fromBase64Url(b64url) {
-  b64url = b64url.replace(/-/g, '+').replace(/_/g, '/');
-  while (b64url.length % 4) b64url += '=';
-  const str = atob(b64url);
-  const arr = new Uint8Array(str.length);
-  for (let i = 0; i < str.length; i++) arr[i] = str.charCodeAt(i);
-  return arr.buffer;
-}
-
-function bufferToHex(buffer) {
-  const bytes = new Uint8Array(buffer);
-  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join(' ');
-}
-
-function logStatus(msg, err=false) {
-  const s = document.getElementById('status');
-  s.textContent = msg;
-  s.className = err ? 'err' : 'ok';
-  console.log('[STATUS]', msg);
-}
-
-function showOutput(obj) {
-  document.getElementById('out').textContent = JSON.stringify(obj, null, 2);
-  console.log('[OUTPUT]', obj);
-}
-
-/* ---------- Check Biometric Availability ---------- */
-document.getElementById('checkBtn').addEventListener('click', async () => {
-  try {
-    const supported = !!window.PublicKeyCredential;
-    const available = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
-    logStatus(supported && available ? 'Biometric available ✅' : 'Not supported ❌');
-  } catch (e) {
-    logStatus('Error: ' + e.message, true);
-  }
-});
-
-/* ---------- Register ---------- */
-document.getElementById('registerBtn').addEventListener('click', async () => {
-  logStatus('Requesting registration options...');
-  try {
-    const userId = 'demo-user-' + Math.floor(Math.random() * 10000);
-
-    console.log('[DEBUG] Sending /register/options request with userId:', userId);
-    const optRes = await fetch(`${API_BASE}/webauthn/register/options`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId, username: 'demo@example.com', displayName: 'Demo User' })
-    });
-
-    const publicKey = await optRes.json();
-    console.log('[DEBUG] Received registration options:', publicKey);
-
-    publicKey.challenge = fromBase64Url(publicKey.challenge);
-    publicKey.user.id = fromBase64Url(publicKey.user.id);
-
-    const cred = await navigator.credentials.create({ publicKey });
-    if (!cred) throw new Error('No credential returned');
-    console.log('[DEBUG] Credential created:', cred);
-    console.log('[DEBUG] Credential rawId (hex):', bufferToHex(cred.rawId));
-    console.log('[DEBUG] AttestationObject (hex):', bufferToHex(cred.response.attestationObject));
-    console.log('[DEBUG] clientDataJSON (hex):', bufferToHex(cred.response.clientDataJSON));
-
-    const payload = {
-      id: toBase64Url(cred.rawId),
-      rawId: toBase64Url(cred.rawId),
-      type: cred.type,
-      response: {
-        attestationObject: toBase64Url(cred.response.attestationObject),
-        clientDataJSON: toBase64Url(cred.response.clientDataJSON),
-      },
-    };
-
-    console.log('[DEBUG] Sending /register/verify payload:', payload);
-    const verifyRes = await fetch(`${API_BASE}/webauthn/register/verify`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    const verifyData = await verifyRes.json();
-    console.log('[DEBUG] Verification response:', verifyData);
-
-    if (!verifyRes.ok) throw new Error(verifyData.error || 'Server verification failed');
-
-    localStorage.setItem('webauthn-cred-id', payload.rawId);
-    logStatus('Registration successful ✅');
-    showOutput(verifyData);
-
-  } catch (err) {
-    console.error('[ERROR] Registration failed:', err);
-    logStatus('Registration error: ' + err.message, true);
-  }
-});
-
-/* ---------- Authenticate ---------- */
-document.getElementById('authBtn').addEventListener('click', async () => {
-  logStatus('Authenticating...');
-  try {
-    const storedId = localStorage.getItem('webauthn-cred-id');
-    if (!storedId) throw new Error('No credential stored');
-
-    const optRes = await fetch(`${API_BASE}/webauthn/auth/options`, { method: 'POST' });
-    
-    const publicKey = await optRes.json();
-
-    // Convert challenge to ArrayBuffer
-    publicKey.challenge = fromBase64Url(publicKey.challenge);
-    publicKey.allowCredentials = [{
-      type: 'public-key',
-      id: fromBase64Url(storedId),
-      transports: ['internal'],
-    }];
-
-    console.log('--- PUBLICKEY OPTIONS SENT TO NAVIGATOR ---');
-    console.log(publicKey);
-
-    const assertion = await navigator.credentials.get({ publicKey });
-    if (!assertion) throw new Error('No assertion returned');
-
-    console.log('--- RAW ASSERTION RETURNED BY WINDOWS HELLO ---');
-    console.log(assertion);
-
-    // Convert ArrayBuffers to Base64URL safely
-    function bufferToBase64url(buf) {
-      return btoa(String.fromCharCode(...new Uint8Array(buf)))
-        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  // Simple demo data and helpers — integrate with your real backend
+  const Demo = {
+    getCurrentUser() {
+      return {
+        id: localStorage.getItem('userId') || 'u123',
+        username: localStorage.getItem('username') || 'you',
+        referralCode: localStorage.getItem('referralCode') || (localStorage.getItem('username') || 'you').toLowerCase() + '123'
+      };
+    },
+    async getReferralEarnings() {
+      // fetch from backend: /api/referrals/earnings
+      // return number in naira
+      return Number(localStorage.getItem('referralEarnings') || 0);
+    },
+    async getReferrals() {
+      // fetch list from backend: /api/referrals/list
+      // example items { username, amountEarned }
+      return JSON.parse(localStorage.getItem('referralsList') || '[]');
+    },
+    async moveToWallet() {
+      // POST to server to credit wallet; here we simulate
+      const amt = Number(localStorage.getItem('referralEarnings') || 0);
+      if (!amt) throw new Error('No earnings to move');
+      // demo: subtract and pretend move
+      localStorage.setItem('walletBalance', (Number(localStorage.getItem('walletBalance')||0) + amt).toString());
+      localStorage.setItem('referralEarnings', '0');
+      // also inform server in production
+      return amt;
     }
+  };
 
-    const payload = {
-      id: assertion.id,
-      rawId: bufferToBase64url(assertion.rawId),
-      type: assertion.type,
-      response: {
-        authenticatorData: bufferToBase64url(assertion.response.authenticatorData),
-        clientDataJSON: bufferToBase64url(assertion.response.clientDataJSON),
-        signature: bufferToBase64url(assertion.response.signature),
-        userHandle: assertion.response.userHandle
-          ? bufferToBase64url(assertion.response.userHandle)
-          : null,
-      },
-    };
+  // UI wiring
+  const modal = document.getElementById('referralModal');
+  const closeBtn = document.getElementById('referralClose');
+  const tabs = document.querySelectorAll('.fg-tab');
+  const views = document.querySelectorAll('[data-view]');
+  const refEarningsEl = document.getElementById('refEarnings');
+  const refCodeEl = document.getElementById('refCode');
+  const refLinkInput = document.getElementById('refLinkInput');
+  const copyLinkBtn = document.getElementById('copyLinkBtn');
+  const shareWhatsAppBtn = document.getElementById('shareWhatsApp');
+  const moveToWalletBtn = document.getElementById('moveToWallet');
+  const referralsListEl = document.getElementById('referralsList');
 
-    console.log('--- FINAL PAYLOAD SENT TO SERVER ---');
-    console.log(payload);
-
-    const verifyRes = await fetch(`${API_BASE}/webauthn/auth/verify`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    const verifyData = await verifyRes.json();
-    console.log('--- SERVER RESPONSE ---');
-    console.log(verifyData);
-
-    logStatus(verifyData.verified ? 'Authentication successful ✅' : 'Authentication failed ❌');
-    showOutput(verifyData);
-  } catch (err) {
-    console.error(err);
-    logStatus('Auth error: ' + err.message, true);
+  function openReferralModal() {
+    modal.style.display = 'flex';
+    loadCampaign();
   }
-});
+  function closeReferralModal() { modal.style.display = 'none'; }
 
+  closeBtn.addEventListener('click', closeReferralModal);
 
-/* ---------- Clear Local Data ---------- */
-document.getElementById('removeBtn').addEventListener('click', () => {
-  localStorage.removeItem('webauthn-cred-id');
-  logStatus('Cleared local data');
-  showOutput({ msg: 'Credential removed.' });
-});
+  tabs.forEach(t => t.addEventListener('click', (ev) => {
+    tabs.forEach(x=>x.classList.remove('active'));
+    t.classList.add('active');
+    const tab = t.dataset.tab;
+    views.forEach(v=>{ v.style.display = v.dataset.view === tab ? '' : 'none' });
+    if (tab === 'campaign') loadCampaign();
+    if (tab === 'referrals') loadReferrals();
+  }));
+
+  async function loadCampaign() {
+    const user = Demo.getCurrentUser();
+    const earnings = await Demo.getReferralEarnings();
+    refEarningsEl.textContent = `₦${earnings.toLocaleString()}`;
+    refCodeEl.textContent = user.referralCode;
+    const link = `${location.origin}/signup?ref=${encodeURIComponent(user.referralCode)}`;
+    refLinkInput.value = link;
+  }
+
+  copyLinkBtn.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(refLinkInput.value); copyLinkBtn.textContent = 'Copied'; setTimeout(()=>copyLinkBtn.textContent='Copy',1200);} catch(e){alert('Copy failed');}
+  });
+
+  shareWhatsAppBtn.addEventListener('click', ()=>{
+    const text = encodeURIComponent(`Join Flexgig and buy data at great rates. Use my code: ${refCodeEl.textContent} - ${refLinkInput.value}`);
+    const wa = `https://wa.me/?text=${text}`;
+    window.open(wa, '_blank');
+  });
+
+  moveToWalletBtn.addEventListener('click', async () => {
+    moveToWalletBtn.disabled = true;
+    try {
+      const amt = await Demo.moveToWallet();
+      refEarningsEl.textContent = `₦0`;
+      alert(`Moved ₦${amt} to wallet`);
+    } catch (e) { alert(e.message || 'Failed'); }
+    finally { moveToWalletBtn.disabled = false; }
+  });
+
+  async function loadReferrals(){
+    referralsListEl.innerHTML = '';
+    const list = await Demo.getReferrals();
+    // sort desc by amount
+    list.sort((a,b)=> (b.amountEarned||0) - (a.amountEarned||0));
+    if (!list.length) {
+      referralsListEl.innerHTML = '<div class="small">No referrals yet. Share your link to start earning.</div>';
+      return;
+    }
+    for (const r of list) {
+      const it = document.createElement('div'); it.className='ref-item';
+      it.innerHTML = `<div class='ref-left'><div class='ref-avatar'>${(r.username||'U').charAt(0).toUpperCase()}</div><div class='ref-meta'><div style="font-weight:600">${r.username||'Unknown'}</div><div class='muted'>Joined: ${r.joined||'—'}</div></div></div><div class='ref-amount'>₦${(r.amountEarned||0).toLocaleString()}</div>`;
+      referralsListEl.appendChild(it);
+    }
+  }
+
+  // Expose open function globally for your app
+  window.openReferralModal = openReferralModal;
+
+  // demo: open automatically for testing
+  openReferralModal();
 </script>
 </body>
 </html>

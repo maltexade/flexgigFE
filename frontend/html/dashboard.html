@@ -728,6 +728,92 @@
         </div>
       </button>
 
+ <!-- ===== Full-Screen Referral Modal (Split: Campaign & Referrals) ===== -->
+<div class="referral-modal" id="referralModal">
+  <div class="referral-modal-card">
+
+    <!-- Header -->
+    <div class="referral-modal-header">
+      <button class="referral-modal-close" data-close aria-label="Close">&lt;</button>
+      <div class="referral-modal-title">Referral</div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="referral-modal-tabs">
+      <button class="referral-modal-tab active" data-tab="campaign">Campaign</button>
+      <button class="referral-modal-tab" data-tab="referrals">Referrals</button>
+    </div>
+
+    <!-- Scrollable Content -->
+    <div class="referral-modal-body">
+
+      <!-- Campaign View -->
+      <div data-view="campaign">
+        <div class="referral-modal-campaign">
+          <div class="referral-modal-campaign-left">
+            <div class="referral-modal-earn-box">
+              <div class="referral-modal-muted">Referral Earnings</div>
+              <div class="referral-modal-earn-amount" id="referral-modal-refEarnings">₦0</div>
+              <div style="margin-top:10px">
+                <button class="referral-modal-btn referral-modal-btn-primary" id="referral-modal-moveToWallet">Move referral bonus to wallet</button>
+                <button class="referral-modal-btn referral-modal-btn-ghost" id="referral-modal-viewHistory" style="margin-left:8px">View history</button>
+              </div>
+            </div>
+
+            <div class="referral-modal-info">
+              <div class="referral-modal-speaker-icon">📣</div>
+              <div style="flex:1">
+                <div class="referral-modal-info-text">Refer friends to Flexgig and earn 1% commissions on every purchase by them for life!</div>
+                <div class="referral-modal-small">Share your unique referral link and get paid every time someone you referred buys data. Commissions are added to your referral balance and can be moved to your wallet.</div>
+              </div>
+            </div>
+
+            <div class="referral-modal-small" style="margin-top:14px">Your referral code</div>
+            <div class="referral-modal-refcode">
+              <div class="referral-modal-code" id="referral-modal-refCode">--</div>
+              <div style="flex:1"></div>
+            </div>
+
+            <div class="referral-modal-copy-box">
+              <input type="text" readonly class="referral-modal-copy-input" id="referral-modal-refLinkInput" value="--">
+              <button class="referral-modal-btn referral-modal-btn-ghost" id="referral-modal-copyLinkBtn">Copy</button>
+            </div>
+
+            <div class="referral-modal-share-row">
+              <button class="referral-modal-btn referral-modal-btn-primary referral-modal-share-btn" id="referral-modal-shareWhatsApp">Share on WhatsApp</button>
+              <button class="referral-modal-btn referral-modal-btn-ghost referral-modal-share-btn" id="referral-modal-shareOther">More</button>
+            </div>
+          </div>
+
+          <div class="referral-modal-campaign-right">
+            <div class="referral-modal-small-title">How it works</div>
+            <div class="referral-modal-small">• You get ₦10 for every ₦1000 spent by people who sign up with your link (1%).</div>
+            <div class="referral-modal-small">• Commissions are credited instantly after a successful purchase.</div>
+            <div class="referral-modal-small">• Move earnings to your wallet when you are ready.</div>
+            <div style="margin-top:12px">
+              <div class="referral-modal-small-title">Tips to share</div>
+              <div class="referral-modal-small">• Share on WhatsApp groups and status.</div>
+              <div class="referral-modal-small">• Personalize the message for better conversion.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Referrals View -->
+      <div data-view="referrals" style="display:none;">
+        <div class="referral-modal-referrals-header">Your Referrals</div>
+        <div class="referral-modal-referrals-list" id="referral-modal-referralsList">
+          <!-- Referred users injected here -->
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+
+
+
       <!-- Dark theme toggle -->
       <div class="settings-item toggle-item" id="themeToggleRow" role="group" aria-label="Theme toggle">
         <div class="left">
@@ -1411,5 +1497,6 @@
   <script src="/frontend/js/main.js"></script>
   <script src="/frontend/js/modalManager.js" defer></script>
   <script src="/frontend/js/resetPin.js" defer></script>
+  <script src="/frontend/js/referral.js" defer></script>
 </body>
 </html>

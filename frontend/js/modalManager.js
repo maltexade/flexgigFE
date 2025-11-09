@@ -105,6 +105,7 @@ function hideBackdrop(modal) {
     contactModal: { id: 'contactModal', element: null, hasPullHandle: false },
     changePwdModal: { id: 'changePwdModal', element: null, hasPullHandle: false },
     rpResetModal: { id: 'rpResetModal', element: null, hasPullHandle: false },
+    referralModal: { id: 'referralModal', element: null, hasPullHandle: false },
   };
 
 
@@ -553,6 +554,7 @@ function hideBackdrop(modal) {
       helpSupportBtn: 'helpSupportModal',
       'see-all-plans': 'allPlansModal',
       changePWD: 'changePwdModal',
+      referralsBtn: 'referralModal',
       // resetPwdBtn: 'rpResetModal',
       // forgetPinLinkPin : 'resetPinModal',
     };
