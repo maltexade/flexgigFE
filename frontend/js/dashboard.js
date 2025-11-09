@@ -7843,9 +7843,6 @@ if (logoutBtnModal) {
     // Hide modal if function exists
     try { hideModal(); } catch (_) {}
     hideLoader();
-
-    // Redirect to login
-    window.location.href = '/';
   });
 }
 
@@ -11983,7 +11980,6 @@ async function bioVerifyAndFinalize(assertion) {
             });
           } catch (err) { console.error('logout cleanup failed', err); }
           hideLoader();
-          window.location.href = '/';
         });
         link.__bound = true;
       }

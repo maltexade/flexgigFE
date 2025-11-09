@@ -204,6 +204,36 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
   // Actions
   // -----------------------------
   function goToGoogleAuth() { location.href = `${BACKEND_URL}/auth/google`; }
+  async function fullClientLogout() {
+  try {
+    // Tell backend to logout
+    await fetch('/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
+
+    // Clear all frontend state
+    localStorage.clear();
+    sessionStorage.clear();
+    window.currentUser = null;
+    window.currentEmail = null;
+    window.__rp_reset_token = null;
+
+    // Clear IndexedDB
+    if (window.indexedDB && indexedDB.databases) {
+      const dbs = await indexedDB.databases();
+      dbs.forEach(db => { if (db.name) indexedDB.deleteDatabase(db.name); });
+    }
+
+    // Clear non-HttpOnly cookies
+    document.cookie.split(';').forEach(c => {
+      document.cookie = c.replace(/^ +/, '').replace(/=.*/, `=;expires=${new Date(0).toUTCString()};path=/`);
+    });
+
+    // Reload / redirect to login
+    window.location.href = '/';
+  } catch (err) {
+    console.error('Logout failed', err);
+    window.location.href = '/';
+  }
+}
 
   async function logoutFlow() {
     setLoading(true, 'Signing out...');
@@ -212,9 +242,7 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
     } catch (e) {
       console.warn('[main.js] logout error:', e);
     } finally {
-      setLoading(false);
-      localStorage.clear();
-      location.href = '/';
+      fullClientLogout()
     }
   }
 
