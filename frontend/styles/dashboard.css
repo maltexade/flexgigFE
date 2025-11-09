@@ -1583,7 +1583,7 @@ body:has(.pin-modal:not(.hidden)) {
   background: #000;               /* black background overlay */
   justify-content: center;
   align-items: center;
-  z-index: 12003 !important;
+  z-index: 15000 !important;
   padding: 0;
   overflow: hidden;
 }

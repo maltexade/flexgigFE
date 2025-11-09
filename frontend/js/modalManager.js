@@ -554,6 +554,7 @@ function hideBackdrop(modal) {
       'see-all-plans': 'allPlansModal',
       changePWD: 'changePwdModal',
       // resetPwdBtn: 'rpResetModal',
+      forgetPinLinkPin : 'resetPinModal',
     };
 
     // Bind triggers to open modals (retained Smart Button skip for securityPinRow)

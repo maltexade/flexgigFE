@@ -800,6 +800,56 @@ const { status, body } = await withLoader(async () => {
 
   log('resetPin module v7 loaded – PIN reset flow ready');
 
+  // --- Expose a safe opener for other modules (dashboard.js will call this) ---
+(function exposeResetModalOpener(){
+  try {
+    if (typeof window.__rp_openResetModal === 'function') return;
+
+    window.__rp_openResetModal = function() {
+      // Try ModalManager first
+      try {
+        if (window.ModalManager && typeof window.ModalManager.openModal === 'function') {
+          window.ModalManager.openModal(RESET_MODAL_ID);
+          return true;
+        }
+      } catch (e) {
+        console.debug('[__rp_openResetModal] ModalManager.openModal failed', e);
+      }
+
+      // Try clicking the internal trigger button (resetPinBtn)
+      try {
+        const trigger = document.getElementById(TRIGGER_ID);
+        if (trigger) { trigger.click(); return true; }
+      } catch (e) {
+        console.debug('[__rp_openResetModal] trigger.click failed', e);
+      }
+
+      // DOM fallback: show modal element directly
+      try {
+        const m = document.getElementById(RESET_MODAL_ID);
+        if (m) {
+          m.classList.remove('hidden');
+          m.style.display = 'flex';
+          m.setAttribute('aria-hidden', 'false');
+          // focus first input if present
+          setTimeout(()=> {
+            const first = m.querySelector('input, button, [autofocus]');
+            if (first && typeof first.focus === 'function') try { first.focus(); } catch(e){}
+          }, 40);
+          return true;
+        }
+      } catch (e) {
+        console.warn('[__rp_openResetModal] DOM fallback failed', e);
+      }
+
+      return false;
+    };
+  } catch (e) {
+    console.warn('Failed to install __rp_openResetModal', e);
+  }
+})();
+
+
 })();
 
 /* change-password.js
