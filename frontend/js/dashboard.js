@@ -6232,6 +6232,7 @@ fetch('https://api.flexgig.com.ng/api/profile/update', {
       });
 
       // Parse response safely
+            // Parse response safely
       let rawText = '';
       let parsedData = null;
       try {
@@ -6241,12 +6242,39 @@ fetch('https://api.flexgig.com.ng/api/profile/update', {
         console.warn('[WARN] updateProfileForm: Response is not valid JSON');
       }
 
+      // Normalize server error/message into a readable string
+      function extractServerMessage(obj, fallback) {
+        if (!obj) return fallback || '';
+        // if it's a string already
+        if (typeof obj === 'string') return obj;
+        // common shapes: { error: 'msg' } or { message: 'msg' } or { error: { message: 'msg' } }
+        if (typeof obj.error === 'string') return obj.error;
+        if (typeof obj.message === 'string') return obj.message;
+        if (obj.error && typeof obj.error.message === 'string') return obj.error.message;
+        if (obj.message && typeof obj.message === 'object' && typeof obj.message.message === 'string') return obj.message.message;
+        // last resort: try to find a nested message field
+        for (const k of ['error', 'errors', 'message', 'detail']) {
+          const v = obj[k];
+          if (typeof v === 'string') return v;
+          if (v && typeof v.message === 'string') return v.message;
+        }
+        // nothing obvious — stringify safely (limit length)
+        try {
+          const s = JSON.stringify(obj);
+          return s.length > 300 ? s.slice(0, 300) + '…' : s;
+        } catch (e) {
+          return fallback || String(obj);
+        }
+      }
+
       if (!response.ok) {
         console.error('[ERROR] updateProfileForm: Failed response', response.status, parsedData || rawText);
-        const serverMsg = (parsedData && (parsedData.error || 
-parsedData.message)) || rawText || `HTTP ${response.status}`;
-        throw new Error(serverMsg);
+        const serverMsg = extractServerMessage(parsedData, rawText || `HTTP ${response.status}`);
+        // throw a real Error with a normalized string message
+        throw new Error(serverMsg || `HTTP ${response.status}`);
       }
+
+
 
       // Immediate localStorage and DOM update with submitted values for quick feedback
       localStorage.setItem('fullName', fullNameVal);
@@ -6297,9 +6325,11 @@ loadProfileToSettings(true);          // force fresh fetch & UI update
       // Fetch fresh server data and apply (will overwrite temp values if needed)
       await loadUserProfile(true);
 
-    } catch (err) {
+        } catch (err) {
       console.error('[ERROR] updateProfileForm:', err);
-      if (err.message && err.message.toLowerCase().includes('username')) {
+      // ensure we have a readable message
+      const readable = (err && (err.message || err.toString())) || String(err);
+      if (readable.toLowerCase().includes('username')) {
         if (usernameError) {
           usernameError.textContent = 'Username is already taken';
           usernameError.classList.add('active');
@@ -6308,11 +6338,11 @@ loadProfileToSettings(true);          // force fresh fetch & UI update
       } else {
         const generalError = document.createElement('div');
         generalError.className = 'error-message active';
-        generalError.textContent = `Failed to update profile: ${err.message || err}`;
+        generalError.textContent = `Failed to update profile: ${readable}`;
         updateProfileForm.prepend(generalError);
         setTimeout(() => generalError.remove(), 4000);
       }
-    } finally {
+  } finally {
       // Always reset button after operation
       saveProfileBtn.disabled = false;
       saveProfileBtn.innerHTML = originalBtnContent; // Restore original content
