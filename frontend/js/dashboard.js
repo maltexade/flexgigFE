@@ -7671,7 +7671,9 @@ function updateAvatar(el, newUrl, fallbackLetter) {
   };
 }
 
-// populate user info
+// In-memory cache for profile to avoid multiple server calls
+let _cachedProfilePromise = null;
+
 async function loadProfileToSettings() {
   const settingsAvatar = document.getElementById('settingsAvatar');
   const settingsUsername = document.getElementById('settingsUsername');
@@ -7682,7 +7684,7 @@ async function loadProfileToSettings() {
     return;
   }
 
-  // Load from localStorage first (instant display)
+  // Instant display from localStorage
   const localProfile = {
     profilePicture: localStorage.getItem('profilePicture') || '',
     username: localStorage.getItem('username') || '',
@@ -7691,194 +7693,104 @@ async function loadProfileToSettings() {
     email: localStorage.getItem('userEmail') || '',
   };
 
-  const hasLocalData =
-    localProfile.username || localProfile.firstName || localProfile.email;
+  const displayName =
+    localProfile.username ||
+    localProfile.firstName ||
+    (localProfile.email ? localProfile.email.split('@')[0] : 'User');
 
-  if (hasLocalData) {
-    // Instant display from local
-    const avatarUrl =
-      localProfile.profilePicture || '/frontend/img/avatar-placeholder.png';
-    const fallbackLetter = (
-      localProfile.username?.charAt(0) ||
-      localProfile.firstName?.charAt(0) ||
-      'U'
-    ).toUpperCase();
+  const avatarUrl =
+    localProfile.profilePicture || '/frontend/img/avatar-placeholder.png';
+  const fallbackLetter = (displayName.charAt(0) || 'U').toUpperCase();
 
-    updateAvatar(settingsAvatar, avatarUrl, fallbackLetter);
+  updateAvatar(settingsAvatar, avatarUrl, fallbackLetter);
+  settingsUsername.textContent = displayName;
+  settingsUsername.classList.add('fade-in');
+  settingsEmail.textContent = localProfile.email || 'Not set';
+  settingsEmail.classList.add('fade-in');
 
-    const displayName =
-      localProfile.username ||
-      localProfile.firstName ||
-      (localProfile.email ? localProfile.email.split('@')[0] : 'User');
+  // Only fetch from server **once per session** (cache promise)
+  if (!_cachedProfilePromise) {
+    _cachedProfilePromise = (async () => {
+      try {
+        const resp = await fetch(
+          `https://api.flexgig.com.ng/api/profile?_${Date.now()}`,
+          {
+            credentials: 'include',
+            headers: {
+              Authorization: `Bearer ${localStorage.getItem('authToken') || ''}`,
+            },
+          }
+        );
 
-    settingsUsername.textContent = displayName;
-    settingsUsername.classList.add('fade-in');
+        const serverProfile = resp.ok
+          ? await resp.json().catch(() => ({}))
+          : {};
 
-    settingsEmail.textContent = localProfile.email || 'Not set';
-    settingsEmail.classList.add('fade-in');
-
-    console.log('[DEBUG] loadProfileToSettings: Loaded from local instantly', {
-      avatarUrl,
-      displayName,
-      email: localProfile.email,
-    });
-  } else {
-    // No local data → shimmer blur
-    settingsUsername.innerHTML = '<div class="loading-blur"></div>';
-    settingsEmail.innerHTML = '<div class="loading-blur"></div>';
-    settingsAvatar.innerHTML =
-      '<div class="loading-blur settings-avatar"></div>';
-  }
-
-  try {
-    // Fetch fresh data
-    const resp = await fetch(
-      `https://api.flexgig.com.ng/api/profile?_${Date.now()}`,
-      {
-        credentials: 'include',
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('authToken') || ''}`,
-        },
-      }
-    );
-
-    let rawText = await resp.text();
-    let serverProfile = {};
-
-    try {
-      serverProfile = rawText ? JSON.parse(rawText) : {};
-    } catch (e) {
-      console.warn(
-        '[WARN] loadProfileToSettings: Response is not valid JSON',
-        rawText
-      );
-      serverProfile = {};
-    }
-
-    // --- HERE: sync hasPin from server if present ---
-    // Server might use hasPin, has_pin, or similar. Check common variants.
-    try {
-      let serverHasPin = null;
-      if (typeof serverProfile.hasPin !== 'undefined') serverHasPin = serverProfile.hasPin;
-      else if (typeof serverProfile.has_pin !== 'undefined') serverHasPin = serverProfile.has_pin;
-      else if (typeof serverProfile.hasPIN !== 'undefined') serverHasPin = serverProfile.hasPIN;
-
-      if (serverHasPin !== null) {
-        localStorage.setItem('hasPin', serverHasPin ? 'true' : 'false');
-        // If PIN is now set, ensure inactivity/reauth is active (no reload required)
-        if (serverHasPin && typeof setupInactivity === 'function') {
-          try { setupInactivity(); } catch (e) { console.warn('setupInactivity failed', e); }
+        // Sync hasPin
+        const serverHasPin =
+          serverProfile.hasPin ??
+          serverProfile.has_pin ??
+          serverProfile.hasPIN ??
+          null;
+        if (serverHasPin !== null) {
+          localStorage.setItem('hasPin', serverHasPin ? 'true' : 'false');
+          if (serverHasPin && typeof setupInactivity === 'function') {
+            try { setupInactivity(); } catch(e){ console.warn('setupInactivity failed', e); }
+          }
         }
+
+        // Merge with local fallback
+        const mergedProfile = {
+          profilePicture:
+            serverProfile.profilePicture ||
+            serverProfile.profile_picture ||
+            serverProfile.avatar_url ||
+            localProfile.profilePicture ||
+            '',
+          username: serverProfile.username || localProfile.username || '',
+          fullName:
+            serverProfile.fullName ||
+            serverProfile.full_name ||
+            localProfile.fullName ||
+            '',
+          firstName:
+            (serverProfile.fullName && serverProfile.fullName.split(' ')[0]) ||
+            (serverProfile.full_name && serverProfile.full_name.split(' ')[0]) ||
+            localProfile.firstName ||
+            '',
+          email: serverProfile.email || localProfile.email || '',
+        };
+
+        // Save to localStorage
+        if (mergedProfile.profilePicture) localStorage.setItem('profilePicture', mergedProfile.profilePicture);
+        if (mergedProfile.username) localStorage.setItem('username', mergedProfile.username);
+        if (mergedProfile.fullName) {
+          localStorage.setItem('fullName', mergedProfile.fullName);
+          localStorage.setItem('firstName', mergedProfile.fullName.split(' ')[0] || '');
+        }
+        if (mergedProfile.email) localStorage.setItem('userEmail', mergedProfile.email);
+
+        return mergedProfile;
+      } catch (err) {
+        console.error('[ERROR] loadProfileToSettings server fetch failed', err);
+        return localProfile; // fallback
       }
-    } catch (e) {
-      console.warn('Error syncing hasPin from server profile', e);
-    }
-
-    // Merge with local fallback
-    const mergedProfile = {
-      profilePicture:
-        serverProfile.profilePicture ||
-        serverProfile.profile_picture ||
-        serverProfile.avatar_url ||
-        localProfile.profilePicture ||
-        '',
-      username: serverProfile.username || localProfile.username || '',
-      fullName: serverProfile.fullName || serverProfile.full_name || localProfile.fullName || '',
-      firstName:
-        (serverProfile.fullName && serverProfile.fullName.split(' ')[0]) ||
-        (serverProfile.full_name && serverProfile.full_name.split(' ')[0]) ||
-        localProfile.firstName ||
-        '',
-      email: serverProfile.email || localProfile.email || '',
-    };
-
-    // Save back to localStorage
-    if (
-      mergedProfile.profilePicture &&
-      mergedProfile.profilePicture !== localProfile.profilePicture
-    ) {
-      localStorage.setItem('profilePicture', mergedProfile.profilePicture);
-    }
-    if (
-      mergedProfile.username &&
-      mergedProfile.username !== localProfile.username
-    ) {
-      localStorage.setItem('username', mergedProfile.username);
-    }
-    if (
-      mergedProfile.fullName &&
-      mergedProfile.fullName !== localProfile.fullName
-    ) {
-      localStorage.setItem('fullName', mergedProfile.fullName);
-      localStorage.setItem(
-        'firstName',
-        (mergedProfile.fullName.split && mergedProfile.fullName.split(' ')[0]) || ''
-      );
-    }
-    if (mergedProfile.email && mergedProfile.email !== localProfile.email) {
-      localStorage.setItem('userEmail', mergedProfile.email);
-    }
-
-    // Clear shimmer
-    settingsUsername.innerHTML = '';
-    settingsEmail.innerHTML = '';
-    settingsAvatar.innerHTML = '';
-
-    // Avatar update (stable + fade-in)
-    const newAvatarUrl =
-      mergedProfile.profilePicture || '/frontend/img/avatar-placeholder.png';
-    const fallbackLetter = (
-      mergedProfile.username?.charAt(0) ||
-      mergedProfile.firstName?.charAt(0) ||
-      'U'
-    ).toUpperCase();
-
-    updateAvatar(settingsAvatar, newAvatarUrl, fallbackLetter);
-
-    // Username + email
-    const newDisplayName =
-      mergedProfile.username ||
-      mergedProfile.firstName ||
-      (mergedProfile.email ? mergedProfile.email.split('@')[0] : 'User');
-
-    settingsUsername.textContent = newDisplayName;
-    settingsUsername.classList.add('fade-in');
-
-    const newEmail = mergedProfile.email || 'Not set';
-    settingsEmail.textContent = newEmail;
-    settingsEmail.classList.add('fade-in');
-
-    console.log('[DEBUG] loadProfileToSettings: Updated from server', {
-      avatarUrl: newAvatarUrl,
-      displayName: newDisplayName,
-      email: newEmail,
-    });
-  } catch (err) {
-    console.error('[ERROR] Failed to load profile to settings', err);
-
-    // Fallback: clear shimmer, show local/fallback
-    settingsUsername.innerHTML = '';
-    settingsEmail.innerHTML = '';
-    settingsAvatar.innerHTML = '';
-
-    settingsUsername.textContent =
-      localProfile.username || localProfile.firstName || 'User';
-    settingsUsername.classList.add('fade-in');
-
-    settingsEmail.textContent = localProfile.email || 'Not set';
-    settingsEmail.classList.add('fade-in');
-
-    settingsAvatar.textContent = (
-      localProfile.username?.charAt(0) ||
-      localProfile.firstName?.charAt(0) ||
-      'U'
-    ).toUpperCase();
-    settingsAvatar.classList.add('fade-in');
+    })();
   }
+
+  // Wait for cached fetch to resolve
+  const finalProfile = await _cachedProfilePromise;
+
+  // Update UI with server data if different
+  const finalAvatarUrl = finalProfile.profilePicture || '/frontend/img/avatar-placeholder.png';
+  const finalFallbackLetter = (finalProfile.username?.charAt(0) || finalProfile.firstName?.charAt(0) || 'U').toUpperCase();
+  updateAvatar(settingsAvatar, finalAvatarUrl, finalFallbackLetter);
+
+  const finalDisplayName = finalProfile.username || finalProfile.firstName || (finalProfile.email ? finalProfile.email.split('@')[0] : 'User');
+  settingsUsername.textContent = finalDisplayName;
+  settingsEmail.textContent = finalProfile.email || 'Not set';
 }
-
-loadProfileToSettings();
-
+loadProfileToSettings(); // initial load
 
 
   // Edit profile action
