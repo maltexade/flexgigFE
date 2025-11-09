@@ -204,53 +204,177 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
   // Actions
   // -----------------------------
   function goToGoogleAuth() { location.href = `${BACKEND_URL}/auth/google`; }
-  async function fullClientLogout() {
+// ✅ IMPROVED: Complete client-side logout with better error handling
+async function fullClientLogout() {
   try {
-    // 1️⃣ Call backend to fully logout
-    const res = await fetch(`${BACKEND_URL}/auth/logout`, { 
-      method: 'POST', 
-      credentials: 'include' 
-    });
+    console.log('[fullClientLogout] Starting complete logout process...');
 
-    if (!res.ok) {
-      console.warn('[fullClientLogout] Server logout failed, proceeding with client cleanup anyway');
+    // 1️⃣ Call backend to fully logout
+    try {
+      const res = await fetch(`${BACKEND_URL}/auth/logout`, { 
+        method: 'POST', 
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!res.ok) {
+        console.warn('[fullClientLogout] Server logout failed, proceeding with client cleanup anyway');
+      } else {
+        const data = await res.json();
+        console.log('[fullClientLogout] Server logout response:', data);
+      }
+    } catch (fetchErr) {
+      console.error('[fullClientLogout] Server logout request failed:', fetchErr);
+      // Continue with client-side cleanup regardless
     }
 
     // 2️⃣ Clear all frontend state
-    localStorage.clear();
-    sessionStorage.clear();
-    window.currentUser = null;
-    window.currentEmail = null;
-    window.__rp_reset_token = null;
-
-    // 3️⃣ Clear IndexedDB
-    if (window.indexedDB && indexedDB.databases) {
-      const dbs = await indexedDB.databases();
-      for (const db of dbs) {
-        if (db.name) indexedDB.deleteDatabase(db.name);
-      }
+    try {
+      localStorage.clear();
+      sessionStorage.clear();
+      
+      // Clear global variables
+      window.currentUser = null;
+      window.currentEmail = null;
+      window.__rp_reset_token = null;
+      window.__SERVER_USER_DATA__ = null; // Clear server-embedded data
+      
+      console.log('[fullClientLogout] Cleared storage and global state');
+    } catch (storageErr) {
+      console.error('[fullClientLogout] Storage clearing failed:', storageErr);
     }
 
-    // 4️⃣ Clear non-HttpOnly cookies
-    document.cookie.split(';').forEach(c => {
-      document.cookie = c.replace(/^ +/, '').replace(/=.*/, `=;expires=${new Date(0).toUTCString()};path=/`);
-    });
+    // 3️⃣ Clear IndexedDB
+    try {
+      if (window.indexedDB) {
+        if (indexedDB.databases) {
+          const dbs = await indexedDB.databases();
+          for (const db of dbs) {
+            if (db.name) {
+              indexedDB.deleteDatabase(db.name);
+              console.log('[fullClientLogout] Deleted IndexedDB:', db.name);
+            }
+          }
+        } else {
+          // Fallback for browsers that don't support indexedDB.databases()
+          // Clear known database names if you have any
+          const knownDBs = ['flexgig-db', 'webauthn-credentials']; // Add your DB names
+          for (const dbName of knownDBs) {
+            indexedDB.deleteDatabase(dbName);
+          }
+        }
+      }
+    } catch (idbErr) {
+      console.error('[fullClientLogout] IndexedDB clearing failed:', idbErr);
+    }
 
-    // 5️⃣ Redirect to login
-    window.location.href = '/';
+    // 4️⃣ Clear client-accessible cookies (non-HttpOnly)
+    try {
+      const cookies = document.cookie.split(';');
+      for (let cookie of cookies) {
+        const eqPos = cookie.indexOf('=');
+        const name = eqPos > -1 ? cookie.substring(0, eqPos).trim() : cookie.trim();
+        
+        // Clear cookie for all possible paths and domains
+        const domains = [
+          window.location.hostname,
+          '.flexgig.com.ng',
+          'flexgig.com.ng',
+          '.localhost',
+          'localhost'
+        ];
+        
+        const paths = ['/', '/dashboard', '/api', '/auth'];
+        
+        for (const domain of domains) {
+          for (const path of paths) {
+            document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=${path};domain=${domain}`;
+            document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=${path}`;
+          }
+        }
+      }
+      console.log('[fullClientLogout] Cleared client-accessible cookies');
+    } catch (cookieErr) {
+      console.error('[fullClientLogout] Cookie clearing failed:', cookieErr);
+    }
+
+    // 5️⃣ Clear Service Workers cache (if you have any)
+    try {
+      if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        for (const registration of registrations) {
+          await registration.unregister();
+          console.log('[fullClientLogout] Unregistered service worker');
+        }
+      }
+
+      if ('caches' in window) {
+        const cacheNames = await caches.keys();
+        await Promise.all(cacheNames.map(name => caches.delete(name)));
+        console.log('[fullClientLogout] Cleared cache storage');
+      }
+    } catch (swErr) {
+      console.error('[fullClientLogout] Service worker/cache clearing failed:', swErr);
+    }
+
+    // 6️⃣ Clear WebAuthn credentials from memory (if stored)
+    try {
+      if (window.webauthnCredentials) {
+        window.webauthnCredentials = null;
+      }
+      console.log('[fullClientLogout] Cleared WebAuthn memory state');
+    } catch (webauthnErr) {
+      console.error('[fullClientLogout] WebAuthn clearing failed:', webauthnErr);
+    }
+
+    console.log('[fullClientLogout] Logout complete, redirecting to login...');
+
+    // 7️⃣ Redirect to login (use replace to prevent back button issues)
+    window.location.replace('/');
+
   } catch (err) {
-    console.error('[fullClientLogout] Error during logout:', err);
-    window.location.href = '/';
+    console.error('[fullClientLogout] Critical error during logout:', err);
+    // Force redirect even if everything fails
+    window.location.replace('/');
   }
 }
 
+// ✅ IMPROVED: Robust logout flow with retry and fallback
 async function logoutFlow() {
+  const maxRetries = 2;
+  let attempt = 0;
+
   setLoading(true, 'Signing out...');
-  try {
-    await fullClientLogout(); // Wait for full cleanup
-  } catch (e) {
-    console.warn('[logoutFlow] Error:', e);
-    await fullClientLogout(); // Try again if failed
+
+  while (attempt < maxRetries) {
+    try {
+      console.log(`[logoutFlow] Attempt ${attempt + 1}/${maxRetries}`);
+      
+      await fullClientLogout(); // Wait for full cleanup
+      
+      // If we reach here, logout succeeded
+      console.log('[logoutFlow] Logout successful');
+      return;
+      
+    } catch (e) {
+      attempt++;
+      console.error(`[logoutFlow] Attempt ${attempt} failed:`, e);
+      
+      if (attempt >= maxRetries) {
+        console.error('[logoutFlow] All retry attempts exhausted');
+        // Force redirect as last resort
+        try {
+          setLoading(false);
+        } catch (_) {}
+        window.location.replace('/');
+        return;
+      }
+      
+      // Wait briefly before retry
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
   }
 }
 
