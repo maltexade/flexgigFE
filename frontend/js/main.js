@@ -206,45 +206,56 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
   function goToGoogleAuth() { location.href = `${BACKEND_URL}/auth/google`; }
   async function fullClientLogout() {
   try {
-    // Tell backend to logout
-    await fetch('/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
+    // 1️⃣ Call backend to fully logout
+    const res = await fetch(`${BACKEND_URL}/auth/logout`, { 
+      method: 'POST', 
+      credentials: 'include' 
+    });
 
-    // Clear all frontend state
+    if (!res.ok) {
+      console.warn('[fullClientLogout] Server logout failed, proceeding with client cleanup anyway');
+    }
+
+    // 2️⃣ Clear all frontend state
     localStorage.clear();
     sessionStorage.clear();
     window.currentUser = null;
     window.currentEmail = null;
     window.__rp_reset_token = null;
 
-    // Clear IndexedDB
+    // 3️⃣ Clear IndexedDB
     if (window.indexedDB && indexedDB.databases) {
       const dbs = await indexedDB.databases();
-      dbs.forEach(db => { if (db.name) indexedDB.deleteDatabase(db.name); });
+      for (const db of dbs) {
+        if (db.name) indexedDB.deleteDatabase(db.name);
+      }
     }
 
-    // Clear non-HttpOnly cookies
+    // 4️⃣ Clear non-HttpOnly cookies
     document.cookie.split(';').forEach(c => {
       document.cookie = c.replace(/^ +/, '').replace(/=.*/, `=;expires=${new Date(0).toUTCString()};path=/`);
     });
 
-    // Reload / redirect to login
+    // 5️⃣ Redirect to login
     window.location.href = '/';
   } catch (err) {
-    console.error('Logout failed', err);
+    console.error('[fullClientLogout] Error during logout:', err);
     window.location.href = '/';
   }
 }
 
-  async function logoutFlow() {
-    setLoading(true, 'Signing out...');
-    try {
-      await fetch(`${BACKEND_URL}/auth/logout`, { method: 'POST', credentials: 'include' });
-    } catch (e) {
-      console.warn('[main.js] logout error:', e);
-    } finally {
-      fullClientLogout()
-    }
+async function logoutFlow() {
+  setLoading(true, 'Signing out...');
+  try {
+    await fullClientLogout(); // Wait for full cleanup
+  } catch (e) {
+    console.warn('[logoutFlow] Error:', e);
+    await fullClientLogout(); // Try again if failed
   }
+}
+
+
+
 
   function bindEvents() {
     if (UI.loginBtn) UI.loginBtn.addEventListener('click', e => { e.preventDefault(); goToGoogleAuth(); });

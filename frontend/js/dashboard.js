@@ -73,35 +73,43 @@ async function guardedHideReauthModal() {
 
 async function fullClientLogout() {
   try {
-    // Tell backend to logout
-    await fetch('/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
+    // 1️⃣ Call backend to fully logout
+    const res = await fetch(`${BACKEND_URL}/auth/logout`, { 
+      method: 'POST', 
+      credentials: 'include' 
+    });
 
-    // Clear all frontend state
+    if (!res.ok) {
+      console.warn('[fullClientLogout] Server logout failed, proceeding with client cleanup anyway');
+    }
+
+    // 2️⃣ Clear all frontend state
     localStorage.clear();
     sessionStorage.clear();
     window.currentUser = null;
     window.currentEmail = null;
     window.__rp_reset_token = null;
 
-    // Clear IndexedDB
+    // 3️⃣ Clear IndexedDB
     if (window.indexedDB && indexedDB.databases) {
       const dbs = await indexedDB.databases();
-      dbs.forEach(db => { if (db.name) indexedDB.deleteDatabase(db.name); });
+      for (const db of dbs) {
+        if (db.name) indexedDB.deleteDatabase(db.name);
+      }
     }
 
-    // Clear non-HttpOnly cookies
+    // 4️⃣ Clear non-HttpOnly cookies
     document.cookie.split(';').forEach(c => {
       document.cookie = c.replace(/^ +/, '').replace(/=.*/, `=;expires=${new Date(0).toUTCString()};path=/`);
     });
 
-    // Reload / redirect to login
+    // 5️⃣ Redirect to login
     window.location.href = '/';
   } catch (err) {
-    console.error('Logout failed', err);
+    console.error('[fullClientLogout] Error during logout:', err);
     window.location.href = '/';
   }
 }
-
 
 
 // ===== Sticky reauth bootstrap (drop near top of dashboard.js, BEFORE initFlow boot) =====
@@ -7804,47 +7812,27 @@ loadProfileToSettings();
       window.location.href = '/referrals.html';
     });
 
-  // Logout (modal)
+ // Logout (modal)
 if (logoutBtnModal) {
   logoutBtnModal.addEventListener('click', async (e) => {
     e.preventDefault();
     showLoader();
-    try {
-      // Tell backend to clear refresh cookie
-      await fetch('/auth/logout', { method: 'POST', credentials: 'include' });
-    } catch (err) {
-      console.warn('Logout API error (continuing client-side)', err);
-    }
 
     try {
-      // Clear local + session storage
-      fullClientLogout()
-
-      // Clear IndexedDB (all databases)
-      if (window.indexedDB) {
-        const dbs = await indexedDB.databases();
-        dbs.forEach(db => {
-          if (db.name) {
-            indexedDB.deleteDatabase(db.name);
-          }
-        });
-      }
-
-      // Clear client cookies (non-HttpOnly)
-      document.cookie.split(';').forEach(c => {
-        document.cookie = c
-          .replace(/^ +/, '')
-          .replace(/=.*/, `=;expires=${new Date(0).toUTCString()};path=/`);
-      });
+      // Wait for full logout (server + client cleanup)
+      await fullClientLogout();
     } catch (err) {
-      console.error('Error during logout cleanup:', err);
+      console.error('[modal logout] Full logout failed:', err);
+      // Ensure we still redirect even if something breaks
+      window.location.href = '/';
+    } finally {
+      // Hide modal & loader safely
+      try { hideModal(); } catch (_) {}
+      hideLoader();
     }
-
-    // Hide modal if function exists
-    try { hideModal(); } catch (_) {}
-    hideLoader();
   });
 }
+
 
 
   // Theme toggle
@@ -11962,149 +11950,121 @@ async function bioVerifyAndFinalize(assertion) {
   try { if (switchToPin) switchToPin.style.display = 'none'; if (switchToBiometric) switchToBiometric.style.display = 'none'; } catch(e){}
 
   // Logout and forget links (same behavior)
-  try {
-    [logoutLinkBio, logoutLinkPin].forEach((link) => {
-      if (link && !link.__bound) {
-        link.addEventListener('click', async (ev) => {
-          ev.preventDefault();
-          showLoader();
-          try {
-            await fetch('https://api.flexgig.com.ng/auth/logout', { method: 'POST', credentials: 'include' }).catch(()=>{});
-            fullClientLogout()
-            if (window.indexedDB && indexedDB.databases) {
-              const dbs = await indexedDB.databases();
-              dbs.forEach(db => { if (db.name) indexedDB.deleteDatabase(db.name); });
-            }
-            document.cookie.split(';').forEach(c => {
-              document.cookie = c.replace(/^ +/, '').replace(/=.*/, `=;expires=${new Date(0).toUTCString()};path=/`);
-            });
-          } catch (err) { console.error('logout cleanup failed', err); }
-          hideLoader();
-        });
-        link.__bound = true;
-      }
-    });
-// OTP-first opener — REPLACE your existing [forgetPinLinkBio, forgetPinLinkPin] binding with this
-[forgetPinLinkBio, forgetPinLinkPin].forEach((link) => {
-  if (!link) return;
-  if (link.__bound) return;
-  link.addEventListener('click', async (ev) => {
-    ev.preventDefault();
+try {
+  [logoutLinkBio, logoutLinkPin].forEach((link) => {
+    if (link && !link.__bound) {
+      link.addEventListener('click', async (ev) => {
+        ev.preventDefault();
+        showLoader();
 
-    try {
-      // keep old behaviour: clear reauth flag
-      try { localStorage.removeItem('reauthPending'); } catch(_) {}
-
-      // Helper to resolve a usable email
-      const resolveEmail = async () => {
-        try { if (typeof currentEmail === 'string' && currentEmail) return currentEmail; } catch(_) {}
-        try { if (window.currentUser && window.currentUser.email) return window.currentUser.email; } catch(_) {}
         try {
-          const saved = localStorage.getItem('userEmail') || localStorage.getItem('email') || (localStorage.getItem('loginState') && JSON.parse(localStorage.getItem('loginState') || '{}').email);
-          if (saved) return saved;
-        } catch(_) {}
-        return '';
-      };
-
-      // Preferred path: call resetPin.js handler that already sends OTP then opens the reset modal
-      if (window.__rp_handlers && typeof window.__rp_handlers.onTrigger === 'function') {
-        try { await window.__rp_handlers.onTrigger(ev); return; } catch (e) { console.debug('onTrigger failed', e); /* fall through */ }
-      }
-      if (window.__rp_handlers && typeof window.__rp_handlers.onTriggerClicked === 'function') {
-        try { await window.__rp_handlers.onTriggerClicked(ev); return; } catch (e) { console.debug('onTriggerClicked failed', e); /* fall through */ }
-      }
-
-      // If we reach here it means the reset module wasn't available. We'll send OTP ourselves, then open reset modal.
-      // Do NOT open modal until server confirms.
-      const email = await resolveEmail();
-      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-        // Try to prompt the user as last resort
-        const p = prompt('Enter the account email to receive OTP for resetting PIN:');
-        if (!p || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p)) {
-          if (typeof notify === 'function') notify('warn', 'Valid email required to send OTP.', { title: 'Email needed' });
-          else alert('Valid email required to send OTP.');
-          return;
+          // Await fullClientLogout to ensure everything clears properly
+          await fullClientLogout();
+        } catch (err) {
+          console.error('[logout/forget links] Full logout failed:', err);
+          // fallback redirect
+          window.location.href = '/';
+        } finally {
+          hideLoader();
         }
-        // normalize
-        const emailPrompt = p.trim().toLowerCase();
-        // proceed with prompt value
-        await (async (em) => {
-          const base = (window.API_BASE || window.__SEC_API_BASE || 'https://api.flexgig.com.ng').replace(/\/$/, '');
-          const url = `${base}/auth/resend-otp`;
-          const resp = await fetch(url, {
-            method: 'POST',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-            body: JSON.stringify({ email: em })
-          });
-          let body;
-          try { body = resp.headers.get('content-type') && resp.headers.get('content-type').includes('application/json') ? await resp.json() : await resp.text(); } catch(_) { body = null; }
-          if (!resp.ok) throw new Error((body && (body.error?.message || body.message)) || `Failed to send OTP (${resp.status})`);
-          // open reset modal after success
-          let opened = false;
-          try {
-            if (window.ModalManager && typeof window.ModalManager.openModal === 'function') { window.ModalManager.openModal('resetPinModal'); opened = true; }
-          } catch(e){ console.debug('ModalManager.openModal failed', e); }
-          if (!opened) {
-            const el = document.getElementById('resetPinModal');
-            if (el) { el.classList.remove('hidden'); el.style.display = 'flex'; el.setAttribute('aria-hidden','false'); opened = true; }
-          }
-          // if reset module exists later, wire inputs
-          if (opened && window.__rp_handlers && typeof window.__rp_handlers.wire === 'function') {
-            try { window.__rp_handlers.wire(); } catch(e){ console.debug('rp_handlers.wire failed', e); }
-          }
-          if (typeof notify === 'function') notify('info', `OTP sent to ${em}`, { title: 'OTP sent' });
-          else alert(`OTP sent to ${em}`);
-        })(emailPrompt);
-        return;
-      }
-
-      // send OTP using resolved email
-      const base = (window.API_BASE || window.__SEC_API_BASE || 'https://api.flexgig.com.ng').replace(/\/$/, '');
-      const url = `${base}/auth/resend-otp`;
-      const resp = await fetch(url, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-        body: JSON.stringify({ email })
       });
-      let body;
-      try { body = resp.headers.get('content-type') && resp.headers.get('content-type').includes('application/json') ? await resp.json() : await resp.text(); } catch(_) { body = null; }
-
-      if (!resp.ok) {
-        const msg = (body && (body.error?.message || body.message)) || `Failed to send OTP (${resp.status})`;
-        if (typeof notify === 'function') notify('error', msg, { title: 'Resend failed' });
-        else alert(msg);
-        return;
-      }
-
-      // Only after server confirms OTP sent do we open the reset modal
-      let opened = false;
-      try {
-        if (window.ModalManager && typeof window.ModalManager.openModal === 'function') { window.ModalManager.openModal('resetPinModal'); opened = true; }
-      } catch (e) { console.debug('ModalManager.openModal fail', e); }
-      if (!opened) {
-        const el = document.getElementById('resetPinModal');
-        if (el) { el.classList.remove('hidden'); el.style.display = 'flex'; el.setAttribute('aria-hidden','false'); opened = true; }
-      }
-      // wire OTP inputs if rp module present
-      try { if (window.__rp_handlers && typeof window.__rp_handlers.wire === 'function') window.__rp_handlers.wire(); } catch(e){ console.debug('rp wire after open failed', e); }
-
-      if (typeof notify === 'function') notify('info', `OTP sent to ${email}`, { title: 'OTP sent' });
-      else alert(`OTP sent to ${email}`);
-
-    } catch (e) {
-      console.warn('forgetPin open flow failed', e);
-      if (typeof notify === 'function') notify('error', e.message || 'Failed to start Reset PIN flow');
-      else alert(e.message || 'Failed to start Reset PIN flow');
+      link.__bound = true;
     }
   });
-  link.__bound = true;
-});
 
+  // OTP-first opener — REPLACE your existing [forgetPinLinkBio, forgetPinLinkPin] binding
+  [forgetPinLinkBio, forgetPinLinkPin].forEach((link) => {
+    if (!link || link.__bound) return;
 
+    link.addEventListener('click', async (ev) => {
+      ev.preventDefault();
+      try {
+        localStorage.removeItem('reauthPending');
 
-  } catch (e) { console.warn('logout/forget setup failed', e); }
+        const resolveEmail = async () => {
+          try { if (typeof currentEmail === 'string' && currentEmail) return currentEmail; } catch(_) {}
+          try { if (window.currentUser && window.currentUser.email) return window.currentUser.email; } catch(_) {}
+          try {
+            const saved = localStorage.getItem('userEmail') || localStorage.getItem('email') ||
+                          (localStorage.getItem('loginState') && JSON.parse(localStorage.getItem('loginState') || '{}').email);
+            if (saved) return saved;
+          } catch(_) {}
+          return '';
+        };
+
+        const email = await resolveEmail();
+
+        if (window.__rp_handlers) {
+          if (typeof window.__rp_handlers.onTrigger === 'function') {
+            try { await window.__rp_handlers.onTrigger(ev); return; } catch(e){ console.debug('onTrigger failed', e); }
+          }
+          if (typeof window.__rp_handlers.onTriggerClicked === 'function') {
+            try { await window.__rp_handlers.onTriggerClicked(ev); return; } catch(e){ console.debug('onTriggerClicked failed', e); }
+          }
+        }
+
+        let emailToUse = email;
+        if (!emailToUse || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailToUse)) {
+          const p = prompt('Enter the account email to receive OTP for resetting PIN:');
+          if (!p || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p)) {
+            if (typeof notify === 'function') notify('warn', 'Valid email required to send OTP.', { title: 'Email needed' });
+            else alert('Valid email required to send OTP.');
+            return;
+          }
+          emailToUse = p.trim().toLowerCase();
+        }
+
+        const base = (window.API_BASE || window.__SEC_API_BASE || 'https://api.flexgig.com.ng').replace(/\/$/, '');
+        const resp = await fetch(`${base}/auth/resend-otp`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify({ email: emailToUse })
+        });
+
+        let body;
+        try { body = resp.headers.get('content-type')?.includes('application/json') ? await resp.json() : await resp.text(); } catch(_) { body = null; }
+
+        if (!resp.ok) {
+          const msg = (body && (body.error?.message || body.message)) || `Failed to send OTP (${resp.status})`;
+          if (typeof notify === 'function') notify('error', msg, { title: 'Resend failed' });
+          else alert(msg);
+          return;
+        }
+
+        // Open reset modal only after server confirms OTP sent
+        let opened = false;
+        try {
+          if (window.ModalManager?.openModal) { window.ModalManager.openModal('resetPinModal'); opened = true; }
+        } catch(e){ console.debug('ModalManager.openModal failed', e); }
+
+        if (!opened) {
+          const el = document.getElementById('resetPinModal');
+          if (el) {
+            el.classList.remove('hidden');
+            el.style.display = 'flex';
+            el.setAttribute('aria-hidden','false');
+            opened = true;
+          }
+        }
+
+        try { if (opened && window.__rp_handlers?.wire) window.__rp_handlers.wire(); } catch(e){ console.debug('rp wire after open failed', e); }
+
+        if (typeof notify === 'function') notify('info', `OTP sent to ${emailToUse}`, { title: 'OTP sent' });
+        else alert(`OTP sent to ${emailToUse}`);
+      } catch (e) {
+        console.warn('forgetPin open flow failed', e);
+        if (typeof notify === 'function') notify('error', e.message || 'Failed to start Reset PIN flow');
+        else alert(e.message || 'Failed to start Reset PIN flow');
+      }
+    });
+    link.__bound = true;
+  });
+
+} catch (e) {
+  console.warn('logout/forget setup failed', e);
+}
+
 
   // keypad init
 // keypad init (guarded)
