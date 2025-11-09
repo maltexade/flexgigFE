@@ -203,7 +203,11 @@ const BACKEND_URL = 'https://api.flexgig.com.ng';
   // -----------------------------
   // Actions
   // -----------------------------
-  function goToGoogleAuth() { location.href = `${BACKEND_URL}/auth/google`; }
+function goToGoogleAuth() { 
+  // ✅ Add prompt=select_account to force account selection
+  const authUrl = `${BACKEND_URL}/auth/google?prompt=select_account`;
+  window.location.href = authUrl;
+}
 // ✅ IMPROVED: Complete client-side logout with better error handling
 async function fullClientLogout() {
   try {
