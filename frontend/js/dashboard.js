@@ -4648,13 +4648,20 @@ updateBalanceDisplay();
     processing = true;
     return withLoader(async () => {
       try {
-        // Build headers and include short-lived reset token if available
+        // --- Build headers ---
         const headers = { 'Content-Type': 'application/json' };
+
+        // Only include reset token if it exists AND is a reset flow
         const resetToken = (window.__rp_handlers && typeof window.__rp_handlers.getResetToken === 'function')
           ? window.__rp_handlers.getResetToken()
           : (window.__rp_reset_token || null);
-        if (resetToken) {
-          headers['x-reset-token'] = resetToken;
+
+        if (resetToken && step === 'confirmReset') { 
+          headers['x-reset-token'] = resetToken; // only for reset PIN flow
+        } else {
+          // normal flow: use Authorization Bearer token if logged in
+          const token = localStorage.getItem('token');
+          if (token) headers['Authorization'] = `Bearer ${token}`;
         }
 
         const res = await fetch('https://api.flexgig.com.ng/api/save-pin', {
@@ -4669,31 +4676,26 @@ updateBalanceDisplay();
         console.log('[dashboard.js] PIN setup successfully');
         localStorage.setItem('hasPin', 'true'); // PIN successfully set
 
-        // --- CLEAR short-lived reset token (security) ---
+        // --- CLEAR short-lived reset token ---
         try {
           if (window.__rp_reset_token) {
             delete window.__rp_reset_token;
-            if (window.__rp_handlers && typeof window.__rp_handlers.getResetToken === 'function') {
-              window.__rp_handlers.getResetToken = () => null;
-            }
-            console.debug('Cleared __rp_reset_token after save-pin');
-          } else {
-            console.debug('No __rp_reset_token present to clear after save-pin');
+          }
+          if (window.__rp_handlers && typeof window.__rp_handlers.getResetToken === 'function') {
+            window.__rp_handlers.getResetToken = () => null;
           }
         } catch (e) {
           console.debug('Error clearing __rp_reset_token', e);
         }
-        // --- end clear token ---
 
         onPinSetupSuccess();
-
         const dashboardPinCard = document.getElementById('dashboardPinCard');
         if (dashboardPinCard) dashboardPinCard.style.display = 'none';
         if (accountPinStatus) accountPinStatus.textContent = 'PIN set';
-
         showToast('PIN updated successfully', 'success', 2400);
         if (pinModal) pinModal.classList.add('hidden');
         resetInputs();
+
       } catch (err) {
         console.error('[dashboard.js] PIN save error:', err);
         showToast('Failed to save PIN. Try again.', 'error', 2200);
