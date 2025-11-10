@@ -1,252 +1,230 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Referral Modal (Flexgig)</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Checkout Modal</title>
   <style>
-    :root{--bg:rgba(0,0,0,0.75);--card:#0b0b0b;--muted:#9aa3ad;--accent:#ffd166;--white:#fff}
-    body{font-family:Inter,system-ui,Segoe UI,Roboto,Arial;}
-    /* overlay */
-    .fg-modal-overlay{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:12000}
-    /* card */
-    .fg-modal{width:760px;max-width:95%;background:linear-gradient(180deg,#0b0b0b,#0a0a0a);border-radius:12px;padding:18px;color:var(--white);box-shadow:0 10px 40px rgba(0,0,0,0.6);}
-    .fg-header{display:flex;align-items:center;gap:8px;margin-bottom:12px}
-    .fg-close{width:36px;height:36px;border-radius:8px;background:transparent;border:none;color:var(--white);cursor:pointer;font-size:20px;display:flex;align-items:center;justify-content:center}
-    .fg-title{flex:1;text-align:center;font-weight:600;font-size:18px}
-    /* tabs */
-    .fg-tabs{display:flex;gap:8px;margin:10px 0 18px}
-    .fg-tab{padding:10px 14px;border-radius:10px;cursor:pointer;background:transparent;color:var(--muted);border:1px solid transparent}
-    .fg-tab.active{background:rgba(255,255,255,0.03);color:var(--white);border-color:rgba(255,255,255,0.04)}
-    /* campaign layout */
-    .campaign{display:flex;gap:20px;align-items:flex-start}
-    .campaign-left{flex:1}
-    .campaign-right{width:320px;background:rgba(255,255,255,0.02);padding:12px;border-radius:10px}
-    .earn-box{background:linear-gradient(90deg,#111 0%, #0f0f0f 100%);padding:18px;border-radius:10px;margin-bottom:12px}
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+    * { box-sizing: border-box; }
 
-    .earn-amount{font-size:28px;font-weight:700;margin-top:6px}
-    .btn{display:inline-flex;align-items:center;gap:8px;padding:10px 12px;border-radius:10px;border:none;cursor:pointer}
-    .btn-primary{background:var(--accent);color:#000}
-    .btn-ghost{background:transparent;color:var(--white);border:1px solid rgba(255,255,255,0.06)}
+    body {
+      margin: 0;
+      font-family: 'Inter', sans-serif;
+      background: #121212;
+      color: #e8e8e8;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
 
-    .speaker-icon{width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#ffd166,#ff9f1c);display:flex;align-items:center;justify-content:center;color:#000;font-weight:700;margin-bottom:12px}
-    .muted{color:var(--muted);font-size:13px}
+    /* Overlay */
+    .overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(4px);
+      display: none;
+      justify-content: center;
+      align-items: center;
+    }
 
-    .refcode{display:flex;gap:8px;align-items:center;margin-top:8px}
-    .refcode .code{background:#0a0a0a;padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);font-weight:600}
-    .copy-box{display:flex;gap:8px;margin-top:10px}
-    .copy-input{flex:1;padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:transparent;color:var(--white)}
+    /* Modal */
+    .modal {
+      width: 92%;
+      max-width: 400px;
+      background: #1a1a1a;
+      border-radius: 14px;
+      box-shadow: 0 4px 25px rgba(0, 0, 0, 0.4);
+      overflow: hidden;
+      animation: fadeIn 0.25s ease;
+      border: 1px solid #262626;
+    }
 
-    .share-row{display:flex;gap:8px;margin-top:10px}
-    .share-btn{flex:1}
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
 
-    /* referrals list */
-    .referrals-list{max-height:360px;overflow:auto;padding:6px 0;margin-top:6px}
-    .ref-item{display:flex;justify-content:space-between;align-items:center;padding:10px;border-radius:8px;margin-bottom:8px;background:rgba(255,255,255,0.02)}
-    .ref-left{display:flex;gap:12px;align-items:center}
-    .ref-avatar{width:40px;height:40px;border-radius:50%;background:#222;display:flex;align-items:center;justify-content:center;color:var(--muted);font-weight:700}
-    .ref-meta{line-height:1}
-    .ref-amount{font-weight:700}
+    .modal-header {
+      padding: 16px 18px;
+      border-bottom: 1px solid #262626;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
 
-    /* small notes */
-    .small{font-size:12px;color:var(--muted);margin-top:8px}
+    .modal-header h2 {
+      margin: 0;
+      font-size: 1rem;
+      font-weight: 500;
+      color: #e8e8e8;
+    }
 
-    @media (max-width:720px){.fg-modal{padding:14px}.campaign{flex-direction:column}.campaign-right{width:100%}}
+    .close-btn {
+      background: none;
+      border: none;
+      color: #aaa;
+      font-size: 1.3rem;
+      cursor: pointer;
+    }
+
+    .modal-content {
+      padding: 20px;
+    }
+
+    .price {
+      font-size: 2rem;
+      font-weight: 600;
+      text-align: center;
+      margin-bottom: 22px;
+      color: #32c46d;
+    }
+
+    .details {
+      background: #222;
+      border-radius: 10px;
+      padding: 14px 16px;
+      font-size: 0.9rem;
+      margin-bottom: 20px;
+    }
+
+    .details div {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 6px;
+      color: #bbb;
+    }
+
+    .details div span:first-child {
+      color: #888;
+    }
+
+    .details div:last-child {
+      margin-bottom: 0;
+    }
+
+    .payment-section {
+      background: #222;
+      border-radius: 10px;
+      padding: 14px 16px;
+      font-size: 0.9rem;
+      margin-bottom: 20px;
+    }
+
+    .payment-section h3 {
+      margin: 0 0 8px;
+      font-size: 0.95rem;
+      color: #999;
+      font-weight: 500;
+    }
+
+    .balance-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 0;
+    }
+
+    .balance-item span:last-child {
+      color: #32c46d;
+      font-weight: 500;
+    }
+
+    .pay-btn {
+      width: 100%;
+      background: #32c46d;
+      color: #fff;
+      font-weight: 500;
+      padding: 13px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 1rem;
+      transition: 0.25s ease;
+    }
+
+    .pay-btn:hover {
+      background: #2ead60;
+    }
+
+    /* Demo open button */
+    .open-btn {
+      padding: 10px 20px;
+      background: #32c46d;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: 0.25s;
+    }
+
+    .open-btn:hover {
+      background: #2ead60;
+    }
   </style>
 </head>
 <body>
 
-<!-- Modal (hidden by default in your app) -->
-<div class="fg-modal-overlay" id="referralModal" style="display:none;">
-  <div class="fg-modal" role="dialog" aria-modal="true" aria-labelledby="referralTitle">
-    <div class="fg-header">
-      <button class="fg-close" id="referralClose" aria-label="Close"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-      <div id="referralTitle" class="fg-title">Referral</div>
-      <div style="width:36px"></div>
-    </div>
+  <button class="open-btn" onclick="openModal()">Open Checkout</button>
 
-    <div class="fg-tabs" role="tablist">
-      <button class="fg-tab active" data-tab="campaign">Campaign</button>
-      <button class="fg-tab" data-tab="referrals">Referrals</button>
-    </div>
-
-    <div id="tabContent">
-      <!-- Campaign View -->
-      <div data-view="campaign">
-        <div class="campaign">
-          <div class="campaign-left">
-            <div class="earn-box">
-              <div class="muted">Referral Earnings</div>
-              <div class="earn-amount" id="refEarnings">₦0</div>
-              <div style="margin-top:10px">
-                <button class="btn btn-primary" id="moveToWallet">Move referral bonus to wallet</button>
-                <button class="btn btn-ghost" id="viewHistory" style="margin-left:8px">View history</button>
-              </div>
-            </div>
-
-            <div style="display:flex;gap:12px;align-items:flex-start">
-              <div class="speaker-icon">📣</div>
-              <div style="flex:1">
-                <div style="font-weight:700">Refer friends to Flexgig and earn 1% commissions on every purchase by them for life!</div>
-                <div class="small">Share your unique referral link and get paid every time someone you referred buys data. Commissions are added to your referral balance and can be moved to your wallet.</div>
-              </div>
-            </div>
-
-            <div class="small" style="margin-top:14px">Your referral code</div>
-            <div class="refcode">
-              <div class="code" id="refCode">--</div>
-              <div style="flex:1"></div>
-            </div>
-
-            <div class="copy-box">
-              <input type="text" readonly class="copy-input" id="refLinkInput" value="--">
-              <button class="btn btn-ghost" id="copyLinkBtn">Copy</button>
-            </div>
-
-            <div class="share-row">
-              <button class="btn btn-primary share-btn" id="shareWhatsApp">Share on WhatsApp</button>
-              <button class="btn btn-ghost share-btn" id="shareOther">More</button>
-            </div>
-
-          </div>
-
-          <div class="campaign-right">
-            <div style="font-size:14px;font-weight:600;margin-bottom:8px">How it works</div>
-            <div class="small">• You get ₦10 for every ₦1000 spent by people who sign up with your link (1%).</div>
-            <div class="small">• Commissions are credited instantly after a successful purchase.</div>
-            <div class="small">• Move earnings to your wallet when you are ready.</div>
-            <div style="margin-top:12px">
-              <div style="font-weight:600">Tips to share</div>
-              <div class="small">• Share on WhatsApp groups and status.</div>
-              <div class="small">• Personalize the message for better conversion.</div>
-            </div>
-          </div>
-        </div>
+  <div class="overlay" id="overlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Checkout</h2>
+        <button class="close-btn" onclick="closeModal()">&times;</button>
       </div>
 
-      <!-- Referrals View -->
-      <div data-view="referrals" style="display:none">
-        <div style="font-weight:600;margin-bottom:8px">Your referrals</div>
-        <div class="referrals-list" id="referralsList">
-          <!-- items injected here -->
+      <div class="modal-content">
+        <div class="price">₦100.00</div>
+
+        <div class="details">
+          <div><span>Product</span><span>Mobile Data (MTN)</span></div>
+          <div><span>Recipient</span><span>0903 8492 701</span></div>
+          <div><span>Plan</span><span>110MB Daily</span></div>
         </div>
+
+        <div class="payment-section">
+          <h3>Payment Method</h3>
+          <div class="balance-item">
+            <span>Available Balance</span>
+            <span>₦6,585.77 ✓</span>
+          </div>
+        </div>
+
+        <button class="pay-btn" onclick="pay()">Pay ₦100.00</button>
       </div>
     </div>
   </div>
-</div>
 
-<script>
-  // Simple demo data and helpers — integrate with your real backend
-  const Demo = {
-    getCurrentUser() {
-      return {
-        id: localStorage.getItem('userId') || 'u123',
-        username: localStorage.getItem('username') || 'you',
-        referralCode: localStorage.getItem('referralCode') || (localStorage.getItem('username') || 'you').toLowerCase() + '123'
-      };
-    },
-    async getReferralEarnings() {
-      // fetch from backend: /api/referrals/earnings
-      // return number in naira
-      return Number(localStorage.getItem('referralEarnings') || 0);
-    },
-    async getReferrals() {
-      // fetch list from backend: /api/referrals/list
-      // example items { username, amountEarned }
-      return JSON.parse(localStorage.getItem('referralsList') || '[]');
-    },
-    async moveToWallet() {
-      // POST to server to credit wallet; here we simulate
-      const amt = Number(localStorage.getItem('referralEarnings') || 0);
-      if (!amt) throw new Error('No earnings to move');
-      // demo: subtract and pretend move
-      localStorage.setItem('walletBalance', (Number(localStorage.getItem('walletBalance')||0) + amt).toString());
-      localStorage.setItem('referralEarnings', '0');
-      // also inform server in production
-      return amt;
+  <script>
+    const overlay = document.getElementById('overlay');
+    const btn = document.querySelector('.pay-btn');
+
+    function openModal() {
+      overlay.style.display = 'flex';
     }
-  };
 
-  // UI wiring
-  const modal = document.getElementById('referralModal');
-  const closeBtn = document.getElementById('referralClose');
-  const tabs = document.querySelectorAll('.fg-tab');
-  const views = document.querySelectorAll('[data-view]');
-  const refEarningsEl = document.getElementById('refEarnings');
-  const refCodeEl = document.getElementById('refCode');
-  const refLinkInput = document.getElementById('refLinkInput');
-  const copyLinkBtn = document.getElementById('copyLinkBtn');
-  const shareWhatsAppBtn = document.getElementById('shareWhatsApp');
-  const moveToWalletBtn = document.getElementById('moveToWallet');
-  const referralsListEl = document.getElementById('referralsList');
-
-  function openReferralModal() {
-    modal.style.display = 'flex';
-    loadCampaign();
-  }
-  function closeReferralModal() { modal.style.display = 'none'; }
-
-  closeBtn.addEventListener('click', closeReferralModal);
-
-  tabs.forEach(t => t.addEventListener('click', (ev) => {
-    tabs.forEach(x=>x.classList.remove('active'));
-    t.classList.add('active');
-    const tab = t.dataset.tab;
-    views.forEach(v=>{ v.style.display = v.dataset.view === tab ? '' : 'none' });
-    if (tab === 'campaign') loadCampaign();
-    if (tab === 'referrals') loadReferrals();
-  }));
-
-  async function loadCampaign() {
-    const user = Demo.getCurrentUser();
-    const earnings = await Demo.getReferralEarnings();
-    refEarningsEl.textContent = `₦${earnings.toLocaleString()}`;
-    refCodeEl.textContent = user.referralCode;
-    const link = `${location.origin}/signup?ref=${encodeURIComponent(user.referralCode)}`;
-    refLinkInput.value = link;
-  }
-
-  copyLinkBtn.addEventListener('click', async () => {
-    try { await navigator.clipboard.writeText(refLinkInput.value); copyLinkBtn.textContent = 'Copied'; setTimeout(()=>copyLinkBtn.textContent='Copy',1200);} catch(e){alert('Copy failed');}
-  });
-
-  shareWhatsAppBtn.addEventListener('click', ()=>{
-    const text = encodeURIComponent(`Join Flexgig and buy data at great rates. Use my code: ${refCodeEl.textContent} - ${refLinkInput.value}`);
-    const wa = `https://wa.me/?text=${text}`;
-    window.open(wa, '_blank');
-  });
-
-  moveToWalletBtn.addEventListener('click', async () => {
-    moveToWalletBtn.disabled = true;
-    try {
-      const amt = await Demo.moveToWallet();
-      refEarningsEl.textContent = `₦0`;
-      alert(`Moved ₦${amt} to wallet`);
-    } catch (e) { alert(e.message || 'Failed'); }
-    finally { moveToWalletBtn.disabled = false; }
-  });
-
-  async function loadReferrals(){
-    referralsListEl.innerHTML = '';
-    const list = await Demo.getReferrals();
-    // sort desc by amount
-    list.sort((a,b)=> (b.amountEarned||0) - (a.amountEarned||0));
-    if (!list.length) {
-      referralsListEl.innerHTML = '<div class="small">No referrals yet. Share your link to start earning.</div>';
-      return;
+    function closeModal() {
+      overlay.style.display = 'none';
+      btn.innerText = 'Pay ₦100.00';
+      btn.disabled = false;
+      btn.style.background = '#32c46d';
     }
-    for (const r of list) {
-      const it = document.createElement('div'); it.className='ref-item';
-      it.innerHTML = `<div class='ref-left'><div class='ref-avatar'>${(r.username||'U').charAt(0).toUpperCase()}</div><div class='ref-meta'><div style="font-weight:600">${r.username||'Unknown'}</div><div class='muted'>Joined: ${r.joined||'—'}</div></div></div><div class='ref-amount'>₦${(r.amountEarned||0).toLocaleString()}</div>`;
-      referralsListEl.appendChild(it);
+
+    function pay() {
+      btn.innerText = 'Processing...';
+      btn.disabled = true;
+      btn.style.background = '#444';
+      setTimeout(() => {
+        btn.innerText = 'Payment Successful ✓';
+        btn.style.background = '#2ead60';
+        setTimeout(closeModal, 1400);
+      }, 1500);
     }
-  }
+  </script>
 
-  // Expose open function globally for your app
-  window.openReferralModal = openReferralModal;
-
-  // demo: open automatically for testing
-  openReferralModal();
-</script>
 </body>
 </html>

@@ -1,4 +1,12 @@
 import { mtnAwoofPlans, mtnGiftingPlans, airtelAwoofPlans, airtelCgPlans, gloCgPlans, gloGiftingPlans, ninemobilePlans } from './dataPlans.js';
+import {
+  openCheckoutModal as openCheckoutModalLocal,
+  closeCheckoutModal,
+  initCheckoutModal,
+  onPayClicked
+} from '/frontend/js/checkout.js';
+
+
 
 window.__SEC_API_BASE = 'https://api.flexgig.com.ng'
 
@@ -3522,157 +3530,157 @@ if (seeAllBtn) {
   }
 
   // Full triggerCheckoutReauth - call this from your checkout flow
-async function triggerCheckoutReauth() {
-  console.log('triggerCheckoutReauth called');
-  try {
-    const reauthStatus = await shouldReauth();
-    console.log('triggerCheckoutReauth: reauthStatus', reauthStatus);
+// async function triggerCheckoutReauth() {
+//   console.log('triggerCheckoutReauth called');
+//   try {
+//     const reauthStatus = await shouldReauth();
+//     console.log('triggerCheckoutReauth: reauthStatus', reauthStatus);
 
-    if (!reauthStatus.needsReauth) {
-      console.log('triggerCheckoutReauth: no reauth needed for checkout');
-      return { success: true };
-    }
+//     if (!reauthStatus.needsReauth) {
+//       console.log('triggerCheckoutReauth: no reauth needed for checkout');
+//       return { success: true };
+//     }
 
-    if (reauthStatus.method === 'biometric') {
-  const session = await safeCall(getSession) || {};
-  const uid = session.user ? (session.user.uid || session.user.id) : null;
-  if (!uid) {
-    console.warn('triggerCheckoutReauth: no uid, opening modal for PIN/fallback');
-    await showReauthModal('checkout');
-    return { success: false, requiresModal: true };
-  }
+//     if (reauthStatus.method === 'biometric') {
+//   const session = await safeCall(getSession) || {};
+//   const uid = session.user ? (session.user.uid || session.user.id) : null;
+//   if (!uid) {
+//     console.warn('triggerCheckoutReauth: no uid, opening modal for PIN/fallback');
+//     await showReauthModal('checkout');
+//     return { success: false, requiresModal: true };
+//   }
 
-  // Client-side guard: ensure biometrics enabled globally and for transactions
-  const isBiometricsEnabled = localStorage.getItem('biometricsEnabled') === 'true';
-  const bioTxEnabled = localStorage.getItem('biometricForTx') === 'true';
-  if (!isBiometricsEnabled || !bioTxEnabled) {
-    // fallback to modal / PIN flow
-    await showReauthModal('checkout');
-    return { success: false, requiresModal: true, error: 'biometrics-disabled-for-transaction' };
-  }
+//   // Client-side guard: ensure biometrics enabled globally and for transactions
+//   const isBiometricsEnabled = localStorage.getItem('biometricsEnabled') === 'true';
+//   const bioTxEnabled = localStorage.getItem('biometricForTx') === 'true';
+//   if (!isBiometricsEnabled || !bioTxEnabled) {
+//     // fallback to modal / PIN flow
+//     await showReauthModal('checkout');
+//     return { success: false, requiresModal: true, error: 'biometrics-disabled-for-transaction' };
+//   }
 
-  // Use 'transaction' so it matches your shouldReauth/server checks
-  const { success, result, error } = await verifyBiometrics(uid, 'transaction');
-  if (success) {
-    console.log('triggerCheckoutReauth: biometric success for checkout');
-    return { success: true, result };
-  }
-  console.log('triggerCheckoutReauth: biometric failed for checkout, opening modal');
-  await showReauthModal('checkout');
-  return { success: false, requiresModal: true, error };
-}
+//   // Use 'transaction' so it matches your shouldReauth/server checks
+//   const { success, result, error } = await verifyBiometrics(uid, 'transaction');
+//   if (success) {
+//     console.log('triggerCheckoutReauth: biometric success for checkout');
+//     return { success: true, result };
+//   }
+//   console.log('triggerCheckoutReauth: biometric failed for checkout, opening modal');
+//   await showReauthModal('checkout');
+//   return { success: false, requiresModal: true, error };
+// }
 
 
-    // PIN path: show modal (will handle the PIN flow)
-    await showReauthModal('checkout');
-    return { success: false, requiresModal: true };
-  } catch (err) {
-    console.error('triggerCheckoutReauth error:', err);
-    await showReauthModal('checkout');
-    return { success: false, requiresModal: true, error: err.message };
-  }
-}
+//     // PIN path: show modal (will handle the PIN flow)
+//     await showReauthModal('checkout');
+//     return { success: false, requiresModal: true };
+//   } catch (err) {
+//     console.error('triggerCheckoutReauth error:', err);
+//     await showReauthModal('checkout');
+//     return { success: false, requiresModal: true, error: err.message };
+//   }
+// }
 
 
   // --- RENDER CHECKOUT MODAL ---
-  function renderCheckoutModal() {
-  const state = JSON.parse(localStorage.getItem('userState') || '{}');
-  const { provider, planId, number } = state;
-  if (!provider || !planId || !number) {
-    console.log('[DEBUG] renderCheckoutModal: Missing required state:', { provider, planId, number });
-    return;
-  }
+//   function renderCheckoutModal() {
+//   const state = JSON.parse(localStorage.getItem('userState') || '{}');
+//   const { provider, planId, number } = state;
+//   if (!provider || !planId || !number) {
+//     console.log('[DEBUG] renderCheckoutModal: Missing required state:', { provider, planId, number });
+//     return;
+//   }
 
-  const plan = findPlanById(planId, provider);
-  if (!plan) {
-    console.log('[DEBUG] renderCheckoutModal: No plan found for ID:', planId);
-    return;
-  }
+//   const plan = findPlanById(planId, provider);
+//   if (!plan) {
+//     console.log('[DEBUG] renderCheckoutModal: No plan found for ID:', planId);
+//     return;
+//   }
 
-  const phoneEl = document.getElementById('checkout-phone');
-  const priceEl = document.getElementById('checkout-price');
-  const dataEl = document.getElementById('checkout-data');
-  const providerEl = document.getElementById('checkout-provider');
-  const payBtn = document.getElementById('payBtn');
+//   const phoneEl = document.getElementById('checkout-phone');
+//   const priceEl = document.getElementById('checkout-price');
+//   const dataEl = document.getElementById('checkout-data');
+//   const providerEl = document.getElementById('checkout-provider');
+//   const payBtn = document.getElementById('payBtn');
 
-  if (phoneEl) {
-    const rawNumber = normalizePhone(number); // Ensure raw number is valid
-    const formattedNumber = formatNigeriaNumber(rawNumber).value; // Get formatted number
-    if (!rawNumber || rawNumber.length !== 11 || !formattedNumber) {
-      console.warn('[WARN] renderCheckoutModal: Invalid number - Raw:', rawNumber, 'Formatted:', formattedNumber, 'Original:', number);
-      phoneEl.textContent = ''; // Fallback to empty if invalid
-    } else {
-      phoneEl.textContent = formattedNumber;
-      // Inline styles to prevent cutoff of 13-character formatted number
-      phoneEl.style.whiteSpace = 'nowrap';
-      phoneEl.style.overflow = 'visible';
-      phoneEl.style.textOverflow = 'initial';
-      phoneEl.style.maxWidth = 'none';
-      phoneEl.style.width = 'auto';
-      phoneEl.style.display = 'inline-block';
-      console.log('[DEBUG] renderCheckoutModal: Phone number set:', formattedNumber, 'Length:', formattedNumber.length, 'Raw:', rawNumber);
-    }
-  }
-  if (priceEl) priceEl.textContent = `₦${plan.price}`;
-  if (dataEl) dataEl.textContent = `${plan.data} (${plan.duration})`;
-  if (providerEl) {
-    const displayName = provider === 'ninemobile' ? '9mobile' : provider.charAt(0).toUpperCase() + provider.slice(1);
-    providerEl.innerHTML = `${svgShapes[provider]} ${displayName}`;
-    console.log('[DEBUG] renderCheckoutModal: Provider set with SVG:', displayName);
-  }
-  if (payBtn) {
-    payBtn.disabled = false;
-    payBtn.classList.add('active');
-  }
-  console.log('[DEBUG] renderCheckoutModal: Rendered for provider:', provider, 'planId:', planId, 'number:', number);
-}
+//   if (phoneEl) {
+//     const rawNumber = normalizePhone(number); // Ensure raw number is valid
+//     const formattedNumber = formatNigeriaNumber(rawNumber).value; // Get formatted number
+//     if (!rawNumber || rawNumber.length !== 11 || !formattedNumber) {
+//       console.warn('[WARN] renderCheckoutModal: Invalid number - Raw:', rawNumber, 'Formatted:', formattedNumber, 'Original:', number);
+//       phoneEl.textContent = ''; // Fallback to empty if invalid
+//     } else {
+//       phoneEl.textContent = formattedNumber;
+//       // Inline styles to prevent cutoff of 13-character formatted number
+//       phoneEl.style.whiteSpace = 'nowrap';
+//       phoneEl.style.overflow = 'visible';
+//       phoneEl.style.textOverflow = 'initial';
+//       phoneEl.style.maxWidth = 'none';
+//       phoneEl.style.width = 'auto';
+//       phoneEl.style.display = 'inline-block';
+//       console.log('[DEBUG] renderCheckoutModal: Phone number set:', formattedNumber, 'Length:', formattedNumber.length, 'Raw:', rawNumber);
+//     }
+//   }
+//   if (priceEl) priceEl.textContent = `₦${plan.price}`;
+//   if (dataEl) dataEl.textContent = `${plan.data} (${plan.duration})`;
+//   if (providerEl) {
+//     const displayName = provider === 'ninemobile' ? '9mobile' : provider.charAt(0).toUpperCase() + provider.slice(1);
+//     providerEl.innerHTML = `${svgShapes[provider]} ${displayName}`;
+//     console.log('[DEBUG] renderCheckoutModal: Provider set with SVG:', displayName);
+//   }
+//   if (payBtn) {
+//     payBtn.disabled = false;
+//     payBtn.classList.add('active');
+//   }
+//   console.log('[DEBUG] renderCheckoutModal: Rendered for provider:', provider, 'planId:', planId, 'number:', number);
+// }
 
-  // --- OPEN CHECKOUT MODAL ---
-  function openCheckoutModal() {
-    const checkoutModal = document.getElementById('checkoutModal');
-    if (!checkoutModal) {
-      console.error('[ERROR] openCheckoutModal: #checkoutModal not found in DOM');
-      return;
-    }
-    const checkoutModalContent = checkoutModal.querySelector('.modal-content');
-    if (!checkoutModalContent) {
-      console.error('[ERROR] openCheckoutModal: .modal-content not found');
-      return;
-    }
-    checkoutModal.style.display = 'none';
-    checkoutModal.classList.remove('active');
-    checkoutModalContent.style.transform = 'translateY(0)';
-    renderCheckoutModal();
-    setTimeout(() => {
-      checkoutModal.style.display = 'flex';
-      checkoutModal.classList.add('active');
-      checkoutModal.setAttribute('aria-hidden', 'false');
-      document.body.classList.add('modal-open');
-      checkoutModal.focus();
-      history.pushState({ popup: true }, '', location.href);
-      console.log('[DEBUG] openCheckoutModal: Modal opened, display:', checkoutModal.style.display, 'active:', checkoutModal.classList.contains('active'));
-    }, 50);
-  }
+  // // --- OPEN CHECKOUT MODAL ---
+  // function openCheckoutModal() {
+  //   const checkoutModal = document.getElementById('checkoutModal');
+  //   if (!checkoutModal) {
+  //     console.error('[ERROR] openCheckoutModal: #checkoutModal not found in DOM');
+  //     return;
+  //   }
+  //   const checkoutModalContent = checkoutModal.querySelector('.modal-content');
+  //   if (!checkoutModalContent) {
+  //     console.error('[ERROR] openCheckoutModal: .modal-content not found');
+  //     return;
+  //   }
+  //   checkoutModal.style.display = 'none';
+  //   checkoutModal.classList.remove('active');
+  //   checkoutModalContent.style.transform = 'translateY(0)';
+  //   renderCheckoutModal();
+  //   setTimeout(() => {
+  //     checkoutModal.style.display = 'flex';
+  //     checkoutModal.classList.add('active');
+  //     checkoutModal.setAttribute('aria-hidden', 'false');
+  //     document.body.classList.add('modal-open');
+  //     checkoutModal.focus();
+  //     history.pushState({ popup: true }, '', location.href);
+  //     console.log('[DEBUG] openCheckoutModal: Modal opened, display:', checkoutModal.style.display, 'active:', checkoutModal.classList.contains('active'));
+  //   }, 50);
+  // }
 
-  // --- CLOSE CHECKOUT MODAL ---
-  function closeCheckoutModal() {
-    const checkoutModal = document.getElementById('checkoutModal');
-    if (!checkoutModal) {
-      console.error('[ERROR] closeCheckoutModal: #checkoutModal not found');
-      return;
-    }
-    const checkoutModalContent = checkoutModal.querySelector('.modal-content');
-    checkoutModal.classList.remove('active');
-    checkoutModal.style.display = 'none';
-    checkoutModal.setAttribute('aria-hidden', 'true');
-    document.body.classList.remove('modal-open');
-    checkoutModalContent.style.transform = 'translateY(100%)';
-    if (history.state && history.state.popup) {
-      history.back();
-      console.log('[DEBUG] closeCheckoutModal: History state popped');
-    }
-    console.log('[DEBUG] closeCheckoutModal: Modal closed, display:', checkoutModal.style.display, 'active:', checkoutModal.classList.length);
-  }
+  // // --- CLOSE CHECKOUT MODAL ---
+  // function closeCheckoutModal() {
+  //   const checkoutModal = document.getElementById('checkoutModal');
+  //   if (!checkoutModal) {
+  //     console.error('[ERROR] closeCheckoutModal: #checkoutModal not found');
+  //     return;
+  //   }
+  //   const checkoutModalContent = checkoutModal.querySelector('.modal-content');
+  //   checkoutModal.classList.remove('active');
+  //   checkoutModal.style.display = 'none';
+  //   checkoutModal.setAttribute('aria-hidden', 'true');
+  //   document.body.classList.remove('modal-open');
+  //   checkoutModalContent.style.transform = 'translateY(100%)';
+  //   if (history.state && history.state.popup) {
+  //     history.back();
+  //     console.log('[DEBUG] closeCheckoutModal: History state popped');
+  //   }
+  //   console.log('[DEBUG] closeCheckoutModal: Modal closed, display:', checkoutModal.style.display, 'active:', checkoutModal.classList.length);
+  // }
 
   // --- SERVICE SELECTION ---
   serviceItems.forEach((item, i) => {
@@ -3938,7 +3946,7 @@ phoneInput.maxLength = 13;  // 11 digits + 2 spaces in formatted value
   // --- CONTINUE BUTTON CLICK ---
   continueBtn.addEventListener('click', () => {
     if (!continueBtn.disabled) {
-      openCheckoutModal();
+      openCheckoutModalLocal();
       console.log('[DEBUG] continueBtn: Opening checkout modal');
     }
   });
@@ -4055,153 +4063,153 @@ viewAllLink.addEventListener('click', (e) => {
   alert('Redirect to all transactions page.');
 });
 
-  // --- CHECKOUT MODAL EVENT LISTENERS ---
-  const checkoutModal = document.getElementById('checkoutModal');
-  if (checkoutModal) {
-    const closeCheckoutBtn = checkoutModal.querySelector('.close-btn');
-    const checkoutModalContent = checkoutModal.querySelector('.modal-content');
-    const checkoutPullHandle = checkoutModal.querySelector('.pull-handle');
+//   // --- CHECKOUT MODAL EVENT LISTENERS ---
+//   const checkoutModal = document.getElementById('checkoutModal');
+//   if (checkoutModal) {
+//     const closeCheckoutBtn = checkoutModal.querySelector('.close-btn');
+//     const checkoutModalContent = checkoutModal.querySelector('.modal-content');
+//     const checkoutPullHandle = checkoutModal.querySelector('.pull-handle');
 
-    closeCheckoutBtn.addEventListener('click', () => {
-      closeCheckoutModal();
-      console.log('[DEBUG] closeCheckoutBtn: Clicked');
-    });
-    checkoutModal.addEventListener('click', e => {
-      if (e.target === checkoutModal) {
-        closeCheckoutModal();
-        console.log('[DEBUG] checkoutModal: Backdrop clicked');
-      }
-    });
-    window.addEventListener('keydown', e => {
-      if (e.key === 'Escape' && checkoutModal.classList.contains('active')) {
-        closeCheckoutModal();
-        console.log('[DEBUG] keydown: ESC pressed');
-      }
-    });
+//     closeCheckoutBtn.addEventListener('click', () => {
+//       closeCheckoutModal();
+//       console.log('[DEBUG] closeCheckoutBtn: Clicked');
+//     });
+//     checkoutModal.addEventListener('click', e => {
+//       if (e.target === checkoutModal) {
+//         closeCheckoutModal();
+//         console.log('[DEBUG] checkoutModal: Backdrop clicked');
+//       }
+//     });
+//     window.addEventListener('keydown', e => {
+//       if (e.key === 'Escape' && checkoutModal.classList.contains('active')) {
+//         closeCheckoutModal();
+//         console.log('[DEBUG] keydown: ESC pressed');
+//       }
+//     });
 
-    let startY = 0, translateY = 0, dragging = false;
+//     let startY = 0, translateY = 0, dragging = false;
 
-    function handleCheckoutTouchStart(e) {
-      dragging = true;
-      startY = e.touches[0].clientY;
-      checkoutModalContent.style.transition = 'none';
-      console.log('[DEBUG] handleCheckoutTouchStart: Drag started, startY:', startY);
-    }
+//     function handleCheckoutTouchStart(e) {
+//       dragging = true;
+//       startY = e.touches[0].clientY;
+//       checkoutModalContent.style.transition = 'none';
+//       console.log('[DEBUG] handleCheckoutTouchStart: Drag started, startY:', startY);
+//     }
 
-    function handleCheckoutTouchMove(e) {
-      if (!dragging) return;
-      translateY = Math.max(0, e.touches[0].clientY - startY);
-      checkoutModalContent.style.transform = `translateY(${translateY}px)`;
-      console.log('[DEBUG] handleCheckoutTouchMove: translateY:', translateY);
-    }
+//     function handleCheckoutTouchMove(e) {
+//       if (!dragging) return;
+//       translateY = Math.max(0, e.touches[0].clientY - startY);
+//       checkoutModalContent.style.transform = `translateY(${translateY}px)`;
+//       console.log('[DEBUG] handleCheckoutTouchMove: translateY:', translateY);
+//     }
 
-    function handleCheckoutTouchEnd() {
-      if (!dragging) return;
-      dragging = false;
-      checkoutModalContent.style.transition = 'transform 0.4s ease';
-      if (translateY > 100) {
-        closeCheckoutModal();
-        console.log('[DEBUG] handleCheckoutTouchEnd: Modal closed via drag');
-      } else {
-        checkoutModalContent.style.transform = 'translateY(0)';
-        console.log('[DEBUG] handleCheckoutTouchEnd: Modal reset');
-      }
-    }
+//     function handleCheckoutTouchEnd() {
+//       if (!dragging) return;
+//       dragging = false;
+//       checkoutModalContent.style.transition = 'transform 0.4s ease';
+//       if (translateY > 100) {
+//         closeCheckoutModal();
+//         console.log('[DEBUG] handleCheckoutTouchEnd: Modal closed via drag');
+//       } else {
+//         checkoutModalContent.style.transform = 'translateY(0)';
+//         console.log('[DEBUG] handleCheckoutTouchEnd: Modal reset');
+//       }
+//     }
 
-    checkoutPullHandle.addEventListener('touchstart', handleCheckoutTouchStart);
-    checkoutPullHandle.addEventListener('touchmove', handleCheckoutTouchMove);
-    checkoutPullHandle.addEventListener('touchend', handleCheckoutTouchEnd);
-    checkoutModalContent.addEventListener('touchstart', handleCheckoutTouchStart);
-    checkoutModalContent.addEventListener('touchmove', handleCheckoutTouchMove);
-    checkoutModalContent.addEventListener('touchend', handleCheckoutTouchEnd);
+//     checkoutPullHandle.addEventListener('touchstart', handleCheckoutTouchStart);
+//     checkoutPullHandle.addEventListener('touchmove', handleCheckoutTouchMove);
+//     checkoutPullHandle.addEventListener('touchend', handleCheckoutTouchEnd);
+//     checkoutModalContent.addEventListener('touchstart', handleCheckoutTouchStart);
+//     checkoutModalContent.addEventListener('touchmove', handleCheckoutTouchMove);
+//     checkoutModalContent.addEventListener('touchend', handleCheckoutTouchEnd);
 
-    // Inside checkoutModal event listeners
-const payBtn = document.getElementById('payBtn');
-payBtn.addEventListener('click', () => {
-  if (!payBtn.disabled) {
-    payBtn.disabled = true;
-    payBtn.textContent = 'Processing...';
-    setTimeout(() => {
-      const state = JSON.parse(localStorage.getItem('userState') || '{}');
-      const { provider, planId, number } = state;
-      const rawNumber = normalizePhone(number);
-      if (!rawNumber || rawNumber.length !== 11) {
-        console.error('[ERROR] payBtn: Invalid phone number:', rawNumber, 'Original:', number);
-        alert('Invalid phone number. Please enter a valid Nigerian number.');
-        payBtn.disabled = false;
-        payBtn.textContent = 'Pay';
-        return;
-      }
-      const plan = findPlanById(planId, provider);
-      if (!plan) {
-        console.error('[ERROR] payBtn: No plan found for ID:', planId);
-        alert('Invalid plan selected. Please try again.');
-        payBtn.disabled = false;
-        payBtn.textContent = 'Pay';
-        return;
-      }
-      if (userBalance < plan.price) {
-        console.error('[ERROR] payBtn: Insufficient balance:', userBalance, 'Required:', plan.price);
-        alert('Insufficient balance. Please add funds.');
-        payBtn.disabled = false;
-        payBtn.textContent = 'Pay';
-        return;
-      }
+//     // Inside checkoutModal event listeners
+// const payBtn = document.getElementById('payBtn');
+// payBtn.addEventListener('click', () => {
+//   if (!payBtn.disabled) {
+//     payBtn.disabled = true;
+//     payBtn.textContent = 'Processing...';
+//     setTimeout(() => {
+//       const state = JSON.parse(localStorage.getItem('userState') || '{}');
+//       const { provider, planId, number } = state;
+//       const rawNumber = normalizePhone(number);
+//       if (!rawNumber || rawNumber.length !== 11) {
+//         console.error('[ERROR] payBtn: Invalid phone number:', rawNumber, 'Original:', number);
+//         alert('Invalid phone number. Please enter a valid Nigerian number.');
+//         payBtn.disabled = false;
+//         payBtn.textContent = 'Pay';
+//         return;
+//       }
+//       const plan = findPlanById(planId, provider);
+//       if (!plan) {
+//         console.error('[ERROR] payBtn: No plan found for ID:', planId);
+//         alert('Invalid plan selected. Please try again.');
+//         payBtn.disabled = false;
+//         payBtn.textContent = 'Pay';
+//         return;
+//       }
+//       if (userBalance < plan.price) {
+//         console.error('[ERROR] payBtn: Insufficient balance:', userBalance, 'Required:', plan.price);
+//         alert('Insufficient balance. Please add funds.');
+//         payBtn.disabled = false;
+//         payBtn.textContent = 'Pay';
+//         return;
+//       }
 
-      // Mock API call
-      const mockResponse = { success: true, transactionId: `TX${Date.now()}` };
-      console.log('[DEBUG] payBtn: Mock API response:', mockResponse);
+//       // Mock API call
+//       const mockResponse = { success: true, transactionId: `TX${Date.now()}` };
+//       console.log('[DEBUG] payBtn: Mock API response:', mockResponse);
 
-      // Update balance
-      userBalance -= plan.price;
-      updateBalanceDisplay();
+//       // Update balance
+//       userBalance -= plan.price;
+//       updateBalanceDisplay();
 
-      // Determine subType for plan type display
-      let subType = '';
-      if (provider === 'mtn') {
-        subType = planId.includes('awoof') ? 'AWOOF' : 'GIFTING';
-      } else if (provider === 'airtel') {
-        subType = planId.includes('awoof') ? 'AWOOF' : 'CG';
-      } else if (provider === 'glo') {
-        subType = planId.includes('cg') ? 'CG' : 'GIFTING';
-      }
+//       // Determine subType for plan type display
+//       let subType = '';
+//       if (provider === 'mtn') {
+//         subType = planId.includes('awoof') ? 'AWOOF' : 'GIFTING';
+//       } else if (provider === 'airtel') {
+//         subType = planId.includes('awoof') ? 'AWOOF' : 'CG';
+//       } else if (provider === 'glo') {
+//         subType = planId.includes('cg') ? 'CG' : 'GIFTING';
+//       }
 
-      // Add to transactions
-      const transaction = {
-        type: 'data',
-        description: 'Data Purchase',
-        amount: plan.price,
-        phone: rawNumber,
-        provider,
-        subType,
-        data: plan.data,
-        duration: plan.duration,
-        timestamp: new Date().toISOString(),
-        status: 'success' // Mock success
-      };
-      transactions.push(transaction);
-      recentTransactions.push(transaction);
-      localStorage.setItem('recentTransactions', JSON.stringify(recentTransactions));
-      renderTransactions();
-      renderRecentTransactions();
+//       // Add to transactions
+//       const transaction = {
+//         type: 'data',
+//         description: 'Data Purchase',
+//         amount: plan.price,
+//         phone: rawNumber,
+//         provider,
+//         subType,
+//         data: plan.data,
+//         duration: plan.duration,
+//         timestamp: new Date().toISOString(),
+//         status: 'success' // Mock success
+//       };
+//       transactions.push(transaction);
+//       recentTransactions.push(transaction);
+//       localStorage.setItem('recentTransactions', JSON.stringify(recentTransactions));
+//       renderTransactions();
+//       renderRecentTransactions();
 
-      // Clear phone number, reset provider to MTN, and clear plan selection
-      phoneInput.value = '';
-      document.querySelectorAll('.plan-box.selected').forEach(p => p.classList.remove('selected'));
-      selectProvider('mtn');
-      updateContactOrCancel();
-      updateContinueState();
-      saveUserState();
+//       // Clear phone number, reset provider to MTN, and clear plan selection
+//       phoneInput.value = '';
+//       document.querySelectorAll('.plan-box.selected').forEach(p => p.classList.remove('selected'));
+//       selectProvider('mtn');
+//       updateContactOrCancel();
+//       updateContinueState();
+//       saveUserState();
 
-      alert(`Payment of ₦${plan.price} for ${plan.data} (${plan.duration}) to ${formatNigeriaNumber(rawNumber).value} successful!`);
-      closeCheckoutModal();
-      console.log('[DEBUG] payBtn: Payment processed, new balance:', userBalance, 'Transaction:', transaction);
-      payBtn.disabled = false;
-      payBtn.textContent = 'Pay';
-    }, 1000);
-  }
-});
-  }
+//       alert(`Payment of ₦${plan.price} for ${plan.data} (${plan.duration}) to ${formatNigeriaNumber(rawNumber).value} successful!`);
+//       closeCheckoutModal();
+//       console.log('[DEBUG] payBtn: Payment processed, new balance:', userBalance, 'Transaction:', transaction);
+//       payBtn.disabled = false;
+//       payBtn.textContent = 'Pay';
+//     }, 1000);
+//   }
+// });
+//   }
 
   // --- CONTACT/CANCEL BUTTON ICONS ---
   const contactSVG = `<img src="/frontend/svg/contact-icon.svg" alt="Contact Icon" class="contact-btn contact-btn-svg" />`;
@@ -5534,7 +5542,7 @@ function __fg_pin_clearAllInputs() {
   const pinVerifyInputs = pinVerifyModal?.querySelectorAll('input[data-fg-pin]');
   const pinVerifyAlert = q('#pinVerifyAlert');
   const pinVerifyAlertMsg = q('#pinVerifyAlertMsg');
-  const payBtn = q('#payBtn');
+  // const payBtn = q('#payBtn');
   const inactivityModal = q('#inactivityModal');
   const inactivityConfirmBtn = q('#inactivityConfirmBtn');
 
@@ -5966,22 +5974,22 @@ async function updateStoredPin(uid, newPin) {
   }
 
   // Initialize checkout PIN verification
-  function initCheckoutPin() {
-    if (payBtn) {
-      payBtn.addEventListener('click', async () => {
-        const info = await getUid();
-        if (!info || !info.uid) {
-          notify('You must be signed in to proceed with payment', 'error');
-          return;
-        }
-        await window.checkPinExists((hasPin) => {
-          if (hasPin) {
-            window.ModalManager.openModal('pinVerifyModal');
-          }
-        }, 'checkout');
-      });
-    }
-  }
+  // function initCheckoutPin() {
+  //   if (payBtn) {
+  //     payBtn.addEventListener('click', async () => {
+  //       const info = await getUid();
+  //       if (!info || !info.uid) {
+  //         notify('You must be signed in to proceed with payment', 'error');
+  //         return;
+  //       }
+  //       await window.checkPinExists((hasPin) => {
+  //         if (hasPin) {
+  //           window.ModalManager.openModal('pinVerifyModal');
+  //         }
+  //       }, 'checkout');
+  //     });
+  //   }
+  // }
 
   // Initialize inactivity handling
   // function initInactivity() {

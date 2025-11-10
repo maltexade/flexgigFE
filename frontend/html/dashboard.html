@@ -372,46 +372,71 @@
           </div>
           <button id="continueBtn" class="continue-btn" disabled>Continue</button>
           <div id="checkoutModal" class="modal" aria-hidden="true">
-            <div class="modal-content">
-              <div class="pull-handle"></div>
-              <button class="close-btn" data-close type="button" aria-label="Close checkout modal">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-                  <circle cx="12" cy="12" r="10" fill="#bfc7d3"/>
-                  <path d="M8 8l8 8M16 8l-8 8" stroke="#021827" stroke-width="2" stroke-linecap="round"/>
-                </svg>
-              </button>
-              <div class="section-header">
-                <h2>Confirm</h2>
-              </div>
-              <div class="checkout-content">
-                <div class="send-to-section">
-                  <h3>Send to</h3>
-                  <p id="checkout-phone"></p>
-                </div>
-                <div class="checkout-details">
-                  <div class="details-left">
-                    <p>Service</p>
-                    <p>Price</p>
-                    <p>Data Package</p>
-                    <p>Provider</p>
-                  </div>
-                  <div class="details-right">
-                    <p><span class="data-icon">
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                        <rect x="6" y="12" width="2" height="8" fill="#1E90FF"/>
-                        <rect x="10" y="8" width="2" height="12" fill="#1E90FF"/>
-                        <rect x="14" y="4" width="2" height="16" fill="#1E90FF"/>
-                      </svg>
-                    </span>Data</p>
-                    <p id="checkout-price"></p>
-                    <p id="checkout-data"></p>
-                    <p id="checkout-provider"></p>
-                  </div>
-                </div>
-                <button id="payBtn" class="pay-btn" type="button" disabled>Pay</button>
-              </div>
-            </div>
-          </div>
+  <div class="modal-content">
+    <div class="modal-top">
+      <div class="handle"></div>
+      <button class="close-btn" data-close type="button" aria-label="Close checkout modal">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+          <circle cx="12" cy="12" r="10" fill="#2f3136" />
+          <path d="M8 8l8 8M16 8l-8 8" stroke="#fff" stroke-width="2" stroke-linecap="round" />
+        </svg>
+      </button>
+    </div>
+
+    <!-- PRICE -->
+    <div class="checkout-price">
+      <h1 id="checkout-price">₦1,200.00</h1>
+    </div>
+
+    <!-- INFO SECTION -->
+    <div class="checkout-info">
+      <div class="info-row">
+        <span class="label">Product Name</span>
+        <span id="checkout-service" class="value">Mobile Data</span>
+      </div>
+
+      <div class="info-row">
+        <span class="label">Provider</span>
+        <span id="checkout-provider" class="value">MTN</span>
+      </div>
+
+      <div class="info-row">
+        <span class="label">Recipient Mobile</span>
+        <span id="checkout-phone" class="value">09038492701</span>
+      </div>
+
+      <div class="info-row">
+  <span class="label">Data Bundle</span>
+  <span class="value" id="checkout-data">2GB</span>
+</div>
+
+<div class="info-row duration-row">
+  <span class="label">Duration</span>
+  <span class="value" id="checkout-duration">30 Days</span>
+</div>
+
+
+      <div class="info-row">
+        <span class="label">Amount</span>
+        <span class="value">₦1,200.00</span>
+      </div>
+    </div>
+
+    <!-- DIVIDER -->
+    <div class="divider"></div>
+
+    <!-- BALANCE -->
+    <div class="balance-inline">
+      <span class="label">Available Balance</span>
+      <span id="checkout-balance" class="balance-value">₦12,560.00</span>
+    </div>
+
+    <!-- PAY BUTTON -->
+    <button id="payBtn" class="pay-btn active" type="button">Pay</button>
+  </div>
+</div>
+
+
         </div>
         <div class="recent-transactions">
           <h4>
@@ -1498,5 +1523,6 @@
   <script src="/frontend/js/modalManager.js" defer></script>
   <script src="/frontend/js/resetPin.js" defer></script>
   <script src="/frontend/js/referral.js" defer></script>
+  <script src="/frontend/js/checkout.js" defer></script>
 </body>
 </html>

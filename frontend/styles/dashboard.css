@@ -1108,205 +1108,190 @@
   }
 }
 
-
-/* Checkout Modal */
 #checkoutModal {
   display: none;
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: #18191cbe;
-  z-index: 1000;
-  backdrop-filter: blur(5px);
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(6px);
+  z-index: 10001;
+  justify-content: center;
+  align-items: flex-end;
+  transition: opacity 0.3s ease;
 }
+
 #checkoutModal.active {
   display: flex;
-  align-items: flex-end;
-  animation: ease-in 3.5s ease;
+  opacity: 1;
 }
+
+/* Modal Container */
 #checkoutModal .modal-content {
-  background: #18191C;
   width: 100%;
   max-width: 420px;
-  height: 62vh;
-  border-top-left-radius: 20px;
-  border-top-right-radius: 20px;
-  box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.5);
-  position: relative;
-  transition: transform 0.4s ease, opacity 0.4s ease;
+  background: #18191b;
+  border-top-left-radius: 18px;
+  border-top-right-radius: 18px;
+  padding: 10px 18px 20px;
+  box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.4);
   transform: translateY(100%);
   opacity: 0;
-  overflow-y: hidden;
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-  margin-bottom: 60px;
+  transition: all 0.35s ease;
+  height: 62vh;
 }
+
 #checkoutModal.active .modal-content {
   transform: translateY(0);
   opacity: 1;
 }
 
-#checkoutModal .pull-handle {
-  display: none;
-  width: 60px;
-  height: 6px;
-  background: #92918d;
+/* Handle + Close */
+.modal-top {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+  padding: 6px 0 4px;
+}
+
+.modal-top .handle {
+  width: 46px;
+  height: 5px;
+  background: #3a3b3d;
   border-radius: 3px;
-  opacity: 0.9;
-  transition: opacity 0.3s ease;
 }
-#checkoutModal .pull-handle:hover {
-  opacity: 1;
-}
-#checkoutModal .close-btn {
+
+.modal-top .close-btn {
   position: absolute;
-  top: 12px;
-  right: 12px;
+  right: 15px;
+  top: 2px;
   background: none;
   border: none;
-  padding: 10px;
   cursor: pointer;
-  transition: transform 0.3s ease;
+  transition: opacity 0.3s ease;
 }
-#checkoutModal .close-btn:hover {
-  transform: scale(1.2);
+.modal-top .close-btn:hover {
+  opacity: 0.7;
 }
-#checkoutModal .section-header {
+
+/* Price */
+.checkout-price {
   text-align: center;
-  padding: 12px 0;
-  border-bottom: 1px solid rgba(255, 215, 0, 0.2);
+  padding: 6px 0 10px;
 }
-#checkoutModal .section-header h2 {
-  font-size: 1.6rem;
-  font-weight: 600;
-  color: #ffffff;
-  margin-top: 15px;
-  letter-spacing: 1px;
+.checkout-price h1 {
+  font-size: 1.8rem;
+  color: #fff;
+  font-weight: 700;
 }
-#checkoutModal .send-to-section {
-  padding: 15px;
-  text-align: center;
-  border-radius: 10px;
-  margin: 10px 15px;
+
+/* Info Rows */
+.checkout-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+  background: transparent;
 }
-#checkoutModal .send-to-section h3 {
-  font-size: 1rem;
-  font-weight: 600;
-  color: #ffffff;
-  margin: 0 0 6px;
-}
-#checkoutModal .send-to-section p {
-  font-size: 1.5rem;
-  font-weight: 600;
-  color: #ffffff;
-  margin: 0;
-  font-family: 'Trebuchet MS', Arial, sans-serif;
-}
-#checkoutModal .checkout-details {
+
+.info-row {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
-  padding: 15px;
-  gap: 15px;
-  margin: 10px 15px;
-  border-radius: 10px;
-  flex-wrap: wrap; /* Ensures responsiveness */
+  align-items: center;
+  padding: 8px 10px;
+
+  
 }
-#checkoutModal .details-left,
-#checkoutModal .details-right {
-  flex: 1;
-  min-width: 120px; /* Prevents text squish */
+
+.info-row .label {
+  color: #b5b5b5;
+  font-size: 0.9rem;
 }
-#checkoutModal .details-left p {
+.info-row .value {
+  color: #fff;
   font-size: 0.95rem;
   font-weight: 500;
-  color: #1E90FF;
-  margin: 10px 0;
-  line-height: 1.5;
+  text-align: right;
 }
-#checkoutModal .details-right p {
+
+
+
+/* Divider */
+.divider {
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  margin: 10px 0;
+}
+
+/* Duration standalone row */
+.duration-row {
+  padding: 8px 10px;
+}
+
+.duration-row .label {
+  color: #b5b5b5;
+  font-size: 0.9rem;
+}
+
+.duration-row .value {
+  color: #fff;
+  font-weight: 500;
   font-size: 0.95rem;
-  font-weight: 600;
-  color: #ffffff;
-  margin: 10px 0;
-  line-height: 1.5;
+  text-align: right;
+}
+
+
+/* Balance inline */
+.balance-inline {
   display: flex;
+  justify-content: space-between;
   align-items: center;
-  gap: 8px;
-  justify-content: flex-end; /* Always stick right */
+  background: #1f2022;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  padding: 10px 12px;
 }
-#checkoutModal .details-right svg {
-  width: 18px;
-  height: 18px;
+.balance-inline .label {
+  color: #b5b5b5;
+  font-size: 0.9rem;
 }
+.balance-inline .balance-value {
+  color: #fff;
+  font-weight: 600;
+  font-size: 1rem;
+}
+
+/* Pay Button */
 #checkoutModal .pay-btn {
-  display: block;
-  width: 90%;
-  margin: 20px auto;
+  width: 100%;
+  margin-top: 12px;
   padding: 14px;
-  font-size: 1.1rem;
+  font-size: 1.05rem;
   font-weight: 600;
   color: #fff;
-  background: linear-gradient(90deg, #00B13C, #00cc44);
+  background: linear-gradient(90deg, #00b14f, #00c853);
   border: none;
-  border-radius: 12px;
-  cursor: not-allowed;
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
-  transition: transform 0.3s ease, box-shadow 0.3s ease;
+  border-radius: 10px;
+  transition: all 0.3s ease;
 }
-#checkoutModal .pay-btn.active {
-  cursor: pointer;
-}
-#checkoutModal .pay-btn.active:hover {
-  transform: translateY(-3px);
+#checkoutModal .pay-btn:hover {
+  transform: translateY(-2px);
   box-shadow: 0 6px 14px rgba(0, 0, 0, 0.4);
 }
 
-/* Mobile Adjustments */
-@media (max-width: 482px) {
-    #checkoutModal .modal-content {
-      position: relative;
-      width: 100%;
-      max-height: 90vh;         /* limit height so it doesn’t cover everything */
-      border-radius: 16px 16px 0 0;
-      margin: 0;
+/* Mobile */
+@media (max-width: 480px) {
+  #checkoutModal .modal-content {
+    height: 65vh;
+    padding: 10px 14px 18px;
   }
-  #checkoutModal .pull-handle {
-    display: block;
-    margin: 0 auto;
-    margin-top: 10px;
+  .checkout-price h1 {
+    font-size: 1.6rem;
   }
-  #checkoutModal .section-header h2 {
-    font-size: 1.4rem;
-  }
-  #checkoutModal .send-to-section {
-    padding: 12px;
-    margin: 8px 12px;
-  }
-  #checkoutModal .send-to-section p {
-    font-size: 1.1rem;
-  }
-  #checkoutModal .checkout-details {
-    padding: 12px;
-    margin: 8px 12px;
-    gap: 10px;
-  }
-  #checkoutModal .details-left p,
-  #checkoutModal .details-right p {
-    font-size: 0.9rem;
-    margin: 8px 0;
-  }
-  #checkoutModal .details-right svg {
-    width: 16px;
-    height: 16px;
-  }
-  #checkoutModal .pay-btn {
-    padding: 12px;
-    font-size: 1rem;
+  .info-row {
+    padding: 7px 9px;
   }
 }
+
 
 
 
