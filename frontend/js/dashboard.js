@@ -1370,7 +1370,7 @@ async function handleBioToggle(e) {
   }
 }
 
-const IDLE_TIME = 10 * 1000; // 10 min in prod
+const IDLE_TIME = 600 * 1000; // 60 min in prod
 
 // === Safety shim: ensure pollStatus exists (place this near top, before onDashboardLoad runs) ===
 if (typeof pollStatus === 'undefined') {
