@@ -1113,7 +1113,6 @@
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.65);
-  backdrop-filter: blur(6px);
   z-index: 10001;
   justify-content: center;
   align-items: flex-end;
@@ -1152,13 +1151,6 @@
   align-items: center;
   position: relative;
   padding: 6px 0 4px;
-}
-
-.modal-top .handle {
-  width: 46px;
-  height: 5px;
-  background: #3a3b3d;
-  border-radius: 3px;
 }
 
 .modal-top .close-btn {

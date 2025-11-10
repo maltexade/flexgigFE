@@ -106,7 +106,7 @@ function hideBackdrop(modal) {
     changePwdModal: { id: 'changePwdModal', element: null, hasPullHandle: false },
     rpResetModal: { id: 'rpResetModal', element: null, hasPullHandle: false },
     referralModal: { id: 'referralModal', element: null, hasPullHandle: false },
-    checkoutModal: { id: 'checkoutModal', element: null, hasPullHandle: true },
+    checkoutModal: { id: 'checkoutModal', element: null, hasPullHandle: false },
   };
 
 

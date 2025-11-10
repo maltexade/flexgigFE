@@ -28,7 +28,6 @@ domReady(() => {
 
   const content = modal.querySelector('.modal-content');
   const closeBtn = modal.querySelector('.close-btn');
-  const pullHandle = modal.querySelector('.pull-handle') || modal.querySelector('.handle');
   const payBtn = document.getElementById('payBtn');
 
   const safeNotify = (msg, type = 'info') => {
