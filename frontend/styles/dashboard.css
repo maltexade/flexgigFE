@@ -1283,6 +1283,53 @@
     padding: 7px 9px;
   }
 }
+@media (max-width: 768px) {
+  #checkoutModal {
+    margin-bottom: 10px;
+  }
+}
+/* Small tablets (portrait) */
+@media (max-width: 768px) {
+  #checkoutModal .modal-content {
+   
+    height: 60vh;     /* slightly shorter */
+    padding: 12px 16px 20px;
+  }
+  .checkout-price h1 {
+    font-size: 1.5rem;
+  }
+  .info-row .label,
+  .info-row .value {
+    font-size: 0.85rem;
+  }
+}
+
+/* Tablets & small laptops */
+@media (min-width: 769px) and (max-width: 1024px) {
+  #checkoutModal .modal-content {
+    max-width: 600px; /* wider modal for tablets */
+    height: 70vh;
+  }
+  .checkout-price h1 {
+    font-size: 1.7rem;
+  }
+}
+
+/* Larger desktops */
+@media (min-width: 1025px) {
+  #checkoutModal {
+    align-items: center; /* center vertically on big screens */
+  }
+  #checkoutModal .modal-content {
+    max-width: 700px;   /* give more breathing room */
+    height: auto;       /* let content define height */
+    border-radius: 18px;
+    padding: 20px 24px 28px;
+  }
+  .checkout-price h1 {
+    font-size: 2rem;
+  }
+}
 
 
 

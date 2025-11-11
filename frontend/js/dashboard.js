@@ -1,8 +1,7 @@
 import { mtnAwoofPlans, mtnGiftingPlans, airtelAwoofPlans, airtelCgPlans, gloCgPlans, gloGiftingPlans, ninemobilePlans } from './dataPlans.js';
 import {
-  openCheckoutModal as openCheckoutModalLocal,
+  openCheckoutModal,
   closeCheckoutModal,
-  initCheckoutModal,
   onPayClicked
 } from '/frontend/js/checkout.js';
 
@@ -3635,52 +3634,52 @@ async function triggerCheckoutReauth() {
   console.log('[DEBUG] renderCheckoutModal: Rendered for provider:', provider, 'planId:', planId, 'number:', number);
 }
 
-  // --- OPEN CHECKOUT MODAL ---
-  function openCheckoutModal() {
-    const checkoutModal = document.getElementById('checkoutModal');
-    if (!checkoutModal) {
-      console.error('[ERROR] openCheckoutModal: #checkoutModal not found in DOM');
-      return;
-    }
-    const checkoutModalContent = checkoutModal.querySelector('.modal-content');
-    if (!checkoutModalContent) {
-      console.error('[ERROR] openCheckoutModal: .modal-content not found');
-      return;
-    }
-    checkoutModal.style.display = 'none';
-    checkoutModal.classList.remove('active');
-    checkoutModalContent.style.transform = 'translateY(0)';
-    renderCheckoutModal();
-    setTimeout(() => {
-      checkoutModal.style.display = 'flex';
-      checkoutModal.classList.add('active');
-      checkoutModal.setAttribute('aria-hidden', 'false');
-      document.body.classList.add('modal-open');
-      checkoutModal.focus();
-      history.pushState({ popup: true }, '', location.href);
-      console.log('[DEBUG] openCheckoutModal: Modal opened, display:', checkoutModal.style.display, 'active:', checkoutModal.classList.contains('active'));
-    }, 50);
-  }
+  // // --- OPEN CHECKOUT MODAL ---
+  // function openCheckoutModal() {
+  //   const checkoutModal = document.getElementById('checkoutModal');
+  //   if (!checkoutModal) {
+  //     console.error('[ERROR] openCheckoutModal: #checkoutModal not found in DOM');
+  //     return;
+  //   }
+  //   const checkoutModalContent = checkoutModal.querySelector('.modal-content');
+  //   if (!checkoutModalContent) {
+  //     console.error('[ERROR] openCheckoutModal: .modal-content not found');
+  //     return;
+  //   }
+  //   checkoutModal.style.display = 'none';
+  //   checkoutModal.classList.remove('active');
+  //   checkoutModalContent.style.transform = 'translateY(0)';
+  //   renderCheckoutModal();
+  //   setTimeout(() => {
+  //     checkoutModal.style.display = 'flex';
+  //     checkoutModal.classList.add('active');
+  //     checkoutModal.setAttribute('aria-hidden', 'false');
+  //     document.body.classList.add('modal-open');
+  //     checkoutModal.focus();
+  //     history.pushState({ popup: true }, '', location.href);
+  //     console.log('[DEBUG] openCheckoutModal: Modal opened, display:', checkoutModal.style.display, 'active:', checkoutModal.classList.contains('active'));
+  //   }, 50);
+  // }
 
-  // --- CLOSE CHECKOUT MODAL ---
-  function closeCheckoutModal() {
-    const checkoutModal = document.getElementById('checkoutModal');
-    if (!checkoutModal) {
-      console.error('[ERROR] closeCheckoutModal: #checkoutModal not found');
-      return;
-    }
-    const checkoutModalContent = checkoutModal.querySelector('.modal-content');
-    checkoutModal.classList.remove('active');
-    checkoutModal.style.display = 'none';
-    checkoutModal.setAttribute('aria-hidden', 'true');
-    document.body.classList.remove('modal-open');
-    checkoutModalContent.style.transform = 'translateY(100%)';
-    if (history.state && history.state.popup) {
-      history.back();
-      console.log('[DEBUG] closeCheckoutModal: History state popped');
-    }
-    console.log('[DEBUG] closeCheckoutModal: Modal closed, display:', checkoutModal.style.display, 'active:', checkoutModal.classList.length);
-  }
+  // // --- CLOSE CHECKOUT MODAL ---
+  // function closeCheckoutModal() {
+  //   const checkoutModal = document.getElementById('checkoutModal');
+  //   if (!checkoutModal) {
+  //     console.error('[ERROR] closeCheckoutModal: #checkoutModal not found');
+  //     return;
+  //   }
+  //   const checkoutModalContent = checkoutModal.querySelector('.modal-content');
+  //   checkoutModal.classList.remove('active');
+  //   checkoutModal.style.display = 'none';
+  //   checkoutModal.setAttribute('aria-hidden', 'true');
+  //   document.body.classList.remove('modal-open');
+  //   checkoutModalContent.style.transform = 'translateY(100%)';
+  //   if (history.state && history.state.popup) {
+  //     history.back();
+  //     console.log('[DEBUG] closeCheckoutModal: History state popped');
+  //   }
+  //   console.log('[DEBUG] closeCheckoutModal: Modal closed, display:', checkoutModal.style.display, 'active:', checkoutModal.classList.length);
+  // }
 
   // --- SERVICE SELECTION ---
   serviceItems.forEach((item, i) => {
@@ -3946,7 +3945,7 @@ phoneInput.maxLength = 13;  // 11 digits + 2 spaces in formatted value
   // --- CONTINUE BUTTON CLICK ---
   continueBtn.addEventListener('click', () => {
     if (!continueBtn.disabled) {
-      openCheckoutModalLocal();
+      window.openCheckoutModal();
       console.log('[DEBUG] continueBtn: Opening checkout modal');
     }
   });
@@ -4063,65 +4062,19 @@ viewAllLink.addEventListener('click', (e) => {
   alert('Redirect to all transactions page.');
 });
 
-//   // --- CHECKOUT MODAL EVENT LISTENERS ---
+// //   // --- CHECKOUT MODAL EVENT LISTENERS ---
 //   const checkoutModal = document.getElementById('checkoutModal');
 //   if (checkoutModal) {
 //     const closeCheckoutBtn = checkoutModal.querySelector('.close-btn');
 //     const checkoutModalContent = checkoutModal.querySelector('.modal-content');
-//     const checkoutPullHandle = checkoutModal.querySelector('.pull-handle');
 
-//     closeCheckoutBtn.addEventListener('click', () => {
-//       closeCheckoutModal();
-//       console.log('[DEBUG] closeCheckoutBtn: Clicked');
-//     });
-//     checkoutModal.addEventListener('click', e => {
-//       if (e.target === checkoutModal) {
-//         closeCheckoutModal();
-//         console.log('[DEBUG] checkoutModal: Backdrop clicked');
-//       }
-//     });
+
 //     window.addEventListener('keydown', e => {
 //       if (e.key === 'Escape' && checkoutModal.classList.contains('active')) {
-//         closeCheckoutModal();
+//         closeCheckoutModalLocal();
 //         console.log('[DEBUG] keydown: ESC pressed');
 //       }
 //     });
-
-//     let startY = 0, translateY = 0, dragging = false;
-
-//     function handleCheckoutTouchStart(e) {
-//       dragging = true;
-//       startY = e.touches[0].clientY;
-//       checkoutModalContent.style.transition = 'none';
-//       console.log('[DEBUG] handleCheckoutTouchStart: Drag started, startY:', startY);
-//     }
-
-//     function handleCheckoutTouchMove(e) {
-//       if (!dragging) return;
-//       translateY = Math.max(0, e.touches[0].clientY - startY);
-//       checkoutModalContent.style.transform = `translateY(${translateY}px)`;
-//       console.log('[DEBUG] handleCheckoutTouchMove: translateY:', translateY);
-//     }
-
-//     function handleCheckoutTouchEnd() {
-//       if (!dragging) return;
-//       dragging = false;
-//       checkoutModalContent.style.transition = 'transform 0.4s ease';
-//       if (translateY > 100) {
-//         closeCheckoutModal();
-//         console.log('[DEBUG] handleCheckoutTouchEnd: Modal closed via drag');
-//       } else {
-//         checkoutModalContent.style.transform = 'translateY(0)';
-//         console.log('[DEBUG] handleCheckoutTouchEnd: Modal reset');
-//       }
-//     }
-
-//     checkoutPullHandle.addEventListener('touchstart', handleCheckoutTouchStart);
-//     checkoutPullHandle.addEventListener('touchmove', handleCheckoutTouchMove);
-//     checkoutPullHandle.addEventListener('touchend', handleCheckoutTouchEnd);
-//     checkoutModalContent.addEventListener('touchstart', handleCheckoutTouchStart);
-//     checkoutModalContent.addEventListener('touchmove', handleCheckoutTouchMove);
-//     checkoutModalContent.addEventListener('touchend', handleCheckoutTouchEnd);
 
 //     // Inside checkoutModal event listeners
 // const payBtn = document.getElementById('payBtn');
@@ -4155,6 +4108,7 @@ viewAllLink.addEventListener('click', (e) => {
 //         payBtn.textContent = 'Pay';
 //         return;
 //       }
+//       onPayClicked(); // Trigger re-authentication
 
 //       // Mock API call
 //       const mockResponse = { success: true, transactionId: `TX${Date.now()}` };
