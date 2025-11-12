@@ -563,7 +563,7 @@
 }
 
 /* Close Button (now in header) */
-.close-btn {
+.close-btn, .ap-close-btn {
  background: transparent;
  border: none;
  font-size: 28px;

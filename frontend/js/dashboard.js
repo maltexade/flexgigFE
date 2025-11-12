@@ -1369,7 +1369,7 @@ async function handleBioToggle(e) {
   }
 }
 
-const IDLE_TIME = 600 * 1000; // 10 min in prod
+const IDLE_TIME = 10 * 60 * 1000; // 10 min in prod
 
 // === Safety shim: ensure pollStatus exists (place this near top, before onDashboardLoad runs) ===
 if (typeof pollStatus === 'undefined') {
@@ -13317,53 +13317,152 @@ let __reauthPromptShowing = false;
  * One-time (re)setup of inactivity detection.
  * Re-runs safely if user later sets a PIN or enables biometrics.
  */
+// Unified single setupInactivity — replace both previous implementations with this one.
 async function setupInactivity() {
   try {
-    const reauthCheck = await shouldReauth();
+    console.debug('[setupInactivity] called');
 
-    // If no reason to reauth yet (no PIN or biometrics), don't attach listeners
-    if (!reauthCheck.needsReauth) {
-      console.debug('[inactivity] skipped (no pin/bio yet)');
+    // If already set up, no-op
+    if (typeof __inactivitySetupDone !== 'undefined' && __inactivitySetupDone) {
+      console.debug('[setupInactivity] already set up, skipping');
+      return;
+    }
+
+    // Ask the canonical check function if available (defensive)
+    let reauthCheck = { needsReauth: true };
+    try {
+      if (typeof shouldReauth === 'function') {
+        reauthCheck = await shouldReauth();
+      } else {
+        console.debug('[setupInactivity] shouldReauth not found; assuming reauth required');
+      }
+    } catch (e) {
+      console.warn('[setupInactivity] shouldReauth threw; defaulting to needsReauth=true', e);
+    }
+
+    if (!reauthCheck || !reauthCheck.needsReauth) {
+      console.debug('[setupInactivity] skipped (no pin/bio yet or no reauth needed)');
       __inactivitySetupDone = false;
       return;
     }
 
-    if (__inactivitySetupDone) {
-      console.debug('[inactivity] already set up');
-      return;
-    }
-
+    // Mark setup done
     __inactivitySetupDone = true;
-    console.debug('[inactivity] setup started');
+    console.debug('[setupInactivity] proceeding to attach listeners');
 
-    const allEvents = [
-      'mousemove', 'keydown', 'click', 'scroll',
-      'touchstart', 'touchend', 'touchmove'
-    ];
+    // Defensive fallbacks for globals that may exist in your file
+    const IDLE = (typeof IDLE_TIME !== 'undefined') ? IDLE_TIME : (10 * 60 * 1000);
+    const DEBOUNCE_MS = (typeof RESET_DEBOUNCE_MS !== 'undefined') ? RESET_DEBOUNCE_MS : 500;
+    const VIS_DEBOUNCE_MS = DEBOUNCE_MS;
+    const events = ['mousemove','keydown','click','scroll','touchstart','touchend','touchmove','pointermove'];
 
-    allEvents.forEach(evt =>
-      document.addEventListener(evt, resetIdleTimer, { passive: true })
-    );
+    // Use existing resetIdleTimer if present; otherwise create a safe local shim that stores lastActive
+    const callReset = (function(){
+      if (typeof resetIdleTimer === 'function') return resetIdleTimer;
+      return function fallbackReset() {
+        try {
+          const now = Date.now();
+          try { localStorage.setItem('lastActive', String(now)); } catch(e){}
+          if (typeof __idleTimer !== 'undefined' && __idleTimer) {
+            try { clearTimeout(__idleTimer); } catch(e){}
+            __idleTimer = null;
+          }
+          // schedule fallback timer only if no global show function
+          if (typeof showInactivityPrompt === 'function') {
+            __idleTimer = setTimeout(() => { try { showInactivityPrompt(); } catch(e){} }, IDLE);
+          }
+        } catch (e) { console.warn('[setupInactivity] fallbackReset error', e); }
+      };
+    })();
 
-    // When tab returns to focus, check if time expired
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') {
-        const last = Number(localStorage.getItem('lastActive') || 0);
-        const diff = Date.now() - last;
-        if (diff > IDLE_TIME) {
-          showInactivityPrompt();
-        } else {
-          resetIdleTimer();
-        }
+    // Attach user-interaction listeners (passive to avoid input blocking)
+    events.forEach(evt => {
+      try {
+        document.addEventListener(evt, callReset, { passive: true });
+      } catch (e) {
+        // some older browsers don't accept options object
+        try { document.addEventListener(evt, callReset); } catch(err) { console.warn('[setupInactivity] addEventListener failed for', evt, err); }
       }
     });
+    console.debug('[setupInactivity] interaction listeners attached:', events);
 
-    // Start timer immediately
-    resetIdleTimer();
+    // Visibility handler (single source of truth for visibility-based idle checks)
+    let lastVisEvent = 0;
+    const visibilityHandler = function () {
+      try {
+        const now = Date.now();
+        if (now - lastVisEvent < VIS_DEBOUNCE_MS) return;
+        lastVisEvent = now;
+
+        console.debug('[setupInactivity] visibilitychange ->', document.visibilityState);
+
+        if (document.visibilityState === 'visible') {
+          // compute conservative idle: prefer stored lastActive, but fall back to lastHiddenAt
+          const lastActiveStored = Number(localStorage.getItem('lastActive') || 0);
+          const lastHidden = Number(localStorage.getItem('lastHiddenAt') || 0);
+          const idleSince = Math.max(Date.now() - lastActiveStored, Date.now() - lastHidden);
+
+          // If reauth modal open flag exists, use it; else assume false
+          const modalOpen = (typeof reauthModalOpen !== 'undefined') ? !!reauthModalOpen : !!window.__reauthModalOpen;
+
+          console.debug('[setupInactivity] wake-check', { lastActiveStored, lastHidden, idleSince, IDLE });
+
+          if (idleSince >= IDLE && !modalOpen) {
+            console.debug('[setupInactivity] idle threshold exceeded on visible -> showInactivityPrompt');
+            try {
+              if (typeof showInactivityPrompt === 'function') {
+                // showInactivityPrompt may be async; we don't await here to avoid blocking visibility event
+                showInactivityPrompt().catch ? showInactivityPrompt().catch(() => {}) : null;
+              } else if (typeof showReauthModal === 'function') {
+                showReauthModal('reauth').catch ? showReauthModal('reauth').catch(()=>{}) : null;
+              } else {
+                console.warn('[setupInactivity] no showInactivityPrompt / showReauthModal available to show reauth UI');
+              }
+            } catch (e) { console.warn('[setupInactivity] show prompt failed', e); }
+          } else {
+            // otherwise reset timer normally
+            try { callReset(); } catch (e) { console.warn('[setupInactivity] reset call failed', e); }
+          }
+        } else {
+          // page hidden — store timestamp for conservative idle computation
+          try {
+            localStorage.setItem('lastHiddenAt', String(Date.now()));
+          } catch (e) {
+            console.warn('[setupInactivity] failed to set lastHiddenAt', e);
+          }
+        }
+      } catch (e) {
+        console.warn('[setupInactivity] visibility handler error', e);
+      }
+    };
+
+    // Remove any previously-attached handler reference if we stored one, then add
+    try {
+      if (window.__fg_inactivity_visibility_handler) {
+        document.removeEventListener('visibilitychange', window.__fg_inactivity_visibility_handler);
+      }
+    } catch (e) {}
+    window.__fg_inactivity_visibility_handler = visibilityHandler;
+    document.addEventListener('visibilitychange', window.__fg_inactivity_visibility_handler, { passive: true });
+    // pageshow helps for bfcache restores on mobile
+    try { window.addEventListener('pageshow', visibilityHandler, { passive: true }); } catch(e){}
+
+    // Ensure a lastActive exists
+    try {
+      if (!localStorage.getItem('lastActive')) {
+        localStorage.setItem('lastActive', String(Date.now()));
+      }
+    } catch (e) { console.warn('[setupInactivity] cannot write lastActive', e); }
+
+    // Start/reset the idle timer now using the shared reset implementation
+    try { callReset(); } catch (e) { console.warn('[setupInactivity] initial reset failed', e); }
+
+    console.debug('[setupInactivity] completed');
   } catch (err) {
-    console.error('[inactivity] setup failed', err);
+    console.error('[setupInactivity] unexpected error', err);
   }
 }
+
 
 /**
  * Resets the inactivity timer and tracks last active time.
@@ -13972,55 +14071,7 @@ window.persistCredentialId = persistCredentialId;
 
 
 
-  async function setupInactivity() {
-  console.log('setupInactivity called');
-  if (__inactivitySetupDone) {
-    console.log('Inactivity already setup');
-    return;
-  }
-
-  // Check if needed *before* setting flag
-  if (!(await shouldReauth())) {
-    console.log('No reauth needed for inactivity');
-    return;
-  }
-
-  // Only set flag and proceed if reauth is needed
-  __inactivitySetupDone = true;
-
-  const events = ['mousemove', 'keydown', 'touchstart', 'touchend', 'click', 'scroll'];
-  events.forEach(evt => {
-    document.addEventListener(evt, resetIdleTimer, { passive: true });
-  });
-  console.log('Inactivity events added');
-
-  let lastVisibilityChange = 0;
-  document.addEventListener('visibilitychange', () => {
-    const now = Date.now();
-    if (now - lastVisibilityChange < RESET_DEBOUNCE_MS) return;
-    lastVisibilityChange = now;
-
-    console.log('Visibility changed to:', document.visibilityState);
-    if (document.visibilityState === 'visible') {
-      const last = Number(localStorage.getItem('lastActive') || 0);
-      if (Date.now() - last > IDLE_TIME && !reauthModalOpen) { // Don't trigger if modal open
-        console.log('Idle on visible, showing prompt');
-        showInactivityPrompt().catch(() => {});
-      } else {
-        resetIdleTimer();
-      }
-    } else {
-      try {
-        localStorage.setItem('lastHiddenAt', String(Date.now()));
-      } catch (e) {
-        console.error('Error setting lastHiddenAt:', e);
-      }
-    }
-  });
-
-  resetIdleTimer();
-  console.log('setupInactivity completed');
-}
+  
 
   function resetIdleTimer() {
     const now = Date.now();
