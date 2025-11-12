@@ -13234,7 +13234,7 @@ document.addEventListener('DOMContentLoaded', () => {
 let idleTimeout = null;
 const PROMPT_TIMEOUT = 5000;
 const PROMPT_AUTO_CLOSE = true;
-let lastActive = Date.now();
+let lastActive = Number(localStorage.getItem('lastActive') || Date.now());
 let reauthModalOpen = false; // Track if reauth is open to pause idle
 try { localStorage.setItem('lastActive', String(lastActive)); } catch (e) {}
 
@@ -13310,175 +13310,195 @@ async function shouldReauth(context = 'reauth') {
 }
 
 
-// One-time inactivity setup
-let __idleTimer = null;
-let __reauthPromptShowing = false;
-/**
- * One-time (re)setup of inactivity detection.
- * Re-runs safely if user later sets a PIN or enables biometrics.
- */
-// Unified single setupInactivity — replace both previous implementations with this one.
+// === Unified inactivity behavior (soft=10m when visible, hard=60m server-enforced when hidden) ===
+// Replace existing `setupInactivity()` and `resetIdleTimer()` with this block.
+
+const SOFT_IDLE_MS = 10 * 60 * 1000; // 10 minutes (soft client-only inactivity)
+const HARD_IDLE_MS = 60 * 60 * 1000; // 60 minutes (server-enforced when hidden)
+if (typeof IDLE_TIME === 'undefined') {
+  // keep any existing code that references IDLE_TIME happy (back-compat)
+  var IDLE_TIME = SOFT_IDLE_MS;
+} else {
+  // If IDLE_TIME exists, prefer syncing it to SOFT_IDLE_MS for consistency
+  IDLE_TIME = SOFT_IDLE_MS;
+}
+
+
+
+try { localStorage.setItem('lastActive', String(lastActive)); } catch (e) {}
+
+
+const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart','touchend','touchmove','pointerdown'];
+
+async function checkServerReauthStatus() {
+  // Returns { reauthRequired: boolean, token?:string, ts?:number, reason?:string } or { reauthRequired: false }
+  try {
+    const res = await fetch((window.__SEC_API_BASE || API_BASE) + '/reauth/status', {
+      method: 'GET',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' }
+    });
+    if (!res.ok) {
+      // treat non-OK as not requiring reauth (fail-open for UX). Caller may choose stricter behavior.
+      return { reauthRequired: false };
+    }
+    return await res.json().catch(() => ({ reauthRequired: false }));
+  } catch (e) {
+    console.warn('[inactivity] checkServerReauthStatus failed', e);
+    return { reauthRequired: false };
+  }
+}
+
+function resetIdleTimer() {
+  try {
+    const now = Date.now();
+    lastActive = now;
+    try { localStorage.setItem('lastActive', String(lastActive)); } catch (e) {}
+
+    // If a modal is open we avoid scheduling soft timer
+    const modalOpen = (typeof reauthModalOpen !== 'undefined') ? !!reauthModalOpen : !!window.__reauthModalOpen;
+    if (idleTimeout) { clearTimeout(idleTimeout); idleTimeout = null; }
+
+    if (!modalOpen) {
+      // schedule soft (10-min) inactivity while page is visible
+      idleTimeout = setTimeout(async () => {
+        try {
+          // only trigger soft prompt when page is visible (protect against hidden timers)
+          if (document.visibilityState === 'visible') {
+            // live-check shouldReauth guard (if available)
+            let allowed = true;
+            try {
+              if (typeof shouldReauth === 'function') {
+                const r = await shouldReauth('reauth');
+                allowed = !!(r && r.needsReauth);
+              }
+            } catch (e) { console.warn('[inactivity] shouldReauth threw', e); }
+
+            if (allowed) {
+              // Soft prompt: only local UI (and will call fgReauth.requireReauth if it auto-locks)
+              try { await showInactivityPrompt(); } catch (e) { try { await showReauthModal('reauth'); } catch(e){} }
+            }
+          }
+        } catch (e) { console.warn('[inactivity] soft timer handler failed', e); }
+      }, SOFT_IDLE_MS);
+    }
+  } catch (err) {
+    console.error('[inactivity] resetIdleTimer error', err);
+  }
+}
+
 async function setupInactivity() {
   try {
     console.debug('[setupInactivity] called');
 
-    // If already set up, no-op
-    if (typeof __inactivitySetupDone !== 'undefined' && __inactivitySetupDone) {
+    if (__inactivitySetupDone) {
       console.debug('[setupInactivity] already set up, skipping');
       return;
     }
 
-    // Ask the canonical check function if available (defensive)
-    let reauthCheck = { needsReauth: true };
+    // Quick live check: if user doesn't need reauth (no pin/biometric) skip wiring
     try {
       if (typeof shouldReauth === 'function') {
-        reauthCheck = await shouldReauth();
-      } else {
-        console.debug('[setupInactivity] shouldReauth not found; assuming reauth required');
+        const r = await shouldReauth('reauth');
+        if (!r || !r.needsReauth) {
+          console.debug('[setupInactivity] shouldReauth says no reauth needed — skipping setup');
+          __inactivitySetupDone = false;
+          return;
+        }
       }
     } catch (e) {
-      console.warn('[setupInactivity] shouldReauth threw; defaulting to needsReauth=true', e);
+      console.warn('[setupInactivity] shouldReauth check failed — proceeding to set up listeners', e);
     }
 
-    if (!reauthCheck || !reauthCheck.needsReauth) {
-      console.debug('[setupInactivity] skipped (no pin/bio yet or no reauth needed)');
-      __inactivitySetupDone = false;
-      return;
-    }
-
-    // Mark setup done
     __inactivitySetupDone = true;
-    console.debug('[setupInactivity] proceeding to attach listeners');
 
-    // Defensive fallbacks for globals that may exist in your file
-    const IDLE = (typeof IDLE_TIME !== 'undefined') ? IDLE_TIME : (10 * 60 * 1000);
-    const DEBOUNCE_MS = (typeof RESET_DEBOUNCE_MS !== 'undefined') ? RESET_DEBOUNCE_MS : 500;
-    const VIS_DEBOUNCE_MS = DEBOUNCE_MS;
-    const events = ['mousemove','keydown','click','scroll','touchstart','touchend','touchmove','pointermove'];
-
-    // Use existing resetIdleTimer if present; otherwise create a safe local shim that stores lastActive
-    const callReset = (function(){
-      if (typeof resetIdleTimer === 'function') return resetIdleTimer;
-      return function fallbackReset() {
-        try {
-          const now = Date.now();
-          try { localStorage.setItem('lastActive', String(now)); } catch(e){}
-          if (typeof __idleTimer !== 'undefined' && __idleTimer) {
-            try { clearTimeout(__idleTimer); } catch(e){}
-            __idleTimer = null;
-          }
-          // schedule fallback timer only if no global show function
-          if (typeof showInactivityPrompt === 'function') {
-            __idleTimer = setTimeout(() => { try { showInactivityPrompt(); } catch(e){} }, IDLE);
-          }
-        } catch (e) { console.warn('[setupInactivity] fallbackReset error', e); }
-      };
-    })();
-
-    // Attach user-interaction listeners (passive to avoid input blocking)
-    events.forEach(evt => {
-      try {
-        document.addEventListener(evt, callReset, { passive: true });
-      } catch (e) {
-        // some older browsers don't accept options object
-        try { document.addEventListener(evt, callReset); } catch(err) { console.warn('[setupInactivity] addEventListener failed for', evt, err); }
-      }
+    // Attach user interaction listeners — reset idle timer (soft) only while visible
+    INTERACTION_EVENTS.forEach(evt => {
+      try { document.addEventListener(evt, resetIdleTimer, { passive: true }); }
+      catch (e) { try { document.addEventListener(evt, resetIdleTimer); } catch(_){} }
     });
-    console.debug('[setupInactivity] interaction listeners attached:', events);
 
-    // Visibility handler (single source of truth for visibility-based idle checks)
-    let lastVisEvent = 0;
-    const visibilityHandler = function () {
+    // Visibility handler: coordinate soft vs server-enforced behavior
+    let lastVisCheck = 0;
+    document.removeEventListener('visibilitychange', window.__fg_inactivity_visibility_handler_ref);
+    const visibilityHandler = async () => {
       try {
         const now = Date.now();
-        if (now - lastVisEvent < VIS_DEBOUNCE_MS) return;
-        lastVisEvent = now;
+        if (now - lastVisCheck < 400) return; // small debounce
+        lastVisCheck = now;
 
-        console.debug('[setupInactivity] visibilitychange ->', document.visibilityState);
-
-        if (document.visibilityState === 'visible') {
-          // compute conservative idle: prefer stored lastActive, but fall back to lastHiddenAt
-          const lastActiveStored = Number(localStorage.getItem('lastActive') || 0);
-          const lastHidden = Number(localStorage.getItem('lastHiddenAt') || 0);
-          const idleSince = Math.max(Date.now() - lastActiveStored, Date.now() - lastHidden);
-
-          // If reauth modal open flag exists, use it; else assume false
-          const modalOpen = (typeof reauthModalOpen !== 'undefined') ? !!reauthModalOpen : !!window.__reauthModalOpen;
-
-          console.debug('[setupInactivity] wake-check', { lastActiveStored, lastHidden, idleSince, IDLE });
-
-          if (idleSince >= IDLE && !modalOpen) {
-            console.debug('[setupInactivity] idle threshold exceeded on visible -> showInactivityPrompt');
-            try {
-              if (typeof showInactivityPrompt === 'function') {
-                // showInactivityPrompt may be async; we don't await here to avoid blocking visibility event
-                showInactivityPrompt().catch ? showInactivityPrompt().catch(() => {}) : null;
-              } else if (typeof showReauthModal === 'function') {
-                showReauthModal('reauth').catch ? showReauthModal('reauth').catch(()=>{}) : null;
-              } else {
-                console.warn('[setupInactivity] no showInactivityPrompt / showReauthModal available to show reauth UI');
-              }
-            } catch (e) { console.warn('[setupInactivity] show prompt failed', e); }
-          } else {
-            // otherwise reset timer normally
-            try { callReset(); } catch (e) { console.warn('[setupInactivity] reset call failed', e); }
-          }
-        } else {
-          // page hidden — store timestamp for conservative idle computation
-          try {
-            localStorage.setItem('lastHiddenAt', String(Date.now()));
-          } catch (e) {
-            console.warn('[setupInactivity] failed to set lastHiddenAt', e);
-          }
+        if (document.visibilityState === 'hidden') {
+          // store when we were backgrounded so wake check is conservative
+          try { localStorage.setItem('lastHiddenAt', String(Date.now())); } catch (e) {}
+          // cancel soft timer — we don't want soft prompts while backgrounded
+          if (idleTimeout) { clearTimeout(idleTimeout); idleTimeout = null; }
+          return;
         }
+
+        // Visible: compute how long we've effectively been away
+        const lastActiveStored = Number(localStorage.getItem('lastActive') || 0);
+        const lastHidden = Number(localStorage.getItem('lastHiddenAt') || 0);
+        const idleSince = Math.max(Date.now() - lastActiveStored, Date.now() - lastHidden);
+
+        // If we've been away long enough for hard reauth, ask server
+        if (idleSince >= HARD_IDLE_MS) {
+          console.debug('[setupInactivity] Wake after hidden >= HARD_IDLE_MS — checking server for reauth status', { idleSince });
+          const status = await checkServerReauthStatus();
+          if (status && status.reauthRequired) {
+            // Authoritative server says reauth required — force canonical reauth
+            try {
+              // set canonical local flag and notify server (fgReauth.requireReauth does both)
+              if (window.fgReauth && typeof window.fgReauth.requireReauth === 'function') {
+                try { await window.fgReauth.requireReauth('server_timeout'); } catch(e){ console.warn('fgReauth.requireReauth failed', e); }
+              } else {
+                // fallback: write local flag & try server call
+                try {
+                  const obj = { token: status.token || String(Date.now()), reason: status.reason || 'server_timeout', ts: status.ts || Date.now() };
+                  localStorage.setItem('fg_reauth_required_v1', JSON.stringify(obj));
+                  // also attempt to call server require endpoint (best-effort)
+                  fetch((window.__SEC_API_BASE || API_BASE) + '/reauth/require', { method: 'POST', credentials: 'include', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ reason: 'server_timeout', token: obj.token }) }).catch(()=>{});
+                } catch(e) {}
+              }
+            } catch (e) { console.warn('[setupInactivity] requireReauth flow failed', e); }
+            // Show the modal immediately (canonical)
+            try { await showReauthModal('reauth'); } catch (e) { try { await initReauthModal({ show: true, context: 'reauth' }); } catch(e){} }
+            return;
+          }
+          // If server says not required, fallthrough to soft check below (user may still be shown local if >= SOFT)
+        }
+
+        // If idle >= soft threshold (10m) show local inactivity prompt immediately (page is visible)
+        if (idleSince >= SOFT_IDLE_MS) {
+          console.debug('[setupInactivity] Wake with idle >= SOFT_IDLE_MS — showing soft inactivity prompt', { idleSince });
+          try { await showInactivityPrompt(); } catch (e) { try { await showReauthModal('reauth'); } catch(e){} }
+          return;
+        }
+
+        // Otherwise reset the soft timer
+        resetIdleTimer();
       } catch (e) {
-        console.warn('[setupInactivity] visibility handler error', e);
+        console.warn('[setupInactivity] visibilityHandler error', e);
       }
     };
 
-    // Remove any previously-attached handler reference if we stored one, then add
+    // store ref so duplicates can be removed safely later
+    window.__fg_inactivity_visibility_handler_ref = visibilityHandler;
+    document.addEventListener('visibilitychange', window.__fg_inactivity_visibility_handler_ref, { passive: true });
+    // pageshow helps for bfcache restores on some mobile browsers
+    try { window.addEventListener('pageshow', visibilityHandler, { passive: true }); } catch (e) {}
+
+    // ensure lastActive exists and start timer
     try {
-      if (window.__fg_inactivity_visibility_handler) {
-        document.removeEventListener('visibilitychange', window.__fg_inactivity_visibility_handler);
-      }
+      if (!localStorage.getItem('lastActive')) localStorage.setItem('lastActive', String(Date.now()));
     } catch (e) {}
-    window.__fg_inactivity_visibility_handler = visibilityHandler;
-    document.addEventListener('visibilitychange', window.__fg_inactivity_visibility_handler, { passive: true });
-    // pageshow helps for bfcache restores on mobile
-    try { window.addEventListener('pageshow', visibilityHandler, { passive: true }); } catch(e){}
+    resetIdleTimer();
 
-    // Ensure a lastActive exists
-    try {
-      if (!localStorage.getItem('lastActive')) {
-        localStorage.setItem('lastActive', String(Date.now()));
-      }
-    } catch (e) { console.warn('[setupInactivity] cannot write lastActive', e); }
-
-    // Start/reset the idle timer now using the shared reset implementation
-    try { callReset(); } catch (e) { console.warn('[setupInactivity] initial reset failed', e); }
-
-    console.debug('[setupInactivity] completed');
+    console.debug('[setupInactivity] completed — soft idle:', SOFT_IDLE_MS, 'hard idle:', HARD_IDLE_MS);
   } catch (err) {
     console.error('[setupInactivity] unexpected error', err);
   }
 }
 
-
-/**
- * Resets the inactivity timer and tracks last active time.
- * Called by user interaction listeners.
- */
-function resetIdleTimer() {
-  try {
-    localStorage.setItem('lastActive', Date.now().toString());
-    if (__idleTimer) clearTimeout(__idleTimer);
-    __idleTimer = setTimeout(() => {
-      showInactivityPrompt();
-    }, IDLE_TIME);
-  } catch (err) {
-    console.error('[inactivity] resetIdleTimer error', err);
-  }
-}
 
 /**
  * Displays reauth modal safely (debounced)
