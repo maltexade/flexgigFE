@@ -1369,7 +1369,7 @@ async function handleBioToggle(e) {
   }
 }
 
-const IDLE_TIME = 10 * 60 * 1000; // 10 min in prod
+const IDLE_TIME = 1 * 60 * 1000; // 1 min in prod
 
 // === Safety shim: ensure pollStatus exists (place this near top, before onDashboardLoad runs) ===
 if (typeof pollStatus === 'undefined') {
@@ -4456,15 +4456,15 @@ updateBalanceDisplay();
   }
 
   // Initialize recent transactions
- // renderRecentTransactions();
+ renderRecentTransactions();
 
-   // payBtn.disabled = true;
-//  payBtn.textContent = 'Processing...';
-//  setTimeout(() => {
-  //  // Payment logic
-    //payBtn.disabled = false;
-    //payBtn.textContent = 'Pay';
-  //}, 1000); 
+   payBtn.disabled = true;
+ payBtn.textContent = 'Processing...';
+ setTimeout(() => {
+   // Payment logic
+    payBtn.disabled = false;
+    payBtn.textContent = 'Pay';
+  }, 1000); 
   // --- ADD MONEY HANDLER ---
   const addMoneyBtn = document.querySelector('.card.add-money');
   addMoneyBtn.addEventListener('click', () => {
