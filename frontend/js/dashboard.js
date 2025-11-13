@@ -1369,7 +1369,7 @@ async function handleBioToggle(e) {
   }
 }
 
-const IDLE_TIME = 1 * 60 * 1000; // 1 min in prod
+const IDLE_TIME = 2 * 60 * 1000; // 2 min in prod
 
 // === Safety shim: ensure pollStatus exists (place this near top, before onDashboardLoad runs) ===
 if (typeof pollStatus === 'undefined') {
@@ -4106,93 +4106,93 @@ viewAllLink.addEventListener('click', (e) => {
 //     });
 
 //     // Inside checkoutModal event listeners
-// const payBtn = document.getElementById('payBtn');
-// payBtn.addEventListener('click', () => {
-//   if (!payBtn.disabled) {
-//     payBtn.disabled = true;
-//     payBtn.textContent = 'Processing...';
-//     setTimeout(() => {
-//       const state = JSON.parse(localStorage.getItem('userState') || '{}');
-//       const { provider, planId, number } = state;
-//       const rawNumber = normalizePhone(number);
-//       if (!rawNumber || rawNumber.length !== 11) {
-//         console.error('[ERROR] payBtn: Invalid phone number:', rawNumber, 'Original:', number);
-//         alert('Invalid phone number. Please enter a valid Nigerian number.');
-//         payBtn.disabled = false;
-//         payBtn.textContent = 'Pay';
-//         return;
-//       }
-//       const plan = findPlanById(planId, provider);
-//       if (!plan) {
-//         console.error('[ERROR] payBtn: No plan found for ID:', planId);
-//         alert('Invalid plan selected. Please try again.');
-//         payBtn.disabled = false;
-//         payBtn.textContent = 'Pay';
-//         return;
-//       }
-//       if (userBalance < plan.price) {
-//         console.error('[ERROR] payBtn: Insufficient balance:', userBalance, 'Required:', plan.price);
-//         alert('Insufficient balance. Please add funds.');
-//         payBtn.disabled = false;
-//         payBtn.textContent = 'Pay';
-//         return;
-//       }
-//       onPayClicked(); // Trigger re-authentication
+const payBtn = document.getElementById('payBtn');
+payBtn.addEventListener('click', () => {
+  if (!payBtn.disabled) {
+    payBtn.disabled = true;
+    payBtn.textContent = 'Processing...';
+    setTimeout(() => {
+      const state = JSON.parse(localStorage.getItem('userState') || '{}');
+      const { provider, planId, number } = state;
+      const rawNumber = normalizePhone(number);
+      if (!rawNumber || rawNumber.length !== 11) {
+        console.error('[ERROR] payBtn: Invalid phone number:', rawNumber, 'Original:', number);
+        alert('Invalid phone number. Please enter a valid Nigerian number.');
+        payBtn.disabled = false;
+        payBtn.textContent = 'Pay';
+        return;
+      }
+      const plan = findPlanById(planId, provider);
+      if (!plan) {
+        console.error('[ERROR] payBtn: No plan found for ID:', planId);
+        alert('Invalid plan selected. Please try again.');
+        payBtn.disabled = false;
+        payBtn.textContent = 'Pay';
+        return;
+      }
+      if (userBalance < plan.price) {
+        console.error('[ERROR] payBtn: Insufficient balance:', userBalance, 'Required:', plan.price);
+        alert('Insufficient balance. Please add funds.');
+        payBtn.disabled = false;
+        payBtn.textContent = 'Pay';
+        return;
+      }
+      onPayClicked(); // Trigger re-authentication
 
-//       // Mock API call
-//       const mockResponse = { success: true, transactionId: `TX${Date.now()}` };
-//       console.log('[DEBUG] payBtn: Mock API response:', mockResponse);
+      // Mock API call
+      const mockResponse = { success: true, transactionId: `TX${Date.now()}` };
+      console.log('[DEBUG] payBtn: Mock API response:', mockResponse);
 
-//       // Update balance
-//       userBalance -= plan.price;
-//       updateBalanceDisplay();
+      // Update balance
+      userBalance -= plan.price;
+      updateBalanceDisplay();
 
-//       // Determine subType for plan type display
-//       let subType = '';
-//       if (provider === 'mtn') {
-//         subType = planId.includes('awoof') ? 'AWOOF' : 'GIFTING';
-//       } else if (provider === 'airtel') {
-//         subType = planId.includes('awoof') ? 'AWOOF' : 'CG';
-//       } else if (provider === 'glo') {
-//         subType = planId.includes('cg') ? 'CG' : 'GIFTING';
-//       }
+      // Determine subType for plan type display
+      let subType = '';
+      if (provider === 'mtn') {
+        subType = planId.includes('awoof') ? 'AWOOF' : 'GIFTING';
+      } else if (provider === 'airtel') {
+        subType = planId.includes('awoof') ? 'AWOOF' : 'CG';
+      } else if (provider === 'glo') {
+        subType = planId.includes('cg') ? 'CG' : 'GIFTING';
+      }
 
-//       // Add to transactions
-//       const transaction = {
-//         type: 'data',
-//         description: 'Data Purchase',
-//         amount: plan.price,
-//         phone: rawNumber,
-//         provider,
-//         subType,
-//         data: plan.data,
-//         duration: plan.duration,
-//         timestamp: new Date().toISOString(),
-//         status: 'success' // Mock success
-//       };
-//       transactions.push(transaction);
-//       recentTransactions.push(transaction);
-//       localStorage.setItem('recentTransactions', JSON.stringify(recentTransactions));
-//       renderTransactions();
-//       renderRecentTransactions();
+      // Add to transactions
+      const transaction = {
+        type: 'data',
+        description: 'Data Purchase',
+        amount: plan.price,
+        phone: rawNumber,
+        provider,
+        subType,
+        data: plan.data,
+        duration: plan.duration,
+        timestamp: new Date().toISOString(),
+        status: 'success' // Mock success
+      };
+      transactions.push(transaction);
+      recentTransactions.push(transaction);
+      localStorage.setItem('recentTransactions', JSON.stringify(recentTransactions));
+      renderTransactions();
+      renderRecentTransactions();
 
-//       // Clear phone number, reset provider to MTN, and clear plan selection
-//       phoneInput.value = '';
-//       document.querySelectorAll('.plan-box.selected').forEach(p => p.classList.remove('selected'));
-//       selectProvider('mtn');
-//       updateContactOrCancel();
-//       updateContinueState();
-//       saveUserState();
+      // Clear phone number, reset provider to MTN, and clear plan selection
+      phoneInput.value = '';
+      document.querySelectorAll('.plan-box.selected').forEach(p => p.classList.remove('selected'));
+      selectProvider('mtn');
+      updateContactOrCancel();
+      updateContinueState();
+      saveUserState();
 
-//       alert(`Payment of ₦${plan.price} for ${plan.data} (${plan.duration}) to ${formatNigeriaNumber(rawNumber).value} successful!`);
-//       closeCheckoutModal();
-//       console.log('[DEBUG] payBtn: Payment processed, new balance:', userBalance, 'Transaction:', transaction);
-//       payBtn.disabled = false;
-//       payBtn.textContent = 'Pay';
-//     }, 1000);
-//   }
-// });
-//   }
+      alert(`Payment of ₦${plan.price} for ${plan.data} (${plan.duration}) to ${formatNigeriaNumber(rawNumber).value} successful!`);
+      closeCheckoutModal();
+      console.log('[DEBUG] payBtn: Payment processed, new balance:', userBalance, 'Transaction:', transaction);
+      payBtn.disabled = false;
+      payBtn.textContent = 'Pay';
+    }, 1000);
+  }
+});
+
 
   // --- CONTACT/CANCEL BUTTON ICONS ---
   const contactSVG = `<img src="/frontend/svg/contact-icon.svg" alt="Contact Icon" class="contact-btn contact-btn-svg" />`;
@@ -5957,22 +5957,22 @@ async function updateStoredPin(uid, newPin) {
   }
 
   // Initialize checkout PIN verification
-  // function initCheckoutPin() {
-  //   if (payBtn) {
-  //     payBtn.addEventListener('click', async () => {
-  //       const info = await getUid();
-  //       if (!info || !info.uid) {
-  //         notify('You must be signed in to proceed with payment', 'error');
-  //         return;
-  //       }
-  //       await window.checkPinExists((hasPin) => {
-  //         if (hasPin) {
-  //           window.ModalManager.openModal('pinVerifyModal');
-  //         }
-  //       }, 'checkout');
-  //     });
-  //   }
-  // }
+  function initCheckoutPin() {
+    if (payBtn) {
+      payBtn.addEventListener('click', async () => {
+        const info = await getUid();
+        if (!info || !info.uid) {
+          notify('You must be signed in to proceed with payment', 'error');
+          return;
+        }
+        await window.checkPinExists((hasPin) => {
+          if (hasPin) {
+            window.ModalManager.openModal('pinVerifyModal');
+          }
+        }, 'checkout');
+      });
+    }
+  }
 
   // Initialize inactivity handling
   // function initInactivity() {
