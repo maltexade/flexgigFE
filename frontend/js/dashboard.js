@@ -13339,12 +13339,31 @@ async function shouldReauth(context = 'reauth') {
 }
 
 
-// === Inactivity helpers (drop-in replacement) ===
-// Soft/hard thresholds
+// === Inactivity helpers (full drop-in update) ===
+
+// thresholds (you already chose 1min / 2min)
 const SOFT_IDLE_MS = 1 * 60 * 1000; // 1 minute while visible
 const HARD_IDLE_MS = 2 * 60 * 1000; // 2 minutes server-enforced when hidden
 
-// State
+// local-first keys & helpers
+const FG_EXPECTED_KEY = 'fg_expected_reauth_at';
+const FG_REAUTH_FLAG = 'fg_reauth_required_v1'; // cross-tab canonical key
+
+function setExpectedReauthAt(ts) {
+  try { localStorage.setItem(FG_EXPECTED_KEY, String(ts)); } catch (e) {}
+}
+function clearExpectedReauthAt() {
+  try { localStorage.removeItem(FG_EXPECTED_KEY); } catch (e) {}
+}
+function getExpectedReauthAt() {
+  try { return Number(localStorage.getItem(FG_EXPECTED_KEY) || 0); } catch (e) { return 0; }
+}
+function hasCanonicalLocalFlag() {
+  try { return !!localStorage.getItem(FG_REAUTH_FLAG); } catch (e) { return false; }
+}
+
+// state
+
 
 try { localStorage.setItem('lastActive', String(lastActive)); } catch (e) {}
 
@@ -13354,7 +13373,6 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
 // Helper: prefer existing shouldReauth(), fallback to /reauth/status
 async function checkServerReauthStatus() {
   try {
-    // prefer your helper if present (it likely returns { needsReauth: true/false } or similar)
     if (typeof shouldReauth === 'function') {
       try {
         const r = await shouldReauth();
@@ -13364,7 +13382,6 @@ async function checkServerReauthStatus() {
       }
     }
 
-    // fallback fetch
     const url = (window.__SEC_API_BASE || (typeof API_BASE !== 'undefined' ? API_BASE : '')) + '/reauth/status';
     const res = await fetch(url, { method: 'GET', credentials: 'include', headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' } });
     if (!res.ok) return { needsReauth: false };
@@ -13378,7 +13395,7 @@ async function checkServerReauthStatus() {
 
 /**
  * resetIdleTimer()
- * - Updates lastActive and schedules the soft (10m) prompt only when visible
+ * - Updates lastActive and schedules the soft (1m) prompt only when visible
  * - Avoids scheduling while a reauth modal is open
  */
 function resetIdleTimer() {
@@ -13392,7 +13409,7 @@ function resetIdleTimer() {
     if (idleTimeout) { clearTimeout(idleTimeout); idleTimeout = null; }
 
     if (!modalOpen) {
-      // schedule soft (10-min) inactivity while page is visible
+      // schedule soft (1-min) inactivity while page is visible
       idleTimeout = setTimeout(async () => {
         try {
           // only trigger soft prompt when page is visible (protect against hidden timers)
@@ -13407,7 +13424,7 @@ function resetIdleTimer() {
             } catch (e) { console.warn('[inactivity] shouldReauth threw', e); }
 
             if (allowed) {
-              // Soft prompt: only local UI (and will call fgReauth.requireReauth if it auto-locks)
+              // Soft prompt: only local UI
               try { await showInactivityPrompt(); } catch (e) { try { await showReauthModal('reauth'); } catch(e){} }
             }
           }
@@ -13420,11 +13437,57 @@ function resetIdleTimer() {
 }
 
 /**
+ * showInactivityPrompt()
+ * - Debounced small "are you still there?" flow that verifies shouldReauth() then opens reauth UI
+ */
+async function showInactivityPrompt() {
+  if (__reauthPromptShowing) return;
+  __reauthPromptShowing = true;
+
+  try {
+    // Double-check server authority before showing soft prompt (if you want)
+    let reauthCheck = null;
+    try { reauthCheck = await checkServerReauthStatus(); } catch(e) { console.warn('[showInactivityPrompt] server check failed', e); reauthCheck = null; }
+
+    if (reauthCheck && (reauthCheck.needsReauth || reauthCheck.reauthRequired)) {
+      // server insists on full reauth -> show full modal immediately
+      try { await showReauthModal({ context: 'reauth' }); } catch(e){ try { await initReauthModal({ show: true, context: 'reauth' }); } catch(_){} }
+      return;
+    }
+
+    // Otherwise fall back to soft path (but still confirm client-side shouldReauth)
+    try {
+      const clientCheck = (typeof shouldReauth === 'function') ? await shouldReauth() : { needsReauth: true };
+      if (!clientCheck || !clientCheck.needsReauth) {
+        __reauthPromptShowing = false;
+        return;
+      }
+    } catch (e) {
+      console.warn('[showInactivityPrompt] shouldReauth threw; proceeding to show soft prompt', e);
+    }
+
+    // show the soft "are you still there?" interaction (existing UI)
+    console.debug('[inactivity] showing soft reauth prompt (are you still there?)');
+    if (typeof showInactivityPromptUI === 'function') {
+      await showInactivityPromptUI(); // optional custom UI
+    } else {
+      try {
+        await (typeof presentSmallInactivityDialog === 'function' ? presentSmallInactivityDialog() : showReauthModal({ context: 'inactivity' }));
+      } catch (e) {
+        console.warn('[showInactivityPrompt] soft prompt display failed, falling back to showReauthModal', e);
+        try { await showReauthModal({ context: 'reauth' }); } catch (ignore) {}
+      }
+    }
+  } catch (err) {
+    console.error('[inactivity] prompt error', err);
+  } finally {
+    __reauthPromptShowing = false;
+  }
+}
+
+/**
  * setupInactivity()
- * - Attaches interaction events and a single visibility handler
- * - When returning from hidden it performs server-first check for HARD_IDLE_MS
- * - If server requires reauth -> show full reauth modal immediately
- * - Otherwise if idle >= SOFT_IDLE_MS -> show soft prompt (only when visible)
+ * - Attaches interaction events and one visibility handler (local-first hard check)
  */
 async function setupInactivity() {
   try {
@@ -13457,7 +13520,7 @@ async function setupInactivity() {
       catch (e) { try { document.addEventListener(evt, resetIdleTimer); } catch(_){} }
     });
 
-    // Visibility handler: coordinate soft vs server-enforced behavior
+    // Visibility handler: local-first hard-idle logic
     let lastVisCheck = 0;
     try { document.removeEventListener('visibilitychange', window.__fg_inactivity_visibility_handler_ref); } catch(e){}
     const visibilityHandler = async () => {
@@ -13467,75 +13530,61 @@ async function setupInactivity() {
         lastVisCheck = now;
 
         if (document.visibilityState === 'hidden') {
-          // store when we were backgrounded so wake check is conservative
-          try { localStorage.setItem('lastHiddenAt', String(Date.now())); } catch (e) {}
+          // store when we were backgrounded and set predicted reauth timestamp
+          try {
+            const nowTs = Date.now();
+            localStorage.setItem('lastHiddenAt', String(nowTs));
+            // set expected reauth time locally so wake-check is instant
+            setExpectedReauthAt(nowTs + HARD_IDLE_MS);
+          } catch (e) {
+            console.error('Error setting lastHiddenAt / expected reauth:', e);
+          }
           // cancel soft timer — we don't want soft prompts while backgrounded
           if (idleTimeout) { clearTimeout(idleTimeout); idleTimeout = null; }
           return;
         }
 
-        // Visible: compute how long we've effectively been away
+        // === visible path (local-first) ===
+        // 1) If canonical local cross-tab/server flag exists -> authoritative reauth
+        if (hasCanonicalLocalFlag()) {
+          try { await showReauthModal('reauth'); } catch (e) { try { await initReauthModal({ show: true, context: 'reauth' }); } catch(_){} }
+          return;
+        }
+
+        // 2) Local expected reauth (fast, no network)
+        const expected = getExpectedReauthAt();
+        if (expected && Date.now() >= expected) {
+          try { await showReauthModal('reauth'); } catch (e) { try { await initReauthModal({ show: true, context: 'reauth' }); } catch(_){} }
+          return;
+        }
+
+        // 3) Fallback - compute idleSince and if >= HARD then consult server (cheap fallback)
         const lastActiveStored = Number(localStorage.getItem('lastActive') || 0);
         const lastHidden = Number(localStorage.getItem('lastHiddenAt') || 0);
         const idleSince = Math.max(Date.now() - lastActiveStored, Date.now() - lastHidden);
 
-        // If we've been away long enough for hard reauth, ask server first
         if (idleSince >= HARD_IDLE_MS) {
-          console.debug('[setupInactivity] Wake after hidden >= HARD_IDLE_MS — checking server for reauth status', { idleSince });
-          // prevent duplicate checks
-          if (window.__fg_inactivity_checking_server) {
-            console.debug('[setupInactivity] server check already in-flight; skipping');
-            return;
-          }
-          window.__fg_inactivity_checking_server = true;
-
-          // optional tiny loader (no-op if not defined)
-          try { if (typeof showTinyLoader === 'function') showTinyLoader(true); } catch(e){}
-
+          // we don't have a predicted key but local suggests hard idle -> fallback to server check
           try {
             const status = await checkServerReauthStatus();
             if (status && (status.needsReauth || status.reauthRequired)) {
-              // Authoritative server says reauth required — force canonical reauth
-              try {
-                // set canonical local flag and notify server (fgReauth.requireReauth does both)
-                if (window.fgReauth && typeof window.fgReauth.requireReauth === 'function') {
-                  try { await window.fgReauth.requireReauth('server_timeout'); } catch(e){ console.warn('fgReauth.requireReauth failed', e); }
-                } else {
-                  // fallback: write local flag & try server call
-                  try {
-                    const obj = { token: status.token || String(Date.now()), reason: status.reason || 'server_timeout', ts: status.ts || Date.now() };
-                    localStorage.setItem('fg_reauth_required_v1', JSON.stringify(obj));
-                    // attempt to call server require endpoint (best-effort)
-                    fetch((window.__SEC_API_BASE || (typeof API_BASE !== 'undefined' ? API_BASE : '')) + '/reauth/require', {
-                      method: 'POST', credentials: 'include', headers: {'Content-Type':'application/json'},
-                      body: JSON.stringify({ reason: 'server_timeout', token: obj.token })
-                    }).catch(()=>{});
-                  } catch(e) {}
-                }
-              } catch (e) { console.warn('[setupInactivity] requireReauth flow failed', e); }
-
-              // Show the modal immediately (canonical)
-              try { await showReauthModal('reauth'); } catch (e) { try { await initReauthModal({ show: true, context: 'reauth' }); } catch(e){} }
+              try { await showReauthModal('reauth'); } catch (e) { try { await initReauthModal({ show: true, context: 'reauth' }); } catch(_){} }
               return;
             }
-            // If server says not required -> fallthrough to soft check below
+            // server says no forced reauth -> continue to soft path
           } catch (e) {
-            console.warn('[setupInactivity] server check failed', e);
-            // If server check fails, fallback to soft behavior (avoid locking users due to network)
-          } finally {
-            window.__fg_inactivity_checking_server = false;
-            try { if (typeof showTinyLoader === 'function') showTinyLoader(false); } catch(e){}
+            console.warn('[setupInactivity] server check failed and local predicted hard idle present; showing reauth modal as safer fallback', e);
+            try { await showReauthModal('reauth'); } catch (ee) { try { await initReauthModal({ show: true, context: 'reauth' }); } catch(_){} }
+            return;
           }
         }
 
-        // If idle >= soft threshold (10m) show local inactivity prompt immediately (page is visible)
+        // 4) soft path: if idle >= SOFT -> show soft prompt; otherwise reset timer
         if (idleSince >= SOFT_IDLE_MS) {
-          console.debug('[setupInactivity] Wake with idle >= SOFT_IDLE_MS — showing soft inactivity prompt', { idleSince });
           try { await showInactivityPrompt(); } catch (e) { try { await showReauthModal('reauth'); } catch(e){} }
           return;
         }
 
-        // Otherwise reset the soft timer
         resetIdleTimer();
       } catch (e) {
         console.warn('[setupInactivity] visibilityHandler error', e);
@@ -13559,6 +13608,7 @@ async function setupInactivity() {
     console.error('[setupInactivity] unexpected error', err);
   }
 }
+
 
 /**
  * showInactivityPrompt()
@@ -14380,45 +14430,54 @@ async function showReauthModal(context = 'reauth') {
 
 
   // When reauth is required: set local + server (server optional)
-  async function requireReauth(reason) {
-    // Create token + write local state
-    const obj = buildStoredObj({ reason });
-    writeLocal(obj);
+async function requireReauth(reason) {
+  // Create token + write local state
+  const obj = buildStoredObj({ reason });
+  writeLocal(obj);
 
-    // Optionally notify server to set authoritative session flag (recommended)
-    try {
-      await fetch((window.__SEC_API_BASE || API_BASE) + '/reauth/require', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason, token: obj.token })
-      }).catch(()=>{});
-    } catch (e) {}
-    // Immediately show in this tab (if not already shown)
-    showReauthModalLocal({ fromStorageObj: obj });
-  }
+  // 💡 NEW: mark local expected reauth timestamp so hard-idle logic knows immediately
+  try { setExpectedReauthAt(Date.now()); } catch (e) { /* ignore */ }
+
+  // Optionally notify server to set authoritative session flag (recommended)
+  try {
+    await fetch((window.__SEC_API_BASE || API_BASE) + '/reauth/require', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason, token: obj.token })
+    }).catch(()=>{});
+  } catch (e) {}
+
+  // Immediately show in this tab (if not already shown)
+  showReauthModalLocal({ fromStorageObj: obj });
+}
+
 
   // call this after a successful reauth in the current tab
-  async function completeReauth() {
-    // call server to clear session flag
-    let ok = false;
-    try {
-      const res = await fetch((window.__SEC_API_BASE || API_BASE) + '/reauth/complete', {
-        method: 'POST',
-        credentials: 'include',
-        headers: {'Content-Type':'application/json'}
-      });
-      ok = res && res.ok;
-    } catch (e) { ok = false; }
+async function completeReauth() {
+  // call server to clear session flag
+  let ok = false;
+  try {
+    const res = await fetch((window.__SEC_API_BASE || API_BASE) + '/reauth/complete', {
+      method: 'POST',
+      credentials: 'include',
+      headers: {'Content-Type':'application/json'}
+    });
+    ok = res && res.ok;
+  } catch (e) { ok = false; }
 
-    // clear local state and broadcast clear
-    const stored = readLocal();
-    clearLocal(stored && stored.token);
+  // clear local state and broadcast clear
+  const stored = readLocal();
+  clearLocal(stored && stored.token);
 
-    // hide this tab modal UI
-    hideReauthModalLocal();
-    return ok;
-  }
+  // **important**: clear the expected reauth timestamp so we don't retrigger hard reauth locally
+  try { clearExpectedReauthAt(); } catch (e) { /* ignore */ }
+
+  // hide this tab modal UI
+  hideReauthModalLocal();
+  return ok;
+}
+
 
   // react to storage events (fallback) and broadcast messages
   function onStorageEvent(e) {
@@ -14637,7 +14696,7 @@ async function showReauthModal(context = 'reauth') {
     await showInactivityPrompt();
   }
 
-// Robust async onSuccessfulReauth — replace existing function
+// Robust async onSuccessfulReauth — updated: clears fg_expected_reauth_at appropriately
 async function onSuccessfulReauth() {
   try {
     // mark modal closed locally (UI state)
@@ -14685,6 +14744,10 @@ async function onSuccessfulReauth() {
       serverCleared = false;
     }
 
+    // Clear the local expected reauth timestamp - user just reauthenticated.
+    // Do this regardless of whether server cleared canonical state, so we don't auto-trigger hard reauth now.
+    try { clearExpectedReauthAt(); } catch (e) { /* ignore */ }
+
     // If server cleared the authoritative flag, remove the canonical local marker.
     // If server clearing failed, KEEP the canonical flag so other tabs / reloads still show modal.
     if (serverCleared) {
@@ -14728,14 +14791,14 @@ async function onSuccessfulReauth() {
           }
         }
         // simple and safe: don't touch the promptModal binding, read from the DOM
-const _pm = (typeof document !== 'undefined') ? document.getElementById('promptModal') : null;
-if (_pm) {
-  try {
-    _pm.classList.add('hidden');
-    _pm.removeAttribute('aria-hidden');
-    _pm.style.pointerEvents = '';
-  } catch (e) { /* ignore DOM errors */ }
-}
+        const _pm = (typeof document !== 'undefined') ? document.getElementById('promptModal') : null;
+        if (_pm) {
+          try {
+            _pm.classList.add('hidden');
+            _pm.removeAttribute('aria-hidden');
+            _pm.style.pointerEvents = '';
+          } catch (e) { /* ignore DOM errors */ }
+        }
 
         reauthModalOpen = false;
       } else {
