@@ -13337,6 +13337,7 @@ async function shouldReauth(context = 'reauth') {
     return { needsReauth, method };
   }
 }
+window.shouldReauth = window.shouldReauth || shouldReauth; // expose globally if needed
 
 
 // === Inactivity helpers (full drop-in update) ===
