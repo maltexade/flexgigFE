@@ -932,16 +932,20 @@ if (updateProfileModal && updateProfileModal.classList.contains('active')) {
 
 
 
+// --- Fetch User Data ---
+// --- Fetch User Data ---
+// --- Robust getSession() with guarded updates and stable avatar handling ---
+// --- Robust getSession() with cache-first rendering ---
+// --- Robust getSession() with cache-first rendering ---
 // Global flags to prevent race conditions
 window.__sessionLoading = false;
 window.__sessionPromise = null;
 window.__lastSessionLoadId = 0;
 window.__INITIAL_SESSION_FETCHED = false;
 
-async function getSession({ force = false, background = false } = {}) {
-  // If there's an in-flight request and caller didn't ask to force a fresh one,
-  // reuse the promise to avoid duplicate network calls.
-  if (window.__sessionPromise && !force) {
+async function getSession() {
+  // Reuse in-flight request to prevent duplicate calls
+  if (window.__sessionPromise) {
     console.log('[DEBUG] getSession: Reusing in-flight promise');
     return window.__sessionPromise;
   }
@@ -949,86 +953,13 @@ async function getSession({ force = false, background = false } = {}) {
   const loadId = Date.now();
   window.__lastSessionLoadId = loadId;
 
-  // Create a new in-flight promise
   window.__sessionPromise = (async () => {
     try {
-      console.log(`[DEBUG] getSession: Starting (loadId=${loadId})`, { force, background });
+      console.log('[DEBUG] getSession: Starting (loadId=' + loadId + ')');
 
-      // PHASE 0: Background mode should avoid the expensive initial fetch and avoid DOM writes
-      if (background) {
-        try {
-          const lightUrl = `${window.__SEC_API_BASE}/api/session?light=true`;
-          console.log('[DEBUG] getSession: background -> fetching light session', lightUrl);
-          const res = await fetch(lightUrl, {
-            method: 'GET',
-            credentials: 'include',
-            headers: {
-              'Accept': 'application/json',
-              'Cache-Control': 'no-cache',
-              'X-Session-Light': '1'
-            }
-          });
-
-          // Try refresh flow on 401
-          if (res.status === 401) {
-            console.log('[DEBUG] getSession: background 401 -> attempting refresh');
-            const refreshRes = await fetch(`${window.__SEC_API_BASE}/auth/refresh`, {
-              method: 'POST',
-              credentials: 'include',
-              headers: { 'Accept': 'application/json' }
-            });
-
-            if (refreshRes.ok) {
-              console.log('[DEBUG] getSession: background refresh succeeded, retrying light session');
-              // retry
-              const retry = await fetch(lightUrl, {
-                method: 'GET',
-                credentials: 'include',
-                headers: {
-                  'Accept': 'application/json',
-                  'Cache-Control': 'no-cache',
-                  'X-Session-Light': '1'
-                }
-              });
-              if (!retry.ok) {
-                console.warn('[WARN] getSession: background retry failed', retry.status);
-                return null;
-              }
-              const pl = await retry.json().catch(() => null);
-              if (pl && pl.user) {
-                try { updateLocalStorageFromUser(pl.user); } catch (e) { console.warn('updateLocalStorageFromUser failed (bg)', e); }
-              }
-              return null;
-            } else {
-              console.warn('[WARN] getSession: background refresh failed; dispatching session:missing');
-              window.dispatchEvent(new CustomEvent('session:missing', {
-                detail: { reason: 'refresh_failed', timestamp: Date.now() }
-              }));
-              return null;
-            }
-          }
-
-          if (!res.ok) {
-            console.warn('[WARN] getSession: background fetch returned non-ok', res.status);
-            return null;
-          }
-
-          const payload = await res.json().catch(() => null);
-          if (payload && payload.user) {
-            try { updateLocalStorageFromUser(payload.user); } catch (e) { console.warn('updateLocalStorageFromUser failed (bg)', e); }
-          }
-          return null; // background refresh intentionally returns null (no DOM changes)
-        } catch (err) {
-          console.warn('[WARN] getSession: background fetch failed', err);
-          return null;
-        } finally {
-          window.__sessionPromise = null;
-        }
-      }
-
-      // PHASE 1: Initial fast-path (only on first full fetch and when not forcing)
-      if (!window.__INITIAL_SESSION_FETCHED && !force) {
-        console.log('[DEBUG] getSession: Attempting initial fast session fetch');
+      // PHASE 1: Check for server initial data (FASTEST)
+      if (!window.__INITIAL_SESSION_FETCHED) {
+        console.log('[DEBUG] getSession: Fetching initial session data');
         try {
           const initialRes = await fetch(`${window.__SEC_API_BASE}/api/session/initial`, {
             method: 'GET',
@@ -1037,54 +968,53 @@ async function getSession({ force = false, background = false } = {}) {
           });
 
           if (initialRes.ok) {
-            const initialData = await initialRes.json().catch(() => null);
+            const initialData = await initialRes.json();
             window.__INITIAL_SESSION_FETCHED = true;
-            if (initialData && initialData.authenticated && initialData.user) {
-              console.log('[DEBUG] getSession: initial session data found; applying to DOM');
+
+            if (initialData.authenticated && initialData.user) {
+              console.log('[DEBUG] getSession: Using initial session data');
               const user = initialData.user;
-              try { applySessionToDOM(user); } catch (e) { console.warn('applySessionToDOM failed (initial)', e); }
-              try { updateLocalStorageFromUser(user); } catch (e) { console.warn('updateLocalStorageFromUser failed (initial)', e); }
+              applySessionToDOM(user);
+              updateLocalStorageFromUser(user);
               return { user };
             }
           }
         } catch (err) {
-          console.warn('[WARN] getSession: initial fast fetch failed', err);
+          console.warn('[WARN] getSession: Initial fetch failed', err);
         }
       }
 
-      // PHASE 2: Cache-first attempt (unless force)
+      // PHASE 2: Use cache if fresh (FAST)
       const cachedUserData = localStorage.getItem('userData');
       let cachedUser = null;
-      if (cachedUserData && !force) {
+      
+      if (cachedUserData) {
         try {
           const parsed = JSON.parse(cachedUserData);
-          // treat parsed as object with cachedAt marker; tolerate older shapes
-          const age = parsed && parsed.cachedAt ? (Date.now() - parsed.cachedAt) : Infinity;
-          if (age < 60000) {
-            console.log('[DEBUG] getSession: Using fresh cache (age ms)', age);
+          if (Date.now() - parsed.cachedAt < 60000) {
+            console.log('[DEBUG] getSession: Using fresh cache');
             cachedUser = parsed;
-            try { applySessionToDOM(parsed); } catch (e) { console.warn('applySessionToDOM failed (cache)', e); }
+            applySessionToDOM(cachedUser);
           }
         } catch (e) {
-          console.warn('[WARN] getSession: cache parse invalid', e);
+          console.warn('[WARN] getSession: Invalid cache', e);
         }
       }
 
-      // PHASE 3: Authoritative fetch
-      const url = `${window.__SEC_API_BASE}/api/session`;
-      console.log('[DEBUG] getSession: Fetching authoritative session', url);
-      let res = await fetch(url, {
+      // PHASE 3: Fetch from API (AUTHORITATIVE)
+      console.log('[DEBUG] getSession: Fetching from /api/session');
+      
+      let res = await fetch(`${window.__SEC_API_BASE}/api/session`, {
         method: 'GET',
         credentials: 'include',
-        headers: {
+        headers: { 
           'Accept': 'application/json',
           'Cache-Control': 'no-cache'
         }
       });
 
-      // 401 -> attempt refresh once
       if (res.status === 401) {
-        console.log('[DEBUG] getSession: 401 from session -> attempting refresh');
+        console.log('[DEBUG] getSession: 401, attempting refresh');
         const refreshRes = await fetch(`${window.__SEC_API_BASE}/auth/refresh`, {
           method: 'POST',
           credentials: 'include',
@@ -1092,34 +1022,38 @@ async function getSession({ force = false, background = false } = {}) {
         });
 
         if (refreshRes.ok) {
-          console.log('[DEBUG] getSession: refresh succeeded; retrying session fetch');
-          res = await fetch(url, {
+          console.log('[DEBUG] getSession: Refresh succeeded, retrying');
+          res = await fetch(`${window.__SEC_API_BASE}/api/session`, {
             method: 'GET',
             credentials: 'include',
-            headers: {
+            headers: { 
               'Accept': 'application/json',
               'Cache-Control': 'no-cache'
             }
           });
         } else {
-          console.warn('[WARN] getSession: Refresh failed — dispatching session:missing');
+
+          // change this later
+
+          console.warn('[WARN] getSession: Refresh failed — not redirecting; dispatching session:missing');
           window.dispatchEvent(new CustomEvent('session:missing', {
             detail: { reason: 'refresh_failed', timestamp: Date.now() }
           }));
           return null;
+
         }
       }
 
       if (!res.ok) {
-        console.error('[ERROR] getSession: API returned non-ok', res.status);
+        console.error('[ERROR] getSession: API returned', res.status);
         if (cachedUser) {
-          console.log('[DEBUG] getSession: Falling back to cached user');
+          console.log('[DEBUG] getSession: Falling back to cache');
           return { user: cachedUser };
         }
         return null;
       }
 
-      const payload = await res.json().catch(() => null);
+      const payload = await res.json();
       if (!payload || !payload.user) {
         console.error('[ERROR] getSession: Invalid payload', payload);
         if (cachedUser) return { user: cachedUser };
@@ -1129,42 +1063,33 @@ async function getSession({ force = false, background = false } = {}) {
       const { user } = payload;
       console.log('[DEBUG] getSession: API success', user);
 
-      // Update DOM only if data changed (or if we didn't apply cache earlier)
-      try {
-        const cachedJson = cachedUser ? JSON.stringify(cachedUser) : null;
-        const userJson = JSON.stringify(user);
-        if (!cachedUser || cachedJson !== userJson) {
-          console.log('[DEBUG] getSession: Data changed -> applying to DOM');
-          try { applySessionToDOM(user); } catch (e) { console.warn('applySessionToDOM failed (api)', e); }
-        }
-      } catch (e) {
-        // If JSON stringify fails for some shape, still attempt to apply DOM
-        try { applySessionToDOM(user); } catch (ee) { console.warn('applySessionToDOM failed (forced)', ee); }
+      // Only update DOM if data changed
+      if (!cachedUser || JSON.stringify(user) !== JSON.stringify(cachedUser)) {
+        console.log('[DEBUG] getSession: Data changed, updating DOM');
+        applySessionToDOM(user);
       }
 
-      // Always update local storage with authoritative payload
-      try { updateLocalStorageFromUser(user); } catch (e) { console.warn('updateLocalStorageFromUser failed (api)', e); }
+      updateLocalStorageFromUser(user);
 
-      console.log(`[DEBUG] getSession: Complete (loadId=${loadId})`);
+      console.log('[DEBUG] getSession: Complete (loadId=' + loadId + ')');
       return { user };
+
     } catch (err) {
       console.error('[ERROR] getSession: Failed', err);
-
-      // On failure attempt to use any cached user as fallback
+      
       const cachedUserData = localStorage.getItem('userData');
       if (cachedUserData) {
         try {
           const cached = JSON.parse(cachedUserData);
           console.log('[DEBUG] getSession: Using cache as fallback');
-          try { applySessionToDOM(cached); } catch (e) { console.warn('applySessionToDOM failed (fallback)', e); }
+          applySessionToDOM(cached);
           return { user: cached };
         } catch (e) {
-          console.warn('[WARN] getSession: cache parse failed in fallback', e);
+          console.warn('[WARN] getSession: Cache parse failed', e);
         }
       }
       return null;
     } finally {
-      // Clear in-flight marker
       window.__sessionPromise = null;
     }
   })();
@@ -1173,7 +1098,6 @@ async function getSession({ force = false, background = false } = {}) {
 }
 
 window.getSession = getSession;
-
 
 
 // Helper: Apply user data to DOM elements
@@ -1445,7 +1369,7 @@ async function handleBioToggle(e) {
   }
 }
 
-const IDLE_TIME = 1 * 60 * 1000; // 2 min in prod
+const IDLE_TIME = 2 * 60 * 1000; // 2 min in prod
 
 // === Safety shim: ensure pollStatus exists (place this near top, before onDashboardLoad runs) ===
 if (typeof pollStatus === 'undefined') {
@@ -2468,31 +2392,6 @@ async function loadUserProfile(noCache = false) {
     throw err; // Re-throw if no fallback
   }
 }
-
-// NEW: quick reauth status check (fast, lightweight)
-async function checkReauthStatus() {
-  try {
-    console.debug('[DEBUG] checkReauthStatus -> /reauth/status (fast)');
-    const apiBase = (window.__SEC_API_BASE || '');
-    const url = apiBase ? `${apiBase}/reauth/status` : '/reauth/status';
-    const res = await fetch(url, {
-      method: 'GET',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' }
-    });
-    if (!res.ok) {
-      console.debug('[DEBUG] checkReauthStatus: non-ok', res.status);
-      return { needsReauth: false };
-    }
-    const j = await res.json().catch(() => ({ needsReauth: false }));
-    return (j && typeof j.reauthRequired !== 'undefined') ? { needsReauth: !!j.reauthRequired, method: j.method || 'pin' } : (j || { needsReauth: false });
-  } catch (err) {
-    console.warn('[DEBUG] checkReauthStatus error', err);
-    // Fail-open: avoid spurious modal blocks if network hiccup
-    return { needsReauth: false };
-  }
-}
-
 
 
 
@@ -12147,7 +12046,20 @@ async function bioVerifyAndFinalize(assertion) {
           // Instead: politely ask the user to re-try fingerprint once (single UI flow).
           safeCall(notify, 'Please touch your fingerprint sensor again to retry biometric authentication.', 'info');
 
-          // Give caller/UI a chance to re-trigger the biometric flow (for example, keep modal open and allow user to tap "Try again"). 
+          // Give caller/UI a chance to re-trigger the biometric flow (for example, keep modal open and allow user to tap "Try again").
+          // If you want the code to programmatically prompt, uncomment the block below — NOTE: this will show the biometric prompt immediately.
+          /*
+          const immediateResult = await doImmediateGetFromFreshOpts(freshOpts);
+          if (immediateResult.ok && immediateResult.assertion) {
+            currentPayload = buildPayloadFromAssertion(immediateResult.assertion);
+            continue; // retry verify
+          } else {
+            safeCall(notify, 'Biometric authentication failed — please try again or use PIN.', 'error');
+            return false;
+          }
+          */
+
+          // Stop automatic retrying — let the UI/modal remain and user perform the fingerprint again.
           return false;
         }
 
@@ -12181,54 +12093,32 @@ async function bioVerifyAndFinalize(assertion) {
             }
           }
 
-          // Optional: keep this best-effort local quick user refresh (non-blocking)
+          // Refresh current user & run your success flows
           try { safeCall(__sec_getCurrentUser); } catch (e) { /* ignore */ }
 
-          // 1. Call onSuccessfulReauth to clear flags, reset timers, and handle session state (pass verifyData if helpful)
+          // 1. Call onSuccessfulReauth to clear flags, reset timers, and handle session state
           if (typeof onSuccessfulReauth === 'function') {
-            try {
-              await onSuccessfulReauth(verifyData);
-            } catch (e) {
-              console.warn('[bio] onSuccessfulReauth threw, continuing', e);
-            }
+            await onSuccessfulReauth();
           }
 
-          // 2. REFRESH authoritative session data BEFORE hiding modal
-          try {
-            await getSession({ force: true });
-          } catch (e) {
-            console.warn('[bio] getSession({force:true}) failed after biometric success', e);
-            // proceed to hide anyway — we don't want to leave the user stuck
-          }
-
-          // 3. hide modal only after server-clear + authoritative refresh
+          // 2. Call guardedHideReauthModal to safely hide the modal only if flags are cleared
           if (typeof guardedHideReauthModal === 'function') {
-            try {
-              await guardedHideReauthModal();
-            } catch (e) {
-              console.warn('[bio] guardedHideReauthModal failed', e);
-            }
+            await guardedHideReauthModal();
           }
-
-          // dispatch canonical event AFTER authoritative refresh so listeners see fresh state
-          try {
-            window.dispatchEvent(new CustomEvent('fg:reauth-success', { detail: { method: 'biometric' } }));
-          } catch (e) {
-            console.debug('bioVerifyAndFinalize: dispatch fg:reauth-success failed', e);
-          }
+          console.log('[DEBUG] Reauth modal hidden after successful biometrics verification in bioVerifyAndFinalize');
 
           // Hide loader (force reset to be safe in edge cases)
           try {
             if (typeof hideLoader === 'function') hideLoader(true);
           } catch (e) { /* ignore */ }
 
-          console.log('[DEBUG] Reauth modal hidden after successful biometrics verification in bioVerifyAndFinalize');
           return true;
         } catch (err) {
           // Last-resort fallback: ensure UI gets restored even on unexpected errors
           try { setReauthActive(false); } catch (e) {}
           try { if (typeof hideLoader === 'function') hideLoader(true); } catch (e) {}
           console.error('[bio] unexpected error in verify success path', err);
+          // Optionally show an error to the user
           if (typeof safeCall === 'function' && typeof notify === 'function') {
             safeCall(notify, 'Error completing authentication. Please try again.', 'error');
           }
@@ -12253,6 +12143,7 @@ async function bioVerifyAndFinalize(assertion) {
     return false;
   }
 }
+
 
 
 
@@ -13607,7 +13498,7 @@ async function setupInactivity() {
       return;
     }
 
-    // Quick live check: if user doesn’t need reauth (no pin/bio), skip wiring
+    // Quick live check: if user doesn't need reauth (no pin/bio) skip wiring
     try {
       if (typeof shouldReauth === 'function') {
         const r = await shouldReauth('reauth');
@@ -13623,89 +13514,74 @@ async function setupInactivity() {
 
     __inactivitySetupDone = true;
 
-    // Reset idle timer when user interacts (only when visible)
+    // Attach user interaction listeners — reset idle timer (soft) only while visible
     INTERACTION_EVENTS.forEach(evt => {
       try { document.addEventListener(evt, resetIdleTimer, { passive: true }); }
-      catch { document.addEventListener(evt, resetIdleTimer); }
+      catch (e) { try { document.addEventListener(evt, resetIdleTimer); } catch(_){} }
     });
 
-    // Replace visibilitychange handler with FAST reauth logic
+    // Visibility handler: local-first hard-idle logic
     let lastVisCheck = 0;
-    try { document.removeEventListener('visibilitychange', window.__fg_inactivity_visibility_handler_ref); } catch {}
-
+    try { document.removeEventListener('visibilitychange', window.__fg_inactivity_visibility_handler_ref); } catch(e){}
     const visibilityHandler = async () => {
       try {
         const now = Date.now();
-        if (now - lastVisCheck < 350) return; // debounce
+        if (now - lastVisCheck < 400) return; // small debounce
         lastVisCheck = now;
 
-        // === When TAB becomes hidden ===
         if (document.visibilityState === 'hidden') {
+          // store when we were backgrounded and set predicted reauth timestamp
           try {
             const nowTs = Date.now();
             localStorage.setItem('lastHiddenAt', String(nowTs));
-            setExpectedReauthAt(nowTs + HARD_IDLE_MS);   // instant predicted reauth
-          } catch (e) {}
+            // set expected reauth time locally so wake-check is instant
+            setExpectedReauthAt(nowTs + HARD_IDLE_MS);
+          } catch (e) {
+            console.error('Error setting lastHiddenAt / expected reauth:', e);
+          }
+          // cancel soft timer — we don't want soft prompts while backgrounded
           if (idleTimeout) { clearTimeout(idleTimeout); idleTimeout = null; }
           return;
         }
 
-        // === TAB IS NOW VISIBLE — run FAST REAUTH CHECK ===
-        console.debug('[visibilityHandler] visible → FAST /reauth/status check');
-
-        // 1) Hard authoritative local flag
+        // === visible path (local-first) ===
+        // 1) If canonical local cross-tab/server flag exists -> authoritative reauth
         if (hasCanonicalLocalFlag()) {
-          console.debug('[visibilityHandler] canonical local reauth flag → modal');
-          try { await showReauthModal({ context: 'reauth' }); }
-          catch { await initReauthModal({ show: true, context: 'reauth' }); }
+          try { await showReauthModal('reauth'); } catch (e) { try { await initReauthModal({ show: true, context: 'reauth' }); } catch(_){} }
           return;
         }
 
-        // 2) **NEW** fast server-side check
-        try {
-          const fastStatus = await checkReauthStatus(); // <── NEW FAST ENDPOINT
-          if (fastStatus && fastStatus.needsReauth) {
-            console.debug('[visibilityHandler] fast endpoint → IMMEDIATE modal');
-            await showReauthModal({ context: 'reauth', reauthStatus: fastStatus });
-            return;
-          }
-        } catch (e) {
-          console.warn('[visibilityHandler] fastStatus check failed', e);
-        }
-
-        // 3) Local expected reauth (instant)
+        // 2) Local expected reauth (fast, no network)
         const expected = getExpectedReauthAt();
         if (expected && Date.now() >= expected) {
-          try { await showReauthModal({ context: 'reauth' }); }
-          catch { await initReauthModal({ show: true, context: 'reauth' }); }
+          try { await showReauthModal('reauth'); } catch (e) { try { await initReauthModal({ show: true, context: 'reauth' }); } catch(_){} }
           return;
         }
 
-        // 4) Fallback to local idle calculation
+        // 3) Fallback - compute idleSince and if >= HARD then consult server (cheap fallback)
         const lastActiveStored = Number(localStorage.getItem('lastActive') || 0);
         const lastHidden = Number(localStorage.getItem('lastHiddenAt') || 0);
         const idleSince = Math.max(Date.now() - lastActiveStored, Date.now() - lastHidden);
 
-        // HARD idle → light server check
         if (idleSince >= HARD_IDLE_MS) {
+          // we don't have a predicted key but local suggests hard idle -> fallback to server check
           try {
             const status = await checkServerReauthStatus();
             if (status && (status.needsReauth || status.reauthRequired)) {
-              await showReauthModal({ context: 'reauth' });
+              try { await showReauthModal('reauth'); } catch (e) { try { await initReauthModal({ show: true, context: 'reauth' }); } catch(_){} }
               return;
             }
+            // server says no forced reauth -> continue to soft path
           } catch (e) {
-            console.warn('[setupInactivity] fallback hard idle error → forcing modal', e);
-            try { await showReauthModal({ context: 'reauth' }); }
-            catch { await initReauthModal({ show: true, context: 'reauth' }); }
+            console.warn('[setupInactivity] server check failed and local predicted hard idle present; showing reauth modal as safer fallback', e);
+            try { await showReauthModal('reauth'); } catch (ee) { try { await initReauthModal({ show: true, context: 'reauth' }); } catch(_){} }
             return;
           }
         }
 
-        // SOFT idle → inactivity prompt
+        // 4) soft path: if idle >= SOFT -> show soft prompt; otherwise reset timer
         if (idleSince >= SOFT_IDLE_MS) {
-          try { await showInactivityPrompt(); }
-          catch { await showReauthModal({ context: 'reauth' }); }
+          try { await showInactivityPrompt(); } catch (e) { try { await showReauthModal('reauth'); } catch(e){} }
           return;
         }
 
@@ -13715,22 +13591,23 @@ async function setupInactivity() {
       }
     };
 
+    // store ref so duplicates can be removed safely later
     window.__fg_inactivity_visibility_handler_ref = visibilityHandler;
-    document.addEventListener('visibilitychange', visibilityHandler, { passive: true });
-    try { window.addEventListener('pageshow', visibilityHandler, { passive: true }); } catch {}
+    document.addEventListener('visibilitychange', window.__fg_inactivity_visibility_handler_ref, { passive: true });
+    // pageshow helps for bfcache restores on some mobile browsers
+    try { window.addEventListener('pageshow', visibilityHandler, { passive: true }); } catch (e) {}
 
-    // Ensure foundation timestamp exists
-    if (!localStorage.getItem('lastActive')) {
-      try { localStorage.setItem('lastActive', String(Date.now())); } catch {}
-    }
-
+    // ensure lastActive exists and start timer
+    try {
+      if (!localStorage.getItem('lastActive')) localStorage.setItem('lastActive', String(Date.now()));
+    } catch (e) {}
     resetIdleTimer();
+
     console.debug('[setupInactivity] completed — soft idle:', SOFT_IDLE_MS, 'hard idle:', HARD_IDLE_MS);
   } catch (err) {
     console.error('[setupInactivity] unexpected error', err);
   }
 }
-
 
 
 /**
@@ -14111,13 +13988,13 @@ async function verifyBiometrics(uid, context = 'reauth') {
     });
 
     if (!optRes.ok) {
-      const errText = await optRes.text().catch(() => optRes.statusText || `HTTP ${optRes.status}`);
+      const errText = await optRes.text();
       console.error('[verifyBiometrics] Options fetch failed', optRes.status, errText);
       throw new Error(`Options fetch failed: ${errText}`);
     }
 
     const publicKey = await optRes.json();
-    console.log('[verifyBiometrics] Fresh options received', { challengeSample: (publicKey.challenge || '').slice ? publicKey.challenge.slice(0, 10) + '...' : '[ok]', allowCredCount: publicKey.allowCredentials?.length || 0 });
+    console.log('[verifyBiometrics] Fresh options received', { challenge: publicKey.challenge?.slice?.(0, 10) + '...', allowCredCount: publicKey.allowCredentials?.length || 0 });
 
     // Convert base64url to buffers (using your fromBase64Url helper)
     publicKey.challenge = fromBase64Url(publicKey.challenge);
@@ -14158,95 +14035,67 @@ async function verifyBiometrics(uid, context = 'reauth') {
       });
 
       if (!verifyRes.ok) {
-        const errText = await verifyRes.text().catch(() => verifyRes.statusText || `HTTP ${verifyRes.status}`);
+        const errText = await verifyRes.text();
         console.error('[verifyBiometrics] Verify failed', verifyRes.status, errText);
         throw new Error(`Server verify failed: ${errText}`);
       }
 
-      const verifyData = await verifyRes.json().catch(() => null);
-      if (!verifyData) {
-        console.warn('[verifyBiometrics] Verify response parsed to null');
-        throw new Error('Invalid server response');
-      }
-
+      const verifyData = await verifyRes.json();
       console.log('[verifyBiometrics] Verify success', verifyData);
 
-      // Handle success: ensure canonical clear -> authoritative refresh -> hide modal -> dispatch
+      // Handle success (e.g., close modal)
       console.log('[DEBUG] Biometrics verification successful in verifyBiometrics');
       try {
-        // 0. Attempt server-side canonical clear if available (non-fatal)
-        if (window.fgReauth && typeof window.fgReauth.completeReauth === 'function') {
-          try {
-            await window.fgReauth.completeReauth();
-          } catch (err) {
-            console.warn('[verifyBiometrics] fgReauth.completeReauth failed (continuing)', err);
-          }
-        }
-
-        // 1. Call onSuccessfulReauth to clear local flags / run local post-reauth hooks
+        // 1. Call onSuccessfulReauth to clear flags, reset timers, and handle session state
         if (typeof onSuccessfulReauth === 'function') {
-          try {
-            await onSuccessfulReauth(verifyData);
-          } catch (e) {
-            console.warn('[verifyBiometrics] onSuccessfulReauth threw (continuing)', e);
-          }
+          await onSuccessfulReauth();
         }
-
-        // 2. Refresh authoritative session data BEFORE hiding modal
-        try {
-          await getSession({ force: true });
-        } catch (e) {
-          console.warn('[verifyBiometrics] getSession({force:true}) failed after biometric success', e);
-          // don't block hiding — we'll still proceed
-        }
-
-        // 3. hide modal only after server-clear + authoritative refresh
+        // 2. Call guardedHideReauthModal to safely hide the modal only if flags are cleared
         if (typeof guardedHideReauthModal === 'function') {
-          try {
-            await guardedHideReauthModal();
-          } catch (e) {
-            console.warn('[verifyBiometrics] guardedHideReauthModal failed', e);
-          }
+          await guardedHideReauthModal();
+        }
+        console.log('[DEBUG] Reauth modal hidden after successful biometrics verification in verifyBiometrics');
+
+        // Notify user of success
+        if (typeof notify === 'function') {
+          notify('Authentication successful', 'success');
         }
 
-        // dispatch canonical event AFTER authoritative refresh so listeners see fresh state
+        // --- NEW: Immediately refresh status/UI but preserve sticky broadcasts ---
         try {
-          window.dispatchEvent(new CustomEvent('fg:reauth-success', { detail: { method: 'biometrics' } }));
-        } catch (e) {
-          console.debug('verifyBiometrics: dispatch fg:reauth-success failed', e);
-        }
-
-        // Notify user of success and hide tiny hint
-        try {
+          // hide any tiny reauth hint (non-destructive)
           if (typeof hideTinyReauthNotice === 'function') {
             try { hideTinyReauthNotice(); } catch (e) {}
           }
-        } catch (e) { /* ignore */ }
+          // dispatch event so other modules can react
+          try {
+  // dispatch canonical event and let the fg:reauth-success handler trigger the debounced poll.
+  window.dispatchEvent(new CustomEvent('fg:reauth-success', { detail: { method: 'biometrics' } }));
+} catch (e) {
+  console.debug('verifyBiometrics: dispatch fg:reauth-success failed', e);
+}
 
-        if (typeof notify === 'function') {
-          try { notify('Authentication successful', 'success'); } catch (e) { console.warn('notify failed', e); }
+        } catch (e) {
+          console.warn('[verifyBiometrics] post-success UI refresh failed', e);
         }
 
-        // Return a positive result for callers
-        return { success: true, data: verifyData };
       } catch (err) {
-        console.error('[verifyBiometrics] Post-verify flow error', err);
+        console.warn('[reauth] Post-biometrics verification error in verifyBiometrics', err);
+        // Optionally show an error to the user
         if (typeof notify === 'function') {
-          try { notify('Error completing authentication. Please try again.', 'error'); } catch (e) {}
+          notify('Error completing authentication. Please try again.', 'error');
         }
-        // Fallback to PIN view to allow alternate path
-        try { switchViews(false); } catch (e) {}
-        return { success: false, error: err.message || String(err) };
       }
+      return { success: true, data: verifyData };
     });
   } catch (err) {
     console.error('[verifyBiometrics] Error', err);
     if (typeof notify === 'function') {
-      try { notify(`Biometric error: ${err.message}`, 'error'); } catch (e) {}
+      notify(`Biometric error: ${err.message}`, 'error');
     }
     // Fallback to PIN view
-    try { switchViews(false); } catch (e) {}
-    return { success: false, error: err.message || String(err) };
+    switchViews(false);  // Show PIN
+    return { success: false, error: err.message };
   }
 }
 
@@ -14418,17 +14267,8 @@ window.persistCredentialId = persistCredentialId;
   // Full showReauthModal (explicit called flow)
 // Full showReauthModal (explicit called flow)
 // ----- Updated implementation with proper reauth flow -----
-async function showReauthModal(opts = 'reauth') {
-  // Support old string usage and new object usage
-  let context = 'reauth';
-  let reauthStatus = null;
-  if (typeof opts === 'string') context = opts;
-  else {
-    context = opts.context || 'reauth';
-    reauthStatus = opts.reauthStatus || null;
-  }
-
-  console.log('showReauthModal called', { context, reauthStatus });
+async function showReauthModal(context = 'reauth') {
+  console.log('showReauthModal called', { context });
   cacheDomRefs();
   if (!reauthModal) {
     console.error('showReauthModal: reauthModal missing');
@@ -14436,70 +14276,24 @@ async function showReauthModal(opts = 'reauth') {
   }
 
   try {
-    // QUICK PATH: we were given a fast status that requires reauth -> show UI immediately
-    if (reauthStatus && reauthStatus.needsReauth) {
-      console.debug('showReauthModal: quick-show using fast reauthStatus', reauthStatus);
-      try {
-        // Attempt to use cached user data for immediate UI hints (non-blocking)
-        let cached = {};
-        try { cached = JSON.parse(localStorage.getItem('userData') || '{}'); } catch (e) { cached = {}; }
+    const reauthStatus = await shouldReauth(context);
+    console.log('showReauthModal: reauthStatus', reauthStatus);
 
-        // initReauthModal does DOM wiring and keypad init — show immediately
-        await initReauthModal({ show: true, context });
-
-        // If server suggested biometric and we have a cached uid, try biometric verify in background
-        if (reauthStatus.method === 'biometric') {
-          const uid = (cached && (cached.uid || cached.userId)) || null;
-          if (uid) {
-            // Run biometric verify in background, but don't block UI
-            (async () => {
-              try {
-                const { success } = await verifyBiometrics(uid, context);
-                if (success) {
-                  console.debug('showReauthModal: background biometric success (quick-path)');
-                  if (typeof onSuccessfulReauth === 'function') await onSuccessfulReauth();
-                  try { await getSession({ force: true }); } catch (e) { console.warn('post-bio getSession failed', e); }
-                  if (typeof guardedHideReauthModal === 'function') await guardedHideReauthModal();
-                } else {
-                  console.debug('showReauthModal: background biometric attempt failed (quick-path)');
-                }
-              } catch (e) {
-                console.warn('showReauthModal: background biometric error', e);
-              }
-            })().catch(() => {});
-          }
-        }
-
-        // Kick off an asynchronous background session refresh so authoritative info becomes fresh
-        try { safeCall(() => getSession({ background: true })); } catch (e) { console.warn('showReauthModal: background getSession scheduling failed', e); }
-
-        return;
-      } catch (e) {
-        console.warn('showReauthModal quick-show failed, falling back to authoritative path', e);
-        // fall-through to authoritative path below
-      }
-    }
-
-    // AUTHORITATIVE PATH: run server-backed check (retains original behaviour)
-    const reauthCheck = await shouldReauth(context);
-    console.log('showReauthModal: reauthStatus (authoritative)', reauthCheck);
-
-    if (!reauthCheck || !reauthCheck.needsReauth) {
+    if (!reauthStatus.needsReauth) {
       console.log('showReauthModal: no reauth required - calling success handler');
       try {
         // 1. Call onSuccessfulReauth to clear flags, reset timers, and handle session state
         if (typeof onSuccessfulReauth === 'function') {
           await onSuccessfulReauth();
         }
-        // 2. Ensure authoritative session refresh before hiding to avoid race
-        try { await getSession({ force: true }); } catch (e) { console.warn('post-success getSession failed', e); }
-        // 3. Call guardedHideReauthModal to safely hide the modal only if flags are cleared
+        // 2. Call guardedHideReauthModal to safely hide the modal only if flags are cleared
         if (typeof guardedHideReauthModal === 'function') {
           await guardedHideReauthModal();
         }
         console.log('[DEBUG] Reauth modal hidden (no reauth needed)');
       } catch (err) {
         console.warn('[reauth] Post-reauth check success error', err);
+        // Optionally show an error to the user, but continue (non-fatal)
         if (typeof showBanner === 'function') {
           showBanner('Authentication completed, but an internal error occurred. Please refresh if issues persist.');
         }
@@ -14507,26 +14301,26 @@ async function showReauthModal(opts = 'reauth') {
       return;
     }
 
-    // If biometric is the chosen method, try biometric flow (authoritative)
-    if (reauthCheck.method === 'biometric') {
-      const session = await safeCall(() => getSession()) || {};
+    if (reauthStatus.method === 'biometric') {
+      const session = await safeCall(getSession) || {};
       const uid = session.user ? (session.user.uid || session.user.id) : null;
       if (uid) {
         const { success } = await verifyBiometrics(uid, context);
         if (success) {
-          console.log('showReauthModal: biometric success (authoritative)');
+          console.log('showReauthModal: biometric success');
           try {
+            // 1. Call onSuccessfulReauth to clear flags, reset timers, and handle session state
             if (typeof onSuccessfulReauth === 'function') {
               await onSuccessfulReauth();
             }
-            // Refresh authoritative session BEFORE hiding
-            try { await getSession({ force: true }); } catch (e) { console.warn('post-bio getSession failed', e); }
+            // 2. Call guardedHideReauthModal to safely hide the modal only if flags are cleared
             if (typeof guardedHideReauthModal === 'function') {
               await guardedHideReauthModal();
             }
             console.log('[DEBUG] Reauth modal hidden after successful biometric verification in showReauthModal');
           } catch (err) {
             console.warn('[reauth] Post-biometric verification error in showReauthModal', err);
+            // Optionally show an error to the user
             if (typeof showBanner === 'function') {
               showBanner('Error completing authentication. Please try again.');
             }
@@ -14549,11 +14343,10 @@ async function showReauthModal(opts = 'reauth') {
     console.error('showReauthModal unexpected error', err);
     // Fallback: Ensure modal is hidden on error to avoid stuck state
     if (typeof guardedHideReauthModal === 'function') {
-      try { await guardedHideReauthModal(); } catch (e) { console.warn('guardedHideReauthModal failed in error path', e); }
+      await guardedHideReauthModal();
     }
   }
 }
-
 
 /* ---------------------------
    Reauth cross-tab sync module
