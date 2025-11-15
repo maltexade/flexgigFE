@@ -14552,7 +14552,7 @@ window.persistCredentialId = persistCredentialId;
     }
   }
 
-  // PIN-first showReauthModal (no auto biometric attempt when PIN available)
+  // showReauthModal (race-proof; PIN-first; never auto-invokes biometrics when PIN exists)
 async function showReauthModal(context = 'reauth') {
   console.log('showReauthModal called', { context });
   cacheDomRefs();
@@ -14563,11 +14563,12 @@ async function showReauthModal(context = 'reauth') {
   }
 
   try {
+    // 1) ask server whether reauth is required
     const raw = await shouldReauth(context);
     const reauthStatus = normalizeReauthStatus(raw);
-    console.log('showReauthModal: reauthStatus normalized', reauthStatus);
+    console.log('showReauthModal: reauthStatus normalized (server):', reauthStatus);
 
-    // No reauth needed
+    // 2) if server says no reauth -> quick exit
     if (!reauthStatus.needsReauth) {
       console.log('showReauthModal: no reauth required');
       if (typeof onSuccessfulReauth === 'function') await onSuccessfulReauth();
@@ -14575,37 +14576,82 @@ async function showReauthModal(context = 'reauth') {
       return;
     }
 
-    // Determine availability of methods
-    const methods = (reauthStatus.methods && reauthStatus.methods.length) ? reauthStatus.methods : [];
-    const hasPin = methods.includes('pin');
-    const hasBiometric = methods.includes('biometric');
+    // 3) Immediately refresh session / client state to avoid races
+    //    (some callers update local flags when getSession resolves)
+    const session = await safeCall(getSession) || {};
+    // try to get fields that may indicate PIN/biometric availability from session
+    // (robustly handle different server shapes)
+    const sessionHasPin = !!(
+      session.hasPin ||
+      session.user?.hasPin ||
+      session.user?.hasPIN ||
+      session.user?.pinConfigured ||
+      session.user?.pin_enabled
+    );
+    const sessionHasBiometric = !!(
+      session.hasBiometrics ||
+      session.user?.hasBiometrics ||
+      session.user?.webauthnRegistered ||
+      session.user?.biometric_enabled
+    );
 
-    // If PIN exists -> ALWAYS show PIN modal and block auto-biometrics
+    // 4) Determine availability using multiple sources:
+    //    prefer an explicit methods array from server, but override with session/local truth if present.
+    const methodsFromServer = Array.isArray(reauthStatus.methods) ? reauthStatus.methods.slice() : [];
+    const methodsSet = new Set(methodsFromServer.map(m => String(m).toLowerCase()));
+
+    // fallbacks from server flags on raw
+    if (!methodsSet.size) {
+      if (raw.hasPin || raw.hasPIN || raw.has_pin) methodsSet.add('pin');
+      if (raw.hasBiometrics || raw.has_biometric || raw.hasBiometric) methodsSet.add('biometric');
+    }
+
+    // honour session observations (these represent the freshest client-side truth)
+    if (sessionHasPin) methodsSet.add('pin');
+    if (sessionHasBiometric) methodsSet.add('biometric');
+
+    // localStorage fallback: some code updates localStorage flags; check tolerant keys
+    try {
+      const ls = window.localStorage;
+      if (ls) {
+        const lsPin = ls.getItem('hasPin') || ls.getItem('fg_hasPin') || ls.getItem('user_hasPin');
+        const lsBio = ls.getItem('hasBiometrics') || ls.getItem('fg_hasBiometrics') || ls.getItem('user_hasBiometrics');
+        if (String(lsPin).toLowerCase() === 'true') methodsSet.add('pin');
+        if (String(lsBio).toLowerCase() === 'true') methodsSet.add('biometric');
+      }
+    } catch (e) { /* ignore storage errors */ }
+
+    // create ordered array: if pin exists, ensure pin is first (PIN-first)
+    const hasPin = methodsSet.has('pin');
+    const hasBiometric = methodsSet.has('biometric');
+    const methods = [];
+    if (hasPin) methods.push('pin');
+    if (hasBiometric && !hasPin) methods.push('biometric'); // only add biometric after pin if pin absent
+
+    console.log('showReauthModal: resolved availability ->', { hasPin, hasBiometric, methods });
+
+    // 5) If PIN exists -> ALWAYS show PIN modal and block auto-biometrics.
     if (hasPin) {
       console.log('showReauthModal: PIN available -> showing PIN modal and blocking auto-biometrics');
-      // Block automatic biometric attempts from any other caller
       window._fg_reauth_blockBiometric = true;
 
-      // Show PIN modal; allow the UI to render an explicit "Use biometrics" button if hasBiometric === true
       await initReauthModal({
         show: true,
         context,
         showBiometricOption: !!hasBiometric
       });
 
-      // Do NOT auto-attempt biometrics here — user must click the biometric button to run it.
+      // NOTE: Do NOT auto-call verifyBiometrics here. User must click biometric button.
       return;
     }
 
-    // If no PIN but biometric is available -> this is the only case where we auto-attempt biometrics
-    if (hasBiometric) {
+    // 6) If no PIN but biometric available -> attempt biometric (only auto-attempt case)
+    if (hasBiometric && !hasPin) {
       console.log('showReauthModal: no PIN present, biometric available -> attempting biometric');
-      // Ensure we are not blocked (safety)
+      // ensure block is not set (safety)
       window._fg_reauth_blockBiometric = false;
 
-      const session = await safeCall(getSession) || {};
       const uid = session.user ? (session.user.uid || session.user.id) : null;
-
       if (!uid) {
         console.warn('showReauthModal: no session UID for biometric -> fallback to PIN modal (safe default)');
         window._fg_reauth_blockBiometric = true;
@@ -14613,7 +14659,7 @@ async function showReauthModal(context = 'reauth') {
         return;
       }
 
-      // Run biometric attempt (only here, when PIN isn't available)
+      // run biometric attempt
       const { success } = await verifyBiometrics(uid, context);
       if (success) {
         console.log('showReauthModal: biometric success');
@@ -14628,8 +14674,8 @@ async function showReauthModal(context = 'reauth') {
       return;
     }
 
-    // No known methods -> safe default: show PIN modal (block biometrics)
-    console.log('showReauthModal: no known methods -> fallback to PIN modal');
+    // 7) Safe default: show PIN modal and block biometrics (most secure UX)
+    console.log('showReauthModal: safe default -> show PIN modal and block biometrics');
     window._fg_reauth_blockBiometric = true;
     await initReauthModal({ show: true, context, showBiometricOption: false });
     return;
