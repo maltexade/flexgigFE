@@ -10885,41 +10885,39 @@ window.toggleKeypadProcessing = window.toggleKeypadProcessing || toggleKeypadPro
 // PIN completion handler (server verification)
 // ----- FIXED implementation with correct reauth flow -----
 async function handlePinCompletion() {
-  console.log('handlePinCompletion started (new robust flow)');
+  console.log('handlePinCompletion started (robust flow)');
   if (processing) {
     console.log('Already processing — ignoring');
     return;
   }
+
   const pin = currentPin;
   if (!/^\d{4}$/.test(pin)) {
-    console.log('Invalid PIN length:', pin.length);
     showTopNotifier('PIN must be 4 digits', 'error');
     return;
   }
 
-  // Visual lock + processing flag
   processing = true;
-  toggleKeypadProcessing(true);  // Disable UI immediately (opacity/pointer-events etc.)
+  toggleKeypadProcessing(true); // lock UI immediately
 
-  // Timeout wrapper: Force unlock after 30s
-  const timeoutPromise = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error('Reauth timeout')), 30000)
-  );
+  let timeoutId;
+  try {
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error('Reauth timeout')), 30000);
+    });
 
-  // Primary work wrapped by withLoader
-  const workPromise = withLoader(async () => {
-    try {
-      // Use the robust helper that waits briefly for session load if needed.
-const uidInfo = await getUid({ waitForSession: true, waitMs: 1200 }) || {};
-const userId = uidInfo?.uid || localStorage.getItem('userId') || null;
-if (!userId) {
-  // Graceful handling instead of throwing — session still loading; ask user to retry
-  console.warn('handlePinCompletion: userId not available yet (session loading).');
-  showTopNotifier('Session still loading — please try PIN again in a moment', 'error');
-  return; // unlock handled in finally
-}
+    const workPromise = withLoader(async () => {
+      // get userId from session/localStorage
+      const uidInfo = await getUid({ waitForSession: true, waitMs: 1200 }) || {};
+      const userId = uidInfo?.uid || localStorage.getItem('userId') || null;
 
+      if (!userId) {
+        console.warn('userId not available yet (session loading).');
+        showTopNotifier('Session still loading — try PIN again in a moment', 'error');
+        return;
+      }
 
+      // PIN verification request
       const res = await fetch('https://api.flexgig.com.ng/api/reauth-pin', {
         method: 'POST',
         credentials: 'include',
@@ -10930,145 +10928,81 @@ if (!userId) {
         body: JSON.stringify({ userId, pin })
       });
 
-      // Try to parse JSON body if possible
       let payload = null;
-      try {
-        payload = await res.json();
-      } catch (e) {
-        payload = null;
-      }
+      try { payload = await res.json(); } catch(e){ payload = null; }
 
       if (res.ok) {
-        // success path
         console.log('[DEBUG] PIN verification successful');
-        try {
-          // 1. Call onSuccessfulReauth to clear flags, reset timers, and handle session state
-          if (typeof onSuccessfulReauth === 'function') {
-            await onSuccessfulReauth();
-          }
-          // 2. Call guardedHideReauthModal to safely hide the modal only if flags are cleared
-          if (typeof guardedHideReauthModal === 'function') {
-            await guardedHideReauthModal();
-          }
-          console.log('[DEBUG] Reauth modal hidden after successful PIN verification');
-          // clear inputs
-          if (typeof resetReauthInputs === 'function') resetReauthInputs();
-          // clear any stored lockout
-          try { localStorage.removeItem('pin_lockout_until'); } catch(e){}
 
-          // --- NEW: immediately refresh UI but preserve sticky broadcasts ---
-          try {
-            if (typeof hideTinyReauthNotice === 'function') {
-              try { hideTinyReauthNotice(); } catch (e) {}
-            }
-            try {
-  // dispatch canonical event and let the fg:reauth-success handler trigger the debounced poll.
-  window.dispatchEvent(new CustomEvent('fg:reauth-success', { detail: { method: 'pin' } }));
-} catch (e) {
-  console.debug('verifyBiometrics: dispatch fg:reauth-success failed', e);
-}
+        // --- POST SUCCESS HANDLING ---
+        if (typeof onSuccessfulReauth === 'function') await onSuccessfulReauth(pin);
+        if (typeof guardedHideReauthModal === 'function') await guardedHideReauthModal();
+        if (typeof resetReauthInputs === 'function') resetReauthInputs();
+        localStorage.removeItem('pin_lockout_until');
 
-          } catch (e) {
-            console.warn('post-PIN success UI refresh failed', e);
-          }
+        try { hideTinyReauthNotice?.(); } catch(e){}
 
-        } catch(e) {
-          console.warn('Post-PIN verification error', e);
-          showTopNotifier('Error completing authentication. Please try again.', 'error');
-        }
-        // successful completion - nothing else to do here
-        return;
+        // Dispatch event for debounced poll updates
+        window.dispatchEvent(new CustomEvent('fg:reauth-success', { detail: { method: 'pin' } }));
+
+        return { success: true };
       }
 
-      // --- Error handling: prefer structured JSON, fallback to text ---
-      const serverMsg = (payload && (payload.message || payload.error)) || (await res.text().catch(()=>'')) || `HTTP ${res.status}`;
-      const serverCode = payload && payload.code ? payload.code : null;
-      const meta = payload && payload.meta ? payload.meta : {};
+      // --- ERROR HANDLING ---
+      const serverMsg = (payload?.message || payload?.error) || (await res.text().catch(()=>'')) || `HTTP ${res.status}`;
+      const serverCode = payload?.code || null;
+      const meta = payload?.meta || {};
 
       console.warn('PIN verify server error', { status: res.status, code: serverCode, msg: serverMsg, meta });
 
-      // Special handling by code
       switch (serverCode) {
         case 'INCORRECT_PIN_ATTEMPT': {
           const left = meta?.attemptsLeft ?? null;
-          showTopNotifier(left ? `Incorrect PIN — ${left} attempt(s) left` : (payload?.message || 'Incorrect PIN'), 'error');
-          const wrap = document.querySelector('.reauthpin-inputs');
-          if (wrap) {
-            wrap.classList.add('fg-shake');
-            setTimeout(()=>wrap.classList.remove('fg-shake'), 400);
-          }
+          showTopNotifier(left ? `Incorrect PIN — ${left} attempt(s) left` : serverMsg, 'error');
+          document.querySelector('.reauthpin-inputs')?.classList.add('fg-shake');
+          setTimeout(()=>document.querySelector('.reauthpin-inputs')?.classList.remove('fg-shake'), 400);
           break;
         }
         case 'TOO_MANY_ATTEMPTS':
         case 'TOO_MANY_ATTEMPTS_EMAIL': {
-          let untilIso = meta?.lockoutUntil || null;
-          if (!untilIso) {
-            const ra = res.headers.get('Retry-After');
-            if (ra) {
-              const sec = parseInt(ra, 10);
-              if (!isNaN(sec)) untilIso = new Date(Date.now() + sec * 1000).toISOString();
-            }
-          }
-          if (untilIso) {
-            persistLockout(untilIso);
-            disableReauthInputs(true);
-            showTopNotifier(payload?.message || 'Too many incorrect PINs — locked', 'error', { autoHide: false, countdownUntil: untilIso });
-          } else {
-            showTopNotifier(payload?.message || 'Too many incorrect PINs — locked', 'error', { autoHide: false });
-          }
+          let untilIso = meta?.lockoutUntil || res.headers.get('Retry-After') ? new Date(Date.now() + parseInt(res.headers.get('Retry-After'),10)*1000).toISOString() : null;
+          if (untilIso) persistLockout(untilIso);
+          disableReauthInputs(true);
+          showTopNotifier(serverMsg, 'error', { autoHide: false, countdownUntil: untilIso });
           break;
         }
         case 'PIN_ENTRY_LIMIT_EXCEEDED': {
-          showTopNotifier(payload?.message || 'PIN entry limit reached — use Forget PIN', 'error', { autoHide: false });
+          showTopNotifier(serverMsg, 'error', { autoHide: false });
           setTimeout(() => openForgetPinFlow(), 800);
           break;
         }
         default: {
-          showTopNotifier(payload?.message || serverMsg || 'PIN verification failed', 'error');
+          showTopNotifier(serverMsg, 'error');
         }
       }
 
-      // Clear inputs visually so user can try again (but only if not locked)
       if (!['TOO_MANY_ATTEMPTS','TOO_MANY_ATTEMPTS_EMAIL','PIN_ENTRY_LIMIT_EXCEEDED'].includes(serverCode)) {
-        if (typeof resetReauthInputs === 'function') resetReauthInputs();
+        resetReauthInputs?.();
         currentPin = '';
-      } else {
-        if (meta?.lockoutUntil) {
-          persistLockout(meta.lockoutUntil);
-          disableReauthInputs(true);
-        }
       }
-
-    } catch (err) {
-      console.error('handlePinCompletion network/error', err);
-      showTopNotifier('Network error. Please try again.', 'error');
-      if (typeof resetReauthInputs === 'function') resetReauthInputs();
-    }
-    // NOTE: do NOT set processing = false here — top-level finally will handle unlocking
-  });
-
-  // Race the work against the timeout so we always run final cleanup
-  return Promise.race([timeoutPromise, workPromise])
-    .then((result) => {
-      console.log('handlePinCompletion resolved:', !!result);
-      // If you want to handle a meaningful result, do it here.
-      return result;
-    })
-    .catch((err) => {
-      console.error('handlePinCompletion timed out or errored:', err);
-      // Timeout case or thrown error — show a helpful message and clear inputs
-      showTopNotifier(err?.message === 'Reauth timeout' ? 'Request timed out — please try again' : 'Request failed — please try again', 'error');
-      if (typeof resetReauthInputs === 'function') resetReauthInputs();
-      currentPin = '';
-      // Re-throw if upstream needs to know about the error, or swallow it to keep UI simple.
-      // throw err;
-    })
-    .finally(() => {
-      console.log('handlePinCompletion finally: unlocking');
-      processing = false;
-      toggleKeypadProcessing(false);  // Re-enable UI
     });
+
+    // race work vs timeout
+    return await Promise.race([timeoutPromise, workPromise]);
+
+  } catch (err) {
+    console.error('handlePinCompletion error:', err);
+    showTopNotifier(err?.message === 'Reauth timeout' ? 'Request timed out — please try again' : 'Request failed — try again', 'error');
+    resetReauthInputs?.();
+    currentPin = '';
+  } finally {
+    clearTimeout(timeoutId); // ✅ prevent timeout after success
+    processing = false;
+    toggleKeypadProcessing(false);
+    console.log('handlePinCompletion finished — UI unlocked');
+  }
 }
+
 
 
 
