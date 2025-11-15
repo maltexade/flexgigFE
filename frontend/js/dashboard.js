@@ -16,6 +16,137 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const { createClient } = supabase;
 const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+
+async function checkReauthStatusOnLoad() {
+  console.log('[REAUTH-INIT] Checking server reauth status on load...');
+  
+  try {
+    // 🔥 Query server FIRST (authoritative)
+    const res = await fetch(`${window.__SEC_API_BASE}/reauth/status`, {
+      method: 'GET',
+      credentials: 'include',
+      headers: { 'Accept': 'application/json' }
+    });
+
+    if (!res.ok) {
+      console.warn('[REAUTH-INIT] Server check failed:', res.status);
+      // Fallback to localStorage check
+      return checkLocalReauthFlag();
+    }
+
+    const data = await res.json();
+    console.log('[REAUTH-INIT] Server response:', data);
+
+    if (data.reauthRequired) {
+      // Server says locked -> update local and show modal
+      const lockData = {
+        reason: data.reason || 'server',
+        ts: data.lockedAt ? new Date(data.lockedAt).getTime() : Date.now(),
+        lockId: data.lockId || null
+      };
+
+      // Persist to localStorage (sync with server)
+      localStorage.setItem('fg_reauth_required_v1', JSON.stringify(lockData));
+
+      // Show modal immediately
+      console.log('[REAUTH-INIT] Server requires reauth -> showing modal');
+      await showReauthModalImmediate(lockData);
+      return true;
+    } else {
+      // Server says unlocked -> clear local flag if present
+      localStorage.removeItem('fg_reauth_required_v1');
+      console.log('[REAUTH-INIT] Server says no reauth required');
+      return false;
+    }
+  } catch (err) {
+    console.error('[REAUTH-INIT] Error checking server:', err);
+    // Fallback to localStorage
+    return checkLocalReauthFlag();
+  }
+}
+
+// Helper: Check local flag (fallback)
+function checkLocalReauthFlag() {
+  try {
+    const stored = JSON.parse(localStorage.getItem('fg_reauth_required_v1') || 'null');
+    if (stored) {
+      console.log('[REAUTH-INIT] Local flag present:', stored);
+      showReauthModalImmediate(stored);
+      return true;
+    }
+    return false;
+  } catch (e) {
+    console.warn('[REAUTH-INIT] Local flag check failed:', e);
+    return false;
+  }
+}
+
+// Helper: Show modal immediately (blocking)
+async function showReauthModalImmediate(lockData) {
+  console.log('[REAUTH-INIT] Showing reauth modal immediately');
+  
+  // Use your existing modal system
+  if (window.__reauth && typeof window.__reauth.showReauthModal === 'function') {
+    await window.__reauth.showReauthModal('reauth', lockData);
+  } else {
+    // Fallback
+    await showReauthModal('reauth', lockData);
+  }
+}
+
+window.addEventListener('storage', async (e) => {
+  if (e.key === 'fg_reauth_required_v1') {
+    console.log('[REAUTH-SYNC] Reauth flag changed in storage:', e.newValue);
+    
+    if (e.newValue) {
+      // Another tab set reauth required
+      try {
+        const lockData = JSON.parse(e.newValue);
+        await showReauthModalImmediate(lockData);
+      } catch (err) {
+        console.error('[REAUTH-SYNC] Failed to show modal:', err);
+      }
+    } else {
+      // Another tab cleared reauth
+      console.log('[REAUTH-SYNC] Reauth cleared in another tab');
+      await guardedHideReauthModal();
+    }
+  }
+});
+
+setInterval(async () => {
+  try {
+    // Only poll if modal is NOT already showing
+    if (reauthModalOpen) return;
+
+    const res = await fetch(`${window.__SEC_API_BASE}/reauth/status`, {
+      method: 'GET',
+      credentials: 'include',
+      headers: { 'Accept': 'application/json' }
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data.reauthRequired) {
+        const localFlag = localStorage.getItem('fg_reauth_required_v1');
+        if (!localFlag) {
+          // Server requires reauth but local doesn't know yet
+          console.log('[REAUTH-POLL] Server requires reauth - showing modal');
+          const lockData = {
+            reason: data.reason || 'server',
+            ts: Date.now(),
+            lockId: data.lockId || null
+          };
+          localStorage.setItem('fg_reauth_required_v1', JSON.stringify(lockData));
+          await showReauthModalImmediate(lockData);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[REAUTH-POLL] Poll failed:', err);
+  }
+}, 30000); // Every 30 seconds
+
 let __backHandler = null;
 // Ensure shared UI refs / flags are declared before any functions use them
 let reauthModal = null;
@@ -32,48 +163,77 @@ let reauthModalOpen = false;
 // Use this everywhere instead of calling reauthModal.classList.add('hidden') directly.
 async function guardedHideReauthModal() {
   try {
-    // REMOVED: Do not call onSuccessfulReauth here to avoid circular calls.
-    // Assume the caller has already run onSuccessfulReauth() to perform any necessary clearing/reset logic.
+    console.log('[REAUTH] guardedHideReauthModal: Checking if safe to hide');
 
-    // helper that reads canonical server/local flag
-    function _isCanonicalPending() {
-      try { return !!JSON.parse(localStorage.getItem('fg_reauth_required_v1') || 'null'); } catch (e) { return false; }
-    }
+    // --- 1) Server check (from version A) ---
+    try {
+      const res = await fetch(`${window.__SEC_API_BASE}/reauth/status`, {
+        method: 'GET',
+        credentials: 'include',
+        headers: { 'Accept': 'application/json' }
+      });
 
-    // only hide UI if canonical flag (fg_reauth_required_v1) is not present
-    if (!_isCanonicalPending()) {
-      try {
-        if (reauthModal) {
-          reauthModal.classList.add('hidden');
-          try { reauthModal.removeAttribute('aria-modal'); } catch (e) {}
-          try { reauthModal.removeAttribute('role'); } catch (e) {}
-          if ('inert' in HTMLElement.prototype) {
-            try { reauthModal.inert = false; } catch (e) {}
-          } else {
-            try { reauthModal.removeAttribute('aria-hidden'); reauthModal.style.pointerEvents = ''; } catch (e) {}
-          }
+      if (res.ok) {
+        const data = await res.json();
+        if (data.reauthRequired) {
+          console.warn('[REAUTH] Server still requires reauth - NOT hiding modal');
+          return;
         }
-                // safe access to the DOM element; avoid referencing a possibly undeclared variable
-        const _pm = (typeof document !== 'undefined') ? document.getElementById('promptModal') : null;
-        if (_pm) {
-          try {
-            _pm.classList.add('hidden');
-            _pm.removeAttribute('aria-hidden');
-            _pm.style.pointerEvents = '';
-          } catch (e) {}
-        }
-
-        reauthModalOpen = false;
-        try { setReauthActive(false); } catch(e) {}
-        try { localStorage.removeItem('fg_reauth_active_tab'); } catch(e) {}
-      } catch (e) {
-        console.warn('[reauth] guardedHideReauthModal UI hide error', e);
       }
-    } else {
-      console.debug('[reauth] guardedHideReauthModal: canonical flag still present; skipping hide');
+    } catch (e) {
+      console.warn('[REAUTH] guardedHideReauthModal: server check failed, continuing cautiously', e);
     }
+
+    // --- 2) Local canonical check (from version B) ---
+    function _isCanonicalPending() {
+      try { 
+        return !!JSON.parse(localStorage.getItem('fg_reauth_required_v1') || 'null'); 
+      } catch (e) { 
+        return false; 
+      }
+    }
+
+    if (_isCanonicalPending()) {
+      console.warn('[REAUTH] Local canonical flag still present - NOT hiding modal');
+      return;
+    }
+
+    // --- 3) Safe to hide ---
+    console.log('[REAUTH] Safe to hide - hiding modal');
+
+    if (reauthModal) {
+      reauthModal.classList.add('hidden');
+      try { reauthModal.removeAttribute('aria-modal'); } catch (e) {}
+      try { reauthModal.removeAttribute('role'); } catch (e) {}
+
+      if ('inert' in HTMLElement.prototype) {
+        try { reauthModal.inert = false; } catch (e) {}
+      } else {
+        try { 
+          reauthModal.removeAttribute('aria-hidden'); 
+          reauthModal.style.pointerEvents = ''; 
+        } catch (e) {}
+      }
+    }
+
+    const promptModal = (typeof document !== 'undefined')
+      ? document.getElementById('promptModal')
+      : null;
+
+    if (promptModal) {
+      try {
+        promptModal.classList.add('hidden');
+        promptModal.removeAttribute('aria-hidden');
+        promptModal.style.pointerEvents = '';
+      } catch (e) {}
+    }
+
+    reauthModalOpen = false;
+    try { setReauthActive(false); } catch (e) {}
+    try { localStorage.removeItem('fg_reauth_active_tab'); } catch (e) {}
+
   } catch (err) {
-    console.warn('[reauth] guardedHideReauthModal unexpected error', err);
+    console.error('[REAUTH] guardedHideReauthModal unexpected error:', err);
     try { setReauthActive(false); } catch(e){}
   }
 }
@@ -215,7 +375,7 @@ async function fullClientLogout() {
   }
 }
 
-// ===== Sticky reauth bootstrap (drop near top of dashboard.js, BEFORE initFlow boot) =====
+// ===== IMPROVED Sticky reauth bootstrap (hybrid: local-first + server-sync) =====
 (function ensurePersistentReauthBootstrap(){
   try {
     // If the cross-tab module exists, call its init now (defensive)
@@ -230,52 +390,155 @@ async function fullClientLogout() {
     }
 
     const stored = readLocalKey();
-    if (!stored) return;
+    
+    // 🔥 NEW: If local flag exists, show immediately (instant feedback)
+    // Then verify with server in background (authoritative check)
+    if (stored) {
+      console.log('[REAUTH-BOOT] Local flag found, showing modal immediately');
+      
+      // Try to show modal as soon as possible
+      let attempts = 0;
+      const maxAttempts = 20;
+      const retryMs = 250;
 
-    // Try to show modal as soon as possible, but wait for DOM wiring if needed.
-    let attempts = 0;
-    const maxAttempts = 20;
-    const retryMs = 250;
-
-    const tryShow = async () => {
-      attempts++;
-      try {
-        // Prefer the local show helper if available
-        if (typeof showReauthModalLocal === 'function') {
-          showReauthModalLocal({ fromStorageObj: stored });
-          return;
+      const tryShow = async () => {
+        attempts++;
+        try {
+          // Prefer the local show helper if available
+          if (typeof showReauthModalLocal === 'function') {
+            showReauthModalLocal({ fromStorageObj: stored });
+            return;
+          }
+          // Otherwise prefer the higher-level API
+          if (window.__reauth && typeof window.__reauth.initReauthModal === 'function') {
+            await window.__reauth.initReauthModal({ show: true, context: 'reauth' });
+            return;
+          }
+          // Fallback: dispatch storage event to trigger other wiring
+          window.dispatchEvent(new StorageEvent('storage', { key: LOCAL_KEY, newValue: JSON.stringify(stored) }));
+        } catch (e) {
+          // swallow and retry
         }
-        // Otherwise prefer the higher-level API
-        if (window.__reauth && typeof window.__reauth.initReauthModal === 'function') {
-          // try to init and show
-          await window.__reauth.initReauthModal({ show: true, context: 'reauth' });
-          return;
+        if (attempts < maxAttempts) setTimeout(tryShow, retryMs);
+        else console.warn('ensurePersistentReauthBootstrap: giving up after attempts');
+      };
+
+      tryShow();
+
+      // 🔥 NEW: Verify with server in background (don't block UI)
+      (async () => {
+        try {
+          await new Promise(resolve => setTimeout(resolve, 500)); // Wait for DOM
+          
+          const res = await fetch(`${window.__SEC_API_BASE || ''}/reauth/status`, {
+            method: 'GET',
+            credentials: 'include',
+            headers: { 'Accept': 'application/json' }
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            if (!data.reauthRequired) {
+              // Server says unlocked but local flag present -> clear it
+              console.warn('[REAUTH-BOOT] Server says unlocked but local flag present - clearing');
+              localStorage.removeItem(LOCAL_KEY);
+              
+              // Hide modal if showing
+              if (typeof guardedHideReauthModal === 'function') {
+                await guardedHideReauthModal();
+              }
+            } else {
+              // Server confirms lock -> sync lockId if missing
+              if (data.lockId && !stored.lockId) {
+                stored.lockId = data.lockId;
+                localStorage.setItem(LOCAL_KEY, JSON.stringify(stored));
+              }
+            }
+          }
+        } catch (err) {
+          console.warn('[REAUTH-BOOT] Background server verification failed:', err);
+          // Keep modal showing if server unreachable (safe default)
         }
-        // Fallback: dispatch storage event to trigger other wiring
-        window.dispatchEvent(new StorageEvent('storage', { key: LOCAL_KEY, newValue: JSON.stringify(stored) }));
-      } catch (e) {
-        // swallow and retry
-      }
-      if (attempts < maxAttempts) setTimeout(tryShow, retryMs);
-      else console.warn('ensurePersistentReauthBootstrap: giving up after attempts');
-    };
+      })();
+    }
 
-    tryShow();
-
-    // When tab becomes visible, re-check local key and force show if present
-    document.addEventListener('visibilitychange', () => {
+    // 🔥 IMPROVED: Visibility change handler with server-first check
+    document.addEventListener('visibilitychange', async () => {
       try {
-        if (document.visibilityState === 'visible') {
-          const s = readLocalKey();
-          if (s) {
-            try {
-              if (typeof showReauthModalLocal === 'function') showReauthModalLocal({ fromStorageObj: s });
-              else if (window.__reauth && typeof window.__reauth.initReauthModal === 'function') window.__reauth.initReauthModal({ show: true, context: 'reauth' });
-            } catch (e) {}
+        if (document.visibilityState !== 'visible') return;
+        
+        console.log('[REAUTH-BOOT] Tab became visible - checking server status');
+        
+        // Check server first (authoritative)
+        try {
+          const res = await fetch(`${window.__SEC_API_BASE || ''}/reauth/status`, {
+            method: 'GET',
+            credentials: 'include',
+            headers: { 'Accept': 'application/json' },
+            cache: 'no-store' // Force fresh check
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            const localFlag = readLocalKey();
+            
+            if (data.reauthRequired) {
+              // Server says locked
+              if (!localFlag) {
+                // Local doesn't know -> set it and show modal
+                console.log('[REAUTH-BOOT] Server requires reauth (visibility) - syncing local');
+                const lockData = {
+                  reason: data.reason || 'server',
+                  ts: data.lockedAt ? new Date(data.lockedAt).getTime() : Date.now(),
+                  lockId: data.lockId || null
+                };
+                localStorage.setItem(LOCAL_KEY, JSON.stringify(lockData));
+                
+                // Show modal
+                if (typeof showReauthModalLocal === 'function') {
+                  showReauthModalLocal({ fromStorageObj: lockData });
+                } else if (window.__reauth && typeof window.__reauth.initReauthModal === 'function') {
+                  await window.__reauth.initReauthModal({ show: true, context: 'reauth' });
+                }
+              } else {
+                // Local knows -> ensure modal is showing
+                if (typeof showReauthModalLocal === 'function') {
+                  showReauthModalLocal({ fromStorageObj: localFlag });
+                } else if (window.__reauth && typeof window.__reauth.initReauthModal === 'function') {
+                  await window.__reauth.initReauthModal({ show: true, context: 'reauth' });
+                }
+              }
+            } else {
+              // Server says unlocked
+              if (localFlag) {
+                // Local thinks locked but server says no -> clear it
+                console.log('[REAUTH-BOOT] Server says unlocked (visibility) - clearing local');
+                localStorage.removeItem(LOCAL_KEY);
+                
+                // Hide modal if showing
+                if (typeof guardedHideReauthModal === 'function') {
+                  await guardedHideReauthModal();
+                }
+              }
+            }
+          }
+        } catch (fetchErr) {
+          console.warn('[REAUTH-BOOT] Server check failed on visibility:', fetchErr);
+          
+          // Fallback: if local flag exists, show it (safe default)
+          const localFlag = readLocalKey();
+          if (localFlag) {
+            if (typeof showReauthModalLocal === 'function') {
+              showReauthModalLocal({ fromStorageObj: localFlag });
+            } else if (window.__reauth && typeof window.__reauth.initReauthModal === 'function') {
+              await window.__reauth.initReauthModal({ show: true, context: 'reauth' });
+            }
           }
         }
-      } catch (e) {}
-    }, { passive:true });
+      } catch (e) {
+        console.warn('[REAUTH-BOOT] Visibility handler error:', e);
+      }
+    }, { passive: true });
 
     // Before unload: keep the key in place (defensive; localStorage persists anyway)
     window.addEventListener('beforeunload', () => {
@@ -284,6 +547,7 @@ async function fullClientLogout() {
         if (s) localStorage.setItem(LOCAL_KEY, JSON.stringify(s));
       } catch (e) {}
     });
+    
   } catch (err) {
     console.warn('ensurePersistentReauthBootstrap failed', err);
   }
@@ -1443,56 +1707,82 @@ if (typeof pollStatus === 'undefined') {
 // After getSession succeeds
 // After getSession succeeds (now cache-first)
 async function onDashboardLoad() {
-  // Instant cache render first
-  const cachedUserData = localStorage.getItem('userData');
-  if (cachedUserData) {
-    try {
-      const parsed = JSON.parse(cachedUserData);
-      if (Date.now() - parsed.cachedAt < 300000) {
-        const firstName = parsed.fullName?.split(' ')[0] || 'User';
-        const domReady = await waitForDomReady(); // Reuse your func
-        if (domReady) applySessionToDOM(parsed, firstName);
-      }
-    } catch (e) { /* ignore */ }
+  console.log('[DASHBOARD] onDashboardLoad: Starting');
+
+  // --- 0) Instant cache-first render for perceived speed ---
+  try {
+    const cachedUserData = localStorage.getItem('userData');
+    if (cachedUserData) {
+      try {
+        const parsed = JSON.parse(cachedUserData);
+        if (Date.now() - parsed.cachedAt < 300000) { // 5m cache
+          const firstName = parsed.fullName?.split(' ')[0] || 'User';
+          const domReady = await waitForDomReady();
+          if (domReady) applySessionToDOM(parsed, firstName);
+        }
+      } catch (e) { /* ignore parse/dom errors */ }
+    }
+  } catch (e) {
+    console.warn('[DASHBOARD] cache-first render failed', e);
   }
 
-  // --- SINGLE getSession() call (capture result) ---
+  // --- 1) Single getSession() call (capture result for fallback use) ---
   let session = null;
   try {
-    session = await getSession(); // <-- only one call in the entire function
+    session = await getSession();
   } catch (err) {
     console.warn('[onDashboardLoad] getSession() failed:', err);
     session = null;
   }
 
-  // 🔥 ADD THESE TWO LINES (after the single getSession)
-  await manageDashboardCards();
-  initializeSmartAccountPinButton();
-
-  // fetch active broadcasts (separate; doesn't call getSession)
+  // --- 2) Critical: authoritative reauth check BEFORE continuing heavy init.
+  // If reauth required, block dashboard load (modal will be shown by check).
   try {
-    const broadcasts = await fetchActiveBroadcasts(); // this already shows banner & sets active_broadcast_id
-    console.debug('[BCAST] fetchActiveBroadcasts returned', broadcasts.length);
-  } catch (err) {
-    console.warn('[BCAST] fetchActiveBroadcasts failed at login', err);
+    const needsReauth = await checkReauthStatusOnLoad(); // should talk to /reauth/status
+    if (needsReauth) {
+      console.log('[DASHBOARD] Reauth required - blocking dashboard load');
+      return; // caller expects modal shown and load stopped
+    }
+  } catch (e) {
+    // If the check fails, log and continue (fail-open to avoid blocking UX).
+    console.warn('[DASHBOARD] checkReauthStatusOnLoad failed, continuing:', e);
   }
 
-  // Securely sync PIN/bio flags to storage on load
+  // --- 3) Continue with normal dashboard init ---
   try {
-    // 🔹 Force fresh fetch for flags (bypass 5min cache — add Cache-Control: no-cache to bust browser cache)
+    await manageDashboardCards();
+  } catch (e) {
+    console.warn('[DASHBOARD] manageDashboardCards failed', e);
+  }
+
+  try {
+    initializeSmartAccountPinButton();
+  } catch (e) {
+    console.warn('[DASHBOARD] initializeSmartAccountPinButton failed', e);
+  }
+
+  // --- 4) Active broadcasts (independent; does not call getSession) ---
+  try {
+    const broadcasts = await fetchActiveBroadcasts();
+    console.debug('[BCAST] fetchActiveBroadcasts returned', (broadcasts && broadcasts.length) || 0);
+  } catch (err) {
+    console.warn('[BCAST] fetchActiveBroadcasts failed at load', err);
+  }
+
+  // --- 5) Securely sync PIN / biometrics flags from server (fresh) with fallback to session
+  try {
     const freshRes = await fetch(`${window.__SEC_API_BASE}/api/session`, {
       method: 'GET',
       credentials: 'include',
       headers: {
         'Accept': 'application/json',
-        'Cache-Control': 'no-cache'  // Ensure fresh server data
+        'Cache-Control': 'no-cache'
       }
     });
     if (!freshRes.ok) throw new Error(`Fresh session fetch failed: ${freshRes.status}`);
     const freshPayload = await freshRes.json();
-    const freshSession = { user: freshPayload.user || {} };  // Mimic getSession structure
+    const freshSession = { user: freshPayload.user || {} }; // mimic getSession shape
 
-    // 🔹 DEBUG: Log raw fresh session for bio/pin (remove after fix)
     console.log('[DEBUG-SYNC-FRESH] Raw fresh session.user:', {
       hasPin: freshSession?.user?.hasPin,
       hasBiometrics: freshSession?.user?.hasBiometrics,
@@ -1503,11 +1793,9 @@ async function onDashboardLoad() {
     const hasPin = freshSession?.user?.hasPin || localStorage.getItem('hasPin') === 'true' || false;
     localStorage.setItem('hasPin', hasPin ? 'true' : 'false');
 
-    // 🔹 Align biometrics with fresh server fallback (uses backend's hasBiometrics count)
     const biometricsEnabled = freshSession?.user?.hasBiometrics || localStorage.getItem('biometricsEnabled') === 'true' || false;
     localStorage.setItem('biometricsEnabled', biometricsEnabled ? 'true' : 'false');
 
-    // 🔹 DEBUG: Log post-sync localStorage (remove after fix)
     console.log('[DEBUG-SYNC-FRESH] Post-sync localStorage:', {
       hasPin: localStorage.getItem('hasPin'),
       biometricsEnabled: localStorage.getItem('biometricsEnabled'),
@@ -1517,7 +1805,6 @@ async function onDashboardLoad() {
     if (biometricsEnabled) {
       const storedLogin = localStorage.getItem('biometricForLogin');
       const storedTx = localStorage.getItem('biometricForTx');
-
       if (storedLogin === null) localStorage.setItem('biometricForLogin', 'true');
       if (storedTx === null) localStorage.setItem('biometricForTx', 'true');
 
@@ -1527,7 +1814,6 @@ async function onDashboardLoad() {
       });
     }
 
-    // If bio enabled and credentialId exists, prefetch immediately
     if (localStorage.getItem('biometricsEnabled') === 'true' && localStorage.getItem('credentialId')) {
       prefetchAuthOptions();
     }
@@ -1535,17 +1821,15 @@ async function onDashboardLoad() {
 
   } catch (err) {
     console.warn('[onDashboardLoad] Flag sync error', err);
-    // Fallback: Use the single-session result captured earlier (if any),
-    // otherwise leave localStorage as-is or apply conservative defaults.
+    // fallback to single getSession() result captured earlier
     try {
-      const useSession = session; // reuse single call result (may be null)
+      const useSession = session;
       const hasPin = useSession?.user?.hasPin || localStorage.getItem('hasPin') === 'true' || false;
       localStorage.setItem('hasPin', hasPin ? 'true' : 'false');
 
       const biometricsEnabled = useSession?.user?.hasBiometrics || localStorage.getItem('biometricsEnabled') === 'true' || false;
       localStorage.setItem('biometricsEnabled', biometricsEnabled ? 'true' : 'false');
 
-      // When biometrics not enabled, don't leave children in an indeterminate state:
       if (!biometricsEnabled) {
         localStorage.setItem('biometricForLogin', 'false');
         localStorage.setItem('biometricForTx', 'false');
@@ -1560,32 +1844,44 @@ async function onDashboardLoad() {
     }
   }
 
-  setupBroadcastSubscription();
-  if (window.__reauth && typeof window.__reauth.initReauthModal === 'function') {
-    await window.__reauth.initReauthModal();
-  } else {
-    console.warn('initReauthModal not available - skipping');
-  }
-  if (window.__reauth && typeof window.__reauth.setupInactivity === 'function') {
-    window.__reauth.setupInactivity();
-  } else {
-    console.warn('setupInactivity not available - skipping');
+  // --- 6) Setup broadcast subscriptions and reauth helpers ---
+  try {
+    setupBroadcastSubscription();
+  } catch (e) {
+    console.warn('[DASHBOARD] setupBroadcastSubscription failed', e);
   }
 
-  // --------------------------
-  // React to successful reauth
-  // --------------------------
-  (function(){
+  try {
+    if (window.__reauth && typeof window.__reauth.initReauthModal === 'function') {
+      await window.__reauth.initReauthModal();
+    } else {
+      console.warn('initReauthModal not available - skipping');
+    }
+  } catch (e) {
+    console.warn('initReauthModal threw', e);
+  }
+
+  try {
+    if (window.__reauth && typeof window.__reauth.setupInactivity === 'function') {
+      window.__reauth.setupInactivity();
+    } else {
+      console.warn('setupInactivity not available - skipping');
+    }
+  } catch (e) {
+    console.warn('setupInactivity threw', e);
+  }
+
+  // --- 7) React to successful reauth: debounce + pollStatus trigger ---
+  (function() {
     let __fg_reauth_timer = null;
-    const __fg_reauth_debounce_ms = 600; // slightly larger debounce to allow server to settle
-    // Short-circuit: do not start a new poll if one started recently
+    const __fg_reauth_debounce_ms = 600;
     const MIN_REAUTH_POLL_MS = 700;
     let __fg_last_reauth_poll = 0;
 
     window.addEventListener('fg:reauth-success', (ev) => {
       try {
         if (typeof hideTinyReauthNotice === 'function') {
-          try { hideTinyReauthNotice(); } catch (e) { /* swallow */ }
+          try { hideTinyReauthNotice(); } catch (e) {}
         }
 
         if (__fg_reauth_timer) clearTimeout(__fg_reauth_timer);
@@ -1598,9 +1894,7 @@ async function onDashboardLoad() {
           }
           __fg_last_reauth_poll = now;
           try {
-            if (typeof pollStatus === 'function') {
-              pollStatus();
-            }
+            if (typeof pollStatus === 'function') pollStatus();
           } catch (e) {
             console.warn('fg:reauth-success -> pollStatus failed', e);
           }
@@ -1611,42 +1905,37 @@ async function onDashboardLoad() {
     }, { passive: true });
   })();
 
-  // Boot-time: decide soft vs hard reauth using server authoritive check.
-// If we were away long enough, ask server whether session is locked.
-// If locked -> open the full reauth modal immediately. Otherwise fall back to soft prompt.
-try {
-  const last = parseInt(localStorage.getItem('lastActive')) || 0;
-  if (Date.now() - last > IDLE_TIME) {
-    let reauthCheck = null;
-    try {
-      reauthCheck = await shouldReauth(); // shouldReauth talks to /reauth/status
-    } catch (e) {
-      console.warn('boot-time shouldReauth failed, falling back to soft prompt', e);
-    }
-
-    if (reauthCheck && reauthCheck.needsReauth) {
-      // Server says reauth required -> open authoritative reauth modal immediately
+  // --- 8) Boot-time idle check: decide soft vs hard reauth ---
+  try {
+    const last = parseInt(localStorage.getItem('lastActive')) || 0;
+    if (Date.now() - last > IDLE_TIME) {
+      let reauthCheck = null;
       try {
-        if (window.__reauth && typeof window.__reauth.showReauthModal === 'function') {
-          await window.__reauth.showReauthModal('reauth');
-        } else {
-          await showReauthModal('reauth');
-        }
+        reauthCheck = await shouldReauth(); // talks to /reauth/status
       } catch (e) {
-        console.warn('Failed to show reauth modal on boot; falling back to inactivity prompt', e);
-        await showInactivityPrompt();
+        console.warn('boot-time shouldReauth failed, falling back to soft prompt', e);
       }
-    } else {
-      // session still OK -> soft inactivity or just reset timer
-      try { resetIdleTimer(); } catch (e) { console.warn('resetIdleTimer on boot failed', e); }
+
+      if (reauthCheck && reauthCheck.needsReauth) {
+        try {
+          if (window.__reauth && typeof window.__reauth.showReauthModal === 'function') {
+            await window.__reauth.showReauthModal('reauth');
+          } else {
+            await showReauthModal('reauth');
+          }
+        } catch (e) {
+          console.warn('Failed to show reauth modal on boot; falling back to inactivity prompt', e);
+          await showInactivityPrompt();
+        }
+      } else {
+        try { resetIdleTimer(); } catch (e) { console.warn('resetIdleTimer on boot failed', e); }
+      }
     }
+  } catch (e) {
+    console.warn('boot-time inactivity check failed', e);
   }
-} catch (e) {
-  console.warn('boot-time inactivity check failed', e);
-}
 
-
-  // Rocket: register SW, start pollStatus, etc.
+  // --- 9) Service worker registration ---
   async function registerSW() {
     if ('serviceWorker' in navigator) {
       try {
@@ -1678,12 +1967,17 @@ try {
     }
   }
 
-  // Post-login re-sync
-  if (localStorage.getItem('justLoggedIn') === 'true') {
-    localStorage.removeItem('justLoggedIn');
-    setupInactivity();
+  // --- 10) Post-login re-sync / inactivity setup ---
+  try {
+    if (localStorage.getItem('justLoggedIn') === 'true') {
+      localStorage.removeItem('justLoggedIn');
+      setupInactivity();
+    }
+  } catch (e) {
+    console.warn('[DASHBOARD] post-login re-sync failed', e);
   }
 
+  // --- 11) Check for updates (PWA manifest) ---
   async function checkForUpdates() {
     try {
       const res = await fetch(`/frontend/pwa/manifest.json?v=${APP_VERSION}`);
@@ -1695,11 +1989,16 @@ try {
     }
   }
 
-  registerSW();
-  checkForUpdates();
-  pollStatus(); // Initial
-  setInterval(pollStatus, 30000); // Every 30s
+  // --- 12) Final boot tasks: register SW, check updates, start polling ---
+  try { registerSW(); } catch (e) { console.warn('[DASHBOARD] registerSW failed', e); }
+  try { checkForUpdates(); } catch (e) { console.warn('[DASHBOARD] checkForUpdates failed', e); }
+
+  try { pollStatus(); } catch (e) { console.warn('[DASHBOARD] initial pollStatus failed', e); }
+  try { setInterval(pollStatus, 30000); } catch (e) { console.warn('[DASHBOARD] pollStatus interval failed', e); }
+
+  console.log('[DASHBOARD] onDashboardLoad: Complete');
 }
+
 
 
 // ============================================
@@ -10583,6 +10882,8 @@ window.toggleKeypadProcessing = window.toggleKeypadProcessing || toggleKeypadPro
 
 // PIN completion handler (server verification)
 // ----- Updated implementation with proper reauth flow -----
+// PIN completion handler (server verification)
+// ----- FIXED implementation with correct reauth flow -----
 async function handlePinCompletion() {
   console.log('handlePinCompletion started (new robust flow)');
   if (processing) {
@@ -10609,15 +10910,14 @@ async function handlePinCompletion() {
   const workPromise = withLoader(async () => {
     try {
       // Use the robust helper that waits briefly for session load if needed.
-const uidInfo = await getUid({ waitForSession: true, waitMs: 1200 }) || {};
-const userId = uidInfo?.uid || localStorage.getItem('userId') || null;
-if (!userId) {
-  // Graceful handling instead of throwing — session still loading; ask user to retry
-  console.warn('handlePinCompletion: userId not available yet (session loading).');
-  showTopNotifier('Session still loading — please try PIN again in a moment', 'error');
-  return; // unlock handled in finally
-}
-
+      const uidInfo = await getUid({ waitForSession: true, waitMs: 1200 }) || {};
+      const userId = uidInfo?.uid || localStorage.getItem('userId') || null;
+      if (!userId) {
+        // Graceful handling instead of throwing — session still loading; ask user to retry
+        console.warn('handlePinCompletion: userId not available yet (session loading).');
+        showTopNotifier('Session still loading — please try PIN again in a moment', 'error');
+        return; // unlock handled in finally
+      }
 
       const res = await fetch('https://api.flexgig.com.ng/api/reauth-pin', {
         method: 'POST',
@@ -10638,53 +10938,67 @@ if (!userId) {
       }
 
       if (res.ok) {
-        // success path
+        // 🔥 SUCCESS PATH - FIXED ORDER
         console.log('[DEBUG] PIN verification successful');
+        
         try {
-          // 1. Call onSuccessfulReauth to clear flags, reset timers, and handle session state
+          // 🔥 STEP 1: Clear inputs FIRST (so user sees immediate feedback)
+          if (typeof resetReauthInputs === 'function') resetReauthInputs();
+          
+          // 🔥 STEP 2: Clear any stored lockout
+          try { localStorage.removeItem('pin_lockout_until'); } catch(e){}
+          
+          // 🔥 STEP 3: Call onSuccessfulReauth (NO ARGUMENTS - it handles everything internally)
+          console.log('[DEBUG] Calling onSuccessfulReauth...');
           if (typeof onSuccessfulReauth === 'function') {
-            await onSuccessfulReauth(payload);
+            await onSuccessfulReauth(); // ✅ No arguments!
+          } else {
+            console.error('[ERROR] onSuccessfulReauth function not found!');
           }
-          // 2. Call guardedHideReauthModal to safely hide the modal only if flags are cleared
+          
+          // 🔥 STEP 4: guardedHideReauthModal is called by onSuccessfulReauth, but call as backup
+          // (Your onSuccessfulReauth already calls this, so this is redundant but safe)
           if (typeof guardedHideReauthModal === 'function') {
             await guardedHideReauthModal();
           }
+          
           console.log('[DEBUG] Reauth modal hidden after successful PIN verification');
-          // clear inputs
-          if (typeof resetReauthInputs === 'function') resetReauthInputs();
-          // clear any stored lockout
-          try { localStorage.removeItem('pin_lockout_until'); } catch(e){}
-
-          // --- NEW: immediately refresh UI but preserve sticky broadcasts ---
+          
+          // 🔥 STEP 5: Hide tiny notice if present
           try {
             if (typeof hideTinyReauthNotice === 'function') {
-              try { hideTinyReauthNotice(); } catch (e) {}
+              hideTinyReauthNotice();
             }
-            try {
-  // dispatch canonical event and let the fg:reauth-success handler trigger the debounced poll.
-  window.dispatchEvent(new CustomEvent('fg:reauth-success', { detail: { method: 'pin' } }));
-} catch (e) {
-  console.debug('verifyBiometrics: dispatch fg:reauth-success failed', e);
-}
-
           } catch (e) {
-            console.warn('post-PIN success UI refresh failed', e);
+            console.warn('[WARN] hideTinyReauthNotice failed', e);
           }
-
+          
+          // 🔥 STEP 6: Dispatch success event
+          // (Your onSuccessfulReauth already dispatches 'fg:reauth-success', 
+          // but dispatching again with 'method: pin' is fine for tracking)
+          try {
+            window.dispatchEvent(new CustomEvent('fg:reauth-success', { 
+              detail: { method: 'pin', timestamp: Date.now() } 
+            }));
+          } catch (e) {
+            console.debug('[DEBUG] dispatch fg:reauth-success failed', e);
+          }
+          
         } catch(e) {
-          console.warn('Post-PIN verification error', e);
+          console.error('[ERROR] Post-PIN verification error', e);
           showTopNotifier('Error completing authentication. Please try again.', 'error');
         }
-        // successful completion - nothing else to do here
+        
+        // Successful completion - nothing else to do here
         return;
       }
 
-      // --- Error handling: prefer structured JSON, fallback to text ---
+      // --- ERROR HANDLING: prefer structured JSON, fallback to text ---
       const serverMsg = (payload && (payload.message || payload.error)) || (await res.text().catch(()=>'')) || `HTTP ${res.status}`;
       const serverCode = payload && payload.code ? payload.code : null;
       const meta = payload && payload.meta ? payload.meta : {};
 
-      console.warn('PIN verify server error', { status: res.status, code: serverCode, msg: serverMsg, meta });
+      console.warn('[WARN] PIN verify server error', { status: res.status, code: serverCode, msg: serverMsg, meta });
 
       // Special handling by code
       switch (serverCode) {
@@ -10739,7 +11053,7 @@ if (!userId) {
       }
 
     } catch (err) {
-      console.error('handlePinCompletion network/error', err);
+      console.error('[ERROR] handlePinCompletion network/error', err);
       showTopNotifier('Network error. Please try again.', 'error');
       if (typeof resetReauthInputs === 'function') resetReauthInputs();
     }
@@ -10749,26 +11063,22 @@ if (!userId) {
   // Race the work against the timeout so we always run final cleanup
   return Promise.race([timeoutPromise, workPromise])
     .then((result) => {
-      console.log('handlePinCompletion resolved:', !!result);
-      // If you want to handle a meaningful result, do it here.
+      console.log('[DEBUG] handlePinCompletion resolved:', !!result);
       return result;
     })
     .catch((err) => {
-      console.error('handlePinCompletion timed out or errored:', err);
+      console.error('[ERROR] handlePinCompletion timed out or errored:', err);
       // Timeout case or thrown error — show a helpful message and clear inputs
       showTopNotifier(err?.message === 'Reauth timeout' ? 'Request timed out — please try again' : 'Request failed — please try again', 'error');
       if (typeof resetReauthInputs === 'function') resetReauthInputs();
       currentPin = '';
-      // Re-throw if upstream needs to know about the error, or swallow it to keep UI simple.
-      // throw err;
     })
     .finally(() => {
-      console.log('handlePinCompletion finally: unlocking');
+      console.log('[DEBUG] handlePinCompletion finally: unlocking');
       processing = false;
       toggleKeypadProcessing(false);  // Re-enable UI
     });
 }
-
 
 
     function initReauthKeypad() {
@@ -14699,120 +15009,161 @@ async function completeReauth() {
 
 // Robust async onSuccessfulReauth — updated: clears fg_expected_reauth_at appropriately
 async function onSuccessfulReauth() {
+  console.log('[REAUTH] onSuccessfulReauth: Starting clear sequence');
+
   try {
-    // mark modal closed locally (UI state)
+    // MARK: UI state — mark modal closed locally (optimistic for UI flow)
     reauthModalOpen = false;
 
-    // Ensure DOM refs are current (defensive)
-    try { cacheDomRefs(); } catch (e) {}
+    // Defensive DOM caching (if your app uses it)
+    try { cacheDomRefs(); } catch (e) { /* ignore */ }
 
     // Read canonical token (if any) so we can avoid races
     let stored = null;
     try { stored = JSON.parse(localStorage.getItem('fg_reauth_required_v1') || 'null'); } catch (e) { stored = null; }
     const token = stored && stored.token ? String(stored.token) : null;
 
-    // Attempt to clear authoritative (server + broadcast) state first.
-    // Prefer window.fgReauth.completeReauth() if present (cross-tab helper).
+    // Ensure we don't immediately re-trigger expected reauth
+    try { clearExpectedReauthAt(); } catch (e) { /* ignore */ }
+
+    // STEP 1 — Attempt to clear authoritative server state first.
     let serverCleared = false;
     try {
+      // Prefer cross-tab / helper if present
       if (window.fgReauth && typeof window.fgReauth.completeReauth === 'function') {
-        // await so we know server/session is cleared before touching local canonical flag
-        const p = window.fgReauth.completeReauth();
-        if (p && typeof p.then === 'function') {
-          // await promise and interpret truthy result as success when possible
-          try {
+        try {
+          const p = window.fgReauth.completeReauth();
+          if (p && typeof p.then === 'function') {
+            // Wait for promise; treat true/undefined/null as success (back-compat)
             const r = await p.catch(() => null);
             serverCleared = (r === true || r === undefined || r === null) ? true : Boolean(r);
-          } catch (e) { serverCleared = false; }
-        } else {
-          // it's not a promise, assume it attempted to clear (best-effort)
-          serverCleared = true;
+          } else {
+            // Not a promise — assume success (best-effort)
+            serverCleared = true;
+          }
+        } catch (e) {
+          console.warn('[REAUTH] completeReauth() threw', e);
+          serverCleared = false;
         }
       } else {
-        // fallback: call the server endpoint directly (best-effort)
+        // Fallback: call server endpoint directly
+        const endpoint = (window.__SEC_API_BASE || window.API_BASE || '') + '/reauth/complete';
         try {
-          const res = await fetch((window.__SEC_API_BASE || API_BASE) + '/reauth/complete', {
+          const res = await fetch(endpoint, {
             method: 'POST',
             credentials: 'include',
-            headers: { 'Content-Type': 'application/json' }
+            headers: {
+              'Accept': 'application/json',
+              'Content-Type': 'application/json'
+            },
+            // no body required; server uses session cookie
           });
           serverCleared = !!(res && res.ok);
+          if (!serverCleared) {
+            // try to read error for logs
+            try {
+              const j = await res.json().catch(() => null);
+              console.warn('[REAUTH] server returned non-OK:', res.status, j);
+            } catch (e) {}
+          }
         } catch (e) {
+          console.warn('[REAUTH] fetch to server reauth/complete failed', e);
           serverCleared = false;
         }
       }
     } catch (e) {
+      console.warn('[REAUTH] server clear unexpected error', e);
       serverCleared = false;
     }
 
-    // Clear the local expected reauth timestamp - user just reauthenticated.
-    // Do this regardless of whether server cleared canonical state, so we don't auto-trigger hard reauth now.
-    try { clearExpectedReauthAt(); } catch (e) { /* ignore */ }
-
-    // If server cleared the authoritative flag, remove the canonical local marker.
-    // If server clearing failed, KEEP the canonical flag so other tabs / reloads still show modal.
+    // STEP 2 — If server cleared, remove canonical local marker (defensive token check)
     if (serverCleared) {
       try {
-        // only remove canonical key if token matches (defensive against races)
         const cur = JSON.parse(localStorage.getItem('fg_reauth_required_v1') || 'null');
         if (!token || !cur || String(cur.token) === String(token)) {
-          try { localStorage.removeItem('fg_reauth_required_v1'); } catch (e) {}
-          try { localStorage.removeItem('reauthPending'); } catch (e) {}
-          // broadcast fallback (if you have cross-tab code expecting it)
-          try { if (typeof window.BroadcastChannel !== 'undefined') { const bc = new BroadcastChannel('fg-reauth'); bc.postMessage({ type: 'clear', payload: { token } }); } } catch(e){}
-          try { window.dispatchEvent(new StorageEvent('storage', { key: 'fg_reauth_required_v1', newValue: null })); } catch(e){}
+          try { localStorage.removeItem('fg_reauth_required_v1'); } catch (e) { /* ignore */ }
+          try { localStorage.removeItem('reauthPending'); } catch (e) { /* ignore */ }
+          try { localStorage.removeItem('fg_reauth_active_tab'); } catch (e) { /* ignore */ }
+
+          // Broadcast to other tabs (if supported)
+          try {
+            if (typeof BroadcastChannel !== 'undefined') {
+              const bc = new BroadcastChannel('fg-reauth');
+              bc.postMessage({ type: 'clear', payload: { token } });
+              bc.close && bc.close();
+            }
+          } catch (e) { /* ignore */ }
+
+          // Fire a storage event as a fallback for listeners
+          try {
+            window.dispatchEvent(new StorageEvent('storage', {
+              key: 'fg_reauth_required_v1',
+              newValue: null,
+              oldValue: JSON.stringify(cur || null),
+              url: location.href
+            }));
+          } catch (e) { /* some browsers prevent synthetic storage events */ }
+
+          console.log('[REAUTH] Server cleared; canonical local marker removed');
         } else {
-          // token mismatch — do not clear; another require may have replaced the token
-          console.warn('[reauth] canonical token mismatch; skipping local clear to avoid race');
+          console.warn('[REAUTH] canonical token mismatch; skipping local clear to avoid race');
         }
       } catch (e) {
-        // if any error removing, just log and continue; keep canonical
-        console.warn('[reauth] failed to clear local canonical flag', e);
+        console.warn('[REAUTH] failed to clear canonical local flag', e);
       }
     } else {
-      // If we could not clear server state, do not remove local flag — keep modal persistently visible across reloads
-      console.debug('[reauth] server clear failed or unreachable — keeping canonical local flag so modal remains persistent');
+      // Server didn't clear — keep canonical flag so modal remains persistent
+      console.debug('[REAUTH] server clear failed or unreachable — keeping canonical local flag so modal remains persistent');
+      // surface a non-blocking user message
+      try { if (typeof notify === 'function') notify('Reauth verification succeeded but server clear failed. Please try again.', 'warning'); } catch (e) {}
     }
 
-    // Now hide UI only if canonical key is no longer present
-    function isCanonicalPending() {
+    // STEP 3 — Clear ephemeral local flags regardless (don't auto-trigger hard reauth)
+    try {
+      localStorage.removeItem('fg_reauth_required_ts'); // if you have a timestamp key
+    } catch (e) { /* ignore */ }
+
+    // STEP 4 — Now hide modal UI only when canonical key is gone
+    const isCanonicalPending = () => {
       try { return !!JSON.parse(localStorage.getItem('fg_reauth_required_v1') || 'null'); } catch (e) { return false; }
-    }
+    };
 
     try {
       if (!isCanonicalPending()) {
+        // Primary modal hide
         if (reauthModal) {
-          reauthModal.classList.add('hidden');
-          try { reauthModal.removeAttribute('aria-modal'); } catch (e) {}
-          try { reauthModal.removeAttribute('role'); } catch (e) {}
-          if ('inert' in HTMLElement.prototype) {
-            try { reauthModal.inert = false; } catch (e) {}
-          } else {
-            try { reauthModal.removeAttribute('aria-hidden'); reauthModal.style.pointerEvents = ''; } catch (e) {}
-          }
+          try {
+            reauthModal.classList.add('hidden');
+            reauthModal.removeAttribute && reauthModal.removeAttribute('aria-modal');
+            reauthModal.removeAttribute && reauthModal.removeAttribute('role');
+            if ('inert' in HTMLElement.prototype) {
+              try { reauthModal.inert = false; } catch (e) {}
+            } else {
+              try { reauthModal.removeAttribute('aria-hidden'); reauthModal.style.pointerEvents = ''; } catch (e) {}
+            }
+          } catch (e) { console.warn('[REAUTH] reauthModal hide error', e); }
         }
-        // simple and safe: don't touch the promptModal binding, read from the DOM
+
+        // Prompt modal fallback
         const _pm = (typeof document !== 'undefined') ? document.getElementById('promptModal') : null;
         if (_pm) {
           try {
             _pm.classList.add('hidden');
-            _pm.removeAttribute('aria-hidden');
-            _pm.style.pointerEvents = '';
-          } catch (e) { /* ignore DOM errors */ }
+            _pm.removeAttribute && _pm.removeAttribute('aria-hidden');
+            _pm.style && (_pm.style.pointerEvents = '');
+          } catch (e) { /* ignore */ }
         }
 
         reauthModalOpen = false;
       } else {
-        console.debug('[reauth] canonical still present — not hiding modal locally');
+        console.debug('[REAUTH] canonical still present — not hiding modal locally');
       }
     } catch (e) {
-      console.warn('[reauth] UI hide error', e);
+      console.warn('[REAUTH] UI hide error', e);
     }
 
-    // turn off global reauth active state
+    // STEP 5 — reset global active flags, timers, and inputs
     try { setReauthActive(false); } catch (e) {}
-
-    // cleanup timers / locks (same as before)
     try {
       if (window.__cachedAuthOptionsLock) { window.__cachedAuthOptionsLock = false; window.__cachedAuthOptionsLockSince = 0; }
     } catch (e) {}
@@ -14820,32 +15171,45 @@ async function onSuccessfulReauth() {
       if (window.__simulatePinInterval) { clearInterval(window.__simulatePinInterval); window.__simulatePinInterval = null; }
       if (window.__simulatePinTimeout) { clearTimeout(window.__simulatePinTimeout); window.__simulatePinTimeout = null; }
     } catch (e) {}
-
-    // Reset / clear PIN UI and re-enable inputs
     try { if (typeof resetReauthInputs === 'function') resetReauthInputs(); } catch (e) {}
     try { if (typeof disableReauthInputs === 'function') disableReauthInputs(false); } catch (e) {}
-
-    // Hide any loader that may be left showing
     try { if (typeof hideLoader === 'function') hideLoader(); } catch (e) {}
-
-    // Restart idle timer
     try { if (typeof resetIdleTimer === 'function') resetIdleTimer(); } catch (e) {}
 
     // restore focus to main app
     try {
-      const appRoot = document.querySelector('main') || document.body;
+      const appRoot = document.querySelector && (document.querySelector('main') || document.body);
       if (appRoot && typeof appRoot.focus === 'function') appRoot.focus();
     } catch (e) {}
 
+    // STEP 6 — guarded hide of reauth modal if you have a helper (keeps parity with earlier simpler flow)
+    try {
+      if (typeof guardedHideReauthModal === 'function') {
+        try { await guardedHideReauthModal(); } catch (e) { console.warn('[REAUTH] guardedHideReauthModal failed', e); }
+      }
+    } catch (e) { /* ignore */ }
+
+    // STEP 7 — dispatch success event for app listeners
+    try {
+      window.dispatchEvent(new CustomEvent('fg:reauth-success', { detail: { timestamp: Date.now() } }));
+    } catch (e) { /* ignore */ }
+
+    console.log('[REAUTH] onSuccessfulReauth: Complete');
     return true;
+
   } catch (err) {
-    // fail-safe: ensure active state is off and idle timer restarted
+    // Fail-safe: ensure active state is off and idle timer restarted
     try { setReauthActive(false); } catch (e) {}
     try { if (typeof resetIdleTimer === 'function') resetIdleTimer(); } catch (e) {}
-    console.warn('[reauth] onSuccessfulReauth unexpected error', err);
+    console.warn('[REAUTH] onSuccessfulReauth unexpected error', err);
+
+    // Inform user (non-blocking)
+    try { if (typeof notify === 'function') notify('An error occurred completing reauth. Please refresh and try again.', 'error'); } catch (e) {}
+
     return false;
   }
 }
+
 
 
 
