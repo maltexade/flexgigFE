@@ -14511,12 +14511,11 @@ window.persistCredentialId = persistCredentialId;
     }
   }
 
-  // Full showReauthModal (explicit called flow)
-// Full showReauthModal (explicit called flow)
-// ----- Updated implementation with proper reauth flow -----
+  // ----- showReauthModal with PIN prioritized -----
 async function showReauthModal(context = 'reauth') {
   console.log('showReauthModal called', { context });
   cacheDomRefs();
+
   if (!reauthModal) {
     console.error('showReauthModal: reauthModal missing');
     return;
@@ -14526,74 +14525,54 @@ async function showReauthModal(context = 'reauth') {
     const reauthStatus = await shouldReauth(context);
     console.log('showReauthModal: reauthStatus', reauthStatus);
 
+    // No reauth needed
     if (!reauthStatus.needsReauth) {
       console.log('showReauthModal: no reauth required - calling success handler');
-      try {
-        // 1. Call onSuccessfulReauth to clear flags, reset timers, and handle session state
-        if (typeof onSuccessfulReauth === 'function') {
-          await onSuccessfulReauth();
-        }
-        // 2. Call guardedHideReauthModal to safely hide the modal only if flags are cleared
-        if (typeof guardedHideReauthModal === 'function') {
-          await guardedHideReauthModal();
-        }
-        console.log('[DEBUG] Reauth modal hidden (no reauth needed)');
-      } catch (err) {
-        console.warn('[reauth] Post-reauth check success error', err);
-        // Optionally show an error to the user, but continue (non-fatal)
-        if (typeof showBanner === 'function') {
-          showBanner('Authentication completed, but an internal error occurred. Please refresh if issues persist.');
-        }
-      }
+      if (typeof onSuccessfulReauth === 'function') await onSuccessfulReauth();
+      if (typeof guardedHideReauthModal === 'function') await guardedHideReauthModal();
       return;
     }
 
+    // === PIN PRIORITY ===
+    if (reauthStatus.method === 'pin' || !reauthStatus.method) {
+      console.log('showReauthModal: showing PIN modal first');
+      await initReauthModal({ show: true, context });
+      return;
+    }
+
+    // === Biometric as fallback ===
     if (reauthStatus.method === 'biometric') {
       const session = await safeCall(getSession) || {};
       const uid = session.user ? (session.user.uid || session.user.id) : null;
-      if (uid) {
-        const { success } = await verifyBiometrics(uid, context);
-        if (success) {
-          console.log('showReauthModal: biometric success');
-          try {
-            // 1. Call onSuccessfulReauth to clear flags, reset timers, and handle session state
-            if (typeof onSuccessfulReauth === 'function') {
-              await onSuccessfulReauth();
-            }
-            // 2. Call guardedHideReauthModal to safely hide the modal only if flags are cleared
-            if (typeof guardedHideReauthModal === 'function') {
-              await guardedHideReauthModal();
-            }
-            console.log('[DEBUG] Reauth modal hidden after successful biometric verification in showReauthModal');
-          } catch (err) {
-            console.warn('[reauth] Post-biometric verification error in showReauthModal', err);
-            // Optionally show an error to the user
-            if (typeof showBanner === 'function') {
-              showBanner('Error completing authentication. Please try again.');
-            }
-          }
-          return;
-        }
-        console.log('showReauthModal: biometric failed -> fallback to PIN modal');
-        await initReauthModal({ show: true, context });
-        return;
-      } else {
-        console.warn('showReauthModal: no session uid for biometric -> open PIN modal');
+
+      if (!uid) {
+        console.warn('showReauthModal: no session UID for biometric -> open PIN modal');
         await initReauthModal({ show: true, context });
         return;
       }
+
+      const { success } = await verifyBiometrics(uid, context);
+      if (success) {
+        console.log('showReauthModal: biometric success');
+        if (typeof onSuccessfulReauth === 'function') await onSuccessfulReauth();
+        if (typeof guardedHideReauthModal === 'function') await guardedHideReauthModal();
+        return;
+      }
+
+      console.log('showReauthModal: biometric failed -> fallback to PIN modal');
+      await initReauthModal({ show: true, context });
+      return;
     }
 
-    // Default: Open PIN modal if no biometric or other methods
+    // === Default fallback: PIN modal ===
     await initReauthModal({ show: true, context });
+
   } catch (err) {
     console.error('showReauthModal unexpected error', err);
-    // Fallback: Ensure modal is hidden on error to avoid stuck state
-    if (typeof guardedHideReauthModal === 'function') {
-      await guardedHideReauthModal();
-    }
+    if (typeof guardedHideReauthModal === 'function') await guardedHideReauthModal();
   }
 }
+
 
 /* ---------------------------
    Reauth cross-tab sync module
