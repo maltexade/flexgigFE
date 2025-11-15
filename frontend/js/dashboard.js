@@ -14552,7 +14552,8 @@ window.persistCredentialId = persistCredentialId;
     }
   }
 
-  async function showReauthModal(context = 'reauth') {
+  // PIN-first showReauthModal (no auto biometric attempt when PIN available)
+async function showReauthModal(context = 'reauth') {
   console.log('showReauthModal called', { context });
   cacheDomRefs();
 
@@ -14574,65 +14575,68 @@ window.persistCredentialId = persistCredentialId;
       return;
     }
 
-    // iterate through prioritized methods in order
-    for (const method of reauthStatus.methods.length ? reauthStatus.methods : ['pin']) {
-      if (method === 'pin') {
-        console.log('showReauthModal: showing PIN modal (priority)');
-        // ensure any biometric auto-attempts are temporarily suppressed
-        window._fg_reauth_blockBiometric = true;
-        await initReauthModal({ show: true, context });
-        // once PIN modal is up we should stop — PIN flow will call onSuccessfulReauth/guardedHideReauthModal
-        return;
-      }
+    // Determine availability of methods
+    const methods = (reauthStatus.methods && reauthStatus.methods.length) ? reauthStatus.methods : [];
+    const hasPin = methods.includes('pin');
+    const hasBiometric = methods.includes('biometric');
 
-      if (method === 'biometric') {
-        // only attempt biometric if no PIN present OR PIN was not attempted / not available
-        // also respect the global block flag
-        if (window._fg_reauth_blockBiometric) {
-          console.log('showReauthModal: biometric blocked (PIN-first policy)');
-          continue;
-        }
-
-        // ensure we have a session uid
-        const session = await safeCall(getSession) || {};
-        const uid = session.user ? (session.user.uid || session.user.id) : null;
-        if (!uid) {
-          console.warn('showReauthModal: no session UID for biometric -> fallthrough to next method');
-          continue;
-        }
-
-        console.log('showReauthModal: attempting biometric');
-        const { success } = await verifyBiometrics(uid, context);
-        if (success) {
-          console.log('showReauthModal: biometric success');
-          if (typeof onSuccessfulReauth === 'function') await onSuccessfulReauth();
-          if (typeof guardedHideReauthModal === 'function') await guardedHideReauthModal();
-          return;
-        }
-        console.log('showReauthModal: biometric failed -> continue to next method');
-        continue;
-      }
-
-      // unknown method fallback -> show PIN modal as safe default
-      console.warn('showReauthModal: unknown reauth method', method, '-> falling back to PIN modal');
+    // If PIN exists -> ALWAYS show PIN modal and block auto-biometrics
+    if (hasPin) {
+      console.log('showReauthModal: PIN available -> showing PIN modal and blocking auto-biometrics');
+      // Block automatic biometric attempts from any other caller
       window._fg_reauth_blockBiometric = true;
-      await initReauthModal({ show: true, context });
+
+      // Show PIN modal; allow the UI to render an explicit "Use biometrics" button if hasBiometric === true
+      await initReauthModal({
+        show: true,
+        context,
+        showBiometricOption: !!hasBiometric
+      });
+
+      // Do NOT auto-attempt biometrics here — user must click the biometric button to run it.
       return;
     }
 
-    // if we reached here, no methods were attempted — fallback to PIN
-    console.log('showReauthModal: no methods attempted -> fallback to PIN');
+    // If no PIN but biometric is available -> this is the only case where we auto-attempt biometrics
+    if (hasBiometric) {
+      console.log('showReauthModal: no PIN present, biometric available -> attempting biometric');
+      // Ensure we are not blocked (safety)
+      window._fg_reauth_blockBiometric = false;
+
+      const session = await safeCall(getSession) || {};
+      const uid = session.user ? (session.user.uid || session.user.id) : null;
+
+      if (!uid) {
+        console.warn('showReauthModal: no session UID for biometric -> fallback to PIN modal (safe default)');
+        window._fg_reauth_blockBiometric = true;
+        await initReauthModal({ show: true, context, showBiometricOption: false });
+        return;
+      }
+
+      // Run biometric attempt (only here, when PIN isn't available)
+      const { success } = await verifyBiometrics(uid, context);
+      if (success) {
+        console.log('showReauthModal: biometric success');
+        if (typeof onSuccessfulReauth === 'function') await onSuccessfulReauth();
+        if (typeof guardedHideReauthModal === 'function') await guardedHideReauthModal();
+        return;
+      }
+
+      console.log('showReauthModal: biometric failed -> fallback to PIN modal');
+      window._fg_reauth_blockBiometric = true;
+      await initReauthModal({ show: true, context, showBiometricOption: false });
+      return;
+    }
+
+    // No known methods -> safe default: show PIN modal (block biometrics)
+    console.log('showReauthModal: no known methods -> fallback to PIN modal');
     window._fg_reauth_blockBiometric = true;
-    await initReauthModal({ show: true, context });
+    await initReauthModal({ show: true, context, showBiometricOption: false });
+    return;
 
   } catch (err) {
     console.error('showReauthModal unexpected error', err);
     if (typeof guardedHideReauthModal === 'function') await guardedHideReauthModal();
-  } finally {
-    // once modal shown or flow decided, clear the block flag after a small delay
-    setTimeout(() => {
-      window._fg_reauth_blockBiometric = false;
-    }, 1000);
   }
 }
 
