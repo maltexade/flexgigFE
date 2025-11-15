@@ -10910,14 +10910,15 @@ async function handlePinCompletion() {
   const workPromise = withLoader(async () => {
     try {
       // Use the robust helper that waits briefly for session load if needed.
-      const uidInfo = await getUid({ waitForSession: true, waitMs: 1200 }) || {};
-      const userId = uidInfo?.uid || localStorage.getItem('userId') || null;
-      if (!userId) {
-        // Graceful handling instead of throwing — session still loading; ask user to retry
-        console.warn('handlePinCompletion: userId not available yet (session loading).');
-        showTopNotifier('Session still loading — please try PIN again in a moment', 'error');
-        return; // unlock handled in finally
-      }
+const uidInfo = await getUid({ waitForSession: true, waitMs: 1200 }) || {};
+const userId = uidInfo?.uid || localStorage.getItem('userId') || null;
+if (!userId) {
+  // Graceful handling instead of throwing — session still loading; ask user to retry
+  console.warn('handlePinCompletion: userId not available yet (session loading).');
+  showTopNotifier('Session still loading — please try PIN again in a moment', 'error');
+  return; // unlock handled in finally
+}
+
 
       const res = await fetch('https://api.flexgig.com.ng/api/reauth-pin', {
         method: 'POST',
@@ -10938,67 +10939,53 @@ async function handlePinCompletion() {
       }
 
       if (res.ok) {
-        // 🔥 SUCCESS PATH - FIXED ORDER
+        // success path
         console.log('[DEBUG] PIN verification successful');
-        
         try {
-          // 🔥 STEP 1: Clear inputs FIRST (so user sees immediate feedback)
-          if (typeof resetReauthInputs === 'function') resetReauthInputs();
-          
-          // 🔥 STEP 2: Clear any stored lockout
-          try { localStorage.removeItem('pin_lockout_until'); } catch(e){}
-          
-          // 🔥 STEP 3: Call onSuccessfulReauth (NO ARGUMENTS - it handles everything internally)
-          console.log('[DEBUG] Calling onSuccessfulReauth...');
+          // 1. Call onSuccessfulReauth to clear flags, reset timers, and handle session state
           if (typeof onSuccessfulReauth === 'function') {
-            await onSuccessfulReauth(); // ✅ No arguments!
-          } else {
-            console.error('[ERROR] onSuccessfulReauth function not found!');
+            await onSuccessfulReauth();
           }
-          
-          // 🔥 STEP 4: guardedHideReauthModal is called by onSuccessfulReauth, but call as backup
-          // (Your onSuccessfulReauth already calls this, so this is redundant but safe)
+          // 2. Call guardedHideReauthModal to safely hide the modal only if flags are cleared
           if (typeof guardedHideReauthModal === 'function') {
             await guardedHideReauthModal();
           }
-          
           console.log('[DEBUG] Reauth modal hidden after successful PIN verification');
-          
-          // 🔥 STEP 5: Hide tiny notice if present
+          // clear inputs
+          if (typeof resetReauthInputs === 'function') resetReauthInputs();
+          // clear any stored lockout
+          try { localStorage.removeItem('pin_lockout_until'); } catch(e){}
+
+          // --- NEW: immediately refresh UI but preserve sticky broadcasts ---
           try {
             if (typeof hideTinyReauthNotice === 'function') {
-              hideTinyReauthNotice();
+              try { hideTinyReauthNotice(); } catch (e) {}
             }
+            try {
+  // dispatch canonical event and let the fg:reauth-success handler trigger the debounced poll.
+  window.dispatchEvent(new CustomEvent('fg:reauth-success', { detail: { method: 'pin' } }));
+} catch (e) {
+  console.debug('verifyBiometrics: dispatch fg:reauth-success failed', e);
+}
+
           } catch (e) {
-            console.warn('[WARN] hideTinyReauthNotice failed', e);
+            console.warn('post-PIN success UI refresh failed', e);
           }
-          
-          // 🔥 STEP 6: Dispatch success event
-          // (Your onSuccessfulReauth already dispatches 'fg:reauth-success', 
-          // but dispatching again with 'method: pin' is fine for tracking)
-          try {
-            window.dispatchEvent(new CustomEvent('fg:reauth-success', { 
-              detail: { method: 'pin', timestamp: Date.now() } 
-            }));
-          } catch (e) {
-            console.debug('[DEBUG] dispatch fg:reauth-success failed', e);
-          }
-          
+
         } catch(e) {
-          console.error('[ERROR] Post-PIN verification error', e);
+          console.warn('Post-PIN verification error', e);
           showTopNotifier('Error completing authentication. Please try again.', 'error');
         }
-        
-        // Successful completion - nothing else to do here
+        // successful completion - nothing else to do here
         return;
       }
 
-      // --- ERROR HANDLING: prefer structured JSON, fallback to text ---
+      // --- Error handling: prefer structured JSON, fallback to text ---
       const serverMsg = (payload && (payload.message || payload.error)) || (await res.text().catch(()=>'')) || `HTTP ${res.status}`;
       const serverCode = payload && payload.code ? payload.code : null;
       const meta = payload && payload.meta ? payload.meta : {};
 
-      console.warn('[WARN] PIN verify server error', { status: res.status, code: serverCode, msg: serverMsg, meta });
+      console.warn('PIN verify server error', { status: res.status, code: serverCode, msg: serverMsg, meta });
 
       // Special handling by code
       switch (serverCode) {
@@ -11053,7 +11040,7 @@ async function handlePinCompletion() {
       }
 
     } catch (err) {
-      console.error('[ERROR] handlePinCompletion network/error', err);
+      console.error('handlePinCompletion network/error', err);
       showTopNotifier('Network error. Please try again.', 'error');
       if (typeof resetReauthInputs === 'function') resetReauthInputs();
     }
@@ -11063,22 +11050,26 @@ async function handlePinCompletion() {
   // Race the work against the timeout so we always run final cleanup
   return Promise.race([timeoutPromise, workPromise])
     .then((result) => {
-      console.log('[DEBUG] handlePinCompletion resolved:', !!result);
+      console.log('handlePinCompletion resolved:', !!result);
+      // If you want to handle a meaningful result, do it here.
       return result;
     })
     .catch((err) => {
-      console.error('[ERROR] handlePinCompletion timed out or errored:', err);
+      console.error('handlePinCompletion timed out or errored:', err);
       // Timeout case or thrown error — show a helpful message and clear inputs
       showTopNotifier(err?.message === 'Reauth timeout' ? 'Request timed out — please try again' : 'Request failed — please try again', 'error');
       if (typeof resetReauthInputs === 'function') resetReauthInputs();
       currentPin = '';
+      // Re-throw if upstream needs to know about the error, or swallow it to keep UI simple.
+      // throw err;
     })
     .finally(() => {
-      console.log('[DEBUG] handlePinCompletion finally: unlocking');
+      console.log('handlePinCompletion finally: unlocking');
       processing = false;
       toggleKeypadProcessing(false);  // Re-enable UI
     });
 }
+
 
 
     function initReauthKeypad() {
