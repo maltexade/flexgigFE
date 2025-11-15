@@ -23,6 +23,34 @@ let promptModal = null;
 let reauthModalOpen = false;
 
 
+let hardIdleTimeout = null;
+
+function scheduleHardIdleCheck() {
+  if (hardIdleTimeout) clearTimeout(hardIdleTimeout);
+
+  const now = Date.now();
+  const last = Number(localStorage.getItem('lastActive') || now);
+  const remaining = HARD_IDLE_MS - (now - last);
+
+  hardIdleTimeout = setTimeout(async () => {
+    // Local-first decision
+    const localCheck = shouldReauthLocal('reauth');
+    if (localCheck.needsReauth) {
+      try { await showReauthModal({ context: 'reauth' }); } 
+      catch(e) { console.error('[hardIdle] showReauthModal failed', e); }
+    } else {
+      // optionally call server async to update status
+      try {
+        const serverCheck = await checkServerReauthStatus();
+        if (serverCheck && (serverCheck.needsReauth || serverCheck.reauthRequired)) {
+          await showReauthModal({ context: 'reauth' });
+        }
+      } catch(e) { console.warn('[hardIdle] server reauth check failed', e); }
+    }
+  }, remaining > 0 ? remaining : 0);
+}
+
+
 // Replace the existing guardedHideReauthModal function in dashboard.js with this version.
 // This removes the call to onSuccessfulReauth() inside guardedHideReauthModal to break the circular dependency.
 // The onSuccessfulReauth() function should be called by the verification flows (e.g., after PIN or biometrics success)
@@ -13290,53 +13318,47 @@ function resetIdleTimer() {
 }
 
 // Full replacement for shouldReauth (unchanged from yours)
-async function shouldReauth(context = 'reauth') {
-  // Read storage flags first (authoritative for live toggles)
+// Local-first check for fast rendering
+function shouldReauthLocal(context = 'reauth') {
   const storedHasPin = String(localStorage.getItem('hasPin') || '').toLowerCase() === 'true';
   const storedBiometricsEnabled = String(localStorage.getItem('biometricsEnabled') || '').toLowerCase() === 'true';
   const storedBioLogin = String(localStorage.getItem('biometricForLogin') || '').toLowerCase() === 'true';
   const storedBioTx = String(localStorage.getItem('biometricForTx') || '').toLowerCase() === 'true';
-  const storedCredentialId = localStorage.getItem('credentialId') || ''; // credentialId should be present when WebAuthn is registered
+  const storedCredentialId = localStorage.getItem('credentialId') || '';
 
-  // Basic environment support check
   const webAuthnSupported = typeof window !== 'undefined' && ('PublicKeyCredential' in window);
-
-  // Determine if, per storage and environment, biometrics are actually available
   const hasBiometricFlag = storedBiometricsEnabled && webAuthnSupported && storedCredentialId.length > 0;
 
-  // Evaluate context-specific applicability
   const isBioApplicable = hasBiometricFlag && (
     (context === 'login' && storedBioLogin) ||
     (context === 'transaction' && storedBioTx) ||
     (context === 'reauth' && (storedBioLogin || storedBioTx))
   );
 
-  // Try to get the session (only call once)
+  const hasPin = storedHasPin;
+  const needsReauth = Boolean(hasPin || isBioApplicable);
+  const method = isBioApplicable ? 'biometric' : (hasPin ? 'pin' : null);
+
+  return { needsReauth, method };
+}
+
+// Original async shouldReauth kept for server sync/fallback
+async function shouldReauth(context = 'reauth') {
+  const localCheck = shouldReauthLocal(context);
+  if (localCheck.needsReauth) return localCheck; // return immediately if localStorage triggers reauth
+
   try {
     const session = await safeCall(getSession);
     const sessionHasPin = !!(session && session.user && (session.user.hasPin || session.user.pin));
-
-    // Merge: prefer session info for PIN presence, fall back to storage
-    const hasPin = sessionHasPin || storedHasPin;
-
-    const needsReauth = Boolean(hasPin || isBioApplicable);
-    // Prefer biometric when applicable; otherwise fall back to PIN (if any)
-    const method = isBioApplicable ? 'biometric' : (hasPin ? 'pin' : null);
-
-    // Useful debug (remove in prod if verbose)
-    console.debug('shouldReauth:', { context, sessionHasPin, storedHasPin, isBioApplicable, hasBiometricFlag, needsReauth, method });
-
+    const hasPin = sessionHasPin || localCheck.method === 'pin';
+    const needsReauth = Boolean(hasPin || localCheck.method === 'biometric');
+    const method = localCheck.method === 'biometric' ? 'biometric' : (hasPin ? 'pin' : null);
     return { needsReauth, method };
   } catch (err) {
-    // Session fetch failed — fall back fully to storage-derived decision
-    const hasPin = storedHasPin;
-    const needsReauth = Boolean(hasPin || isBioApplicable);
-    const method = isBioApplicable ? 'biometric' : (hasPin ? 'pin' : null);
-
-    console.error('shouldReauth() getSession failed, falling back to storage values:', err);
-    return { needsReauth, method };
+    return localCheck; // fallback to local-only decision if server fails
   }
 }
+
 window.shouldReauth = window.shouldReauth || shouldReauth; // expose globally if needed
 
 
@@ -13405,37 +13427,25 @@ function resetIdleTimer() {
     lastActive = now;
     try { localStorage.setItem('lastActive', String(lastActive)); } catch (e) {}
 
-    // If a modal is open we avoid scheduling soft timer
-    const modalOpen = (typeof reauthModalOpen !== 'undefined') ? !!reauthModalOpen : !!window.__reauthModalOpen;
     if (idleTimeout) { clearTimeout(idleTimeout); idleTimeout = null; }
 
-    if (!modalOpen) {
-      // schedule soft (1-min) inactivity while page is visible
-      idleTimeout = setTimeout(async () => {
-        try {
-          // only trigger soft prompt when page is visible (protect against hidden timers)
-          if (document.visibilityState === 'visible') {
-            // live-check shouldReauth guard (if available)
-            let allowed = true;
-            try {
-              if (typeof shouldReauth === 'function') {
-                const r = await shouldReauth('reauth');
-                allowed = !!(r && (r.needsReauth || r.reauthRequired));
-              }
-            } catch (e) { console.warn('[inactivity] shouldReauth threw', e); }
+    scheduleHardIdleCheck(); // schedule hard idle immediately
 
-            if (allowed) {
-              // Soft prompt: only local UI
-              try { await showInactivityPrompt(); } catch (e) { try { await showReauthModal('reauth'); } catch(e){} }
-            }
+    // existing soft idle scheduling (1min) remains
+    const modalOpen = !!window.__reauthModalOpen;
+    if (!modalOpen) {
+      idleTimeout = setTimeout(async () => {
+        if (document.visibilityState === 'visible') {
+          const allowed = shouldReauthLocal('reauth').needsReauth;
+          if (allowed) {
+            try { await showInactivityPrompt(); } catch (e) { await showReauthModal('reauth'); }
           }
-        } catch (e) { console.warn('[inactivity] soft timer handler failed', e); }
+        }
       }, SOFT_IDLE_MS);
     }
-  } catch (err) {
-    console.error('[inactivity] resetIdleTimer error', err);
-  }
+  } catch (err) { console.error('[inactivity] resetIdleTimer error', err); }
 }
+
 
 /**
  * showInactivityPrompt()
