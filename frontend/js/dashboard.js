@@ -14244,14 +14244,18 @@ async function prefetchAuthOptionsFor(uid, context = 'reauth') {
 
 
 
-// 🔹 Main verifyBiometrics (robust: fresh challenge + withLoader + debug logs + safe PIN simulation)
-// 🔹 Main verifyBiometrics (always fresh: invalidate cache + fetch new + debug + safe PIN fallback)
-// Updated verifyBiometrics function
-// ----- Updated implementation with proper reauth flow -----
-async function verifyBiometrics(uid, context = 'reauth') {
+// verifyBiometrics (PIN-first guarded; always-fresh, with optional force override)
+async function verifyBiometrics(uid, context = 'reauth', opts = {}) {
   console.log('%c[verifyBiometrics] Called (always fresh)', 'color:#0ff;font-weight:bold');
 
   try {
+    // Honor PIN-first block unless explicitly forced
+    const force = !!(opts && opts.force);
+    if (window._fg_reauth_blockBiometric && !force) {
+      console.log('[verifyBiometrics] Aborted: PIN-first policy active (blockBiometric=true)');
+      return { success: false, skipped: true, reason: 'blocked_by_pin_first' };
+    }
+
     // Resolve userId if not provided
     let userId = uid;
     if (!userId) {
@@ -14288,10 +14292,10 @@ async function verifyBiometrics(uid, context = 'reauth') {
     // Convert base64url to buffers (using your fromBase64Url helper)
     publicKey.challenge = fromBase64Url(publicKey.challenge);
     if (Array.isArray(publicKey.allowCredentials)) {
-      publicKey.allowCredentials = publicKey.allowCredentials.map(c => ({
+      publicKey.allowCredentials = publicKey.allowCredentials.map(c => ( {
         ...c,
         id: fromBase64Url(c.id)
-      }));
+      } ));
     }
     publicKey.userVerification = 'required';
     publicKey.timeout = 60000;
@@ -14335,42 +14339,34 @@ async function verifyBiometrics(uid, context = 'reauth') {
       // Handle success (e.g., close modal)
       console.log('[DEBUG] Biometrics verification successful in verifyBiometrics');
       try {
-        // 1. Call onSuccessfulReauth to clear flags, reset timers, and handle session state
         if (typeof onSuccessfulReauth === 'function') {
           await onSuccessfulReauth();
         }
-        // 2. Call guardedHideReauthModal to safely hide the modal only if flags are cleared
         if (typeof guardedHideReauthModal === 'function') {
           await guardedHideReauthModal();
         }
         console.log('[DEBUG] Reauth modal hidden after successful biometrics verification in verifyBiometrics');
 
-        // Notify user of success
         if (typeof notify === 'function') {
           notify('Authentication successful', 'success');
         }
 
         // --- NEW: Immediately refresh status/UI but preserve sticky broadcasts ---
         try {
-          // hide any tiny reauth hint (non-destructive)
           if (typeof hideTinyReauthNotice === 'function') {
             try { hideTinyReauthNotice(); } catch (e) {}
           }
-          // dispatch event so other modules can react
           try {
-  // dispatch canonical event and let the fg:reauth-success handler trigger the debounced poll.
-  window.dispatchEvent(new CustomEvent('fg:reauth-success', { detail: { method: 'biometrics' } }));
-} catch (e) {
-  console.debug('verifyBiometrics: dispatch fg:reauth-success failed', e);
-}
-
+            window.dispatchEvent(new CustomEvent('fg:reauth-success', { detail: { method: 'biometrics' } }));
+          } catch (e) {
+            console.debug('verifyBiometrics: dispatch fg:reauth-success failed', e);
+          }
         } catch (e) {
           console.warn('[verifyBiometrics] post-success UI refresh failed', e);
         }
 
       } catch (err) {
         console.warn('[reauth] Post-biometrics verification error in verifyBiometrics', err);
-        // Optionally show an error to the user
         if (typeof notify === 'function') {
           notify('Error completing authentication. Please try again.', 'error');
         }
@@ -14382,11 +14378,14 @@ async function verifyBiometrics(uid, context = 'reauth') {
     if (typeof notify === 'function') {
       notify(`Biometric error: ${err.message}`, 'error');
     }
-    // Fallback to PIN view
-    switchViews(false);  // Show PIN
-    return { success: false, error: err.message };
+    // Fallback to PIN view only when this is a real biometric attempt that errored (not when skipped)
+    if (!err || String(err).indexOf('blocked_by_pin_first') === -1) {
+      try { switchViews(false); } catch (e) { /* ignore */ }
+    }
+    return { success: false, error: err.message || String(err) };
   }
 }
+
 
 
 // 🔹 Improved simulatePinEntry with verbose debug logs and Promise-based completion
