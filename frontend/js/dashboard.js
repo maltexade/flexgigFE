@@ -97,15 +97,7 @@ async function scheduleHardIdleCheck() {
       try { 
         console.log('🔒 [HARD IDLE] Local check: Reauth required - showing modal');
         await showReauthModal({ context: 'reauth', reason: 'hard-idle' }); 
-        
-        // 🚨 CRITICAL: Use setTimeout instead of await to break the blocking chain
-        // This allows the modal to fully render before biometric prompt appears
-        setTimeout(() => {
-          attemptHardIdleBiometricAuth().catch(err => {
-            console.error('[HARD IDLE BIO] Auto-trigger failed:', err);
-          });
-        }, 500); // 500ms delay ensures modal is visible and rendered
-        
+        // 🚨 REMOVED: Auto-trigger biometrics call
       } catch(e) { 
         console.error('[hardIdle] showReauthModal failed', e); 
       }
@@ -117,14 +109,7 @@ async function scheduleHardIdleCheck() {
         if (serverCheck && (serverCheck.needsReauth || serverCheck.reauthRequired)) {
           console.log('🔒 [HARD IDLE] Server check: Reauth required - showing modal');
           await showReauthModal({ context: 'reauth', reason: 'hard-idle' });
-          
-          // 🚨 CRITICAL: Use setTimeout instead of await to break the blocking chain
-          setTimeout(() => {
-            attemptHardIdleBiometricAuth().catch(err => {
-              console.error('[HARD IDLE BIO] Auto-trigger failed:', err);
-            });
-          }, 500); // 500ms delay ensures modal is visible and rendered
-          
+          // 🚨 REMOVED: Auto-trigger biometrics call
         } else {
           console.log('✅ [HARD IDLE] Server check passed - no reauth needed');
         }
@@ -133,63 +118,6 @@ async function scheduleHardIdleCheck() {
       }
     }
   }, remaining > 0 ? remaining : 0);
-}
-
-// 🔥 Helper: Wait for reauth modal to be visible in DOM
-async function waitForReauthModalVisible() {
-  return new Promise((resolve) => {
-    // Try to find the modal
-    const checkModal = () => {
-      const modal = document.getElementById('reauthModal') || 
-                    document.querySelector('.reauth-modal') ||
-                    document.querySelector('[data-modal="reauth"]');
-      
-      if (!modal) {
-        console.log('[WAIT MODAL] Modal element not found yet, retrying...');
-        return false;
-      }
-      
-      // Check if modal is visible (not hidden, has display, opacity > 0)
-      const styles = window.getComputedStyle(modal);
-      const isVisible = !modal.classList.contains('hidden') &&
-                       styles.display !== 'none' &&
-                       styles.visibility !== 'hidden' &&
-                       parseFloat(styles.opacity) > 0;
-      
-      if (isVisible) {
-        console.log('✅ [WAIT MODAL] Reauth modal is now visible');
-        return true;
-      }
-      
-      console.log('[WAIT MODAL] Modal found but not visible yet, retrying...');
-      return false;
-    };
-    
-    // Initial check
-    if (checkModal()) {
-      // Add extra 100ms for any CSS transitions/animations
-      setTimeout(() => resolve(), 100);
-      return;
-    }
-    
-    // Poll every 50ms for up to 2 seconds
-    let attempts = 0;
-    const maxAttempts = 40; // 2 seconds / 50ms
-    
-    const interval = setInterval(() => {
-      attempts++;
-      
-      if (checkModal()) {
-        clearInterval(interval);
-        // Add extra 100ms for any CSS transitions/animations
-        setTimeout(() => resolve(), 100);
-      } else if (attempts >= maxAttempts) {
-        clearInterval(interval);
-        console.warn('[WAIT MODAL] Timeout waiting for modal - proceeding anyway');
-        resolve(); // Proceed even if modal not detected
-      }
-    }, 50);
-  });
 }
 // Replace the existing guardedHideReauthModal function in dashboard.js with this version.
 // This removes the call to onSuccessfulReauth() inside guardedHideReauthModal to break the circular dependency.
@@ -533,17 +461,14 @@ function challengeToB64Url(ch) {
 }
 
 // Try a single immediate navigator.credentials.get() with server-supplied freshOpts
-// 🔒 TIGHTENED: Only auto-calls biometrics on HARD idle timeout (not soft idle, not manual reauth)
+// 🔒 NO AUTO-CALL: This function should only be called manually by user button clicks
 async function tryImmediateReauthWithFreshOptions(freshOpts, attemptLimit = 1, context = {}) {
-  // 🚨 CRITICAL GUARD: Only proceed if this is a HARD idle timeout scenario
-  const isHardIdle = context.reason === 'hard-idle' || context.trigger === 'hard-idle';
+  // 🚨 REMOVED: All auto-call guards and hard idle checks
+  // This function now only executes when explicitly called (e.g., user clicks bio button)
   
-  if (!isHardIdle) {
-    console.log('[webauthn] tryImmediateReauth: Skipped (not hard idle). Context:', context);
-    return { ok: false, reason: 'not-hard-idle-skipped' };
-  }
+  console.log('[webauthn] tryImmediateReauth: Manual call initiated', context);
   
-  // Additional safety: Check if biometrics are enabled and user has credentials
+  // Safety: Check if biometrics are enabled and user has credentials
   const biometricsEnabled = localStorage.getItem('biometricsEnabled') === 'true';
   const credentialId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
   
@@ -552,7 +477,7 @@ async function tryImmediateReauthWithFreshOptions(freshOpts, attemptLimit = 1, c
     return { ok: false, reason: 'biometrics-not-available' };
   }
   
-  console.log('🔥 [webauthn] HARD IDLE DETECTED → Auto-calling biometric panel');
+  console.log('🔐 [webauthn] Calling biometric panel (manual trigger)');
   
   function b64UrlToUint8(s) {
     if (!s) return null;
@@ -608,21 +533,20 @@ async function tryImmediateReauthWithFreshOptions(freshOpts, attemptLimit = 1, c
   while (attempt < attemptLimit) {
     attempt++;
     try {
-      console.log(`🔐 [webauthn] Attempt ${attempt}/${attemptLimit} - Calling navigator.credentials.get() for HARD IDLE`);
+      console.log(`🔐 [webauthn] Attempt ${attempt}/${attemptLimit} - Calling navigator.credentials.get() (manual)`);
       const assertion = await navigator.credentials.get({ publicKey });
       if (assertion) {
-        console.log('✅ [webauthn] Hard idle biometric success');
+        console.log('✅ [webauthn] Biometric success (manual)');
         return { ok: true, assertion };
       }
     } catch (err) {
-      console.warn('[webauthn] Hard idle immediate re-get attempt failed', err);
+      console.warn('[webauthn] Manual biometric attempt failed', err);
       break;
     }
   }
-  return { ok: false, reason: 'immediate-get-failed' };
+  return { ok: false, reason: 'get-failed' };
 }
 // ---------- end helpers ----------
-
 
 
 // ---------- Loader (refcounted, idempotent) ----------
