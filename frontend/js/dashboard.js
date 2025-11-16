@@ -5,6 +5,17 @@ import {
   onPayClicked
 } from '/frontend/js/checkout.js';
 
+// 🚨 TRAP: Detect any auto-calls to navigator.credentials.get
+(function() {
+  const original = navigator.credentials.get;
+  navigator.credentials.get = function(...args) {
+    console.error('🚨 AUTO-CALL DETECTED! navigator.credentials.get called from:');
+    console.trace();
+    debugger; // This will pause execution so you can see the call stack
+    return original.apply(this, args);
+  };
+})();
+
 
 
 window.__SEC_API_BASE = 'https://api.flexgig.com.ng'
@@ -15,12 +26,6 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 
 const { createClient } = supabase;
 const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-// 🚨 DISABLE AUTO-PREFETCH - No automatic biometric calls
-window.prefetchAuthOptions = function() {
-  console.log('[prefetchAuthOptions] DISABLED - no auto-calls allowed');
-  return Promise.resolve();
-};
 
 let __backHandler = null;
 // Ensure shared UI refs / flags are declared before any functions use them
