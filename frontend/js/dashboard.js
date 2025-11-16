@@ -5810,40 +5810,40 @@ async function updateStoredPin(uid, newPin) {
 }
 
 
-  // Re-authenticate with PIN
-  async function reAuthenticateWithPin(uid, pin, callback) {
-  return withLoader(async () => {
+//   // Re-authenticate with PIN
+//   async function reAuthenticateWithPin(uid, pin, callback) {
+//   return withLoader(async () => {
 
-  try {
-    const found = await findStoredPin(uid);
-    if (!found) {
-      notify('No PIN set. Please set a PIN first.', 'error', pinVerifyAlert, pinVerifyAlertMsg);
-      return false;
-    }
-    const res = await fetch('https://api.flexgig.com.ng/api/verify-pin', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-        // Removed Authorization
-      },
-      body: JSON.stringify({ userId: uid, pin }),
-      credentials: 'include',
-    });
-    if (!res.ok) {
-      const { error } = await res.json();
-      notify(error?.message || 'Incorrect PIN. Try again.', 'error', pinVerifyAlert, pinVerifyAlertMsg);
-      return false;
-    }
-    notify('PIN verified successfully', 'success', pinVerifyAlert, pinVerifyAlertMsg);
-    callback(true);
-    return true;
-  } catch (err) {
-    log.e('reAuthenticateWithPin error', err);
-    notify('Error verifying PIN. Please try again.', 'error', pinVerifyAlert, pinVerifyAlertMsg);
-    return false;
-  }
-  });
-}
+//   try {
+//     const found = await findStoredPin(uid);
+//     if (!found) {
+//       notify('No PIN set. Please set a PIN first.', 'error', pinVerifyAlert, pinVerifyAlertMsg);
+//       return false;
+//     }
+//     const res = await fetch('https://api.flexgig.com.ng/api/verify-pin', {
+//       method: 'POST',
+//       headers: {
+//         'Content-Type': 'application/json'
+//         // Removed Authorization
+//       },
+//       body: JSON.stringify({ userId: uid, pin }),
+//       credentials: 'include',
+//     });
+//     if (!res.ok) {
+//       const { error } = await res.json();
+//       notify(error?.message || 'Incorrect PIN. Try again.', 'error', pinVerifyAlert, pinVerifyAlertMsg);
+//       return false;
+//     }
+//     notify('PIN verified successfully', 'success', pinVerifyAlert, pinVerifyAlertMsg);
+//     callback(true);
+//     return true;
+//   } catch (err) {
+//     log.e('reAuthenticateWithPin error', err);
+//     notify('Error verifying PIN. Please try again.', 'error', pinVerifyAlert, pinVerifyAlertMsg);
+//     return false;
+//   }
+//   });
+// }
 
   // Reusable PIN check function
   window.checkPinExists = async function (callback, context = null) {
