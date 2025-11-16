@@ -16,6 +16,12 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const { createClient } = supabase;
 const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+// 🚨 DISABLE AUTO-PREFETCH - No automatic biometric calls
+window.prefetchAuthOptions = function() {
+  console.log('[prefetchAuthOptions] DISABLED - no auto-calls allowed');
+  return Promise.resolve();
+};
+
 let __backHandler = null;
 // Ensure shared UI refs / flags are declared before any functions use them
 let reauthModal = null;
