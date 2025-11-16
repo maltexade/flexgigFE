@@ -5,17 +5,6 @@ import {
   onPayClicked
 } from '/frontend/js/checkout.js';
 
-// 🚨 TRAP: Detect any auto-calls to navigator.credentials.get
-(function() {
-  const original = navigator.credentials.get;
-  navigator.credentials.get = function(...args) {
-    console.error('🚨 AUTO-CALL DETECTED! navigator.credentials.get called from:');
-    console.trace();
-    debugger; // This will pause execution so you can see the call stack
-    return original.apply(this, args);
-  };
-})();
-
 
 
 window.__SEC_API_BASE = 'https://api.flexgig.com.ng'
@@ -4963,49 +4952,64 @@ updateBalanceDisplay();
   }
 
   if (step === 'reauth') {
-    return withLoader(async () => {
-      processing = true;
-      try {
-        const res = await fetch('https://api.flexgig.com.ng/api/verify-pin', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pin: currentPin }),
-          credentials: 'include',
+  return withLoader(async () => {
+    processing = true;
+    const tStart = performance.now();
+    try {
+      const res = await fetch('https://api.flexgig.com.ng/api/verify-pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: currentPin }),
+        credentials: 'include',
+      });
+      console.log('[reauth] verify-pin status', res.status, 'ms', performance.now() - tStart);
+
+      if (!res.ok) throw new Error('Invalid PIN');
+
+      // Parse minimal payload only (server should return minimal user summary)
+      const payload = await res.json(); // ideally: { user: { username, fullName, ... } }
+      const user = payload.user || {};
+
+      // Hide modal immediately for snappy UX
+      if (pinModal) pinModal.classList.add('hidden');
+      resetInputs();
+
+      // Prepare userData from minimal payload, avoid extra fetches when possible
+      const userData = {
+        email: user.email || '',
+        firstName: user.fullName?.split(' ')[0] || '',
+        username: user.username || '',
+        phoneNumber: user.phoneNumber || '',
+        address: user.address || '',
+        profilePicture: user.profilePicture || '',
+      };
+
+      // Fire non-blocking UI updates in parallel — don't await them before continuing
+      Promise.allSettled([
+        (typeof updateGreetingAndAvatar === 'function') ? updateGreetingAndAvatar(userData.username, userData.firstName) : Promise.resolve(),
+        (typeof loadUserProfile === 'function') ? loadUserProfile(userData) : Promise.resolve(),
+        (typeof updateBalanceDisplay === 'function') ? updateBalanceDisplay() : Promise.resolve()
+      ]).then(results => {
+        // log any failures but don't block user
+        results.forEach((r, idx) => {
+          if (r.status === 'rejected') {
+            console.warn('[reauth] background update failed', idx, r.reason);
+          }
         });
-        if (!res.ok) throw new Error('Invalid PIN');
+      });
 
-        const { user } = await res.json();
-        const userData = {
-          email: user.email || '',
-          firstName: user.fullName?.split(' ')[0] || '',
-          username: user.username || '',
-          phoneNumber: user.phoneNumber || '',
-          address: user.address || '',
-          profilePicture: user.profilePicture || '',
-        };
+      console.log('[dashboard.js] PIN re-auth: Session restored (client-side done)');
 
-        if (typeof updateGreetingAndAvatar === 'function') {
-          await updateGreetingAndAvatar(userData.username, userData.firstName);
-        }
-        if (typeof loadUserProfile === 'function') {
-          await loadUserProfile(userData);
-        }
-        if (typeof updateBalanceDisplay === 'function') {
-          await updateBalanceDisplay();
-        }
+    } catch (err) {
+      console.error('[dashboard.js] PIN re-auth error:', err);
+      showToast('Invalid PIN or session. Redirecting to login...', 'error', 1800);
+      setTimeout(() => (window.location.href = '/'), 1200);
+    } finally {
+      processing = false;
+    }
+  });
+}
 
-        if (pinModal) pinModal.classList.add('hidden');
-        resetInputs();
-        console.log('[dashboard.js] PIN re-auth: Session restored');
-      } catch (err) {
-        console.error('[dashboard.js] PIN re-auth error:', err);
-        showToast('Invalid PIN or session. Redirecting to login...', 'error', 1800);
-        setTimeout(() => (window.location.href = '/'), 1200);
-      } finally {
-        processing = false;
-      }
-    });
-  }
 }
 
 function onPinSetupSuccess() {
