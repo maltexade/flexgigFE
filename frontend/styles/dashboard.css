@@ -95,25 +95,34 @@
     .arrow-icon { flex-shrink: 0; }
 
 
-    /* hide until JS renders */
-.user-profile-dashboard-content {
-  visibility: hidden; /* prevents layout shift */
+/* hide until JS renders */
+/* hidden by default until JS decides to show */
+.card.pin,
+.card.update-profile {
+  display: none;
   opacity: 0;
   transition: opacity .22s ease;
-  pointer-events: none;
 }
 
-/* visible after JS */
-.user-profile-dashboard-content.js-ready {
-  visibility: visible;
+/* JS-enabled visible state */
+.card.pin.js-ready,
+.card.update-profile.js-ready {
+  display: flex; /* or grid if you use grid */
   opacity: 1;
   pointer-events: auto;
 }
 
+
 /* card helpers */
-.dashboard-card-hidden { display: none !important; }
-.dashboard-card-fading { opacity: 0.0; transition: opacity .18s ease; }
-.card { display:flex; gap:12px; align-items:center; padding:12px; border-radius:8px; background:#0b2a3a; color:#fff; justify-content:space-between; }
+.card.pin, .card.update-profile {
+  display: none !important;
+}
+
+.card.pin-fading, .card.update-profile-fading {
+  opacity: 0 !important;
+  transition: opacity .18s ease;
+}
+
 
 
     .pin .icon-wrap { background: linear-gradient(135deg, rgba(255, 204, 0, 0.12), rgba(255, 204, 0, 0.06)); }
