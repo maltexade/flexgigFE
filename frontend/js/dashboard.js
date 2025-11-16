@@ -22,6 +22,146 @@ let reauthModal = null;
 let promptModal = null;
 let reauthModalOpen = false;
 
+// Call this as early as practical (before container paints) - e.g., in onDashboardLoad() before manageDashboardCards() if possible.
+async function renderDashboardCardsFromState({ preferServer = true } = {}) {
+  const container = document.getElementById('userProfileDashboardContent');
+  if (!container) return;
+
+  // Defensive: keep hidden until done (prevents flash)
+  container.classList.remove('js-ready');
+
+  // Read cached/local flags first (fast)
+  let localHasPin = localStorage.getItem('hasPin') === 'true';
+  let localProfileCompleted = localStorage.getItem('profileCompleted') === 'true';
+
+  // Optionally fetch authoritative server flags (best effort)
+  if (preferServer && typeof getSession === 'function') {
+    try {
+      const session = await getSession();
+      if (session && session.user) {
+        localHasPin = !!session.user.hasPin;
+        localProfileCompleted = !!session.user.profileCompleted;
+        // persist what we used (keeps localStorage in sync)
+        localStorage.setItem('hasPin', localHasPin ? 'true' : 'false');
+        localStorage.setItem('profileCompleted', localProfileCompleted ? 'true' : 'false');
+      }
+    } catch (e) {
+      console.warn('renderDashboardCardsFromState: getSession failed, using local flags', e);
+    }
+  }
+
+  // Clear any existing cards inside (so you can call this repeatedly)
+  // If your container has other children, target a specific stack element instead.
+  const stack = container.querySelector('.stack') || container;
+  // remove only card elements we may have created previously (safe)
+  Array.from(stack.querySelectorAll('.card[data-managed="true"]')).forEach(n => n.remove());
+
+  // Helper to create a card node
+  function createCard({ id, title, subtitle, svgHtml, onClick }) {
+    const card = document.createElement('div');
+    card.className = `card ${id}`;
+    card.id = id;
+    card.setAttribute('data-managed', 'true');
+
+    const left = document.createElement('div');
+    left.style.display = 'flex';
+    left.style.gap = '12px';
+    left.style.alignItems = 'center';
+
+    const iconWrap = document.createElement('div');
+    iconWrap.className = 'icon-wrap';
+    iconWrap.setAttribute('aria-hidden', 'true');
+    iconWrap.innerHTML = svgHtml || '';
+
+    const textWrap = document.createElement('div');
+    const h4 = document.createElement('h4');
+    h4.textContent = title;
+    const p = document.createElement('p');
+    p.textContent = subtitle;
+    textWrap.appendChild(h4);
+    textWrap.appendChild(p);
+
+    left.appendChild(iconWrap);
+    left.appendChild(textWrap);
+
+    const arrowSvg = document.createElement('div');
+    arrowSvg.className = 'arrow-icon';
+    arrowSvg.innerHTML = `
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+        <path d="M9 18l6-6-6-6" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    `;
+
+    card.appendChild(left);
+    card.appendChild(arrowSvg);
+
+    // basic click wiring (delegate to provided handler)
+    card.addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      if (typeof onClick === 'function') onClick(e, card);
+    }, { passive: true });
+
+    return card;
+  }
+
+  // Create only the cards the user still needs
+  const cardsToAppend = [];
+
+  // PIN card: only show when user DOES NOT have a PIN
+  if (!localHasPin) {
+    cardsToAppend.push(createCard({
+      id: 'dashboardPinCard',
+      title: 'Setup Pin',
+      subtitle: 'Secure your account',
+      svgHtml: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+        <path d="M12 2L4 5v6c0 5.25 3.84 9.74 8 11 4.16-1.26 8-5.75 8-11V5l-8-3z" fill="#FFD700" opacity="0.95"/>
+        <rect x="9" y="10" width="6" height="5" rx="1" fill="#021827"/>
+      </svg>`,
+      onClick: () => {
+        // Open your existing PIN setup flow (ModalManager or your function)
+        if (typeof openPinModal === 'function') openPinModal('setup');
+        else if (typeof window.ModalManager?.openModal === 'function') window.ModalManager.openModal('pinModal');
+      }
+    }));
+  }
+
+  // Update profile card: only show when profile not completed
+  if (!localProfileCompleted) {
+    cardsToAppend.push(createCard({
+      id: 'dashboardUpdateProfileCard',
+      title: 'Update Profile',
+      subtitle: 'Keep your account details up to date',
+      svgHtml: `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24">
+        <defs><linearGradient id="gradProfile" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:#ff6a00; stop-opacity:1"/><stop offset="50%" style="stop-color:#ee0979; stop-opacity:1"/><stop offset="100%" style="stop-color:#8e2de2; stop-opacity:1"/></linearGradient></defs>
+        <path fill="url(#gradProfile)" d="M12 12c2.67 0 8 1.34 8 4v2H4v-2c0-2.66 5.33-4 8-4zm0-2a4 4 0 100-8 4 4 0 000 8z"/>
+      </svg>`,
+      onClick: () => {
+        // Open your profile modal
+        if (typeof openUpdateProfileModal === 'function') openUpdateProfileModal();
+        else if (typeof window.ModalManager?.openModal === 'function') window.ModalManager.openModal('updateProfileModal');
+      }
+    }));
+  }
+
+  // Append created cards to the stack in the container
+  cardsToAppend.forEach(card => stack.appendChild(card));
+
+  // Ensure manageDashboardCards() still runs to keep server/local sync & animations in sync
+  // but we already created only the needed cards, so no flash will occur.
+  try {
+    if (typeof manageDashboardCards === 'function') {
+      // call it but it will find the elements we created
+      manageDashboardCards();
+    }
+  } catch (e) {
+    console.warn('renderDashboardCardsFromState: manageDashboardCards failed', e);
+  }
+
+  // Reveal container now that DOM is stable
+  container.classList.add('js-ready');
+}
+
+
 
 let hardIdleTimeout = null;
 
@@ -42,11 +182,14 @@ async function scheduleHardIdleCheck() {
         console.log('🔒 [HARD IDLE] Local check: Reauth required - showing modal');
         await showReauthModal({ context: 'reauth', reason: 'hard-idle' }); 
         
-        // 🚨 WAIT for modal to fully render before triggering biometrics
-        await waitForReauthModalVisible();
+        // 🚨 CRITICAL: Use setTimeout instead of await to break the blocking chain
+        // This allows the modal to fully render before biometric prompt appears
+        setTimeout(() => {
+          attemptHardIdleBiometricAuth().catch(err => {
+            console.error('[HARD IDLE BIO] Auto-trigger failed:', err);
+          });
+        }, 500); // 500ms delay ensures modal is visible and rendered
         
-        // Now auto-trigger biometrics
-        await attemptHardIdleBiometricAuth();
       } catch(e) { 
         console.error('[hardIdle] showReauthModal failed', e); 
       }
@@ -59,11 +202,13 @@ async function scheduleHardIdleCheck() {
           console.log('🔒 [HARD IDLE] Server check: Reauth required - showing modal');
           await showReauthModal({ context: 'reauth', reason: 'hard-idle' });
           
-          // 🚨 WAIT for modal to fully render before triggering biometrics
-          await waitForReauthModalVisible();
+          // 🚨 CRITICAL: Use setTimeout instead of await to break the blocking chain
+          setTimeout(() => {
+            attemptHardIdleBiometricAuth().catch(err => {
+              console.error('[HARD IDLE BIO] Auto-trigger failed:', err);
+            });
+          }, 500); // 500ms delay ensures modal is visible and rendered
           
-          // Now auto-trigger biometrics
-          await attemptHardIdleBiometricAuth();
         } else {
           console.log('✅ [HARD IDLE] Server check passed - no reauth needed');
         }
@@ -1712,7 +1857,8 @@ async function onDashboardLoad() {
   }
 
   // 🔥 ADD THESE TWO LINES (after the single getSession)
-  await manageDashboardCards();
+  await renderDashboardCardsFromState({ preferServer: true });
+
   initializeSmartAccountPinButton();
 
   // fetch active broadcasts (separate; doesn't call getSession)

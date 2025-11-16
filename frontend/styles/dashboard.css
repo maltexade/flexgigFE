@@ -94,6 +94,28 @@
     .card p { margin: 4px 0 0 0; font-size: 0.85rem; color: var(--muted); }
     .arrow-icon { flex-shrink: 0; }
 
+
+    /* hide until JS renders */
+.user-profile-dashboard-content {
+  visibility: hidden; /* prevents layout shift */
+  opacity: 0;
+  transition: opacity .22s ease;
+  pointer-events: none;
+}
+
+/* visible after JS */
+.user-profile-dashboard-content.js-ready {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* card helpers */
+.dashboard-card-hidden { display: none !important; }
+.dashboard-card-fading { opacity: 0.0; transition: opacity .18s ease; }
+.card { display:flex; gap:12px; align-items:center; padding:12px; border-radius:8px; background:#0b2a3a; color:#fff; justify-content:space-between; }
+
+
     .pin .icon-wrap { background: linear-gradient(135deg, rgba(255, 204, 0, 0.12), rgba(255, 204, 0, 0.06)); }
     .kyc .icon-wrap { background: linear-gradient(135deg, rgba(0, 170, 255, 0.12), rgba(0, 170, 255, 0.06)); }
     .transfer .icon-wrap { background: linear-gradient(135deg, rgba(255, 204, 0, 0.12), rgba(255, 204, 0, 0.06)); }
