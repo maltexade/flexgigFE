@@ -42,7 +42,10 @@ async function scheduleHardIdleCheck() {
         console.log('🔒 [HARD IDLE] Local check: Reauth required - showing modal');
         await showReauthModal({ context: 'reauth', reason: 'hard-idle' }); 
         
-        // 🚨 AUTO-TRIGGER BIOMETRICS for hard idle (only if enabled)
+        // 🚨 WAIT for modal to fully render before triggering biometrics
+        await waitForReauthModalVisible();
+        
+        // Now auto-trigger biometrics
         await attemptHardIdleBiometricAuth();
       } catch(e) { 
         console.error('[hardIdle] showReauthModal failed', e); 
@@ -56,7 +59,10 @@ async function scheduleHardIdleCheck() {
           console.log('🔒 [HARD IDLE] Server check: Reauth required - showing modal');
           await showReauthModal({ context: 'reauth', reason: 'hard-idle' });
           
-          // 🚨 AUTO-TRIGGER BIOMETRICS for hard idle (only if enabled)
+          // 🚨 WAIT for modal to fully render before triggering biometrics
+          await waitForReauthModalVisible();
+          
+          // Now auto-trigger biometrics
           await attemptHardIdleBiometricAuth();
         } else {
           console.log('✅ [HARD IDLE] Server check passed - no reauth needed');
@@ -68,9 +74,68 @@ async function scheduleHardIdleCheck() {
   }, remaining > 0 ? remaining : 0);
 }
 
+// 🔥 Helper: Wait for reauth modal to be visible in DOM
+async function waitForReauthModalVisible() {
+  return new Promise((resolve) => {
+    // Try to find the modal
+    const checkModal = () => {
+      const modal = document.getElementById('reauthModal') || 
+                    document.querySelector('.reauth-modal') ||
+                    document.querySelector('[data-modal="reauth"]');
+      
+      if (!modal) {
+        console.log('[WAIT MODAL] Modal element not found yet, retrying...');
+        return false;
+      }
+      
+      // Check if modal is visible (not hidden, has display, opacity > 0)
+      const styles = window.getComputedStyle(modal);
+      const isVisible = !modal.classList.contains('hidden') &&
+                       styles.display !== 'none' &&
+                       styles.visibility !== 'hidden' &&
+                       parseFloat(styles.opacity) > 0;
+      
+      if (isVisible) {
+        console.log('✅ [WAIT MODAL] Reauth modal is now visible');
+        return true;
+      }
+      
+      console.log('[WAIT MODAL] Modal found but not visible yet, retrying...');
+      return false;
+    };
+    
+    // Initial check
+    if (checkModal()) {
+      // Add extra 100ms for any CSS transitions/animations
+      setTimeout(() => resolve(), 100);
+      return;
+    }
+    
+    // Poll every 50ms for up to 2 seconds
+    let attempts = 0;
+    const maxAttempts = 40; // 2 seconds / 50ms
+    
+    const interval = setInterval(() => {
+      attempts++;
+      
+      if (checkModal()) {
+        clearInterval(interval);
+        // Add extra 100ms for any CSS transitions/animations
+        setTimeout(() => resolve(), 100);
+      } else if (attempts >= maxAttempts) {
+        clearInterval(interval);
+        console.warn('[WAIT MODAL] Timeout waiting for modal - proceeding anyway');
+        resolve(); // Proceed even if modal not detected
+      }
+    }, 50);
+  });
+}
+
 // 🔥 Helper: Auto-trigger biometrics ONLY for hard idle
 async function attemptHardIdleBiometricAuth() {
   try {
+    console.log('🔐 [HARD IDLE BIO] Starting auto-trigger sequence...');
+    
     // Pre-flight checks
     const biometricsEnabled = localStorage.getItem('biometricsEnabled') === 'true';
     const credentialId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
@@ -103,7 +168,7 @@ async function attemptHardIdleBiometricAuth() {
     }
     
     const freshOpts = await optionsRes.json();
-    console.log('[HARD IDLE BIO] Auth options received, calling biometric panel...');
+    console.log('[HARD IDLE BIO] Auth options received, calling biometric panel NOW...');
     
     // 🚨 THIS TRIGGERS THE BIOMETRIC PROMPT AUTOMATICALLY
     const bioResult = await tryImmediateReauthWithFreshOptions(
@@ -178,6 +243,7 @@ async function attemptHardIdleBiometricAuth() {
     // Silent fail - user can still manually authenticate via modal buttons
   }
 }
+
 
 // Replace the existing guardedHideReauthModal function in dashboard.js with this version.
 // This removes the call to onSuccessfulReauth() inside guardedHideReauthModal to break the circular dependency.
