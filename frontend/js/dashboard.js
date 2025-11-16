@@ -22,29 +22,10 @@ let reauthModal = null;
 let promptModal = null;
 let reauthModalOpen = false;
 
-window.addEventListener('load', async () => {
-  if (!isHardIdleTriggered()) return; // only trigger for hard idle
-  clearHardIdleTrigger(); // consume the flag
-
-  // Check local biometric eligibility
-  const { needsReauth, method } = shouldReauthLocal('reauth'); 
-  if (needsReauth && method === 'biometric') {
-    console.debug('[Auto-Biometric] Triggering biometric verification due to previous hard idle');
-    try {
-      await showReauthModal({ context: 'reauth', autoTriggerBiometric: true });
-      // optionally call a helper if you want biometric immediately
-      if (typeof triggerBiometric === 'function') await triggerBiometric();
-    } catch(e){
-      console.warn('[Auto-Biometric] failed', e);
-    }
-  }
-});
-
-
 
 let hardIdleTimeout = null;
 
-function scheduleHardIdleCheck() {
+async function scheduleHardIdleCheck() {
   if (hardIdleTimeout) clearTimeout(hardIdleTimeout);
 
   const now = Date.now();
@@ -52,43 +33,151 @@ function scheduleHardIdleCheck() {
   const remaining = HARD_IDLE_MS - (now - last);
 
   hardIdleTimeout = setTimeout(async () => {
-    if (needsReauthDueToHardIdle) {
-  markHardIdleTriggered();  // 🔥 flag it
-  await showReauthModal({ context: 'reauth' });
-}
-
+    console.log('🔥 [HARD IDLE] Timeout triggered - checking reauth status');
+    
     // Local-first decision
     const localCheck = shouldReauthLocal('reauth');
     if (localCheck.needsReauth) {
-      try { await showReauthModal({ context: 'reauth' }); } 
-      catch(e) { console.error('[hardIdle] showReauthModal failed', e); }
+      try { 
+        console.log('🔒 [HARD IDLE] Local check: Reauth required - showing modal');
+        await showReauthModal({ context: 'reauth', reason: 'hard-idle' }); 
+        
+        // 🚨 AUTO-TRIGGER BIOMETRICS for hard idle (only if enabled)
+        await attemptHardIdleBiometricAuth();
+      } catch(e) { 
+        console.error('[hardIdle] showReauthModal failed', e); 
+      }
     } else {
       // optionally call server async to update status
       try {
+        console.log('🔒 [HARD IDLE] Local check passed - verifying with server');
         const serverCheck = await checkServerReauthStatus();
         if (serverCheck && (serverCheck.needsReauth || serverCheck.reauthRequired)) {
-          await showReauthModal({ context: 'reauth' });
+          console.log('🔒 [HARD IDLE] Server check: Reauth required - showing modal');
+          await showReauthModal({ context: 'reauth', reason: 'hard-idle' });
+          
+          // 🚨 AUTO-TRIGGER BIOMETRICS for hard idle (only if enabled)
+          await attemptHardIdleBiometricAuth();
+        } else {
+          console.log('✅ [HARD IDLE] Server check passed - no reauth needed');
         }
-      } catch(e) { console.warn('[hardIdle] server reauth check failed', e); }
+      } catch(e) { 
+        console.warn('[hardIdle] server reauth check failed', e); 
+      }
     }
   }, remaining > 0 ? remaining : 0);
 }
 
-const FG_HARD_IDLE_TRIGGER = 'fg_hard_idle_triggered';
-
-function markHardIdleTriggered() {
-  try { localStorage.setItem(FG_HARD_IDLE_TRIGGER, 'true'); } catch(e){}
+// 🔥 Helper: Auto-trigger biometrics ONLY for hard idle
+async function attemptHardIdleBiometricAuth() {
+  try {
+    // Pre-flight checks
+    const biometricsEnabled = localStorage.getItem('biometricsEnabled') === 'true';
+    const credentialId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
+    const bioForLogin = localStorage.getItem('biometricForLogin') === 'true';
+    
+    if (!biometricsEnabled || !credentialId || !bioForLogin) {
+      console.log('[HARD IDLE BIO] Skipped - biometrics not enabled or configured for login');
+      return;
+    }
+    
+    console.log('🔐 [HARD IDLE BIO] Fetching auth options for auto-trigger...');
+    
+    // Fetch fresh WebAuthn options from server
+    const optionsRes = await fetch(`${window.__SEC_API_BASE}/webauthn/auth/options`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({ 
+        credentialId: credentialId,
+        context: 'hard-idle-reauth' 
+      })
+    });
+    
+    if (!optionsRes.ok) {
+      console.warn('[HARD IDLE BIO] Failed to fetch auth options:', optionsRes.status);
+      return;
+    }
+    
+    const freshOpts = await optionsRes.json();
+    console.log('[HARD IDLE BIO] Auth options received, calling biometric panel...');
+    
+    // 🚨 THIS TRIGGERS THE BIOMETRIC PROMPT AUTOMATICALLY
+    const bioResult = await tryImmediateReauthWithFreshOptions(
+      freshOpts, 
+      1, // Single attempt
+      { reason: 'hard-idle', trigger: 'hard-idle' } // Context flag
+    );
+    
+    if (bioResult.ok) {
+      console.log('✅ [HARD IDLE BIO] Auto-auth succeeded!');
+      
+      // Send assertion to server for verification
+      const verifyRes = await fetch(`${window.__SEC_API_BASE}/webauthn/auth/verify`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({
+          id: bioResult.assertion.id,
+          rawId: Array.from(new Uint8Array(bioResult.assertion.rawId)),
+          response: {
+            clientDataJSON: Array.from(new Uint8Array(bioResult.assertion.response.clientDataJSON)),
+            authenticatorData: Array.from(new Uint8Array(bioResult.assertion.response.authenticatorData)),
+            signature: Array.from(new Uint8Array(bioResult.assertion.response.signature)),
+            userHandle: bioResult.assertion.response.userHandle ? Array.from(new Uint8Array(bioResult.assertion.response.userHandle)) : null
+          },
+          type: bioResult.assertion.type,
+          context: 'hard-idle-reauth'
+        })
+      });
+      
+      if (verifyRes.ok) {
+        console.log('✅ [HARD IDLE BIO] Server verification succeeded - closing reauth modal');
+        
+        // Clear reauth flag and close modal
+        if (typeof clearCanonicalReauthFlag === 'function') {
+          clearCanonicalReauthFlag();
+        }
+        
+        if (typeof guardedHideReauthModal === 'function') {
+          await guardedHideReauthModal();
+        }
+        
+        // Dispatch success event
+        window.dispatchEvent(new CustomEvent('fg:reauth-success', { 
+          detail: { method: 'biometric', trigger: 'hard-idle-auto' } 
+        }));
+        
+        // Reset idle timer
+        if (typeof resetIdleTimer === 'function') {
+          resetIdleTimer();
+        }
+        
+        if (typeof notify === 'function') {
+          notify('Welcome back! Authenticated via biometrics', 'success');
+        }
+      } else {
+        console.warn('[HARD IDLE BIO] Server verification failed:', verifyRes.status);
+        if (typeof notify === 'function') {
+          notify('Biometric authentication failed. Please use PIN.', 'error');
+        }
+      }
+    } else {
+      console.log('[HARD IDLE BIO] Auto-auth failed or cancelled:', bioResult.reason);
+      // User cancelled or failed - they can still manually click bio/PIN buttons in modal
+    }
+    
+  } catch (err) {
+    console.error('[HARD IDLE BIO] Auto-trigger error:', err);
+    // Silent fail - user can still manually authenticate via modal buttons
+  }
 }
-
-function clearHardIdleTrigger() {
-  try { localStorage.removeItem(FG_HARD_IDLE_TRIGGER); } catch(e){}
-}
-
-function isHardIdleTriggered() {
-  try { return localStorage.getItem(FG_HARD_IDLE_TRIGGER) === 'true'; } catch(e){ return false; }
-}
-
-
 
 // Replace the existing guardedHideReauthModal function in dashboard.js with this version.
 // This removes the call to onSuccessfulReauth() inside guardedHideReauthModal to break the circular dependency.
@@ -432,7 +521,27 @@ function challengeToB64Url(ch) {
 }
 
 // Try a single immediate navigator.credentials.get() with server-supplied freshOpts
-async function tryImmediateReauthWithFreshOptions(freshOpts, attemptLimit = 1) {
+// 🔒 TIGHTENED: Only auto-calls biometrics on HARD idle timeout (not soft idle, not manual reauth)
+async function tryImmediateReauthWithFreshOptions(freshOpts, attemptLimit = 1, context = {}) {
+  // 🚨 CRITICAL GUARD: Only proceed if this is a HARD idle timeout scenario
+  const isHardIdle = context.reason === 'hard-idle' || context.trigger === 'hard-idle';
+  
+  if (!isHardIdle) {
+    console.log('[webauthn] tryImmediateReauth: Skipped (not hard idle). Context:', context);
+    return { ok: false, reason: 'not-hard-idle-skipped' };
+  }
+  
+  // Additional safety: Check if biometrics are enabled and user has credentials
+  const biometricsEnabled = localStorage.getItem('biometricsEnabled') === 'true';
+  const credentialId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
+  
+  if (!biometricsEnabled || !credentialId) {
+    console.log('[webauthn] tryImmediateReauth: Skipped (bio disabled or no cred)');
+    return { ok: false, reason: 'biometrics-not-available' };
+  }
+  
+  console.log('🔥 [webauthn] HARD IDLE DETECTED → Auto-calling biometric panel');
+  
   function b64UrlToUint8(s) {
     if (!s) return null;
     s = s.replace(/-/g, '+').replace(/_/g, '/');
@@ -444,6 +553,7 @@ async function tryImmediateReauthWithFreshOptions(freshOpts, attemptLimit = 1) {
       return u;
     } catch (e) { return null; }
   }
+  
   function ensureUint8(val) {
     if (val instanceof ArrayBuffer) return new Uint8Array(val);
     if (ArrayBuffer.isView(val)) return new Uint8Array(val.buffer || val);
@@ -456,7 +566,6 @@ async function tryImmediateReauthWithFreshOptions(freshOpts, attemptLimit = 1) {
       return b64UrlToUint8(val);
     }
 
-    // Defensive: correctly check val.data is an array (previous code had a stray quote)
     if (val && typeof val === 'object' && Array.isArray(val.data)) {
       return new Uint8Array(val.data.map(n => Number(n) & 0xff));
     }
@@ -487,10 +596,14 @@ async function tryImmediateReauthWithFreshOptions(freshOpts, attemptLimit = 1) {
   while (attempt < attemptLimit) {
     attempt++;
     try {
+      console.log(`🔐 [webauthn] Attempt ${attempt}/${attemptLimit} - Calling navigator.credentials.get() for HARD IDLE`);
       const assertion = await navigator.credentials.get({ publicKey });
-      if (assertion) return { ok: true, assertion };
+      if (assertion) {
+        console.log('✅ [webauthn] Hard idle biometric success');
+        return { ok: true, assertion };
+      }
     } catch (err) {
-      console.warn('[webauthn] immediate re-get attempt failed', err);
+      console.warn('[webauthn] Hard idle immediate re-get attempt failed', err);
       break;
     }
   }
@@ -14317,10 +14430,8 @@ window.persistCredentialId = persistCredentialId;
   // Full showReauthModal (explicit called flow)
 // Full showReauthModal (explicit called flow)
 // ----- Updated implementation with proper reauth flow -----
-async function showReauthModal(context = 'reauth', options = {}) {
-  const { hardIdleAutoBio = false } = options; // only auto biometric on hard idle
-  console.log('showReauthModal called', { context, hardIdleAutoBio });
-
+async function showReauthModal(context = 'reauth') {
+  console.log('showReauthModal called', { context });
   cacheDomRefs();
   if (!reauthModal) {
     console.error('showReauthModal: reauthModal missing');
@@ -14331,51 +14442,74 @@ async function showReauthModal(context = 'reauth', options = {}) {
     const reauthStatus = await shouldReauth(context);
     console.log('showReauthModal: reauthStatus', reauthStatus);
 
-    // If no reauth needed, handle success silently
     if (!reauthStatus.needsReauth) {
-      if (typeof onSuccessfulReauth === 'function') await onSuccessfulReauth();
-      if (typeof guardedHideReauthModal === 'function') await guardedHideReauthModal();
-      console.log('[DEBUG] Reauth modal hidden (no reauth needed)');
+      console.log('showReauthModal: no reauth required - calling success handler');
+      try {
+        // 1. Call onSuccessfulReauth to clear flags, reset timers, and handle session state
+        if (typeof onSuccessfulReauth === 'function') {
+          await onSuccessfulReauth();
+        }
+        // 2. Call guardedHideReauthModal to safely hide the modal only if flags are cleared
+        if (typeof guardedHideReauthModal === 'function') {
+          await guardedHideReauthModal();
+        }
+        console.log('[DEBUG] Reauth modal hidden (no reauth needed)');
+      } catch (err) {
+        console.warn('[reauth] Post-reauth check success error', err);
+        // Optionally show an error to the user, but continue (non-fatal)
+        if (typeof showBanner === 'function') {
+          showBanner('Authentication completed, but an internal error occurred. Please refresh if issues persist.');
+        }
+      }
       return;
     }
 
-    // Biometric path
     if (reauthStatus.method === 'biometric') {
       const session = await safeCall(getSession) || {};
       const uid = session.user ? (session.user.uid || session.user.id) : null;
-
-      // Only auto-trigger biometrics if this is a hard idle
-      if (hardIdleAutoBio && uid) {
-        try {
-          const { success } = await verifyBiometrics(uid, context);
-          if (success) {
-            console.log('[Hard Idle] Biometric success');
-            if (typeof onSuccessfulReauth === 'function') await onSuccessfulReauth();
-            if (typeof guardedHideReauthModal === 'function') await guardedHideReauthModal();
-            return;
+      if (uid) {
+        const { success } = await verifyBiometrics(uid, context);
+        if (success) {
+          console.log('showReauthModal: biometric success');
+          try {
+            // 1. Call onSuccessfulReauth to clear flags, reset timers, and handle session state
+            if (typeof onSuccessfulReauth === 'function') {
+              await onSuccessfulReauth();
+            }
+            // 2. Call guardedHideReauthModal to safely hide the modal only if flags are cleared
+            if (typeof guardedHideReauthModal === 'function') {
+              await guardedHideReauthModal();
+            }
+            console.log('[DEBUG] Reauth modal hidden after successful biometric verification in showReauthModal');
+          } catch (err) {
+            console.warn('[reauth] Post-biometric verification error in showReauthModal', err);
+            // Optionally show an error to the user
+            if (typeof showBanner === 'function') {
+              showBanner('Error completing authentication. Please try again.');
+            }
           }
-          console.log('[Hard Idle] Biometric failed -> fallback to PIN modal');
-        } catch (e) {
-          console.warn('[Hard Idle] Biometric verification error', e);
+          return;
         }
+        console.log('showReauthModal: biometric failed -> fallback to PIN modal');
+        await initReauthModal({ show: true, context });
+        return;
+      } else {
+        console.warn('showReauthModal: no session uid for biometric -> open PIN modal');
+        await initReauthModal({ show: true, context });
+        return;
       }
-
-      // Normal modal flow (user clicks biometric button manually)
-      await initReauthModal({ show: true, context });
-      return;
     }
 
-    // Default: PIN modal
+    // Default: Open PIN modal if no biometric or other methods
     await initReauthModal({ show: true, context });
-
   } catch (err) {
     console.error('showReauthModal unexpected error', err);
+    // Fallback: Ensure modal is hidden on error to avoid stuck state
     if (typeof guardedHideReauthModal === 'function') {
       await guardedHideReauthModal();
     }
   }
 }
-
 
 /* ---------------------------
    Reauth cross-tab sync module
