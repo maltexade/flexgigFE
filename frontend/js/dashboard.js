@@ -6854,22 +6854,19 @@ case 'fullName': {
     break;
   }
 
-  // server lock (if present)
+  // Permanent lock: cannot change username after initial setup
   const lastUpdate = localStorage.getItem('lastUsernameUpdate');
   const currentUsername = localStorage.getItem('username') || '';
   if (value !== currentUsername && lastUpdate) {
-    const daysSinceUpdate = (Date.now() - new Date(lastUpdate).getTime()) / (1000 * 60 * 60 * 24);
-    if (daysSinceUpdate < 90) {
-      err = `You can update your username again in ${Math.ceil(90 - daysSinceUpdate)} days`;
-      errorElement.textContent = err;
-      errorElement.classList.add('active', 'error');
-      inputElement.classList.add('invalid');
-      isValid = false;
-      break;
-    }
+    err = 'Username cannot be changed after initial setup';
+    errorElement.textContent = err;
+    errorElement.classList.add('active', 'error');
+    inputElement.classList.add('invalid');
+    isValid = false;
+    break;
   }
 
-  // Immediate client-side checks:
+  // Immediate client-side checks: (rest of your existing code unchanged)
   if (/^\d/.test(value)) {
     err = 'Username cannot start with a number';
   } else if (/^_/.test(value)) {
@@ -6892,8 +6889,7 @@ case 'fullName': {
   }
 
   // Passed client-side syntactic checks — now consider availability state
-  // If we already have an availability result (isUsernameAvailable) we reflect it here,
-  // otherwise we just clear errors (the debounced availability check will set isUsernameAvailable).
+  // (rest of your existing availability check code unchanged)
   if (value === currentUsername) {
     // unchanged username -> treat as available
     errorElement.textContent = '';
@@ -7577,6 +7573,7 @@ function openUpdateProfileModal(profile = {}) {
   if (fullNameInput) fullNameInput.disabled = localStorage.getItem('fullNameEdited') === 'true';
   if (phoneNumberInput) phoneNumberInput.disabled = !!phoneNumber;
   if (emailInput) emailInput.disabled = true;
+  if (usernameInput) usernameInput.disabled = !!username;  // NEW: Disable username if already set
   if (addressInput) addressInput.disabled = !!(profile?.address || localStorage.getItem('address')?.trim());
   if (profilePictureInput) profilePictureInput.disabled = false; // always editable
 
