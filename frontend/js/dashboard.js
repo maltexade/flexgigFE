@@ -5,6 +5,44 @@ import {
   onPayClicked
 } from '/frontend/js/checkout.js';
 
+function saveCurrentAppState() {
+  const state = {
+    // Modals
+    openModal: document.querySelector('.modal.active, .modal[style*="block"], .modal:not(.hidden)')?.id || null,
+    
+    // Form inputs
+    phoneNumber: document.getElementById('phone-input')?.value || '',
+    pinInputs: {
+      current: document.getElementById('currentPin')?.value || '',
+      new: document.getElementById('newPin')?.value || '',
+      confirm: document.getElementById('confirmPin')?.value || '',
+    },
+    
+    // Selection state
+    selectedProvider: document.querySelector('.provider-box.active')?.className.match(/mtn|airtel|glo|ninemobile/)?.[0] || 'mtn',
+    selectedPlanId: document.querySelector('.plan-box.selected')?.getAttribute('data-id') || '',
+    
+    // Scroll positions
+    scrollPositions: {
+      dashboard: window.scrollY,
+      plansRow: document.querySelector('.plans-row')?.scrollLeft || 0,
+      allPlansModal: document.getElementById('allPlansModalContent')?.scrollTop || 0,
+    },
+    
+    // Extra
+    timestamp: Date.now(),
+    version: APP_VERSION || '1.0.0'
+  };
+
+  // Save in two places for maximum reliability
+  sessionStorage.setItem('__fg_app_state_v2', JSON.stringify(state));
+  
+  // Also push to history.state so back/forward works too
+  history.replaceState(state, '', location.href);
+  
+  console.log('[StateSaver] UI state saved', state);
+}
+
 
 
 window.__SEC_API_BASE = 'https://api.flexgig.com.ng'
@@ -1329,10 +1367,14 @@ function updateLocalStorageFromUser(user) {
 
 
 // Run observer only on dashboard
+// Run observer only on dashboard
+// Run observer only on dashboard
 if (window.location.pathname.includes('dashboard.html')) {
-  window.addEventListener('load', () => { // Or 'DOMContentLoaded' if preferred
-    console.log('[DEBUG] window.load: Starting MutationObserver');
-    onDashboardLoad();
+  window.addEventListener('load', async () => {
+    console.log('[DEBUG] window.load: Starting onDashboardLoad');
+    await onDashboardLoad();                    // ← await everything
+    console.log('[StateRestore] NOW restoring saved UI state...');
+    restoreAppState();                          // ← only here, once
   });
 }
 
@@ -1833,6 +1875,90 @@ try {
   checkForUpdates();
   pollStatus(); // Initial
   setInterval(pollStatus, 30000); // Every 30s
+
+  function restoreAppState() {
+  let state = null;
+
+  console.log('[StateRestore] Attempting restore... sessionStorage has __fg_app_state_v2:', !!sessionStorage.getItem('__fg_app_state_v2'));
+console.log('[StateRestore] history.state exists:', !!history.state);
+
+  // 1. Try history.state first (survives navigation)
+  if (history.state && history.state.timestamp) {
+    state = history.state;
+  }
+  // 2. Fallback to sessionStorage
+  else if (sessionStorage.getItem('__fg_app_state_v2')) {
+    try {
+      state = JSON.parse(sessionStorage.getItem('__fg_app_state_v2'));
+    } catch(e) { }
+  }
+
+  if (!state) return;
+
+  console.log('[StateRestore] Restoring UI state', state);
+
+  // Small delay to let DOM settle
+  setTimeout(() => {
+    // Restore phone number
+    const phoneInput = document.getElementById('phone-input');
+    if (phoneInput && state.phoneNumber) {
+      phoneInput.value = state.phoneNumber;
+      updateContactOrCancel();
+      updateContinueState();
+    }
+
+    // Restore provider + plan
+    if (state.selectedProvider) {
+      selectProvider(state.selectedProvider);
+      if (state.selectedPlanId) {
+        setTimeout(() => selectPlanById(state.selectedPlanId), 300);
+      }
+    }
+
+    // Restore PIN inputs (for security modal)
+    if (state.pinInputs) {
+      if (state.pinInputs.current) document.getElementById('currentPin')?.focus();
+      // Don't restore PIN values for security reasons (optional)
+    }
+
+    // Restore scroll
+    if (state.scrollPositions) {
+      window.scrollTo(0, state.scrollPositions.dashboard);
+      document.querySelector('.plans-row')?.scrollTo(state.scrollPositions.plansRow, 0);
+    }
+
+    // Re-open modal if one was open
+    if (state.openModal) {
+      setTimeout(() => {
+        if (window.ModalManager?.openModal) {
+          ModalManager.openModal(state.openModal);
+        } else {
+          const modal = document.getElementById(state.openModal);
+          if (modal) {
+            modal.classList.remove('hidden');
+            modal.classList.add('active');
+          }
+        }
+        // In restoreAppState(), after session/history check
+if (!state) {
+  const userState = JSON.parse(localStorage.getItem('userState') || '{}');
+  if (userState.provider) {
+    state = { selectedProvider: userState.provider, selectedPlanId: userState.planId, phoneNumber: formatNigeriaNumber(userState.number).value };
+  }
+}
+
+        // Special case: restore checkout modal content
+        if (state.openModal === 'checkoutModal') {
+          renderCheckoutModal();
+        }
+      }, 100);
+    }
+
+    // Cleanup old storage
+    sessionStorage.removeItem('__fg_app_state_v2');
+  }, 100);
+}
+
 }
 
 
@@ -3173,29 +3299,28 @@ function formatNigeriaNumber(phone, isInitialDigit = false, isPaste = false) {
   }
 
   function saveUserState() {
-    const activeProvider = providerClasses.find(cls => slider.classList.contains(cls));
-    const selectedPlan = plansRow.querySelector('.plan-box.selected');
-    const phoneNumber = phoneInput.value;
-    const rawNumber = normalizePhone(phoneNumber);
+  const activeProvider = providerClasses.find(cls => slider.classList.contains(cls));
+  const selectedPlan = plansRow.querySelector('.plan-box.selected'); // ← MOVED INSIDE!
+  const phoneNumber = phoneInput.value;
+  const rawNumber = normalizePhone(phoneNumber);
 
-    if (!rawNumber) {
-      console.warn('[WARN] saveUserState: Invalid phone number:', phoneNumber);
-      // Do not save invalid phone numbers
-    }
-
-    localStorage.setItem('userState', JSON.stringify({
-      provider: activeProvider || '',
-      planId: selectedPlan ? selectedPlan.getAttribute('data-id') : '',
-      number: rawNumber || '',   // Save empty string instead of invalid
-      serviceIdx: [...serviceItems].findIndex(el => el.classList.contains('active')),
-    }));
-
-    console.log('[DEBUG] saveUserState: Saved state:', {
-      provider: activeProvider,
-      planId: selectedPlan ? selectedPlan.getAttribute('data-id') : '',
-      number: rawNumber,
-    });
+  if (!rawNumber) {
+    console.warn('[WARN] saveUserState: Invalid phone number:', phoneNumber);
   }
+
+  localStorage.setItem('userState', JSON.stringify({
+    provider: activeProvider || '',
+    planId: selectedPlan ? selectedPlan.getAttribute('data-id') : '',
+    number: rawNumber || '',
+    serviceIdx: [...serviceItems].findIndex(el => el.classList.contains('active')),
+  }));
+
+  console.log('[DEBUG] saveUserState: Saved state:', {
+    provider: activeProvider,
+    planId: selectedPlan ? selectedPlan.getAttribute('data-id') : '(none)',
+    number: rawNumber,
+  });
+}
 
 
   // --- CUSTOM SMOOTH SCROLL ---
@@ -3338,6 +3463,7 @@ function formatNigeriaNumber(phone, isInitialDigit = false, isPaste = false) {
       logPlanIDs();
       updateContinueState();
       saveUserState();
+      saveCurrentAppState();
 
       providerTransitioning = false;
 
@@ -3462,17 +3588,30 @@ function fillPlanSection(sectionEl, provider, subType, plans, title, svg) {
 const seeAllBtn = document.querySelector('.see-all-plans');
 if (seeAllBtn) {
   seeAllBtn.addEventListener('click', () => {
-    if (window.ModalManager && typeof ModalManager.openModal === 'function') {
-      ModalManager.openModal('allPlansModal');
-      console.log('[DEBUG] See All Plans: Modal opened via ModalManager');
-    } else {
-      if (allPlansModal) {
-        allPlansModal.classList.remove('hidden');
-        allPlansModal.classList.add('active');
-        allPlansModal.style.display = 'flex';
-        allPlansModal.setAttribute('aria-hidden', 'false');
+    ModalManager.openModal('allPlansModal');
+
+    // Your old logic — runs right after ModalManager starts opening
+    setTimeout(() => {
+      const dashSelected = plansRow.querySelector('.plan-box.selected');
+      const activeProvider = providerClasses.find(cls => slider.classList.contains(cls));
+
+      allPlansModalContent.scrollTop = 0;
+
+      const awoofSection = allPlansModal.querySelector('.plan-section.awoof-section');
+      const giftingSection = allPlansModal.querySelector('.plan-section.gifting-section');
+      if (giftingSection) giftingSection.style.display = activeProvider === 'ninemobile' ? 'none' : 'block';
+      if (awoofSection) awoofSection.style.display = 'block';
+
+      if (dashSelected) {
+        const id = dashSelected.getAttribute('data-id');
+        allPlansModal.querySelectorAll('.plan-box.selected').forEach(p => p.classList.remove('selected'));
+        const modalPlan = allPlansModal.querySelector(`.plan-box[data-id="${id}"]`);
+        if (modalPlan) {
+          modalPlan.classList.add('selected');
+          setTimeout(() => modalPlan.scrollIntoView({ behavior: 'smooth', block: 'center' }), 150);
+        }
       }
-    }
+    }, 50);
   });
 }
 
@@ -3528,6 +3667,7 @@ if (seeAllBtn) {
 
     updateContinueState();
     saveUserState();
+    saveCurrentAppState();
   }
 
   // --- ATTACH PLAN LISTENERS ---
@@ -3550,7 +3690,7 @@ if (seeAllBtn) {
 
     if (isModalClick && isDashSelected) {
       e.stopPropagation();
-      closeModal();
+      ModalManager.closeModal('allPlansModal'); 
       console.log('[DEBUG] handlePlanClick: Reselected same plan, modal closed, ID:', id);
     } else if (isModalClick) {
       const dashPlans = Array.from(plansRow.querySelectorAll('.plan-box'));
@@ -3585,7 +3725,8 @@ if (seeAllBtn) {
         console.log('[DEBUG] handlePlanClick: Selected first dashboard plan, no cloning needed, ID:', id);
       }
       saveUserState();
-      closeModal();
+      saveCurrentAppState();
+      ModalManager.closeModal('allPlansModal'); 
     } else {
       selectPlanById(id);
     }
@@ -3611,6 +3752,7 @@ if (seeAllBtn) {
       phoneInput.focus();
       updateContinueState();
       saveUserState();
+      saveCurrentAppState();
     }
   }
 
@@ -3626,59 +3768,7 @@ if (seeAllBtn) {
     }
   }
 
-  // --- OPEN PLANS MODAL ---
-  function openModal() {
-    const dashSelected = plansRow.querySelector('.plan-box.selected');
-    const activeProvider = providerClasses.find(cls => slider.classList.contains(cls));
-
-    allPlansModalContent.scrollTop = 0;
-    console.log('[DEBUG] openModal: Scroll position reset to top for provider:', activeProvider);
-    const awoofSection = allPlansModal.querySelector('.plan-section.awoof-section');
-    const giftingSection = allPlansModal.querySelector('.plan-section.gifting-section');
-    if (giftingSection) {
-      giftingSection.style.display = activeProvider === 'ninemobile' ? 'none' : 'block';
-      console.log(`[DEBUG] openModal: Gifting section display set to ${giftingSection.style.display} for provider ${activeProvider}`);
-    }
-    if (awoofSection) {
-      awoofSection.style.display = 'block';
-      console.log(`[DEBUG] openModal: Awoof section display set to ${awoofSection.style.display} for provider ${activeProvider}`);
-    }
-
-    if (dashSelected) {
-      const id = dashSelected.getAttribute('data-id');
-      allPlansModal.querySelectorAll('.plan-box.selected').forEach(p => p.classList.remove('selected'));
-      const modalPlan = allPlansModal.querySelector(`.plan-box[data-id="${id}"]`);
-      if (modalPlan) {
-        modalPlan.classList.add('selected');
-        console.log('[RAW LOG] Modal plan selected on openModal. Plan ID:', id, 'Text:', modalPlan.textContent.trim());
-      } else {
-        console.log('[RAW LOG] openModal: No matching modal plan for ID', id);
-        const allModalPlans = Array.from(allPlansModal.querySelectorAll('.plan-box'));
-        console.log('[RAW LOG] openModal: Modal plan IDs:', allModalPlans.map(p => p.getAttribute('data-id')));
-      }
-    }
-    allPlansModal.classList.add('active');
-    allPlansModal.setAttribute('aria-hidden', 'false');
-    document.body.classList.add('modal-open');
-    allPlansModal.focus();
-    history.pushState({ popup: true }, '', location.href);
-    setTimeout(() => {
-      const modalSelected = allPlansModal.querySelector('.plan-box.selected');
-      if (modalSelected) {
-        modalSelected.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        console.log('[RAW LOG] Modal auto-scrolled to selected plan:', modalSelected.textContent.trim());
-      }
-    }, 50);
-  }
-
-  // --- CLOSE PLANS MODAL ---
-  function closeModal() {
-    allPlansModal.classList.remove('active');
-    allPlansModal.setAttribute('aria-hidden', 'true');
-    document.body.classList.remove('modal-open');
-    allPlansModalContent.style.transform = 'translateY(0)';
-    if (history.state && history.state.popup) history.back();
-  }
+  
 
   // --- FIND PLAN BY ID ---
   function findPlanById(planId, provider) {
@@ -3850,34 +3940,76 @@ async function triggerCheckoutReauth() {
       serviceItems.forEach(el => el.classList.remove('active'));
       item.classList.add('active');
       saveUserState();
+      saveCurrentAppState();
     });
   });
   serviceItems[0].classList.add('active');
 
   // --- INITIAL PROVIDER SETUP ---
-  function setProviderOnLoad() {
-    const mtnProvider = document.querySelector('.provider-box.mtn');
-    if (mtnProvider) {
-      providers.forEach(p => p.classList.remove('active'));
-      mtnProvider.classList.add('active');
-      slider.className = 'slider mtn';
-      slider.innerHTML = `
-        <img src="${svgPaths.mtn}" alt="MTN" class="provider-icon" />
-        <div class="provider-name">MTN</div>
-      `;
-      moveSliderTo(mtnProvider);
-      providerClasses.forEach(cls => plansRow.classList.remove(cls));
-      plansRow.classList.add('mtn');
-      plansRow.querySelectorAll('.plan-box').forEach(plan =>
-        plan.classList.remove('selected', ...providerClasses));
-      renderDashboardPlans('mtn');
-      renderModalPlans('mtn');
-      attachPlanListeners();
-      logPlanIDs();
-      console.log('[DEBUG] setProviderOnLoad: Initialized slider on MTN');
-    }
+  // REPLACE your current initializeProviderFromState() with this version
+function initializeProviderAndPlans() {
+  let providerToUse = null;
+
+  // 1. Try to restore from saved state
+  if (history.state?.selectedProvider) {
+    providerToUse = history.state.selectedProvider;
+  } else if (sessionStorage.getItem('__fg_app_state_v2')) {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem('__fg_app_state_v2'));
+      if (saved.selectedProvider) providerToUse = saved.selectedProvider;
+    } catch (e) {}
+  } else if (localStorage.getItem('userState')) {
+    try {
+      const userState = JSON.parse(localStorage.getItem('userState'));
+      if (userState.provider) providerToUse = userState.provider;
+    } catch (e) {}
   }
-  setProviderOnLoad();
+
+  // 2. If NOTHING was restored → default to MTN (exactly like your old function did)
+  if (!providerToUse) {
+    providerToUse = 'mtn';
+    console.log('[INIT] No saved provider → defaulting to MTN (first visit)');
+  } else {
+    console.log('[INIT] Restored provider from state:', providerToUse);
+  }
+
+  // 3. Now do the FULL initialization — same as your old setProviderOnLoad()
+  const providerBox = document.querySelector(`.provider-box.${providerToUse}`);
+  if (!providerBox) {
+    console.error('[INIT] Provider box not found for:', providerToUse);
+    return;
+  }
+
+  // Clear any existing active state
+  providers.forEach(p => p.classList.remove('active'));
+  providerBox.classList.add('active');
+
+  // Update slider
+  slider.className = `slider ${providerToUse}`;
+  slider.innerHTML = `
+    <img src="${svgPaths[providerToUse]}" alt="${providerToUse.toUpperCase()}" class="provider-icon" />
+    <div class="provider-name">${providerToUse === 'ninemobile' ? '9MOBILE' : providerToUse.toUpperCase()}</div>
+  `;
+  moveSliderTo(providerBox);
+
+  // Update plans row
+  providerClasses.forEach(cls => plansRow.classList.remove(cls));
+  plansRow.classList.add(providerToUse);
+
+  // Clear old selections
+  plansRow.querySelectorAll('.plan-box').forEach(plan =>
+    plan.classList.remove('selected', ...providerClasses)
+  );
+
+  // Render plans & modal
+  renderDashboardPlans(providerToUse);
+  renderModalPlans(providerToUse);
+  attachPlanListeners();
+  logPlanIDs();
+
+  console.log('[INIT] Provider fully initialized:', providerToUse);
+}
+initializeProviderAndPlans();
 
   // --- PROVIDER BOX CLICK ---
   let touchStartX = 0, touchStartY = 0, isScrolling = false;
@@ -4026,6 +4158,7 @@ async function triggerCheckoutReauth() {
     updateContactOrCancel();
     updateContinueState();
     saveUserState();
+    saveCurrentAppState();
 
     if (normalized.length === 11 && isNigeriaMobile(normalized)) {
       phoneInput.blur();
@@ -4044,6 +4177,7 @@ async function triggerCheckoutReauth() {
     updateContactOrCancel();
     updateContinueState();
     saveUserState();
+    saveCurrentAppState();
     console.log('[DEBUG] phoneInput input: Input cleared, no validation');
     return;
   }
@@ -4056,6 +4190,7 @@ async function triggerCheckoutReauth() {
     updateContactOrCancel();
     updateContinueState();
     saveUserState();
+    saveCurrentAppState();
     return;
   }
 
@@ -4096,7 +4231,7 @@ async function triggerCheckoutReauth() {
 
   updateContactOrCancel();
   updateContinueState();
-  saveUserState();
+  saveCurrentAppState();
 
   if (finalNormalized.length === 11 && isNigeriaMobile(finalNormalized)) {
     phoneInput.blur();
@@ -4114,55 +4249,63 @@ phoneInput.maxLength = 13;  // 11 digits + 2 spaces in formatted value
   });
 
   // --- MODAL EVENT LISTENERS ---
-  openBtn.addEventListener('click', openModal);
- allPlansModal.addEventListener('click', e => {
-    if (e.target === allPlansModal) closeModal();
-  });
-  window.addEventListener('keydown', e => {
-    if (e.key === 'Escape') closeModal();
-  });
+ 
 
   let startY = 0, currentY = 0, translateY = 0, dragging = false;
-  const pullThreshold = 120;
+const pullThreshold = 120;
 
-  function handleTouchStart(e) {
-    if (allPlansModalContent.scrollTop > 0) return;
-    dragging = true;
-    startY = e.touches[0].clientY;
-    translateY = 0;
-    allPlansModalContent.style.transition = 'none';
+function handleTouchStart(e) {
+  if (allPlansModalContent.scrollTop > 0) return;
+  dragging = true;
+  startY = e.touches[0].clientY;
+  translateY = 0;
+  allPlansModalContent.style.transition = 'none';
+}
+
+function handleTouchMove(e) {
+  if (!dragging) return;
+  currentY = e.touches[0].clientY;
+  let diff = currentY - startY;
+  if (diff > 0) {
+    let resistance = diff < 60 ? 1 : diff < 120 ? 0.8 : 0.6;
+    translateY = diff * resistance;
+    allPlansModalContent.style.transform = `translateY(${translateY}px)`;
+    // Remove this line if you have it:
+    // allPlansModalContent.style.opacity = Math.max(1 - translateY / 500, 0.3);
+    e.preventDefault();
+  }
+}
+
+function handleTouchEnd() {
+  if (!dragging) return;
+  dragging = false;
+
+  // Always reset transition so ModalManager can control it
+  allPlansModalContent.style.transition = '';
+
+  if (translateY > pullThreshold) {
+    // Let ModalManager handle the close + animation + cleanup
+    ModalManager.closeModal('allPlansModal');
+  } else {
+    // Just snap back — ModalManager will handle the rest
+    allPlansModalContent.style.transform = 'translateY(0)';
   }
 
-  function handleTouchMove(e) {
-    if (!dragging) return;
-    currentY = e.touches[0].clientY;
-    let diff = currentY - startY;
-    if (diff > 0) {
-      let resistance = diff < 60 ? 1 : diff < 120 ? 0.8 : 0.6;
-      translateY = diff * resistance;
-      allPlansModalContent.style.transform = `translateY(${translateY}px)`;
-      e.preventDefault();
-    }
-  }
+  // CRITICAL: Reset any inline styles that might linger
+  setTimeout(() => {
+    allPlansModalContent.style.opacity = '';
+    allPlansModalContent.style.transform = '';
+    allPlansModalContent.style.visibility = '';
+  }, 100);
+}
 
-  function handleTouchEnd() {
-    if (!dragging) return;
-    dragging = false;
-    allPlansModalContent.style.transition = 'transform 0.25s cubic-bezier(0.22, 1, 0.36, 1)';
-    if (translateY > pullThreshold) {
-      allPlansModalContent.style.transform = `translateY(100%)`;
-      setTimeout(closeModal, 200);
-    } else {
-      allPlansModalContent.style.transform = 'translateY(0)';
-    }
-  }
-
-  pullHandle?.addEventListener('touchstart', handleTouchStart);
-  pullHandle?.addEventListener('touchmove', handleTouchMove, { passive: false });
-  pullHandle?.addEventListener('touchend', handleTouchEnd);
-  allPlansModalContent.addEventListener('touchstart', handleTouchStart);
-  allPlansModalContent.addEventListener('touchmove', handleTouchMove, { passive: false });
-  allPlansModalContent.addEventListener('touchend', handleTouchEnd);
+// Re-attach (in case ModalManager re-renders)
+pullHandle?.addEventListener('touchstart', handleTouchStart);
+pullHandle?.addEventListener('touchmove', handleTouchMove, { passive: false });
+pullHandle?.addEventListener('touchend', handleTouchEnd);
+allPlansModalContent.addEventListener('touchstart', handleTouchStart);
+allPlansModalContent.addEventListener('touchmove', handleTouchMove, { passive: false });
+allPlansModalContent.addEventListener('touchend', handleTouchEnd);
 
   // --- TRANSACTIONS RENDERING ---
 // --- TRANSACTIONS RENDERING ---
@@ -4208,7 +4351,7 @@ function renderTransactions() {
         </div>
         <div class="tx-right">
           <span class="tx-amount">${amountSign}₦${tx.amount}</span>
-          <span class="tx-status ${statusClass}">${tx.status === 'failed' ? 'Failed' : 'Successful'}</span>
+          <span class="dtx-status ${statusClass}">${tx.status === 'failed' ? 'Failed' : 'Successful'}</span>
         </div>
       `;
       transactionsContainer.appendChild(txDiv);
@@ -4317,8 +4460,9 @@ payBtn.addEventListener('click', () => {
       updateContactOrCancel();
       updateContinueState();
       saveUserState();
+      saveCurrentAppState();
 
-      alert(`Payment of ₦${plan.price} for ${plan.data} (${plan.duration}) to ${formatNigeriaNumber(rawNumber).value} successful!`);
+      window.showSlideNotification(`Payment of ₦${plan.price} for ${plan.data} (${plan.duration}) to ${formatNigeriaNumber(rawNumber).value} successful!`, 'success');
       closeCheckoutModal();
       console.log('[DEBUG] payBtn: Payment processed, new balance:', userBalance, 'Transaction:', transaction);
       payBtn.disabled = false;
@@ -4355,6 +4499,7 @@ payBtn.addEventListener('click', () => {
       updateContactOrCancel();
       updateContinueState();
       saveUserState();
+      saveCurrentAppState();
       console.log('[DEBUG] contactBtn: Cancel button clicked, input cleared');
       return;
     }
@@ -4456,6 +4601,7 @@ payBtn.addEventListener('click', () => {
       updateContactOrCancel();
       updateContinueState();
       saveUserState();
+      saveCurrentAppState();
 
       if (normalized.length === 11 && isNigeriaMobile(normalized)) {
         phoneInput.blur();
@@ -4576,6 +4722,7 @@ updateBalanceDisplay();
           updateContactOrCancel();
           updateContinueState();
           saveUserState();
+          saveCurrentAppState();
           if (formattedNumber.valid && tx.phone.length === 11 && isNigeriaMobile(tx.phone)) {
             phoneInput.blur(); // Close the keyboard immediately
             console.log('[RAW LOG] recentTransaction click: Keyboard closed, valid Nigeria number:', tx.phone);
@@ -6200,7 +6347,7 @@ if (document.readyState === 'loading') {
 // --- UPDATE PROFILE MODAL ---
 // --- UPDATE PROFILE MODAL ---
 const updateProfileBtn = document.getElementById('updateProfileBtn'); // dashboard
-const settingsUpdateBtn = document.getElementById('settingsUpdateBtn'); // settings
+const settingsUpdateBtn = document.getElementById('openUpdateProfile'); // settings
 const updateProfileModal = document.getElementById('updateProfileModal');
 const updateProfileForm = document.getElementById('updateProfileForm');
 const profilePictureInput = document.getElementById('profilePicture');
@@ -6252,12 +6399,50 @@ if (updateProfileBtn) {
   });
 }
 
-if (settingsUpdateBtn) {
-  settingsUpdateBtn.addEventListener('click', () => {
-    lastModalSource = 'settings';
-    openUpdateProfileModal();
-  });
-}
+
+// ====== Force Profile Modal Open Above ModalManager ======
+// if (settingsUpdateBtn) {
+//   settingsUpdateBtn.addEventListener(
+//     'click',
+//     (event) => {
+//       event.preventDefault();
+//       event.stopImmediatePropagation();
+//       lastModalSource = 'settings';
+//       if (typeof openUpdateProfileModal === 'function') {
+//         openUpdateProfileModal();
+//         if (updateProfileModal) {
+//           // Force active and remove hidden
+//           updateProfileModal.classList.add('active');
+//           updateProfileModal.classList.remove('hidden');
+//           updateProfileModal.style.display = 'flex';
+//           updateProfileModal.style.opacity = 1;
+//           // CRITICAL: Push proper history state with modalDepth
+//           // Get current depth from ModalManager if available
+//           const currentDepth = window.ModalManager?.getCurrentDepth?.() || 1;
+//           history.pushState(
+//             { 
+//               isModal: true,
+//               modalId: 'updateProfileModal',
+//               modalDepth: currentDepth + 1
+//             }, 
+//             '', 
+//             '#updateProfileModal'
+//           );
+//           console.log('[INFO] updateProfileModal forced visible with history', {
+//             classList: updateProfileModal.className,
+//             display: updateProfileModal.style.display,
+//             modalDepth: currentDepth + 1
+//           });
+//           // Run validation safely
+//           setTimeout(() => validateProfileForm(true), 50);
+//         }
+//       }
+//     },
+//     true
+//   );
+// }
+
+
 
 
 const updateProfileCard = document.querySelector('.card.update-profile');
@@ -6729,10 +6914,8 @@ const fieldTouched = {
 
 function validateProfileForm(showErrors = true) {
   // Guard: Skip if modal is not active
-  if (!updateProfileModal || !updateProfileModal.classList.contains('active')) {
-    console.log('[DEBUG] validateProfileForm: Skipped - modal not active');
-    return true;
-  }
+  // Only skip if ModalManager doesn't know about it
+  
 
   const isFullNameValid = !fieldTouched.fullName || validateField('fullName');
   const isUsernameValid = !fieldTouched.username || validateField('username');
@@ -7542,134 +7725,43 @@ if (addressInput && !addressInput.disabled) {
 
 
 
-function openUpdateProfileModal(profile = {}) {
-  if (!updateProfileModal || !updateProfileForm) {
-    console.error('[ERROR] openUpdateProfileModal: Modal or form not found');
-    return;
-  }
+// ===== FINAL CLEAN VERSION — DELETE EVERYTHING BELOW THIS LINE IN YOUR FILE =====
 
-  // show modal
-  updateProfileModal.style.display = 'block';
-  setTimeout(() => {
-    updateProfileModal.classList.add('active');
-    updateProfileModal.setAttribute('aria-hidden', 'false');
-    document.body.classList.add('modal-open');
-  }, 10);
+// 1. Remove the entire openUpdateProfileModal() function
+// 2. Remove closeUpdateProfileModal()
+// 3. Remove the manual popstate listener
+// 4. Remove all manual .active / display / aria-hidden manipulation
 
-  // --- Populate form fields (prefer provided profile, then localStorage as fallback) ---
-  const fullName = profile?.fullName || localStorage.getItem('fullName') || (localStorage.getItem('userEmail') || '').split('@')[0] || '';
-  const username = profile?.username || localStorage.getItem('username') || '';
-  const phoneNumber = profile?.phoneNumber || localStorage.getItem('phoneNumber') || '';
-  const email = profile?.email || localStorage.getItem('userEmail') || '';
-  const address = profile?.address || localStorage.getItem('address') || '';
+// → ONLY keep this: let ModalManager do 100% of the work
 
-  if (fullNameInput) fullNameInput.value = fullName;
-  if (usernameInput) usernameInput.value = username;
-  if (phoneNumberInput) phoneNumberInput.value = phoneNumber ? formatNigeriaNumberProfile(phoneNumber).value : '';
-  if (emailInput) emailInput.value = email;
-  if (addressInput) addressInput.value = address;
+if (settingsUpdateBtn) {
+  settingsUpdateBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    lastModalSource = 'settings';
+    window.ModalManager?.openModal('updateProfileModal');
 
-  // --- Field enable/disable rules (server-driven) ---
-  if (fullNameInput) fullNameInput.disabled = localStorage.getItem('fullNameEdited') === 'true';
-  if (phoneNumberInput) phoneNumberInput.disabled = !!phoneNumber;
-  if (emailInput) emailInput.disabled = true;
-  if (usernameInput) usernameInput.disabled = !!username;  // NEW: Disable username if already set
-  if (addressInput) addressInput.disabled = !!(profile?.address || localStorage.getItem('address')?.trim());
-  if (profilePictureInput) profilePictureInput.disabled = false; // always editable
-
-  // --- Avatar / preview ---
-  const profilePicture = localStorage.getItem('profilePicture') || '';
-  const isValidProfilePicture = !!profilePicture && /^(data:image\/|https?:\/\/|\/|blob:)/i.test(profilePicture);
-  const displayName = username || (fullName.split(' ')[0] || 'User');
-
-  if (profilePicturePreview) {
-    if (isValidProfilePicture) {
-      profilePicturePreview.innerHTML = `<img src="${profilePicture}" alt="Profile Picture" class="avatar-img" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`;
-    } else {
-      profilePicturePreview.innerHTML = '';
-      profilePicturePreview.textContent = displayName.charAt(0).toUpperCase();
-    }
-  }
-
-  // --- Reset error UI, invalid classes and touched flags ---
-  [fullNameError, usernameError, phoneNumberError, addressError, profilePictureError].forEach(errEl => {
-    if (errEl) {
-      errEl.textContent = '';
-      errEl.classList.remove('active', 'error', 'checking', 'available');
-    }
+    // Run validation after transition (ModalManager uses 0.3s)
+    setTimeout(() => validateProfileForm(true), 450);
   });
+}
 
-  [fullNameInput, usernameInput, phoneNumberInput, addressInput].forEach(inp => {
-    if (inp) inp.classList.remove('invalid');
+if (updateProfileBtn) {
+  updateProfileBtn.addEventListener('click', () => {
+    lastModalSource = 'dashboard';
+    window.ModalManager?.openModal('updateProfileModal');
+    setTimeout(() => validateProfileForm(true), 450);
   });
-
-  Object.keys(fieldTouched).forEach(k => fieldTouched[k] = false);
-
-  // --- Ensure no duplicate listeners: detach previous, then attach fresh handlers ---
-  detachProfileListeners();
-  attachProfileListeners(); // attachProfileListeners should add input/blur/paste handlers for fullName/username/phone/address/profilePicture
-
-  // NOTE: Do NOT add inline input listeners for validation here.
-  // The attachProfileListeners() function is the single source of truth and
-  // is responsible for adding the input + blur handlers that follow the
-  // "live rules vs blur-on-length" pattern (so length errors only show on blur/submit).
-
-  // Re-run initial validation to set the save button state correctly
-  validateProfileForm(false);
-
-  console.log('[DEBUG] openUpdateProfileModal: Modal opened', { fullName, username, phoneNumber, email });
 }
 
-
-function closeUpdateProfileModal() {
-    if (!updateProfileModal) return;
-    detachProfileListeners();
-    updateProfileModal.classList.remove('active');
-    updateProfileModal.setAttribute('aria-hidden', 'true');
-    document.body.classList.remove('modal-open');
-    setTimeout(() => {
-        updateProfileModal.style.display = 'none';
-    }, 400);
-    console.log('[DEBUG] closeUpdateProfileModal: Modal closed');
-
-    // Ensure settings-tab is active
-    const tabs = document.querySelectorAll('.nav-link');
-    const settingsTab = document.getElementById('settings-tab');
-    tabs.forEach(t => t.classList.remove('active'));
-    if (settingsTab) settingsTab.classList.add('active');
-
-    // Reopen settings modal if source was settings
-    if (lastModalSource === 'settings') {
-        const settingsModal = document.getElementById('settingsModal') || document.getElementById('settings');
-        if (settingsModal) {
-            settingsModal.style.display = 'flex';
-            document.documentElement.style.overflow = 'hidden';
-            const settingsBtn = document.getElementById('settingsBtn');
-            if (settingsBtn) settingsBtn.classList.add('active');
-        }
-    } else {
-        // Activate dashboard tab
-        const homeTab = document.getElementById('home-tab');
-        if (homeTab) homeTab.classList.add('active');
-    }
-
-    lastModalSource = null;
-}
-
-// Initialize modal event listeners
-if (updateProfileModal) {
-  const closeModalBtn = updateProfileModal.querySelector('.close-btn');
-  const backBtn = updateProfileModal.querySelector('.back-btn');
-  closeModalBtn?.addEventListener('click', closeUpdateProfileModal);
-  backBtn?.addEventListener('click', closeUpdateProfileModal);
-}
-
-// Handle popstate to close modal
-window.addEventListener('popstate', (event) => {
-  if (!event.state || event.state.modal !== 'updateProfile') {
-    closeUpdateProfileModal();
-  }
+// Optional: If you have a dashboard card with class .card.update-profile
+document.querySelector('.card.update-profile')?.addEventListener('click', () => {
+  lastModalSource = 'dashboard';
+  window.ModalManager?.openModal('updateProfileModal');
+  setTimeout(() => validateProfileForm(true), 450);
 });
+
+// That's it. Nothing else needed.
 
 if (profilePictureInput && profilePicturePreview) {
   profilePictureInput.addEventListener('change', (e) => {
@@ -7754,12 +7846,16 @@ if (profilePictureInput && profilePicturePreview) {
   }
 
   function hideModal() {
-    settingsModal.style.display = 'none';
-    document.documentElement.style.overflow = ''; // Restore scroll
-    document.body.style.overflow = ''; // Ensure body scroll is restored
-    if (settingsBtn) settingsBtn.classList.remove('active');
-    console.log('[SettingsModal] hideModal: Modal closed, scroll restored');
-  }
+  settingsModal.style.setProperty('display', 'none', 'important');
+
+  document.documentElement.style.setProperty('overflow', '', 'important');
+  document.body.style.setProperty('overflow', '', 'important');
+
+  if (settingsBtn) settingsBtn.classList.remove('active');
+
+  console.log('[SettingsModal] hideModal: Modal closed, scroll restored');
+}
+
 
   // button → open
   if (settingsBtn) settingsBtn.addEventListener('click', showModal);
@@ -15460,6 +15556,8 @@ window.addEventListener('storage', function(e) {
     toggle: () => { if (!updating) updateAll(!state, 'api-toggle'); }
   };
 })();
+
+updateContinueState();
 
 
 

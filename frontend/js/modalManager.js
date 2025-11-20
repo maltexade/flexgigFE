@@ -1,97 +1,444 @@
 (function () {
   'use strict';
 
-  // compute next/top z-index for a modal so it always appears above any existing modal
-function getNextModalZIndex() {
-  const BASE = 10000; // high base to play nicely with modal CSS that uses 1000+ ranges
-  let max = BASE;
-  // consider both inline style and computed style for each modal
-  openModalsStack.forEach(item => {
-    try {
-      const el = item.modal;
-      // prefer inline style if set, otherwise computed style
-      const inline = el && el.style && el.style.zIndex ? parseInt(el.style.zIndex, 10) : NaN;
-      const computed = el ? parseInt(window.getComputedStyle(el).zIndex, 10) : NaN;
-      const candidate = (!isNaN(inline) ? inline : (!isNaN(computed) ? computed : 0));
-      if (candidate > max) max = candidate;
-    } catch (e) { /* ignore parse issues */ }
-  });
-  return max + 10;
-}
-
-// ===== Backdrop helpers (insert right after getNextModalZIndex) =====
-function ensureBackdrop(modal) {
-  if (!modal) return null;
-  let backdrop = modal.querySelector('.modal-backdrop');
-  if (!backdrop) {
-    backdrop = document.createElement('div');
-    backdrop.className = 'modal-backdrop';
-    // initial styles - not all must be here if your CSS already styles .modal-backdrop
-    backdrop.style.cssText = `
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background-color: rgba(0,0,0,0.5);
-      opacity: 0;
-      transition: opacity 0.25s ease;
-      pointer-events: auto;
-    `;
-    modal.insertBefore(backdrop, modal.firstChild);
-    log('debug', `ensureBackdrop: created backdrop for ${modal.id || '(unknown)'}`);
-  }
-
-  // compute backdrop z-index to be just under modal
-  try {
-    // prefer inline style zIndex (set by manager), then computed style, then fallback
-    const inlineZ = modal.style && modal.style.zIndex ? parseInt(modal.style.zIndex, 10) : NaN;
-    const computedZ = parseInt(window.getComputedStyle(modal).zIndex, 10);
-    const modalZ = !isNaN(inlineZ) ? inlineZ : (!isNaN(computedZ) ? computedZ : getNextModalZIndex());
-    backdrop.style.zIndex = (modalZ - 1).toString();
-  } catch (e) {
-    backdrop.style.zIndex = '9999';
-  }
-
-  return backdrop;
-}
-
-function showBackdrop(modal) {
-  const backdrop = ensureBackdrop(modal);
-  if (!backdrop) return;
-  // ensure visible by forcing a frame then switching opacity
-  requestAnimationFrame(() => {
-    backdrop.style.opacity = '1';
-  });
-}
-
-function hideBackdrop(modal) {
-  if (!modal) return;
-  const backdrop = modal.querySelector('.modal-backdrop');
-  if (!backdrop) return;
-  // fade out, but leave the element (so observers can read it). If you prefer, remove it after fade.
-  backdrop.style.opacity = '0';
-  // optional: remove after transition to keep DOM clean
-  try {
-    clearTimeout(backdrop._rmTimer);
-    backdrop._rmTimer = setTimeout(() => {
-      if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
-    }, 300); // match transition duration
-  } catch (e) { /* ignore */ }
-}
-
-
-
   // Toggle for dev logs (set to false in prod)
-  const DEBUG_LOGS = true;  // ← Change to false for quiet mode
+  const DEBUG_LOGS = true;
+
+  // Debug overlay config
+  const DEBUG_MAX_LINES = 600;
+  let debugOverlay = null;
+  let debugVisible = false;
+  let debugLines = 0;
+
+  // Track elements we've intentionally modified recently to differentiate external changes
+  const recentModifications = new WeakMap();
+  const MODIFICATION_GRACE_MS = 600;
+
+  // Create debug overlay and controls
+  function createDebugOverlay() {
+    
+  }
+
+  function updateCounter() {
+    const counter = document.getElementById('mm-debug-counter');
+    const toggle = document.getElementById('mm-debug-toggle');
+    if (!counter || !toggle) return;
+    counter.style.display = debugVisible ? 'none' : 'block';
+    counter.textContent = `${debugLines} logs`;
+  }
+
+  function appendDebugLine(msg, color = null, cssClass = '') {
+    if (!DEBUG_LOGS) return;
+    try {
+      if (!debugOverlay) createDebugOverlay();
+      // respect paused state
+      if (debugOverlay && debugOverlay.dataset.paused === 'true') return;
+
+      // Cap lines
+      if (debugLines >= DEBUG_MAX_LINES) {
+        // remove oldest third
+        const nodes = debugOverlay.querySelectorAll('.mm-debug-line');
+        const removeCount = Math.max(1, Math.floor(nodes.length / 3));
+        for (let i = 0; i < removeCount; i++) {
+          if (nodes[i]) nodes[i].remove();
+        }
+        debugLines = debugOverlay.querySelectorAll('.mm-debug-line').length;
+      }
+
+      const line = document.createElement('div');
+      line.className = `mm-debug-line ${cssClass}`.trim();
+      if (color) line.style.color = color;
+      line.textContent = msg;
+      // insert at end
+      debugOverlay.appendChild(line);
+      debugOverlay.scrollTop = debugOverlay.scrollHeight;
+      debugLines++;
+      updateCounter();
+    } catch (e) {
+      // ignore overlay errors
+    }
+  }
+
+  function safeStringify(obj) {
+    try {
+      return JSON.stringify(obj, (k, v) => {
+        if (typeof v === 'function') return '[Function]';
+        return v;
+      }, 2);
+    } catch (e) {
+      try {
+        return String(obj);
+      } catch (e2) {
+        return '[unserializable]';
+      }
+    }
+  }
+
+  function timestamp() {
+    const d = new Date();
+    return d.toISOString().replace('T', ' ').replace('Z', '');
+  }
 
   function log(type, msg, data = {}) {
     if (!DEBUG_LOGS) return;
-    console[type](`[ModalManager] ${msg}`, data);
+    const formatted = `${timestamp()} [${type}] ${msg}${data && Object.keys(data).length ? ' ' + safeStringify(data) : ''}`;
+    // console
+    if (console && console[type]) {
+      try { console[type](`[ModalManager] ${msg}`, data); } catch (e) { console.log(`[ModalManager] ${msg}`, data); }
+    } else {
+      console.log(`[ModalManager] ${msg}`, data);
+    }
+
+    // overlay: color based on type and special class for error/alert
+    let color = null;
+    let cssClass = '';
+    if (type === 'error') { color = '#ff6b6b'; cssClass = 'mm-debug-err'; }
+    else if (type === 'warn') { color = '#ffd166'; cssClass = 'mm-debug-warn'; }
+    else if (type === 'info') { color = '#8ecae6'; cssClass = 'mm-debug-info'; }
+    else { color = '#cbd5e1'; cssClass = ''; }
+
+    appendDebugLine(formatted, color, cssClass);
+  }
+
+  // Add an assert helper that highlights alerts (flashing red) in the overlay
+  function assert(condition, msg, data = {}) {
+    if (condition) {
+      log('debug', `ASSERT OK: ${msg}`, data);
+      return true;
+    }
+    const formatted = `${timestamp()} [ASSERT FAIL] ${msg}${data && Object.keys(data).length ? ' ' + safeStringify(data) : ''}`;
+    if (console && console.error) console.error('[ModalManager] ASSERT FAIL:', msg, data);
+    appendDebugLine(formatted, '#ffb4b4', 'mm-debug-alert');
+    log('error', `ASSERT FAIL: ${msg}`, data);
+    return false;
+  }
+
+  // Retrieve raw logs (plain text) from overlay
+  function getRawLogs() {
+    if (!debugOverlay) return '';
+    const lines = debugOverlay.querySelectorAll('.mm-debug-line');
+    const out = [];
+    lines.forEach(n => {
+      out.push(n.textContent.trim());
+    });
+    return out.join('\n');
+  }
+
+  function downloadRawLogs() {
+    try {
+      const data = getRawLogs();
+      const blob = new Blob([data], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const name = `modal-manager-logs-${new Date().toISOString().replace(/[:.]/g,'-')}.log`;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      appendDebugLine(`${timestamp()} [info] Downloaded logs as ${name}`, '#8ecae6');
+    } catch (e) {
+      appendDebugLine(`${timestamp()} [error] Failed to download logs: ${e}`, '#ff6b6b');
+    }
+  }
+
+  async function copyRawLogs() {
+    try {
+      const data = getRawLogs();
+      if (!navigator.clipboard) {
+        appendDebugLine(`${timestamp()} [warn] Clipboard API not available`, '#ffd166');
+        return;
+      }
+      await navigator.clipboard.writeText(data);
+      appendDebugLine(`${timestamp()} [info] Copied logs to clipboard`, '#8ecae6');
+    } catch (e) {
+      appendDebugLine(`${timestamp()} [error] Failed to copy logs: ${e}`, '#ff6b6b');
+    }
+  }
+
+  async function sendRawLogsTo(url) {
+    try {
+      const data = getRawLogs();
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: data,
+      });
+      if (!res.ok) {
+        appendDebugLine(`${timestamp()} [warn] Sending logs returned ${res.status}`, '#ffd166');
+      } else {
+        appendDebugLine(`${timestamp()} [info] Sent logs to ${url}`, '#8ecae6');
+      }
+    } catch (e) {
+      appendDebugLine(`${timestamp()} [error] Failed to send logs: ${e}`, '#ff6b6b');
+    }
+  }
+
+  // capture stack + snapshot for an element and reason
+  function captureStackForElement(el, reason = 'external') {
+    try {
+      const stack = (new Error(`captureStackForElement: ${reason}`)).stack || '(no stack)';
+      const outer = el && el.outerHTML ? el.outerHTML.slice(0, 2000) : '(no outerHTML)';
+      const desc = describeElement(el);
+      const txt = `${timestamp()} [trace] ${reason} detected on ${desc}\nouterHTML: ${outer}\nstack:\n${stack}`;
+      appendDebugLine(txt, '#ffb4b4', 'mm-debug-alert');
+      // console.warn('[ModalManager] captureStackForElement', { reason, desc, stack });
+    } catch (e) {
+      console.warn('captureStackForElement failed', e);
+    }
+  }
+
+  // Modal stack to track open modals
+  const openModalsStack = [];
+  let currentDepth = 0;
+  let isProcessingPopstate = false;
+
+  // compute next/top z-index for a modal so it always appears above any existing modal
+  function getNextModalZIndex() {
+    const BASE = 10000;
+    let max = BASE;
+    openModalsStack.forEach(item => {
+      try {
+        const el = item.modal;
+        const inline = el && el.style && el.style.zIndex ? parseInt(el.style.zIndex, 10) : NaN;
+        const computed = el ? parseInt(window.getComputedStyle(el).zIndex, 10) : NaN;
+        const candidate = (!isNaN(inline) ? inline : (!isNaN(computed) ? computed : 0));
+        if (candidate > max) max = candidate;
+      } catch (e) { /* ignore parse issues */ }
+    });
+    return max + 10;
+  }
+
+  // ===== Active State Management =====
+  const modalTriggerMap = {
+    home: 'homeNavLink',
+    historyModal: 'historyNavLink',
+    settingsModal: 'settingsBtn',
+    securityModal: 'securityBtn',
+    helpSupportModal: 'helpSupportBtn',
+    referralModal: 'referralsBtn',
+    allPlansModal: 'see-all-plans',
+    pinModal: 'dashboardPinCard',
+    updateProfileModal: 'dashboardUpdateProfileCard',
+    changePwdModal: 'changePWD',
+    checkoutModal: 'continueBtn',
+  };
+
+  // Modals that should NOT affect nav tab active states (card/button triggered, not nav items)
+  const nonNavModals = ['allPlansModal', 'checkoutModal', 'pinModal', 'updateProfileModal', 'securityPinModal', 'changePwdModal', 'referralModal', 'securityModal', 'helpSupportModal', 'updateProfileModal'];
+  
+  // Only these modals should manage nav active states
+  const navModals = ['historyModal', 'settingsModal'];
+
+  // Helper: find all possible trigger elements for a modal id.
+  function findTriggerElements(modalId) {
+    const found = new Set();
+
+    // 1) Try mapped id (legacy)
+    const mapped = modalTriggerMap[modalId];
+    if (mapped) {
+      const byId = document.getElementById(mapped);
+      if (byId) found.add(byId);
+      // also try as selector if someone put a selector string in the map
+      try {
+        const sel = document.querySelectorAll(mapped);
+        if (sel) sel.forEach(e => found.add(e));
+      } catch (e) {
+        // not a selector; ignore
+      }
+    }
+
+    // 2) Common fallback selectors used in different codebases / mobile navs
+    const fallbackSelectors = [
+      `[data-modal-trigger="${modalId}"]`,
+      `[data-trigger="${modalId}"]`,
+      `[data-target="#${modalId}"]`,
+      `[href="#${modalId}"]`,
+      `.nav-item[data-modal="${modalId}"]`,
+      `#${modalId}Trigger`,
+      `#${modalId}Btn`,
+      `.${modalId}-trigger`,
+      `.nav-item.${modalId}`,
+    ];
+
+    fallbackSelectors.forEach(sel => {
+      try { document.querySelectorAll(sel).forEach(el => found.add(el)); } catch (e) {}
+    });
+
+    // 3) If nothing found, try to guess based on modalId string (safe fail)
+    if (found.size === 0) {
+      const guess = document.querySelectorAll('.nav-item, [class*="nav-"], [class*="tab-"], a, button');
+      guess.forEach(el => {
+        try {
+          if (
+            el.getAttribute &&
+            (
+              el.getAttribute('data-modal') === modalId ||
+              el.getAttribute('data-target') === `#${modalId}` ||
+              el.getAttribute('href') === `#${modalId}` ||
+              el.dataset?.modal === modalId ||
+              el.id === modalTriggerMap[modalId]
+            )
+          ) {
+            found.add(el);
+          }
+        } catch (e) { /* ignore */ }
+      });
+    }
+
+    return Array.from(found);
+  }
+
+  function markRecentModification(el) {
+    try {
+      recentModifications.set(el, Date.now());
+    } catch (e) { /* ignore */ }
+  }
+
+  function wasRecentlyModified(el) {
+    try {
+      const t = recentModifications.get(el);
+      return !!t && (Date.now() - t) < MODIFICATION_GRACE_MS;
+    } catch (e) { return false; }
+  }
+
+  function clearActiveFromElement(el) {
+    if (!el) return;
+    el.classList.remove('active', 'selected', 'current', 'nav-active', 'tab-active');
+    try {
+      el.removeAttribute('aria-current');
+      el.removeAttribute('aria-pressed');
+      // record modification
+      markRecentModification(el);
+    } catch (e) { /* ignore */ }
+  }
+
+  // Describe element succinctly for logs
+  function describeElement(el) {
+    if (!el) return '(null)';
+    try {
+      const id = el.id ? `#${el.id}` : '';
+      const cls = el.className ? `.${el.className.toString().replace(/\s+/g,'.')}` : '';
+      const tag = el.tagName ? el.tagName.toLowerCase() : 'el';
+      const href = el.getAttribute && el.getAttribute('href') ? ` href="${el.getAttribute('href')}"` : '';
+      return `${tag}${id}${cls}${href}`;
+    } catch (e) {
+      return String(el);
+    }
+  }
+
+  // Set or remove 'active' on triggers and verify results; if mismatch, assert and highlight
+  function setTriggerActive(modalId, active = true) {
+  const triggers = findTriggerElements(modalId);
+
+  // Case 1: No real trigger exists (checkoutModal, allPlansModal, etc.)
+  if (!triggers || triggers.length === 0) {
+    log('debug', `setTriggerActive: No trigger elements found for ${modalId}.`);
+
+    // Only when deactivating and no trigger exists → defensive global cleanup
+    if (!active) {
+      log('debug', `setTriggerActive: No trigger + deactivating → global fallback cleanup for ${modalId}`);
+      const strayActives = document.querySelectorAll(
+        '.nav-item.active, .current, .nav-active, .tab-active, [aria-current="true"], [aria-pressed="true"]'
+      );
+      strayActives.forEach(item => {
+        clearActiveFromElement(item);
+        markRecentModification(item);
+      });
+    }
+    return;
+  }
+
+  // Debug info about found triggers
+  const trgInfo = triggers.map(t => {
+    try {
+      return `${t.tagName.toLowerCase()}#${t.id || '(no-id)'}.${(t.className || '').replace(/\s+/g, '.')}`;
+    } catch (e) {
+      return String(t);
+    }
+  });
+  log('debug', `setTriggerActive: Found ${triggers.length} trigger(s) for ${modalId}`, { triggers: trgInfo });
+
+  if (active) {
+    // 1. Clear navigation-related active states globally (safe, doesn't touch plan .selected)
+    const navItems = document.querySelectorAll('.nav-item, [role="tab"], [aria-current], [aria-pressed]');
+    navItems.forEach(item => {
+      item.classList.remove('active', 'current', 'nav-active', 'tab-active');
+      item.removeAttribute('aria-current');
+      item.removeAttribute('aria-pressed');
+      markRecentModification(item);
+    });
+
+    // 2. Activate the real triggers
+    triggers.forEach(trigger => {
+      trigger.classList.add('active');
+      trigger.setAttribute('aria-current', 'true');
+      markRecentModification(trigger);
+
+      // Verify
+      if (!trigger.classList.contains('active')) {
+        assert(false, `Failed to add 'active' class to trigger for ${modalId}`, {
+          trigger: trigger.id || trigger.className || trigger.tagName
+        });
+      }
+    });
+
+    log('debug', `setTriggerActive: Activated triggers for ${modalId}`, { modalId, triggers: trgInfo });
+  } 
+  else {
+    // Deactivate ONLY the real triggers
+    triggers.forEach(trigger => {
+      const hadActive = trigger.classList.contains('active');
+
+      // Fixed typo: was duplicated 'nav-active,' with a comma inside the string
+      trigger.classList.remove('active', 'current', 'nav-active', 'tab-active');
+      trigger.removeAttribute('aria-current');
+      trigger.removeAttribute('aria-pressed');
+      markRecentModification(trigger);
+
+      // Forensic check if it somehow stayed active
+      if (trigger.classList.contains('active')) {
+        assert(false, `Active class still present after removal for ${modalId}`, {
+          trigger: trigger.id || trigger.className || trigger.tagName,
+          hadBefore: hadActive
+        });
+        captureStackForElement(trigger, 'active-still-present-after-removal');
+      }
+    });
+
+    log('debug', `setTriggerActive: Deactivated triggers for ${modalId}`, { modalId, triggers: trgInfo });
+  }
+}
+
+  function setHomeActive() {
+    const homeLink = document.getElementById('homeNavLink') || document.querySelector('[data-home-nav], .home-nav, a.home');
+    if (!homeLink) {
+      log('warn', 'setHomeActive: Home nav link not found; clearing all nav active classes as fallback');
+      // fallback: clear all nav active classes
+      const navItems = document.querySelectorAll('.nav-item, [class*="nav-"], [class*="tab-"], a, button');
+      navItems.forEach(item => {
+        item.classList.remove('active', 'selected', 'current', 'nav-active', 'tab-active');
+        try { item.removeAttribute('aria-current'); item.removeAttribute('aria-pressed'); } catch (e) {}
+      });
+      return;
+    }
+
+    // Remove active from all nav items
+    const navItems = document.querySelectorAll('.nav-item, [class*="nav-"], [class*="tab-"], a, button');
+    navItems.forEach(item => {
+      item.classList.remove('active', 'selected', 'current', 'nav-active', 'tab-active');
+      try { item.removeAttribute('aria-current'); item.removeAttribute('aria-pressed'); } catch (e) {}
+    });
+
+    // Add active to home
+    homeLink.classList.add('active');
+    try { homeLink.setAttribute('aria-current', 'true'); } catch (e) {}
+    markRecentModification(homeLink);
+    log('debug', 'setHomeActive: Set home as active');
   }
 
   // Modal configuration
-    // Modal configuration (use id strings and resolve elements later)
   const modals = {
     spwModal: { id: 'spwModal', element: null, hasPullHandle: false },
     resetPinModal: { id: 'resetPinModal', element: null, hasPullHandle: false },
@@ -99,7 +446,7 @@ function hideBackdrop(modal) {
     helpSupportModal: { id: 'helpSupportModal', element: null, hasPullHandle: false },
     securityModal: { id: 'securityModal', element: null, hasPullHandle: false },
     securityPinModal: { id: 'securityPinModal', element: null, hasPullHandle: false },
-    updateProfileModal: { id: 'updateProfileModal', element: null, hasPullHandle: true },
+    updateProfileModal: { id: 'updateProfileModal', element: null, hasPullHandle: false },
     pinModal: { id: 'pinModal', element: null, hasPullHandle: false },
     allPlansModal: { id: 'allPlansModal', element: null, hasPullHandle: true },
     contactModal: { id: 'contactModal', element: null, hasPullHandle: false },
@@ -107,15 +454,10 @@ function hideBackdrop(modal) {
     rpResetModal: { id: 'rpResetModal', element: null, hasPullHandle: false },
     referralModal: { id: 'referralModal', element: null, hasPullHandle: false },
     checkoutModal: { id: 'checkoutModal', element: null, hasPullHandle: false },
+    historyModal: { id: 'historyModal', element: null, hasPullHandle: false },
   };
 
-
-  // Modal stack to track open modals
-  const openModalsStack = [];
-  let currentDepth = 0;
-  let isProcessingPopstate = false;
-
-  // Utility: Check if modal is visible (trimmed logs)
+  // Utility: Check if modal is visible
   function isModalVisible(modal) {
     if (!modal) {
       log('warn', 'isModalVisible: Modal is null or undefined');
@@ -128,7 +470,6 @@ function hideBackdrop(modal) {
       cs.visibility !== 'hidden' &&
       !modal.classList.contains('hidden') &&
       ariaHidden;
-    // Log only on mismatch (less spam)
     if (isVisible !== (modal.dataset._lastVisible || false)) {
       log('debug', `isModalVisible: ${modal.id} now ${isVisible ? 'visible' : 'hidden'}`, {
         display: cs.display,
@@ -141,43 +482,65 @@ function hideBackdrop(modal) {
     return isVisible;
   }
 
-  // Utility: Add transition effect (unchanged, but guard self-triggers)
-  function applyTransition(modal, show, callback) {
-    if (!modal) return callback?.();
+  // Utility: Add transition effect
+// Utility: Add transition effect – NOW WORKS PERFECTLY FOR allPlansModal TOO
+function applyTransition(modal, show, callback) {
+  if (!modal) return callback?.();
 
-    const isProfile = modal.id === 'updateProfileModal';
-    modal.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
-    modal.style.opacity = show ? '0' : '1';
-    modal.style.transform = show
-      ? (isProfile ? 'translateX(-100%)' : 'translateY(20px)')
-      : (isProfile ? 'translateX(0)' : 'translateY(0)');
+  const isAllPlans = modal.id === 'allPlansModal';
+  const isProfile = modal.id === 'updateProfileModal';
 
-    const onTransitionEnd = () => {
-      modal.removeEventListener('transitionend', onTransitionEnd);
-      if (!show) {
-        modal.classList.add('hidden');
-        modal.style.display = 'none';
-        modal.setAttribute('aria-hidden', 'true');
-        modal.setAttribute('inert', '');
+  // Use slightly better easing for allPlansModal (matches most bottom-sheet designs)
+  modal.style.transition = isAllPlans
+    modal.style.transition = isAllPlans
+  ? 'transform 0.28s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.22s ease'
+  : 'opacity 0.26s ease, transform 0.26s ease';
+
+
+  const onTransitionEnd = () => {
+    modal.removeEventListener('transitionend', onTransitionEnd);
+
+    if (!show) {
+      // Only remove .active AFTER the exit animation finishes
+      if (isAllPlans) modal.classList.remove('active');
+      modal.classList.add('hidden');
+      modal.style.display = 'none';
+      modal.setAttribute('aria-hidden', 'true');
+      modal.setAttribute('inert', '');
+    } else {
+      modal.removeAttribute('inert');
+      if (isAllPlans) modal.classList.add('active'); // ensure it's present
+    }
+
+    if (!isProcessingPopstate) {
+      log('debug', `applyTransition: ${modal.id} ${show ? 'shown' : 'hidden'}`);
+    }
+    callback?.();
+  };
+
+  modal.addEventListener('transitionend', onTransitionEnd);
+
+  requestAnimationFrame(() => {
+    if (show) {
+      modal.style.opacity = '1';
+      modal.style.visibility = 'visible';
+      modal.style.transform = 'translateY(0)';
+    } else {
+      modal.style.opacity = '0';
+      modal.style.visibility = 'visible'; // keep visible during animation
+
+      if (isProfile) {
+        modal.style.transform = 'translateX(-100%)';
+      } else if (isAllPlans) {
+        modal.style.transform = 'translateY(100%)';   // slide down
       } else {
-        modal.removeAttribute('inert');
+        modal.style.transform = 'translateY(20px)';
       }
-      // Guard: Don't log if self-triggered
-      if (!isProcessingPopstate) log('debug', `applyTransition: ${modal.id} ${show ? 'shown' : 'hidden'}`);
-      callback?.();
-    };
+    }
+  });
+}
 
-    modal.addEventListener('transitionend', onTransitionEnd);
-
-    requestAnimationFrame(() => {
-      modal.style.opacity = show ? '1' : '0';
-      modal.style.transform = show
-        ? (isProfile ? 'translateX(0)' : 'translateY(0)')
-        : (isProfile ? 'translateX(-100%)' : 'translateY(20px)');
-    });
-  }
-
-  // Force close modal (trimmed logs)
+  // Force close modal
   function forceCloseModal(modalId) {
     log('debug', `forceCloseModal: Forcing close of ${modalId}`);
     const modalConfig = modals[modalId];
@@ -196,10 +559,34 @@ function hideBackdrop(modal) {
       return;
     }
     if (document.activeElement && modal.contains(document.activeElement)) {
-      document.body.focus();
-      log('debug', `forceCloseModal: Moved focus from ${modalId} to body`);
+      // prefer to restore focus to a real content area
+      const main = document.getElementById('mainContent') || document.querySelector('main') || document.body;
+      try { main.focus(); } catch (e) { document.body.focus(); }
+      log('debug', `forceCloseModal: Moved focus from ${modalId} to ${describeElement(main)}`);
     }
+    
+    // REMOVE ACTIVE STATE from closing modal BEFORE transition (defensive)
+    if (modalId !== 'allPlansModal') {
+      setTriggerActive(modalId, false);
+      log('debug', `forceCloseModal: Removed active state from ${modalId}`);
+    }
+    
     applyTransition(modal, false, () => {
+      // cleanup focus trap if present
+      try {
+        if (modal._trapHandler) {
+          modal.removeEventListener('keydown', modal._trapHandler);
+          delete modal._trapHandler;
+          log('debug', `forceCloseModal: Removed trapHandler from ${modalId}`);
+        }
+      } catch (e) { /* ignore */ }
+
+      // restore body scroll if some other code locked it
+      try {
+        document.body.style.overflow = '';
+        document.body.classList.remove('modal-open');
+      } catch (e) {}
+
       modal.classList.add('hidden');
       modal.style.display = 'none';
       modal.setAttribute('aria-hidden', 'true');
@@ -210,8 +597,24 @@ function hideBackdrop(modal) {
         currentDepth = openModalsStack.length;
         log('debug', `forceCloseModal: Modal ${modalId} closed, stack: ${openModalsStack.map((item) => item.id).join(', ')}, depth: ${currentDepth}`);
       }
+      
+      // For modals that were pushed onto history (fragments) - clear it so close-button doesn't leave a stale fragment
+            // For modals that were pushed onto history (fragments)
+      try {
+        if (modalId === 'allPlansModal') {
+          history.replaceState({ isModal: false }, '', window.location.pathname);
+          log('debug', `forceCloseModal: Cleared history fragment for ${modalId}`);
+        }
+      } catch (e) {}
+
+      // Check if there are any remaining modals
       const previousModal = openModalsStack[openModalsStack.length - 1];
       if (previousModal) {
+        // Restore active state for previous modal
+        if (previousModal.id !== 'allPlansModal') {
+          setTriggerActive(previousModal.id, true);
+        }
+        
         const focusable = previousModal.modal.querySelector(
           'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
         );
@@ -222,19 +625,36 @@ function hideBackdrop(modal) {
           log('warn', `forceCloseModal: No focusable elements in previous modal ${previousModal.id}`);
         }
       } else {
-        document.body.focus();
-        log('debug', 'forceCloseModal: Restored focus to document body');
+        // No more modals - determine which tab should be active
+        const wasNavModal = ['historyModal'].includes(modalId);
+        
+        if (wasNavModal) {
+          // Closing a nav modal = go to home
+          setHomeActive();
+          log('debug', 'forceCloseModal: Closed nav modal, set home active');
+        } else {
+          const currentActive = document.querySelector('.nav-item.active, .active, [aria-current="true"]');
+          if (!currentActive) {
+            setHomeActive();
+            log('debug', 'forceCloseModal: No active nav, set home active');
+          } else {
+            log('debug', 'forceCloseModal: Keeping current active tab');
+          }
+        }
+        
+        // final focus fallback
+        const main = document.getElementById('mainContent') || document.querySelector('main') || document.body;
+        try { main.focus(); } catch (e) { document.body.focus(); }
       }
     });
-    hideBackdrop(modal);
   }
 
-  // Open modal (added dynamic z-index for stack robustness)
+  // Open modal
   function openModal(modalId, skipHistory = false) {
     log('debug', `openModal: Attempting to open ${modalId}`);
 
     const modalConfig = modals[modalId];
-        // Lazy-resolve element if it wasn't present at init (handles dynamic DOM)
+    
     if (modalConfig && !modalConfig.element) {
       modalConfig.element = document.getElementById(modalConfig.id || modalId) || null;
       if (modalConfig.element) {
@@ -266,22 +686,24 @@ function hideBackdrop(modal) {
     modal.style.display = modalConfig.hasPullHandle ? 'block' : 'flex';
     modal.setAttribute('aria-hidden', 'false');
     modal.removeAttribute('inert');
-
-    // Set dynamic z-index based on stack depth (ensures top modal is always visible on top)
-    // Set dynamic z-index - always compute topmost
+    modal.style.visibility = 'visible';   // ← ADD THIS
     modal.style.zIndex = getNextModalZIndex();
     
-    
+    // Special handling for All Plans modal — use CSS class for animation (your old way)
+if (modalId === 'allPlansModal') {
+  // Let CSS handle the starting position and animation
+  modal.style.transform = '';           // ← Remove any inline transform
+  modal.style.opacity = '';            // ← Full opacity
+  modal.classList.add('active');        // ← Trigger your CSS transition
+} else if (modalId === 'updateProfileModal') {
+  modal.style.transform = 'translateX(-100%)';
+  modal.style.opacity = '0';
+} else {
+  modal.style.transform = 'translateY(20px)';
+  modal.style.opacity = '0';
+}
 
 
-    // Special slide-in for updateProfileModal
-    if (modalId === 'updateProfileModal') {
-      modal.style.transform = 'translateX(-100%)';
-      modal.style.opacity = '0';
-    } else {
-      modal.style.transform = 'translateY(20px)';
-      modal.style.opacity = '0';
-    }
 
     applyTransition(modal, true, () => {
       if (!openModalsStack.some((item) => item.id === modalId)) {
@@ -293,7 +715,11 @@ function hideBackdrop(modal) {
         history.pushState({ modalId }, '', `#${modalId}`);
       }
 
-      // Focus handling
+      // Set trigger active - but NOT for allPlansModal (it doesn't have a nav trigger)
+      if (modalId !== 'allPlansModal') {
+        setTriggerActive(modalId, true);
+      }
+
       let focusTarget =
         modal.querySelector('input, select, textarea, [tabindex]:not([tabindex="-1"])') ||
         modal.querySelector('button:not([data-close])');
@@ -301,7 +727,6 @@ function hideBackdrop(modal) {
       if (modalId === 'securityPinModal') {
         const title = modal.querySelector('#pinTitle');
         if (title) focusTarget = title;
-        // Dispatch event to bind PIN inputs
         document.dispatchEvent(new CustomEvent('security:pin-modal-opened'));
         log('debug', 'openModal: Dispatched security:pin-modal-opened for securityPinModal');
       }
@@ -315,7 +740,7 @@ function hideBackdrop(modal) {
     });
   }
 
-  // Close modal (removed PIN guard as no longer needed)
+  // Close modal
   function closeModal(modalId) {
     log('debug', `closeModal: Attempting to close ${modalId}`);
     const modalConfig = modals[modalId];
@@ -330,20 +755,33 @@ function hideBackdrop(modal) {
       return;
     }
 
-    // Move focus away from modal BEFORE closing
     if (document.activeElement && modal.contains(document.activeElement)) {
-      document.body.focus();
-      log('debug', `closeModal: Moved focus from ${modalId} to body`);
+      const main = document.getElementById('mainContent') || document.querySelector('main') || document.body;
+      try { main.focus(); } catch (e) { document.body.focus(); }
+      log('debug', `closeModal: Moved focus from ${modalId} to ${describeElement(main)}`);
     }
 
-    // Apply closing transition
     applyTransition(modal, false, () => {
+      // cleanup focus trap if present
+      try {
+        if (modal._trapHandler) {
+          modal.removeEventListener('keydown', modal._trapHandler);
+          delete modal._trapHandler;
+          log('debug', `closeModal: Removed trapHandler from ${modalId}`);
+        }
+      } catch (e) { /* ignore */ }
+
+      // restore body scroll if some other code locked it
+      try {
+        document.body.style.overflow = '';
+        document.body.classList.remove('modal-open');
+      } catch (e) {}
+
       modal.classList.add('hidden');
       modal.style.display = 'none';
       modal.setAttribute('aria-hidden', 'true');
       modal.setAttribute('inert', '');
       
-      // Remove from stack
       const idx = openModalsStack.findIndex((item) => item.id === modalId);
       if (idx !== -1) {
         openModalsStack.splice(idx, 1);
@@ -351,12 +789,25 @@ function hideBackdrop(modal) {
         log('debug', `closeModal: Modal ${modalId} closed, stack: ${openModalsStack.map((item) => item.id).join(', ')}, depth: ${currentDepth}`);
       }
 
-      // Restore previous modal if exists (no need to show if already visible; z-index handles layering)
+      // Remove active state - but NOT for allPlansModal
+      if (modalId !== 'allPlansModal') {
+        setTriggerActive(modalId, false);
+            } else {
+        // ← allPlansModal specific cleanup
+        modal.classList.remove('active'); // triggers CSS exit animation
+        history.replaceState({ isModal: false }, '', window.location.pathname);
+        log('debug', `closeModal: Removed .active + cleared URL fragment for allPlansModal`);
+      }
+
       const previousModal = openModalsStack[openModalsStack.length - 1];
       if (previousModal) {
         const prevEl = previousModal.modal;
         
-        // Focus first focusable element
+        // Restore active state for previous modal - but NOT for allPlansModal
+        if (previousModal.id !== 'allPlansModal') {
+          setTriggerActive(previousModal.id, true);
+        }
+        
         const focusable = prevEl.querySelector(
           'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
         );
@@ -365,21 +816,32 @@ function hideBackdrop(modal) {
           log('debug', `closeModal: Restored focus to ${previousModal.id}`);
         }
       } else {
-        // No more modals, focus body
-        document.body.focus();
-        log('debug', 'closeModal: Restored focus to document body');
+        // No more modals - determine which tab should be active based on where we came from
+        const wasNavModal = ['historyModal'].includes(modalId);
+        
+        if (wasNavModal) {
+          // Closing a nav modal with no stack = go to home
+          setHomeActive();
+          log('debug', 'closeModal: Closed nav modal, set home active');
+        } else {
+          const currentActive = document.querySelector('.nav-item.active, .active, [aria-current="true"]');
+          if (!currentActive) {
+            setHomeActive();
+            log('debug', 'closeModal: No active nav, set home active');
+          } else {
+            log('debug', 'closeModal: Keeping current active tab');
+          }
+        }
+        
+        const main = document.getElementById('mainContent') || document.querySelector('main') || document.body;
+        try { main.focus(); } catch (e) { document.body.focus(); }
       }
     });
-    hideBackdrop(modal);
 
-    // Handle history if needed
-    if (history.state && history.state.modalId === modalId) {
-      history.back();
-      log('debug', `closeModal: Triggered history.back for ${modalId}`);
-    }
+   
   }
 
-  // Focus trap for accessibility (unchanged)
+  // Focus trap for accessibility
   function trapFocus(modal) {
     if (!modal) {
       log('error', 'trapFocus: Modal is null or undefined');
@@ -410,13 +872,14 @@ function hideBackdrop(modal) {
       }
     };
 
-    modal._trapHandler = keydownHandler;  // Store for cleanup
+    modal._trapHandler = keydownHandler;
     modal.addEventListener('keydown', keydownHandler);
     log('debug', `trapFocus: Focus trap set for ${modal.id}`);
   }
 
-  // Handle device back button (popstate) (trimmed logs, added guard)
+  // Handle device back button (popstate)
   function handlePopstate(e) {
+    
     if (isProcessingPopstate) {
       log('debug', 'handlePopstate: Skipping, already processing popstate');
       return;
@@ -424,17 +887,63 @@ function hideBackdrop(modal) {
     isProcessingPopstate = true;
     log('debug', 'handlePopstate: Popstate event triggered', e.state);
 
-    // Close the top modal if it exists
+    
+
+    // EXTRA DIAGNOSTIC LOGS (insert in handlePopstate)
+log('debug', 'handlePopstate: window.location.hash', { hash: window.location.hash });
+log('debug', 'handlePopstate: openModalsStack snapshot', { stack: openModalsStack.map(s => s.id), depth: openModalsStack.length });
+
+
     const topModal = openModalsStack[openModalsStack.length - 1];
     if (topModal) {
-      log('debug', `handlePopstate: Closing top modal ${topModal.id}`);
-      forceCloseModal(topModal.id);
+      if (topModal.id === 'settingsModal') {
+        log('debug', 'handlePopstate: Back button triggered, simulating home logic directly for settings (not triggering home button click)');
+        // Directly close all modals without transition
+        while (openModalsStack.length > 0) {
+          const { id } = openModalsStack.pop();
+          const modalConfig = modals[id];
+          if (modalConfig && modalConfig.element) {
+            const modalEl = modalConfig.element;
+            if (id !== 'allPlansModal') {
+              setTriggerActive(id, false);
+            }
+            modalEl.classList.add('hidden');
+            modalEl.style.display = 'none';
+            modalEl.setAttribute('aria-hidden', 'true');
+            modalEl.setAttribute('inert', '');
+            log('debug', `handlePopstate: Directly closed modal ${id} during settings simulation`);
+          }
+        }
+        currentDepth = 0;
+        setHomeActive();
+        history.replaceState({ isModal: false }, '', window.location.pathname);
+        setTimeout(() => {
+          isProcessingPopstate = false;
+          log('debug', 'handlePopstate: Popstate processing complete');
+        }, 50);
+        return; // Skip the rest of the processing
+      } else {
+        log('debug', `handlePopstate: Closing top modal ${topModal.id}`);
+        
+        // Remove active state from closing modal
+        if (topModal.id !== 'allPlansModal') {
+          setTriggerActive(topModal.id, false);
+        }
+        
+        forceCloseModal(topModal.id);
+      }
     }
 
     if (e.state && e.state.isModal && e.state.modalDepth && e.state.modalId) {
       log('debug', `handlePopstate: Processing modal state, depth: ${e.state.modalDepth}, modalId: ${e.state.modalId}`);
       while (openModalsStack.length > e.state.modalDepth) {
         const { modal, id } = openModalsStack.pop();
+        
+        // Remove active state from each closing modal
+        if (id !== 'allPlansModal') {
+          setTriggerActive(id, false);
+        }
+        
         forceCloseModal(id);
         log('debug', `handlePopstate: Closed modal ${id}`);
       }
@@ -448,28 +957,43 @@ function hideBackdrop(modal) {
         newTopModal.modal.style.display = modals[newTopModal.id].hasPullHandle ? 'block' : 'flex';
         newTopModal.modal.setAttribute('aria-hidden', 'false');
         newTopModal.modal.removeAttribute('inert');
-        // Reset z-index if needed (though usually not, as it was set on open)
-        newTopModal.modal.style.zIndex = 1050 + (openModalsStack.length * 10);
+        newTopModal.modal.style.zIndex = getNextModalZIndex() + (openModalsStack.length * 10);
         applyTransition(newTopModal.modal, true);
         trapFocus(newTopModal.modal);
+        
+        // Restore active state for the modal we're going back to
+        if (newTopModal.id !== 'allPlansModal') {
+          setTriggerActive(newTopModal.id, true);
+        }
+        
         log('debug', `handlePopstate: Restored modal ${newTopModal.id}`);
       }
     } else if (openModalsStack.length > 0) {
       log('debug', 'handlePopstate: No modal state, closing top modal only');
       const { modal, id } = openModalsStack.pop();
+      
+      // Remove active state from closing modal
+      if (id !== 'allPlansModal') {
+        setTriggerActive(id, false);
+      }
+      
       forceCloseModal(id);
       log('debug', `handlePopstate: Closed modal ${id}`);
-      // Restore previous modal if any
       const previousModal = openModalsStack[openModalsStack.length - 1];
       if (previousModal && !isModalVisible(previousModal.modal)) {
         previousModal.modal.classList.remove('hidden');
         previousModal.modal.style.display = modals[previousModal.id].hasPullHandle ? 'block' : 'flex';
         previousModal.modal.setAttribute('aria-hidden', 'false');
         previousModal.modal.removeAttribute('inert');
-        // Reset z-index
-        previousModal.modal.style.zIndex = 1050 + (openModalsStack.length * 10);
+        previousModal.modal.style.zIndex = getNextModalZIndex() + (openModalsStack.length * 10);
         applyTransition(previousModal.modal, true);
         trapFocus(previousModal.modal);
+        
+        // Restore active state for previous modal
+        if (previousModal.id !== 'allPlansModal') {
+          setTriggerActive(previousModal.id, true);
+        }
+        
         log('debug', `handlePopstate: Restored previous modal ${previousModal.id}`);
       }
     }
@@ -478,7 +1002,8 @@ function hideBackdrop(modal) {
     log('debug', `handlePopstate: Updated stack: ${openModalsStack.map((item) => item.id).join(', ')}, depth: ${currentDepth}`);
     if (openModalsStack.length === 0) {
       history.replaceState({ isModal: false }, '', window.location.href);
-      log('debug', 'handlePopstate: Reset history state');
+      setHomeActive();
+      log('debug', 'handlePopstate: Reset history state and set home active');
     } else {
       history.replaceState(
         {
@@ -498,13 +1023,29 @@ function hideBackdrop(modal) {
     }, 50);
   }
 
-  // Initialize (removed __setupPinActive from observer)
+  // Initialize
   function initialize() {
     log('info', 'initialize: Starting initialization');
-        // Resolve element references now (handles modals added after script load)
+
+    // create overlay, show on mobile by default
+    try {
+      createDebugOverlay();
+      // show overlay by default for touch devices or narrow screens
+      const shouldShow = ('ontouchstart' in window) || window.matchMedia('(max-width: 820px)').matches;
+      debugVisible = !!shouldShow;
+      if (debugOverlay) debugOverlay.style.display = debugVisible ? 'block' : 'none';
+      const toggle = document.getElementById('mm-debug-toggle');
+      if (toggle) toggle.style.display = 'block';
+      const counter = document.getElementById('mm-debug-counter');
+      if (counter) counter.style.display = debugVisible ? 'none' : 'block';
+      log('info', `initialize: Debug overlay created, visible=${debugVisible}`);
+    } catch (e) {
+      console.warn('ModalManager: Failed to create debug overlay', e);
+    }
+    
+    // Resolve element references
     Object.entries(modals).forEach(([modalId, cfg]) => {
       if (!cfg) return;
-      // If element already set, keep it; otherwise attempt to resolve from DOM
       if (!cfg.element) {
         cfg.element = document.getElementById(cfg.id || modalId) || null;
       }
@@ -512,7 +1053,6 @@ function hideBackdrop(modal) {
         log('warn', `initialize: Modal element not found for ${modalId} (expected id="${cfg.id || modalId}")`);
       } else {
         log('debug', `initialize: Modal ${modalId} resolved to element`, { id: cfg.element.id });
-        // normalize starting hidden state
         if (cfg.element.getAttribute('aria-hidden') === null || cfg.element.getAttribute('aria-hidden') === 'true') {
           cfg.element.setAttribute('aria-hidden', 'true');
           cfg.element.setAttribute('inert', '');
@@ -522,20 +1062,41 @@ function hideBackdrop(modal) {
       }
     });
 
-
+    // Bind close buttons
     Object.entries(modals).forEach(([modalId, { element }]) => {
       if (!element) return;
       const closeBtn = element.querySelector('[data-close]');
       if (closeBtn) {
         const closeHandler = (e) => {
           e.preventDefault();
-          log('debug', `Close button clicked for ${modalId}`);
-          closeModal(modalId);
+          if (modalId === 'settingsModal') {
+            log('debug', `Close button clicked for ${modalId} - simulating home logic directly (not triggering home button click)`);
+            // Directly close all modals without transition
+            while (openModalsStack.length > 0) {
+              const { id } = openModalsStack.pop();
+              const modalConfig = modals[id];
+              if (modalConfig && modalConfig.element) {
+                const modalEl = modalConfig.element;
+                if (id !== 'allPlansModal') {
+                  setTriggerActive(id, false);
+                }
+                modalEl.classList.add('hidden');
+                modalEl.style.display = 'none';
+                modalEl.setAttribute('aria-hidden', 'true');
+                modalEl.setAttribute('inert', '');
+                log('debug', `Close button: Directly closed modal ${id} during settings simulation`);
+              }
+            }
+            currentDepth = 0;
+            history.replaceState({ isModal: false }, '', window.location.pathname);
+            setHomeActive();
+          } else {
+            log('debug', `Close button clicked for ${modalId}`);
+            closeModal(modalId);
+          }
         };
-        // Remove existing listeners to prevent duplicates
         closeBtn.removeEventListener('click', closeBtn._closeHandler);
         closeBtn.removeEventListener('touchend', closeBtn._closeHandler);
-        // Store the handler for future removal
         closeBtn._closeHandler = closeHandler;
         closeBtn.addEventListener('click', closeHandler);
         closeBtn.addEventListener('touchend', closeHandler);
@@ -545,6 +1106,7 @@ function hideBackdrop(modal) {
       }
     });
 
+    // Triggers - NOTE: homeNavLink is NOT here
     const triggers = {
       dashboardPinCard: 'pinModal',
       dashboardUpdateProfileCard: 'updateProfileModal',
@@ -557,19 +1119,16 @@ function hideBackdrop(modal) {
       changePWD: 'changePwdModal',
       referralsBtn: 'referralModal',
       continueBtn: 'checkoutModal',
-      // resetPwdBtn: 'rpResetModal',
-      // forgetPinLinkPin : 'resetPinModal',
+      historyNavLink: 'historyModal',
     };
 
-    // Bind triggers to open modals (retained Smart Button skip for securityPinRow)
+    // Bind triggers to open modals
     Object.entries(triggers).forEach(([triggerId, modalId]) => {
       const trigger = document.getElementById(triggerId);
 
       if (trigger) {
         if (triggerId === "securityPinRow") {
-          // Special handling for Security PIN modal (SKIP if Smart Button flagged)
           trigger.addEventListener("click", (e) => {
-            // Guard: Skip if Smart Button handled (from your dashboard.js)
             if (trigger.dataset.skipModal === 'true' || window.__smartPinHandled) {
               log('debug', `[GUARD] Ignored ${triggerId} click – Smart Button handled`);
               e.stopImmediatePropagation();
@@ -578,7 +1137,6 @@ function hideBackdrop(modal) {
 
             e.preventDefault();
 
-            // Ignore clicks inside the modal itself
             if (e.target.closest("#securityPinModal")) {
               log('debug', `[GUARD] Ignored click inside securityPinModal`, {
                 clickedTag: e.target.tagName,
@@ -591,7 +1149,6 @@ function hideBackdrop(modal) {
             openModal(modalId);
           });
 
-          // Ignore clicks on inputs/buttons inside modal
           const secModal = document.getElementById("securityPinModal");
           if (secModal) {
             secModal.addEventListener("click", (e) => {
@@ -610,7 +1167,6 @@ function hideBackdrop(modal) {
           }
 
         } else {
-          // Normal handling for all other triggers
           trigger.addEventListener("click", (e) => {
             e.preventDefault();
             log('debug', `Trigger clicked: ${triggerId} to open ${modalId}`);
@@ -624,37 +1180,101 @@ function hideBackdrop(modal) {
       }
     });
 
+    // HOME BUTTON HANDLER - Separate from other triggers
+    const homeNavLink = document.getElementById('homeNavLink');
+    if (homeNavLink) {
+      homeNavLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        log('debug', 'Home button clicked directly - closing all modals');
+        
+        if (openModalsStack.length > 0) {
+          while (openModalsStack.length > 0) {
+            const { modal, id } = openModalsStack.pop();
+            const modalConfig = modals[id];
+            if (modalConfig && modalConfig.element) {
+              const modalEl = modalConfig.element;
+              
+              modalEl.classList.add('hidden');
+              modalEl.style.display = 'none';
+              modalEl.setAttribute('aria-hidden', 'true');
+              modalEl.setAttribute('inert', '');
+              
+              log('debug', `Home: Closed modal ${id}`);
+            }
+          }
+          currentDepth = 0;
+          history.replaceState({ isModal: false }, '', window.location.pathname);
+        }
+        
+        setHomeActive();
+      });
+      
+      log('debug', 'initialize: Bound home button to close all modals');
+    } else {
+      log('error', 'initialize: Home nav link not found');
+    }
+
     window.addEventListener('popstate', handlePopstate);
     log('debug', 'initialize: Popstate listener added');
 
-    // MutationObserver with BETTER DEBOUNCE (longer + self-guard) to stop loops
+    // MutationObserver to detect external modifications to nav active classes (the likely culprit)
+    // Observe the whole document for class changes to nav items; ignore ones we did intentionally
+    const navObserver = new MutationObserver((mutations) => {
+      mutations.forEach(m => {
+        if (!m.target) return;
+        // interested in class/aria-current changes
+        if (m.attributeName !== 'class' && m.attributeName !== 'aria-current') return;
+        try {
+          const el = m.target;
+          const hasActive = (el.classList && (el.classList.contains('active') || el.classList.contains('nav-active'))) || el.getAttribute && el.getAttribute('aria-current') === 'true';
+          if (hasActive && !wasRecentlyModified(el)) {
+            // This element gained active class but we didn't modify it recently -> suspicious
+            captureStackForElement(el, 'external-active-added-by-mutationobserver');
+            appendDebugLine(`${timestamp()} [alert] External code added 'active' to ${describeElement(el)}`, '#ffb4b4', 'mm-debug-alert');
+            // console.warn('[ModalManager] External active set detected on', el);
+          }
+        } catch (e) { /* ignore */ }
+      });
+    });
+
+    try {
+      navObserver.observe(document, {
+        attributes: true,
+        attributeFilter: ['class', 'aria-current'],
+        subtree: true,
+        childList: false,
+      });
+      log('debug', 'initialize: nav mutation observer added (detects external active changes)');
+    } catch (e) {
+      log('warn', 'initialize: failed to attach nav mutation observer', { error: String(e) });
+    }
+
+    // MutationObserver for each modal (existing behavior)
     Object.entries(modals).forEach(([modalId, { element }]) => {
       if (!element) return;
       const observer = new MutationObserver((mutations) => {
-        if (isProcessingPopstate) {  // Guard for popstate
+        if (isProcessingPopstate) {
           log('debug', `MutationObserver: Skipping for ${modalId} during popstate`);
           return;
         }
 
-        // Debounce: Longer timer + ignore self-changes (e.g., from applyTransition)
         clearTimeout(observer._debounceTimer);
         observer._debounceTimer = setTimeout(() => {
           const visible = isModalVisible(element);
           const inStack = openModalsStack.some((item) => item.id === modalId);
           
-          // Only act on real state change (not self-triggered)
           if (visible && !inStack && !element.dataset._mutating) {
-            element.dataset._mutating = 'true';  // Temp flag
+            element.dataset._mutating = 'true';
             log('debug', `MutationObserver: ${modalId} became visible, opening`);
             openModal(modalId);
-            setTimeout(() => { delete element.dataset._mutating; }, 200);  // Clear after settle
+            setTimeout(() => { delete element.dataset._mutating; }, 200);
           } else if (!visible && inStack && !element.dataset._mutating) {
             element.dataset._mutating = 'true';
             log('debug', `MutationObserver: ${modalId} became hidden, closing`);
             closeModal(modalId);
             setTimeout(() => { delete element.dataset._mutating; }, 200);
           }
-        }, 200);  // ↑ Longer debounce = fewer loops
+        }, 200);
       });
       observer.observe(element, {
         attributes: true,
@@ -664,12 +1284,70 @@ function hideBackdrop(modal) {
       log('debug', `initialize: MutationObserver set for ${modalId}`);
     });
 
+    // Monkeypatch DOMTokenList.add to capture exact stack when "active" class is added programmatically
+    (function patchClassListAdd() {
+      try {
+        if (DOMTokenList.prototype._mm_patched_add) {
+          log('debug', 'patchClassListAdd: already patched');
+          return;
+        }
+        const originalAdd = DOMTokenList.prototype.add;
+        DOMTokenList.prototype.add = function (...tokens) {
+          // call original first to keep behavior
+          const result = originalAdd.apply(this, tokens);
+          try {
+            if (tokens.some(t => t === 'active' || /active/.test(String(t)))) {
+              // try to find owner element by comparing classList references (best-effort)
+              let owner = null;
+              try {
+                // scope down search to likely navs to be less costly, fallback to document.getElementsByTagName('*')
+                const candidates = document.querySelectorAll('.nav-item, a, button, [role="tab"], [role="button"]');
+                for (let i = 0; i < candidates.length; i++) {
+                  const el = candidates[i];
+                  if (el.classList === this) { owner = el; break; }
+                }
+                if (!owner) {
+                  const all = document.getElementsByTagName('*');
+                  for (let i = 0; i < all.length; i++) {
+                    const el = all[i];
+                    if (el.classList === this) { owner = el; break; }
+                  }
+                }
+              } catch (e) {
+                // fallback later if needed
+              }
+              // capture stack & snapshot
+              captureStackForElement(owner || null, 'classList.add-active');
+              const info = {
+                tokenAdded: tokens,
+                owner: owner ? describeElement(owner) : '(owner-not-found)',
+                id: owner && owner.id ? owner.id : null,
+              };
+              appendDebugLine(`${timestamp()} [class-add] active added - ${safeStringify(info)}`, '#ffb4b4', 'mm-debug-alert');
+              // console.warn('[ModalManager] classList.add detected active', info);
+            }
+          } catch (e) {
+            console.warn('classList.add wrapper error', e);
+          }
+          return result;
+        };
+        DOMTokenList.prototype._mm_patched_add = true;
+        log('debug', 'patchClassListAdd: DOMTokenList.add patched to capture "active" additions');
+      } catch (e) {
+        log('warn', 'patchClassListAdd: Failed to patch DOMTokenList.add', { error: String(e) });
+      }
+    })();
+
     window.ModalManager = {
       openModal,
       closeModal,
       forceCloseModal,
       getOpenModals: () => openModalsStack.map((item) => item.id),
       getCurrentDepth: () => currentDepth,
+      getRawLogs,
+      downloadRawLogs,
+      copyRawLogs,
+      sendRawLogsTo,
       closeAll: () => {
         log('info', 'closeAll: Closing all modals');
         while (openModalsStack.length > 0) {
@@ -678,19 +1356,25 @@ function hideBackdrop(modal) {
         }
         currentDepth = 0;
         history.replaceState({ isModal: false }, '', window.location.href);
-        log('info', 'closeAll: All modals closed, reset history state');
+        setHomeActive();
+        log('info', 'closeAll: All modals closed, home is now active');
       },
     };
+
+    // Set home as active on page load if no modals are open
+    if (openModalsStack.length === 0) {
+      setHomeActive();
+      log('debug', 'initialize: Set home as active on page load');
+    }
     
     log('info', 'initialize: Initialization complete');
   }
 
-  // Add click protection for nested modals (unchanged)
+  // Add click protection for nested modals and register DOMContentLoaded
   Object.entries(modals).forEach(([modalId, { element }]) => {
     if (!element) return;
     
     element.addEventListener('click', (e) => {
-      // Stop clicks from propagating to modals beneath
       if (e.target === element || e.target.closest('.modal-content')) {
         e.stopPropagation();
       }
@@ -711,4 +1395,5 @@ function hideBackdrop(modal) {
       }
     });
   });
+
 })();
