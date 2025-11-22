@@ -7,9 +7,28 @@ import {
 
 function saveCurrentAppState() {
   const state = {
-    // Modals
-    openModal: document.querySelector('.modal.active, .modal[style*="block"], .modal:not(.hidden)')?.id || null,
+    // ==================== MODALS – FIXED & BULLETPROOF ====================
     
+
+openModal: (() => {
+  // This will NOW work perfectly
+  if (window.ModalManager && typeof window.ModalManager.getTopModal === 'function') {
+    const top = window.ModalManager.getTopModal();
+    if (top) {
+      console.log('[StateSaver] Detected open modal via ModalManager:', top);
+      return top;
+    }
+  }
+
+  // Fallback (should never trigger now)
+  const visible = document.querySelector('.modal.active, .modal[style*="flex"], .modal[style*="block"]');
+  if (visible?.id) return visible.id;
+
+  return null;
+})(),
+
+
+
     // Form inputs
     phoneNumber: document.getElementById('phone-input')?.value || '',
     pinInputs: {
@@ -17,30 +36,28 @@ function saveCurrentAppState() {
       new: document.getElementById('newPin')?.value || '',
       confirm: document.getElementById('confirmPin')?.value || '',
     },
-    
+
     // Selection state
     selectedProvider: document.querySelector('.provider-box.active')?.className.match(/mtn|airtel|glo|ninemobile/)?.[0] || 'mtn',
     selectedPlanId: document.querySelector('.plan-box.selected')?.getAttribute('data-id') || '',
-    
+
     // Scroll positions
     scrollPositions: {
       dashboard: window.scrollY,
       plansRow: document.querySelector('.plans-row')?.scrollLeft || 0,
       allPlansModal: document.getElementById('allPlansModalContent')?.scrollTop || 0,
     },
-    
+
     // Extra
     timestamp: Date.now(),
     version: APP_VERSION || '1.0.0'
   };
 
-  // Save in two places for maximum reliability
+  // Save in two places
   sessionStorage.setItem('__fg_app_state_v2', JSON.stringify(state));
-  
-  // Also push to history.state so back/forward works too
   history.replaceState(state, '', location.href);
-  
-  console.log('[StateSaver] UI state saved', state);
+
+  console.log('[StateSaver] UI state saved → openModal:', state.openModal, state);
 }
 
 
@@ -1366,17 +1383,7 @@ function updateLocalStorageFromUser(user) {
 
 
 
-// Run observer only on dashboard
-// Run observer only on dashboard
-// Run observer only on dashboard
-if (window.location.pathname.includes('dashboard.html')) {
-  window.addEventListener('load', async () => {
-    console.log('[DEBUG] window.load: Starting onDashboardLoad');
-    await onDashboardLoad();                    // ← await everything
-    console.log('[StateRestore] NOW restoring saved UI state...');
-    restoreAppState();                          // ← only here, once
-  });
-}
+
 
 
 
@@ -1876,88 +1883,6 @@ try {
   pollStatus(); // Initial
   setInterval(pollStatus, 30000); // Every 30s
 
-  function restoreAppState() {
-  let state = null;
-
-  console.log('[StateRestore] Attempting restore... sessionStorage has __fg_app_state_v2:', !!sessionStorage.getItem('__fg_app_state_v2'));
-console.log('[StateRestore] history.state exists:', !!history.state);
-
-  // 1. Try history.state first (survives navigation)
-  if (history.state && history.state.timestamp) {
-    state = history.state;
-  }
-  // 2. Fallback to sessionStorage
-  else if (sessionStorage.getItem('__fg_app_state_v2')) {
-    try {
-      state = JSON.parse(sessionStorage.getItem('__fg_app_state_v2'));
-    } catch(e) { }
-  }
-
-  if (!state) return;
-
-  console.log('[StateRestore] Restoring UI state', state);
-
-  // Small delay to let DOM settle
-  setTimeout(() => {
-    // Restore phone number
-    const phoneInput = document.getElementById('phone-input');
-    if (phoneInput && state.phoneNumber) {
-      phoneInput.value = state.phoneNumber;
-      updateContactOrCancel();
-      updateContinueState();
-    }
-
-    // Restore provider + plan
-    if (state.selectedProvider) {
-      selectProvider(state.selectedProvider);
-      if (state.selectedPlanId) {
-        setTimeout(() => selectPlanById(state.selectedPlanId), 300);
-      }
-    }
-
-    // Restore PIN inputs (for security modal)
-    if (state.pinInputs) {
-      if (state.pinInputs.current) document.getElementById('currentPin')?.focus();
-      // Don't restore PIN values for security reasons (optional)
-    }
-
-    // Restore scroll
-    if (state.scrollPositions) {
-      window.scrollTo(0, state.scrollPositions.dashboard);
-      document.querySelector('.plans-row')?.scrollTo(state.scrollPositions.plansRow, 0);
-    }
-
-    // Re-open modal if one was open
-    if (state.openModal) {
-      setTimeout(() => {
-        if (window.ModalManager?.openModal) {
-          ModalManager.openModal(state.openModal);
-        } else {
-          const modal = document.getElementById(state.openModal);
-          if (modal) {
-            modal.classList.remove('hidden');
-            modal.classList.add('active');
-          }
-        }
-        // In restoreAppState(), after session/history check
-if (!state) {
-  const userState = JSON.parse(localStorage.getItem('userState') || '{}');
-  if (userState.provider) {
-    state = { selectedProvider: userState.provider, selectedPlanId: userState.planId, phoneNumber: formatNigeriaNumber(userState.number).value };
-  }
-}
-
-        // Special case: restore checkout modal content
-        if (state.openModal === 'checkoutModal') {
-          renderCheckoutModal();
-        }
-      }, 100);
-    }
-
-    // Cleanup old storage
-    sessionStorage.removeItem('__fg_app_state_v2');
-  }, 100);
-}
 
 }
 
@@ -4009,8 +3934,148 @@ function initializeProviderAndPlans() {
 
   console.log('[INIT] Provider fully initialized:', providerToUse);
 }
-initializeProviderAndPlans();
 
+function restoreEverything() {
+  let state = null;
+
+  console.log('[RestoreEverything] Starting restore process...');
+
+  // 1. Try history.state first
+  if (history.state && history.state.timestamp) {
+    state = history.state;
+    console.log('[RestoreEverything] Found state in history.state:', state);
+  }
+  // 2. Fallback to sessionStorage
+  else if (sessionStorage.getItem('__fg_app_state_v2')) {
+    try {
+      state = JSON.parse(sessionStorage.getItem('__fg_app_state_v2'));
+      console.log('[RestoreEverything] Found state in sessionStorage:', state);
+    } catch(e) {
+      console.error('[RestoreEverything] Failed to parse sessionStorage state', e);
+    }
+  }
+
+  if (!state) {
+    console.log('[RestoreEverything] No saved state found — nothing to restore');
+    return;
+  }
+
+  console.log('[RestoreEverything] Full saved state:', state);
+
+  requestAnimationFrame(() => {
+    console.log('[RestoreEverything] DOM ready — starting restoration...');
+
+    // 1. Phone number
+    const phoneInput = document.getElementById('phone-input');
+    if (phoneInput && state.phoneNumber) {
+      phoneInput.value = state.phoneNumber;
+      updateContactOrCancel();
+      updateContinueState();
+      console.log('[RestoreEverything] ✓ Phone number restored:', state.phoneNumber);
+    } else {
+      console.log('[RestoreEverything] ✗ Phone input not found or no saved number');
+    }
+
+    // 2. Provider + plan (already handled by initializeProviderAndPlans, but safe double-check)
+    if (state.selectedProvider) {
+      console.log('[RestoreEverything] Provider from state:', state.selectedProvider);
+      selectProvider(state.selectedProvider);
+      if (state.selectedPlanId) {
+        setTimeout(() => {
+          console.log('[RestoreEverything] Restoring plan ID:', state.selectedPlanId);
+          selectPlanById(state.selectedPlanId);
+        }, 400);
+      }
+    }
+
+    // 3. Scroll positions
+    if (state.scrollPositions) {
+      window.scrollTo(0, state.scrollPositions.dashboard);
+      document.querySelector('.plans-row')?.scrollTo(state.scrollPositions.plansRow, 0);
+      document.getElementById('allPlansModalContent')?.scrollTo(0, state.scrollPositions.allPlansModal || 0);
+      console.log('[RestoreEverything] ✓ Scroll positions restored');
+    }
+
+    // 4. MODALS — THE MOST IMPORTANT PART
+    if (state.openModal) {
+      console.log('[RestoreEverything] Found open modal to restore:', state.openModal);
+
+      setTimeout(() => {
+        console.log('[RestoreEverything] Attempting to re-open modal:', state.openModal);
+
+        // CRITICAL: Use ModalManager if it exists (even if in another file)
+        if (typeof window.ModalManager !== 'undefined' && window.ModalManager?.openModal) {
+          console.log('[RestoreEverything] ✓ Using ModalManager.openModal()');
+          window.ModalManager.openModal(state.openModal, true); // skipHistory = true
+        } 
+        // Fallback if ModalManager not loaded yet
+        else if (document.getElementById(state.openModal)) {
+          console.log('[RestoreEverything] ModalManager not ready — using direct DOM method');
+          const modal = document.getElementById(state.openModal);
+          modal.classList.remove('hidden');
+          modal.classList.add('active');
+          modal.style.display = 'flex';
+          modal.removeAttribute('aria-hidden');
+          modal.removeAttribute('inert');
+        } else {
+          console.error('[RestoreEverything] ✗ Modal element not found in DOM:', state.openModal);
+        }
+        if (state.openModal) {
+  console.log('[RestoreEverything] Found open modal to restore:', state.openModal);
+
+  setTimeout(() => {
+    const modal = document.getElementById(state.openModal);
+    if (!modal) {
+      console.error('[RestoreEverything] Modal element not found:', state.openModal);
+      return;
+    }
+
+    // FORCE EVERYTHING NEEDED FOR ANIMATION
+    modal.classList.remove('hidden');
+    modal.style.display = modal.dataset.hasPullHandle === 'true' ? 'block' : 'flex';  // ← CRITICAL
+    modal.style.opacity = '0';
+    modal.style.visibility = 'visible';
+    modal.style.transform = modal.id === 'allPlansModal' ? 'translateY(100%)' : 'translateY(20px)';
+    modal.style.zIndex = '10010'; // high enough
+    modal.removeAttribute('aria-hidden');
+    modal.removeAttribute('inert');
+
+    console.log('[RestoreEverything] Forced starting state for animation');
+
+    // Now trigger the real openModal (which has the animation logic)
+    if (window.ModalManager?.openModal) {
+      window.ModalManager.openModal(state.openModal, true);
+      console.log('[RestoreEverything] Called ModalManager.openModal()');
+    }
+
+    // Special case for checkout
+    if (state.openModal === 'checkoutModal') {
+      renderCheckoutModal();
+    }
+  }, 100);
+}
+
+        // Special case for checkout modal
+        if (state.openModal === 'checkoutModal') {
+          console.log('[RestoreEverything] Rendering checkout modal content');
+          renderCheckoutModal();
+        }
+      }, 200); // Slightly longer delay to ensure ModalManager is ready
+    } else {
+      console.log('[RestoreEverything] No modal was open — nothing to re-open');
+    }
+
+    // Cleanup
+    sessionStorage.removeItem('__fg_app_state_v2');
+    console.log('[RestoreEverything] Restoration complete!');
+  });
+}
+
+
+
+initializeProviderAndPlans();
+restoreEverything(); 
+updateContinueState();
   // --- PROVIDER BOX CLICK ---
   let touchStartX = 0, touchStartY = 0, isScrolling = false;
 
@@ -4244,6 +4309,7 @@ phoneInput.maxLength = 13;  // 11 digits + 2 spaces in formatted value
   continueBtn.addEventListener('click', () => {
     if (!continueBtn.disabled) {
       window.openCheckoutModal();
+      saveCurrentAppState()
       console.log('[DEBUG] continueBtn: Opening checkout modal');
     }
   });

@@ -651,6 +651,7 @@ function applyTransition(modal, show, callback) {
 
   // Open modal
   function openModal(modalId, skipHistory = false) {
+    
     log('debug', `openModal: Attempting to open ${modalId}`);
 
     const modalConfig = modals[modalId];
@@ -703,6 +704,13 @@ if (modalId === 'allPlansModal') {
   modal.style.opacity = '0';
 }
 
+
+if (skipHistory && document.getElementById(modalId)) {
+    const modal = document.getElementById(modalId);
+    modal.style.opacity = '0';
+    modal.style.transform = modalId === 'allPlansModal' ? 'translateY(100%)' : 'translateY(20px)';
+    console.log('[ModalManager] Forced animation start for restored modal:', modalId);
+  }
 
 
     applyTransition(modal, true, () => {
@@ -1395,5 +1403,7 @@ log('debug', 'handlePopstate: openModalsStack snapshot', { stack: openModalsStac
       }
     });
   });
+
+  
 
 })();
