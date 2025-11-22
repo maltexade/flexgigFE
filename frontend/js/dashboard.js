@@ -13791,50 +13791,142 @@ async function checkServerReauthStatus() {
  * showInactivityPrompt()
  * - Debounced small "are you still there?" flow that verifies shouldReauth() then opens reauth UI
  */
+/**
+ * Unified, defensive showInactivityPrompt()
+ * - refuses to show soft prompt while page is hidden
+ * - honours hard-idle: if hard idle threshold passed, force full reauth instead
+ * - never sets persistent "requireReauth" on casual soft prompts
+ */
 async function showInactivityPrompt() {
-  if (__reauthPromptShowing) return;
+  // debounce guard: if a prompt is already in-flight, skip
+  if (typeof __reauthPromptShowing !== 'undefined' && __reauthPromptShowing) {
+    console.debug('[inactivity] showInactivityPrompt skipped: already showing');
+    return;
+  }
   __reauthPromptShowing = true;
 
   try {
-    // Double-check server authority before showing soft prompt (if you want)
-    let reauthCheck = null;
-    try { reauthCheck = await checkServerReauthStatus(); } catch(e) { console.warn('[showInactivityPrompt] server check failed', e); reauthCheck = null; }
+    // --- 0) Quick visibility check: if page is hidden, do not show soft prompt.
+    // We'll still check hard idle below and force full reauth if needed.
+    const isVisible = typeof document !== 'undefined' ? document.visibilityState === 'visible' : true;
 
-    if (reauthCheck && (reauthCheck.needsReauth || reauthCheck.reauthRequired)) {
-      // server insists on full reauth -> show full modal immediately
-      try { await showReauthModal({ context: 'reauth' }); } catch(e){ try { await initReauthModal({ show: true, context: 'reauth' }); } catch(_){} }
-      return;
-    }
-
-    // Otherwise fall back to soft path (but still confirm client-side shouldReauth)
+    // --- 1) Hard-idle detection (counts while hidden)
+    // Use the globally-tracked lastActive timestamp and HARD_IDLE_MS constant.
+    // If those names differ in your file, adapt accordingly.
     try {
-      const clientCheck = (typeof shouldReauth === 'function') ? await shouldReauth() : { needsReauth: true };
-      if (!clientCheck || !clientCheck.needsReauth) {
-        __reauthPromptShowing = false;
+      const now = Date.now();
+      const hardMs = (typeof HARD_IDLE_MS === 'number') ? HARD_IDLE_MS : (60 * 60 * 1000); // default 1 hour
+      const last = (typeof lastActive === 'number') ? lastActive : (typeof lastVisibleAt === 'number' ? lastVisibleAt : null);
+
+      if (last !== null && now - last >= hardMs) {
+        console.info('[inactivity] hard idle threshold reached — forcing full reauth');
+        // Set persistent flag (if available) so we won't auto-bio on next open
+        if (window.fgReauth && typeof window.fgReauth.requireReauth === 'function') {
+          try { await window.fgReauth.requireReauth('hard-idle'); } catch (e) { console.warn('[inactivity] requireReauth() failed', e); }
+        }
+        // Show full reauth modal (do not attempt soft dialog)
+        if (typeof initReauthModal === 'function') {
+          try { await initReauthModal({ show: true, context: 'reauth' }); } catch (e) { console.error('[inactivity] initReauthModal failed', e); }
+        } else if (typeof showReauthModal === 'function') {
+          try { await showReauthModal({ context: 'reauth' }); } catch (e) { console.error('[inactivity] showReauthModal failed', e); }
+        }
         return;
       }
     } catch (e) {
-      console.warn('[showInactivityPrompt] shouldReauth threw; proceeding to show soft prompt', e);
+      console.warn('[inactivity] hard-idle check threw, continuing:', e);
+      // fall through to soft path
     }
 
-    // show the soft "are you still there?" interaction (existing UI)
+    // If page is not visible, abort (soft prompt must not show in background)
+    if (!isVisible) {
+      console.debug('[inactivity] skipped soft prompt because document is hidden');
+      return;
+    }
+
+    // --- 2) Live checks: skip if reauth UI already open or user hasn't set PIN/biometrics
+    try {
+      if (typeof reauthModalOpen !== 'undefined' && reauthModalOpen) {
+        console.debug('[inactivity] skipped: reauth modal already open');
+        return;
+      }
+      const hasPin = (function () {
+        try { return localStorage.getItem('hasPin') === 'true'; } catch (e) { return false; }
+      })();
+      const biometricsEnabled = (function () {
+        try { return localStorage.getItem('biometricsEnabled') === 'true'; } catch (e) { return false; }
+      })();
+      if (!hasPin && !biometricsEnabled) {
+        console.debug('[inactivity] skipped: no PIN or biometrics configured');
+        return;
+      }
+    } catch (e) {
+      console.warn('[inactivity] live checks failed, continuing:', e);
+    }
+
+    // --- 3) Server-side check (optional): if server demands full reauth, perform it
+    try {
+      if (typeof checkServerReauthStatus === 'function') {
+        const server = await checkServerReauthStatus();
+        if (server && (server.needsReauth || server.reauthRequired)) {
+          console.info('[inactivity] server requires reauth -> full reauth');
+          if (window.fgReauth && typeof window.fgReauth.requireReauth === 'function') {
+            try { await window.fgReauth.requireReauth('server'); } catch (e) { console.warn('[inactivity] requireReauth(server) failed', e); }
+          }
+          if (typeof initReauthModal === 'function') {
+            try { await initReauthModal({ show: true, context: 'reauth' }); } catch (e) { console.error('[inactivity] initReauthModal failed', e); }
+          } else if (typeof showReauthModal === 'function') {
+            try { await showReauthModal({ context: 'reauth' }); } catch (e) { console.error('[inactivity] showReauthModal failed', e); }
+          }
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn('[inactivity] server check failed, falling back to client checks', e);
+    }
+
+    // --- 4) Client-side shouldReauth check
+    try {
+      if (typeof shouldReauth === 'function') {
+        const clientCheck = await shouldReauth();
+        if (!clientCheck || !clientCheck.needsReauth) {
+          console.debug('[inactivity] shouldReauth says no reauth needed');
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn('[inactivity] shouldReauth threw, proceeding to soft prompt', e);
+    }
+
+    // --- 5) Show soft prompt UI (only while visible)
     console.debug('[inactivity] showing soft reauth prompt (are you still there?)');
     if (typeof showInactivityPromptUI === 'function') {
-      await showInactivityPromptUI(); // optional custom UI
+      try { await showInactivityPromptUI(); } catch (e) { console.warn('[inactivity] showInactivityPromptUI failed', e); }
     } else {
       try {
-        await (typeof presentSmallInactivityDialog === 'function' ? presentSmallInactivityDialog() : showReauthModal({ context: 'inactivity' }));
+        if (typeof presentSmallInactivityDialog === 'function') {
+          await presentSmallInactivityDialog();
+        } else if (typeof showReauthModal === 'function') {
+          // fallback: use the modal with "inactivity" context, but do NOT set persistent lock here
+          await showReauthModal({ context: 'inactivity' });
+        } else {
+          console.warn('[inactivity] no UI handler available for soft prompt');
+        }
       } catch (e) {
-        console.warn('[showInactivityPrompt] soft prompt display failed, falling back to showReauthModal', e);
-        try { await showReauthModal({ context: 'reauth' }); } catch (ignore) {}
+        console.warn('[inactivity] soft prompt display failed, falling back to full reauth', e);
+        if (typeof initReauthModal === 'function') {
+          try { await initReauthModal({ show: true, context: 'reauth' }); } catch (ie) { console.error('[inactivity] fallback initReauthModal failed', ie); }
+        }
       }
     }
+
   } catch (err) {
-    console.error('[inactivity] prompt error', err);
+    console.error('[inactivity] showInactivityPrompt general error', err);
   } finally {
     __reauthPromptShowing = false;
   }
 }
+
+window.showInactivityPrompt = window.showInactivityPrompt || showInactivityPrompt; // expose globally if needed
 
 /**
  * setupInactivity()
@@ -13965,56 +14057,56 @@ async function setupInactivity() {
  * showInactivityPrompt()
  * - Debounced small "are you still there?" flow that verifies shouldReauth() then opens reauth UI
  */
-async function showInactivityPrompt() {
-  if (__reauthPromptShowing) return;
-  __reauthPromptShowing = true;
+// async function showInactivityPrompt() {
+//   if (__reauthPromptShowing) return;
+//   __reauthPromptShowing = true;
 
-  try {
-    // Double-check server authority before showing soft prompt
-    let reauthCheck = null;
-    try { reauthCheck = await checkServerReauthStatus(); } catch(e) { console.warn('[showInactivityPrompt] server check failed', e); reauthCheck = null; }
+//   try {
+//     // Double-check server authority before showing soft prompt
+//     let reauthCheck = null;
+//     try { reauthCheck = await checkServerReauthStatus(); } catch(e) { console.warn('[showInactivityPrompt] server check failed', e); reauthCheck = null; }
 
-    if (reauthCheck && (reauthCheck.needsReauth || reauthCheck.reauthRequired)) {
-      // server insists on full reauth -> show full modal immediately
-      try { await showReauthModal({ context: 'reauth' }); } catch(e){ try { await initReauthModal({ show: true, context: 'reauth' }); } catch(_){} }
-      return;
-    }
+//     if (reauthCheck && (reauthCheck.needsReauth || reauthCheck.reauthRequired)) {
+//       // server insists on full reauth -> show full modal immediately
+//       try { await showReauthModal({ context: 'reauth' }); } catch(e){ try { await initReauthModal({ show: true, context: 'reauth' }); } catch(_){} }
+//       return;
+//     }
 
-    // Otherwise fall back to soft path (but still confirm client-side shouldReauth)
-    try {
-      const clientCheck = (typeof shouldReauth === 'function') ? await shouldReauth() : { needsReauth: true };
-      if (!clientCheck || !clientCheck.needsReauth) {
-        __reauthPromptShowing = false;
-        return;
-      }
-    } catch (e) {
-      console.warn('[showInactivityPrompt] shouldReauth threw; proceeding to show soft prompt', e);
-    }
+//     // Otherwise fall back to soft path (but still confirm client-side shouldReauth)
+//     try {
+//       const clientCheck = (typeof shouldReauth === 'function') ? await shouldReauth() : { needsReauth: true };
+//       if (!clientCheck || !clientCheck.needsReauth) {
+//         __reauthPromptShowing = false;
+//         return;
+//       }
+//     } catch (e) {
+//       console.warn('[showInactivityPrompt] shouldReauth threw; proceeding to show soft prompt', e);
+//     }
 
-    // show the soft "are you still there?" interaction (existing UI)
-    console.debug('[inactivity] showing soft reauth prompt (are you still there?)');
-    // keep wrapper call so if you renamed the function we call whichever exists
-    if (typeof showInactivityPromptUI === 'function') {
-      // optional custom UI handler
-      await showInactivityPromptUI();
-    } else {
-      // your existing small prompt function (name kept as showInactivityPrompt in file originally)
-      // If you don't have a separate UI, call the main modal as fallback.
-      try {
-        // If you have a dedicated small prompt function, it should be used here.
-        // Some projects reuse the full modal with a different context — adjust if necessary.
-        await (typeof presentSmallInactivityDialog === 'function' ? presentSmallInactivityDialog() : showReauthModal({ context: 'inactivity' }));
-      } catch (e) {
-        console.warn('[showInactivityPrompt] soft prompt display failed, falling back to showReauthModal', e);
-        try { await showReauthModal({ context: 'reauth' }); } catch (ignore) {}
-      }
-    }
-  } catch (err) {
-    console.error('[inactivity] prompt error', err);
-  } finally {
-    __reauthPromptShowing = false;
-  }
-}
+//     // show the soft "are you still there?" interaction (existing UI)
+//     console.debug('[inactivity] showing soft reauth prompt (are you still there?)');
+//     // keep wrapper call so if you renamed the function we call whichever exists
+//     if (typeof showInactivityPromptUI === 'function') {
+//       // optional custom UI handler
+//       await showInactivityPromptUI();
+//     } else {
+//       // your existing small prompt function (name kept as showInactivityPrompt in file originally)
+//       // If you don't have a separate UI, call the main modal as fallback.
+//       try {
+//         // If you have a dedicated small prompt function, it should be used here.
+//         // Some projects reuse the full modal with a different context — adjust if necessary.
+//         await (typeof presentSmallInactivityDialog === 'function' ? presentSmallInactivityDialog() : showReauthModal({ context: 'inactivity' }));
+//       } catch (e) {
+//         console.warn('[showInactivityPrompt] soft prompt display failed, falling back to showReauthModal', e);
+//         try { await showReauthModal({ context: 'reauth' }); } catch (ignore) {}
+//       }
+//     }
+//   } catch (err) {
+//     console.error('[inactivity] prompt error', err);
+//   } finally {
+//     __reauthPromptShowing = false;
+//   }
+// }
 
 
 
@@ -14883,127 +14975,127 @@ async function completeReauth() {
 
 
 
-  async function showInactivityPrompt() {
-  console.log('showInactivityPrompt called');
+//   async function showInactivityPrompt() {
+//   console.log('showInactivityPrompt called');
 
-  // If reauth modal already open, skip
-  if (typeof reauthModalOpen !== 'undefined' && reauthModalOpen) {
-    console.log('Inactivity prompt skipped: reauth modal active');
-    return;
-  }
+//   // If reauth modal already open, skip
+//   if (typeof reauthModalOpen !== 'undefined' && reauthModalOpen) {
+//     console.log('Inactivity prompt skipped: reauth modal active');
+//     return;
+//   }
 
-  // Live-check: skip if neither PIN nor biometrics enabled (covers "no pin added yet" case)
-  try {
-    const hasPin = localStorage.getItem('hasPin') === 'true';
-    const biometricsEnabled = localStorage.getItem('biometricsEnabled') === 'true';
-    if (!hasPin && !biometricsEnabled) {
-      console.log('Inactivity prompt skipped: no PIN or biometrics set (live check)');
-      return;
-    }
-  } catch (e) {
-    console.warn('showInactivityPrompt: error reading localStorage flags', e);
-  }
+//   // Live-check: skip if neither PIN nor biometrics enabled (covers "no pin added yet" case)
+//   try {
+//     const hasPin = localStorage.getItem('hasPin') === 'true';
+//     const biometricsEnabled = localStorage.getItem('biometricsEnabled') === 'true';
+//     if (!hasPin && !biometricsEnabled) {
+//       console.log('Inactivity prompt skipped: no PIN or biometrics set (live check)');
+//       return;
+//     }
+//   } catch (e) {
+//     console.warn('showInactivityPrompt: error reading localStorage flags', e);
+//   }
 
-  // Properly call shouldReauth() and check .needsReauth
-  let reauthCheck = null;
-  try {
-    reauthCheck = await shouldReauth();
-  } catch (e) {
-    console.warn('showInactivityPrompt: shouldReauth threw, aborting prompt', e);
-    return;
-  }
-  if (!reauthCheck || !reauthCheck.needsReauth) {
-    console.log('No reauth needed according to shouldReauth()');
-    return;
-  }
+//   // Properly call shouldReauth() and check .needsReauth
+//   let reauthCheck = null;
+//   try {
+//     reauthCheck = await shouldReauth();
+//   } catch (e) {
+//     console.warn('showInactivityPrompt: shouldReauth threw, aborting prompt', e);
+//     return;
+//   }
+//   if (!reauthCheck || !reauthCheck.needsReauth) {
+//     console.log('No reauth needed according to shouldReauth()');
+//     return;
+//   }
 
-  // Continue with UI logic
-  try {
-    cacheDomRefs();
-  } catch (e) {
-    console.warn('cacheDomRefs failed', e);
-  }
+//   // Continue with UI logic
+//   try {
+//     cacheDomRefs();
+//   } catch (e) {
+//     console.warn('cacheDomRefs failed', e);
+//   }
 
-  try {
-    if (!promptModal || !yesBtn) {
-      console.log('No promptModal or yesBtn, opening PIN reauth modal (inactivity)');
-      // NEW: Set persistent flag before showing modal
-      if (window.fgReauth && typeof window.fgReauth.requireReauth === 'function') {
-        try { await window.fgReauth.requireReauth('inactivity'); } catch (e) { console.warn('Failed to set reauth flag', e); }
-      }
-      // Use initReauthModal to force PIN view (do not auto-invoke biometrics)
-      try { await initReauthModal({ show: true, context: 'reauth' }); } catch (e) { console.error('initReauthModal failed', e); }
-      return;
-    }
+//   try {
+//     if (!promptModal || !yesBtn) {
+//       console.log('No promptModal or yesBtn, opening PIN reauth modal (inactivity)');
+//       // NEW: Set persistent flag before showing modal
+//       if (window.fgReauth && typeof window.fgReauth.requireReauth === 'function') {
+//         try { await window.fgReauth.requireReauth('inactivity'); } catch (e) { console.warn('Failed to set reauth flag', e); }
+//       }
+//       // Use initReauthModal to force PIN view (do not auto-invoke biometrics)
+//       try { await initReauthModal({ show: true, context: 'reauth' }); } catch (e) { console.error('initReauthModal failed', e); }
+//       return;
+//     }
 
-    if (!promptModal.classList.contains('hidden')) {
-      console.log('Prompt already shown');
-      return;
-    }
+//     if (!promptModal.classList.contains('hidden')) {
+//       console.log('Prompt already shown');
+//       return;
+//     }
 
-    promptModal.classList.remove('hidden');
-    promptModal.setAttribute('aria-modal', 'true');
-    promptModal.setAttribute('role', 'dialog');
-    try { yesBtn.focus(); } catch(e) {}
-    try { trapFocus(promptModal); } catch(e) {}
+//     promptModal.classList.remove('hidden');
+//     promptModal.setAttribute('aria-modal', 'true');
+//     promptModal.setAttribute('role', 'dialog');
+//     try { yesBtn.focus(); } catch(e) {}
+//     try { trapFocus(promptModal); } catch(e) {}
 
-    console.log('Prompt shown');
+//     console.log('Prompt shown');
 
-    let promptTimeout = null;
-    const yesHandler = () => {
-      console.log('Yes handler called');
-      try {
-        promptModal.classList.add('hidden');
-        if (promptTimeout) {
-          clearTimeout(promptTimeout);
-          promptTimeout = null;
-        }
-        try { yesBtn.removeEventListener('click', yesHandler); } catch (e) {}
-        resetIdleTimer();
-      } catch (e) {
-        console.error('Error in yesHandler:', e);
-      }
-    };
+//     let promptTimeout = null;
+//     const yesHandler = () => {
+//       console.log('Yes handler called');
+//       try {
+//         promptModal.classList.add('hidden');
+//         if (promptTimeout) {
+//           clearTimeout(promptTimeout);
+//           promptTimeout = null;
+//         }
+//         try { yesBtn.removeEventListener('click', yesHandler); } catch (e) {}
+//         resetIdleTimer();
+//       } catch (e) {
+//         console.error('Error in yesHandler:', e);
+//       }
+//     };
 
-    try {
-      yesBtn.addEventListener('click', yesHandler, { once: true });
-    } catch (e) {
-      console.error('Error adding yes click:', e);
-    }
+//     try {
+//       yesBtn.addEventListener('click', yesHandler, { once: true });
+//     } catch (e) {
+//       console.error('Error adding yes click:', e);
+//     }
 
-    // Escape key closes prompt (UX)
-    const escHandler = (ev) => {
-      if (ev.key === 'Escape') {
-        console.log('Escape pressed in prompt');
-        yesHandler();
-      }
-    };
-    document.addEventListener('keydown', escHandler, { once: true });
+//     // Escape key closes prompt (UX)
+//     const escHandler = (ev) => {
+//       if (ev.key === 'Escape') {
+//         console.log('Escape pressed in prompt');
+//         yesHandler();
+//       }
+//     };
+//     document.addEventListener('keydown', escHandler, { once: true });
 
-    if (typeof PROMPT_AUTO_CLOSE !== 'undefined' && PROMPT_AUTO_CLOSE) {
-      promptTimeout = setTimeout(async () => {
-        console.log('Prompt auto-close timeout');
-        try {
-          if (!promptModal.classList.contains('hidden')) {
-            promptModal.classList.add('hidden');
-            try { yesBtn.removeEventListener('click', yesHandler); } catch (e) {}
-            document.removeEventListener('keydown', escHandler);
-            // NEW: Set persistent flag on auto-close (lock)
-            if (window.fgReauth && typeof window.fgReauth.requireReauth === 'function') {
-              try { await window.fgReauth.requireReauth('inactivity'); } catch (e) { console.warn('Failed to set reauth flag', e); }
-            }
-            // Open PIN modal on inactivity auto-close (prevent immediate biometric)
-            try { await initReauthModal({ show: true, context: 'reauth' }); } catch (e) { console.error('initReauthModal failed (auto-close)', e); }
-          }
-        } catch (e) {
-          console.error('Error during prompt auto-close flow:', e);
-        }
-      }, typeof PROMPT_TIMEOUT !== 'undefined' ? PROMPT_TIMEOUT : 5000);
-    }
-  } catch (e) {
-    console.error('showInactivityPrompt general error:', e);
-  }
-}
+//     if (typeof PROMPT_AUTO_CLOSE !== 'undefined' && PROMPT_AUTO_CLOSE) {
+//       promptTimeout = setTimeout(async () => {
+//         console.log('Prompt auto-close timeout');
+//         try {
+//           if (!promptModal.classList.contains('hidden')) {
+//             promptModal.classList.add('hidden');
+//             try { yesBtn.removeEventListener('click', yesHandler); } catch (e) {}
+//             document.removeEventListener('keydown', escHandler);
+//             // NEW: Set persistent flag on auto-close (lock)
+//             if (window.fgReauth && typeof window.fgReauth.requireReauth === 'function') {
+//               try { await window.fgReauth.requireReauth('inactivity'); } catch (e) { console.warn('Failed to set reauth flag', e); }
+//             }
+//             // Open PIN modal on inactivity auto-close (prevent immediate biometric)
+//             try { await initReauthModal({ show: true, context: 'reauth' }); } catch (e) { console.error('initReauthModal failed (auto-close)', e); }
+//           }
+//         } catch (e) {
+//           console.error('Error during prompt auto-close flow:', e);
+//         }
+//       }, typeof PROMPT_TIMEOUT !== 'undefined' ? PROMPT_TIMEOUT : 5000);
+//     }
+//   } catch (e) {
+//     console.error('showInactivityPrompt general error:', e);
+//   }
+// }
 
 
 
