@@ -3988,82 +3988,82 @@ function restoreEverything() {
       }
     }
 
-    // 3. Scroll positions
-    if (state.scrollPositions) {
-      window.scrollTo(0, state.scrollPositions.dashboard);
-      document.querySelector('.plans-row')?.scrollTo(state.scrollPositions.plansRow, 0);
-      document.getElementById('allPlansModalContent')?.scrollTo(0, state.scrollPositions.allPlansModal || 0);
-      console.log('[RestoreEverything] ✓ Scroll positions restored');
-    }
+    // // 3. Scroll positions
+    // if (state.scrollPositions) {
+    //   window.scrollTo(0, state.scrollPositions.dashboard);
+    //   document.querySelector('.plans-row')?.scrollTo(state.scrollPositions.plansRow, 0);
+    //   document.getElementById('allPlansModalContent')?.scrollTo(0, state.scrollPositions.allPlansModal || 0);
+    //   console.log('[RestoreEverything] ✓ Scroll positions restored');
+    // }
 
     // 4. MODALS — THE MOST IMPORTANT PART
-    if (state.openModal) {
-      console.log('[RestoreEverything] Found open modal to restore:', state.openModal);
+//     if (state.openModal) {
+//       console.log('[RestoreEverything] Found open modal to restore:', state.openModal);
 
-      setTimeout(() => {
-        console.log('[RestoreEverything] Attempting to re-open modal:', state.openModal);
+//       setTimeout(() => {
+//         console.log('[RestoreEverything] Attempting to re-open modal:', state.openModal);
 
-        // CRITICAL: Use ModalManager if it exists (even if in another file)
-        if (typeof window.ModalManager !== 'undefined' && window.ModalManager?.openModal) {
-          console.log('[RestoreEverything] ✓ Using ModalManager.openModal()');
-          window.ModalManager.openModal(state.openModal, true); // skipHistory = true
-        } 
-        // Fallback if ModalManager not loaded yet
-        else if (document.getElementById(state.openModal)) {
-          console.log('[RestoreEverything] ModalManager not ready — using direct DOM method');
-          const modal = document.getElementById(state.openModal);
-          modal.classList.remove('hidden');
-          modal.classList.add('active');
-          modal.style.display = 'flex';
-          modal.removeAttribute('aria-hidden');
-          modal.removeAttribute('inert');
-        } else {
-          console.error('[RestoreEverything] ✗ Modal element not found in DOM:', state.openModal);
-        }
-        if (state.openModal) {
-  console.log('[RestoreEverything] Found open modal to restore:', state.openModal);
+//         // CRITICAL: Use ModalManager if it exists (even if in another file)
+//         if (typeof window.ModalManager !== 'undefined' && window.ModalManager?.openModal) {
+//           console.log('[RestoreEverything] ✓ Using ModalManager.openModal()');
+//           window.ModalManager.openModal(state.openModal, true); // skipHistory = true
+//         } 
+//         // Fallback if ModalManager not loaded yet
+//         else if (document.getElementById(state.openModal)) {
+//           console.log('[RestoreEverything] ModalManager not ready — using direct DOM method');
+//           const modal = document.getElementById(state.openModal);
+//           modal.classList.remove('hidden');
+//           modal.classList.add('active');
+//           modal.style.display = 'flex';
+//           modal.removeAttribute('aria-hidden');
+//           modal.removeAttribute('inert');
+//         } else {
+//           console.error('[RestoreEverything] ✗ Modal element not found in DOM:', state.openModal);
+//         }
+//         if (state.openModal) {
+//   console.log('[RestoreEverything] Found open modal to restore:', state.openModal);
 
-  setTimeout(() => {
-    const modal = document.getElementById(state.openModal);
-    if (!modal) {
-      console.error('[RestoreEverything] Modal element not found:', state.openModal);
-      return;
-    }
+//   setTimeout(() => {
+//     const modal = document.getElementById(state.openModal);
+//     if (!modal) {
+//       console.error('[RestoreEverything] Modal element not found:', state.openModal);
+//       return;
+//     }
 
-    // FORCE EVERYTHING NEEDED FOR ANIMATION
-    modal.classList.remove('hidden');
-    modal.style.display = modal.dataset.hasPullHandle === 'true' ? 'block' : 'flex';  // ← CRITICAL
-    modal.style.opacity = '0';
-    modal.style.visibility = 'visible';
-    modal.style.transform = modal.id === 'allPlansModal' ? 'translateY(100%)' : 'translateY(20px)';
-    modal.style.zIndex = '10010'; // high enough
-    modal.removeAttribute('aria-hidden');
-    modal.removeAttribute('inert');
+//     // FORCE EVERYTHING NEEDED FOR ANIMATION
+//     modal.classList.remove('hidden');
+//     modal.style.display = modal.dataset.hasPullHandle === 'true' ? 'block' : 'flex';  // ← CRITICAL
+//     modal.style.opacity = '0';
+//     modal.style.visibility = 'visible';
+//     modal.style.transform = modal.id === 'allPlansModal' ? 'translateY(100%)' : 'translateY(20px)';
+//     modal.style.zIndex = '10010'; // high enough
+//     modal.removeAttribute('aria-hidden');
+//     modal.removeAttribute('inert');
 
-    console.log('[RestoreEverything] Forced starting state for animation');
+//     console.log('[RestoreEverything] Forced starting state for animation');
 
-    // Now trigger the real openModal (which has the animation logic)
-    if (window.ModalManager?.openModal) {
-      window.ModalManager.openModal(state.openModal, true);
-      console.log('[RestoreEverything] Called ModalManager.openModal()');
-    }
+//     // Now trigger the real openModal (which has the animation logic)
+//     if (window.ModalManager?.openModal) {
+//       window.ModalManager.openModal(state.openModal, true);
+//       console.log('[RestoreEverything] Called ModalManager.openModal()');
+//     }
 
-    // Special case for checkout
-    if (state.openModal === 'checkoutModal') {
-      renderCheckoutModal();
-    }
-  }, 100);
-}
+//     // Special case for checkout
+//     if (state.openModal === 'checkoutModal') {
+//       renderCheckoutModal();
+//     }
+//   }, 100);
+// }
 
-        // Special case for checkout modal
-        if (state.openModal === 'checkoutModal') {
-          console.log('[RestoreEverything] Rendering checkout modal content');
-          renderCheckoutModal();
-        }
-      }, 200); // Slightly longer delay to ensure ModalManager is ready
-    } else {
-      console.log('[RestoreEverything] No modal was open — nothing to re-open');
-    }
+//         // Special case for checkout modal
+//         if (state.openModal === 'checkoutModal') {
+//           console.log('[RestoreEverything] Rendering checkout modal content');
+//           renderCheckoutModal();
+//         }
+//       }, 200); // Slightly longer delay to ensure ModalManager is ready
+//     } else {
+//       console.log('[RestoreEverything] No modal was open — nothing to re-open');
+//     }
 
     // Cleanup
     sessionStorage.removeItem('__fg_app_state_v2');
@@ -13592,223 +13592,197 @@ document.addEventListener('DOMContentLoaded', () => {
       console.error('Error in resetReauthInputs:', e);
     }
   }
+/* ============================
+   Inactivity + Reauth (Cleaned)
+   Single, de-duplicated file
+   ============================ */
 
-  /* -----------------------
-   Inactivity logic (Mobile + Desktop)
-   ----------------------- */
-let idleTimeout = null;
-const PROMPT_TIMEOUT = 5000;
-const PROMPT_AUTO_CLOSE = true;
-let lastActive = Number(localStorage.getItem('lastActive') || Date.now());
-let reauthModalOpen = false; // Track if reauth is open to pause idle
-try { localStorage.setItem('lastActive', String(lastActive)); } catch (e) {}
+(() => {
+  // ---------- Config & state ----------
+  const SOFT_IDLE_MS = 1 * 60 * 1000; // 1 minute while visible
+  const HARD_IDLE_MS = 60 * 60 * 1000; // 1 hour server-enforced when hidden
+  const PROMPT_TIMEOUT = 5000;
+  const PROMPT_AUTO_CLOSE = true;
 
-let lastResetCall = 0;
-// ⚡ Loosen debounce for mobile — 500ms safer
-const RESET_DEBOUNCE_MS = /Mobi|Android/i.test(navigator.userAgent) ? 500 : 150;
-let __inactivitySetupDone = false;
+  const RESET_DEBOUNCE_MS = /Mobi|Android/i.test(navigator.userAgent) ? 500 : 150;
+  const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart','touchend','touchmove','pointerdown'];
 
-// Reset timer
-function resetIdleTimer() {
-  const now = Date.now();
-  if (now - lastResetCall < RESET_DEBOUNCE_MS) return;
-  lastResetCall = now;
+  const FG_EXPECTED_KEY = 'fg_expected_reauth_at';
+  const FG_REAUTH_FLAG = 'fg_reauth_required_v1'; // cross-tab canonical key
 
-  lastActive = now;
+  let idleTimeout = null;
+  let lastActive = Number(localStorage.getItem('lastActive') || Date.now());
+  let lastResetCall = 0;
+  let __inactivitySetupDone = false;
+  let __reauthPromptShowing = false;
+
+  // Keep cross-scope modal flag on window for compatibility with other code paths
+  window.__reauthModalOpen = window.__reauthModalOpen || false;
+
   try { localStorage.setItem('lastActive', String(lastActive)); } catch (e) {}
-  if (idleTimeout) clearTimeout(idleTimeout);
 
-  if (!reauthModalOpen) {
-    idleTimeout = setTimeout(() => {
-      showInactivityPrompt();
-    }, IDLE_TIME);
+  // ---------- Local helper functions for expected reauth ----------
+  function setExpectedReauthAt(ts) {
+    try { localStorage.setItem(FG_EXPECTED_KEY, String(ts)); } catch (e) {}
   }
-}
+  function clearExpectedReauthAt() {
+    try { localStorage.removeItem(FG_EXPECTED_KEY); } catch (e) {}
+  }
+  function getExpectedReauthAt() {
+    try { return Number(localStorage.getItem(FG_EXPECTED_KEY) || 0); } catch (e) { return 0; }
+  }
+  function hasCanonicalLocalFlag() {
+    try { return !!localStorage.getItem(FG_REAUTH_FLAG); } catch (e) { return false; }
+  }
 
-// Full replacement for shouldReauth (unchanged from yours)
-// Local-first check for fast rendering
-function shouldReauthLocal(context = 'reauth') {
-  const storedHasPin = String(localStorage.getItem('hasPin') || '').toLowerCase() === 'true';
-  const storedBiometricsEnabled = String(localStorage.getItem('biometricsEnabled') || '').toLowerCase() === 'true';
-  const storedBioLogin = String(localStorage.getItem('biometricForLogin') || '').toLowerCase() === 'true';
-  const storedBioTx = String(localStorage.getItem('biometricForTx') || '').toLowerCase() === 'true';
-  const storedCredentialId = localStorage.getItem('credentialId') || '';
+  // ---------- shouldReauth (local-fast + server fallback) ----------
+  function shouldReauthLocal(context = 'reauth') {
+    const storedHasPin = String(localStorage.getItem('hasPin') || '').toLowerCase() === 'true';
+    const storedBiometricsEnabled = String(localStorage.getItem('biometricsEnabled') || '').toLowerCase() === 'true';
+    const storedBioLogin = String(localStorage.getItem('biometricForLogin') || '').toLowerCase() === 'true';
+    const storedBioTx = String(localStorage.getItem('biometricForTx') || '').toLowerCase() === 'true';
+    const storedCredentialId = localStorage.getItem('credentialId') || '';
 
-  const webAuthnSupported = typeof window !== 'undefined' && ('PublicKeyCredential' in window);
-  const hasBiometricFlag = storedBiometricsEnabled && webAuthnSupported && storedCredentialId.length > 0;
+    const webAuthnSupported = typeof window !== 'undefined' && ('PublicKeyCredential' in window);
+    const hasBiometricFlag = storedBiometricsEnabled && webAuthnSupported && storedCredentialId.length > 0;
 
-  const isBioApplicable = hasBiometricFlag && (
-    (context === 'login' && storedBioLogin) ||
-    (context === 'transaction' && storedBioTx) ||
-    (context === 'reauth' && (storedBioLogin || storedBioTx))
-  );
+    const isBioApplicable = hasBiometricFlag && (
+      (context === 'login' && storedBioLogin) ||
+      (context === 'transaction' && storedBioTx) ||
+      (context === 'reauth' && (storedBioLogin || storedBioTx))
+    );
 
-  const hasPin = storedHasPin;
-  const needsReauth = Boolean(hasPin || isBioApplicable);
-  const method = isBioApplicable ? 'biometric' : (hasPin ? 'pin' : null);
+    const hasPin = storedHasPin;
+    const needsReauth = Boolean(hasPin || isBioApplicable);
+    const method = isBioApplicable ? 'biometric' : (hasPin ? 'pin' : null);
 
-  return { needsReauth, method };
-}
-
-// Original async shouldReauth kept for server sync/fallback
-async function shouldReauth(context = 'reauth') {
-  const localCheck = shouldReauthLocal(context);
-  if (localCheck.needsReauth) return localCheck; // return immediately if localStorage triggers reauth
-
-  try {
-    const session = await safeCall(getSession);
-    const sessionHasPin = !!(session && session.user && (session.user.hasPin || session.user.pin));
-    const hasPin = sessionHasPin || localCheck.method === 'pin';
-    const needsReauth = Boolean(hasPin || localCheck.method === 'biometric');
-    const method = localCheck.method === 'biometric' ? 'biometric' : (hasPin ? 'pin' : null);
     return { needsReauth, method };
-  } catch (err) {
-    return localCheck; // fallback to local-only decision if server fails
   }
-}
 
-window.shouldReauth = window.shouldReauth || shouldReauth; // expose globally if needed
+  async function shouldReauth(context = 'reauth') {
+    const localCheck = shouldReauthLocal(context);
+    if (localCheck.needsReauth) return localCheck; // fast path
 
-
-// === Inactivity helpers (full drop-in update) ===
-
-// thresholds (you already chose 1min / 2min)
-const SOFT_IDLE_MS = 1 * 60 * 1000; // 1 minute while visible
-const HARD_IDLE_MS = 60 * 60 * 1000; // 1 hour server-enforced when hidden
-
-// local-first keys & helpers
-const FG_EXPECTED_KEY = 'fg_expected_reauth_at';
-const FG_REAUTH_FLAG = 'fg_reauth_required_v1'; // cross-tab canonical key
-
-function setExpectedReauthAt(ts) {
-  try { localStorage.setItem(FG_EXPECTED_KEY, String(ts)); } catch (e) {}
-}
-function clearExpectedReauthAt() {
-  try { localStorage.removeItem(FG_EXPECTED_KEY); } catch (e) {}
-}
-function getExpectedReauthAt() {
-  try { return Number(localStorage.getItem(FG_EXPECTED_KEY) || 0); } catch (e) { return 0; }
-}
-function hasCanonicalLocalFlag() {
-  try { return !!localStorage.getItem(FG_REAUTH_FLAG); } catch (e) { return false; }
-}
-
-// state
-
-
-try { localStorage.setItem('lastActive', String(lastActive)); } catch (e) {}
-
-let __reauthPromptShowing = false;
-const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart','touchend','touchmove','pointerdown'];
-
-// Helper: prefer existing shouldReauth(), fallback to /reauth/status
-async function checkServerReauthStatus() {
-  try {
-    if (typeof shouldReauth === 'function') {
-      try {
-        const r = await shouldReauth();
-        if (r) return r;
-      } catch (e) {
-        console.warn('[checkServerReauthStatus] shouldReauth() threw, falling back', e);
-      }
-    }
-
-    const url = (window.__SEC_API_BASE || (typeof API_BASE !== 'undefined' ? API_BASE : '')) + '/reauth/status';
-    const res = await fetch(url, { method: 'GET', credentials: 'include', headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' } });
-    if (!res.ok) return { needsReauth: false };
-    const j = await res.json().catch(() => ({ needsReauth: false }));
-    return j || { needsReauth: false };
-  } catch (e) {
-    console.warn('[checkServerReauthStatus] network error', e);
-    return { needsReauth: false };
-  }
-}
-
-/**
- * resetIdleTimer()
- * - Updates lastActive and schedules the soft (1m) prompt only when visible
- * - Avoids scheduling while a reauth modal is open
- */
-function resetIdleTimer() {
-  try {
-    const now = Date.now();
-    lastActive = now;
-    try { localStorage.setItem('lastActive', String(lastActive)); } catch (e) {}
-
-    if (idleTimeout) { clearTimeout(idleTimeout); idleTimeout = null; }
-
-    scheduleHardIdleCheck(); // schedule hard idle immediately
-
-    // existing soft idle scheduling (1min) remains
-    const modalOpen = !!window.__reauthModalOpen;
-    if (!modalOpen) {
-      idleTimeout = setTimeout(async () => {
-        if (document.visibilityState === 'visible') {
-          const allowed = shouldReauthLocal('reauth').needsReauth;
-          if (allowed) {
-            try { await showInactivityPrompt(); } catch (e) { await showReauthModal('reauth'); }
-          }
-        }
-      }, SOFT_IDLE_MS);
-    }
-  } catch (err) { console.error('[inactivity] resetIdleTimer error', err); }
-}
-
-
-/**
- * showInactivityPrompt()
- * - Debounced small "are you still there?" flow that verifies shouldReauth() then opens reauth UI
- */
-async function showInactivityPrompt() {
-  if (__reauthPromptShowing) return;
-  __reauthPromptShowing = true;
-
-  try {
-    // Double-check server authority before showing soft prompt (if you want)
-    let reauthCheck = null;
-    try { reauthCheck = await checkServerReauthStatus(); } catch(e) { console.warn('[showInactivityPrompt] server check failed', e); reauthCheck = null; }
-
-    if (reauthCheck && (reauthCheck.needsReauth || reauthCheck.reauthRequired)) {
-      // server insists on full reauth -> show full modal immediately
-      try { await showReauthModal({ context: 'reauth' }); } catch(e){ try { await initReauthModal({ show: true, context: 'reauth' }); } catch(_){} }
-      return;
-    }
-
-    // Otherwise fall back to soft path (but still confirm client-side shouldReauth)
     try {
-      const clientCheck = (typeof shouldReauth === 'function') ? await shouldReauth() : { needsReauth: true };
-      if (!clientCheck || !clientCheck.needsReauth) {
-        __reauthPromptShowing = false;
+      // Prefer caller-provided shouldReauth override, otherwise call server
+      const session = await safeCall(getSession);
+      const sessionHasPin = !!(session && session.user && (session.user.hasPin || session.user.pin));
+      const hasPin = sessionHasPin || localCheck.method === 'pin';
+      const needsReauth = Boolean(hasPin || localCheck.method === 'biometric');
+      const method = localCheck.method === 'biometric' ? 'biometric' : (hasPin ? 'pin' : null);
+      return { needsReauth, method };
+    } catch (err) {
+      // fallback to local-only decision
+      return localCheck;
+    }
+  }
+  // expose if not present
+  window.shouldReauth = window.shouldReauth || shouldReauth;
+
+  // ---------- Server status helper ----------
+  async function checkServerReauthStatus() {
+    try {
+      if (typeof shouldReauth === 'function') {
+        try {
+          const r = await shouldReauth();
+          if (r) return r;
+        } catch (e) {
+          console.warn('[checkServerReauthStatus] shouldReauth() threw, falling back', e);
+        }
+      }
+
+      const url = (window.__SEC_API_BASE || (typeof API_BASE !== 'undefined' ? API_BASE : '')) + '/reauth/status';
+      const res = await fetch(url, { method: 'GET', credentials: 'include', headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' } });
+      if (!res.ok) return { needsReauth: false };
+      const j = await res.json().catch(() => ({ needsReauth: false }));
+      return j || { needsReauth: false };
+    } catch (e) {
+      console.warn('[checkServerReauthStatus] network error', e);
+      return { needsReauth: false };
+    }
+  }
+
+  // ---------- resetIdleTimer (single implementation) ----------
+  function resetIdleTimer() {
+    try {
+      const now = Date.now();
+      if (now - lastResetCall < RESET_DEBOUNCE_MS) return;
+      lastResetCall = now;
+
+      lastActive = now;
+      try { localStorage.setItem('lastActive', String(lastActive)); } catch (e) {}
+
+      if (idleTimeout) { clearTimeout(idleTimeout); idleTimeout = null; }
+
+      // schedule hard idle prediction
+      setExpectedReauthAt(Date.now() + HARD_IDLE_MS);
+
+      const modalOpen = !!window.__reauthModalOpen;
+      if (!modalOpen) {
+        idleTimeout = setTimeout(async () => {
+          try {
+            if (document.visibilityState === 'visible') {
+              const allowed = shouldReauthLocal('reauth').needsReauth;
+              if (allowed) {
+                try { await showInactivityPrompt(); } catch (e) { await showReauthModal('reauth'); }
+              }
+            }
+          } catch (e) {
+            console.error('[inactivity] idleTimeout handler error', e);
+          }
+        }, SOFT_IDLE_MS);
+      }
+    } catch (err) {
+      console.error('[inactivity] resetIdleTimer error', err);
+    }
+  }
+
+  // ---------- showInactivityPrompt (single implementation) ----------
+  async function showInactivityPrompt() {
+    if (__reauthPromptShowing) return;
+    __reauthPromptShowing = true;
+
+    try {
+      // server sanity-check
+      let reauthCheck = null;
+      try { reauthCheck = await checkServerReauthStatus(); } catch(e) { console.warn('[showInactivityPrompt] server check failed', e); reauthCheck = null; }
+
+      if (reauthCheck && (reauthCheck.needsReauth || reauthCheck.reauthRequired)) {
+        try { await showReauthModal({ context: 'reauth' }); } catch(e){ try { await initReauthModal({ show: true, context: 'reauth' }); } catch(_){} }
         return;
       }
-    } catch (e) {
-      console.warn('[showInactivityPrompt] shouldReauth threw; proceeding to show soft prompt', e);
-    }
 
-    // show the soft "are you still there?" interaction (existing UI)
-    console.debug('[inactivity] showing soft reauth prompt (are you still there?)');
-    if (typeof showInactivityPromptUI === 'function') {
-      await showInactivityPromptUI(); // optional custom UI
-    } else {
+      // client-side short-circuit
       try {
-        await (typeof presentSmallInactivityDialog === 'function' ? presentSmallInactivityDialog() : showReauthModal({ context: 'inactivity' }));
+        const clientCheck = (typeof shouldReauth === 'function') ? await shouldReauth() : { needsReauth: true };
+        if (!clientCheck || !clientCheck.needsReauth) {
+          __reauthPromptShowing = false;
+          return;
+        }
       } catch (e) {
-        console.warn('[showInactivityPrompt] soft prompt display failed, falling back to showReauthModal', e);
-        try { await showReauthModal({ context: 'reauth' }); } catch (ignore) {}
+        console.warn('[showInactivityPrompt] shouldReauth threw; proceeding to show soft prompt', e);
       }
-    }
-  } catch (err) {
-    console.error('[inactivity] prompt error', err);
-  } finally {
-    __reauthPromptShowing = false;
-  }
-}
 
-/**
- * setupInactivity()
- * - Attaches interaction events and one visibility handler (local-first hard check)
- */
-async function setupInactivity() {
+      console.debug('[inactivity] showing soft reauth prompt (are you still there?)');
+      if (typeof showInactivityPromptUI === 'function') {
+        await showInactivityPromptUI();
+      } else {
+        try {
+          await (typeof presentSmallInactivityDialog === 'function' ? presentSmallInactivityDialog() : showReauthModal({ context: 'inactivity' }));
+        } catch (e) {
+          console.warn('[showInactivityPrompt] soft prompt display failed, falling back to showReauthModal', e);
+          try { await showReauthModal({ context: 'reauth' }); } catch (ignore) {}
+        }
+      }
+    } catch (err) {
+      console.error('[inactivity] prompt error', err);
+    } finally {
+      __reauthPromptShowing = false;
+    }
+  }
+
+  // ---------- setupInactivity (single implementation) ----------
+  async function setupInactivity() {
   try {
     console.debug('[setupInactivity] called');
 
@@ -13848,75 +13822,94 @@ async function setupInactivity() {
         if (now - lastVisCheck < 400) return; // small debounce
         lastVisCheck = now;
 
+        // -------- WHEN TAB GOES HIDDEN --------
         if (document.visibilityState === 'hidden') {
-          // store when we were backgrounded and set predicted reauth timestamp
           try {
             const nowTs = Date.now();
             localStorage.setItem('lastHiddenAt', String(nowTs));
-            // set expected reauth time locally so wake-check is instant
             setExpectedReauthAt(nowTs + HARD_IDLE_MS);
           } catch (e) {
             console.error('Error setting lastHiddenAt / expected reauth:', e);
           }
-          // cancel soft timer — we don't want soft prompts while backgrounded
           if (idleTimeout) { clearTimeout(idleTimeout); idleTimeout = null; }
           return;
         }
 
-        // === visible path (local-first) ===
-        // 1) If canonical local cross-tab/server flag exists -> authoritative reauth
+        // -------- WHEN TAB BECOMES VISIBLE --------
+
+        // 1. Canonical flag → immediate forced reauth
         if (hasCanonicalLocalFlag()) {
-          try { await showReauthModal('reauth'); } catch (e) { try { await initReauthModal({ show: true, context: 'reauth' }); } catch(_){} }
+          try { await showReauthModal('reauth'); }
+          catch (e) { try { await initReauthModal({ show: true, context: 'reauth' }); } catch(_){} }
           return;
         }
 
-        // 2) Local expected reauth (fast, no network)
+        // 2. Expected reauth time reached (HARD idle logic)
         const expected = getExpectedReauthAt();
         if (expected && Date.now() >= expected) {
-          try { await showReauthModal('reauth'); } catch (e) { try { await initReauthModal({ show: true, context: 'reauth' }); } catch(_){} }
+          try { await showReauthModal('reauth'); }
+          catch (e) { try { await initReauthModal({ show: true, context: 'reauth' }); } catch(_){} }
           return;
         }
 
-        // 3) Fallback - compute idleSince and if >= HARD then consult server (cheap fallback)
         const lastActiveStored = Number(localStorage.getItem('lastActive') || 0);
         const lastHidden = Number(localStorage.getItem('lastHiddenAt') || 0);
+
+        // ---------- 🟢 NEW: Resume Guard Fix ----------
+        const msSinceHidden = lastHidden ? (Date.now() - lastHidden) : 0;
+
+        // If user resumed from minimize but not long enough for HARD idle,
+        // DO NOT trigger soft idle; restart soft timer instead.
+        if (lastHidden && msSinceHidden < HARD_IDLE_MS) {
+          try {
+            lastActive = Date.now();
+            try { localStorage.setItem('lastActive', String(lastActive)); } catch (e) {}
+          } catch (e) {
+            console.warn('[setupInactivity] visibilityHandler: failed to update lastActive on resume', e);
+          }
+
+          resetIdleTimer();
+          return;
+        }
+        // ---------- END FIX ----------
+
         const idleSince = Math.max(Date.now() - lastActiveStored, Date.now() - lastHidden);
 
+        // 3. HARD idle fallback (server authority)
         if (idleSince >= HARD_IDLE_MS) {
-          // we don't have a predicted key but local suggests hard idle -> fallback to server check
           try {
             const status = await checkServerReauthStatus();
             if (status && (status.needsReauth || status.reauthRequired)) {
-              try { await showReauthModal('reauth'); } catch (e) { try { await initReauthModal({ show: true, context: 'reauth' }); } catch(_){} }
+              try { await showReauthModal('reauth'); }
+              catch (e) { try { await initReauthModal({ show: true, context: 'reauth' }); } catch(_){} }
               return;
             }
-            // server says no forced reauth -> continue to soft path
           } catch (e) {
             console.warn('[setupInactivity] server check failed and local predicted hard idle present; showing reauth modal as safer fallback', e);
-            try { await showReauthModal('reauth'); } catch (ee) { try { await initReauthModal({ show: true, context: 'reauth' }); } catch(_){} }
+            try { await showReauthModal('reauth'); }
+            catch (ee) { try { await initReauthModal({ show: true, context: 'reauth' }); } catch(_){} }
             return;
           }
         }
 
-        // 4) soft path: if idle >= SOFT -> show soft prompt; otherwise reset timer
+        // 4. SOFT idle prompt (will NOT run on resume anymore)
         if (idleSince >= SOFT_IDLE_MS) {
-          try { await showInactivityPrompt(); } catch (e) { try { await showReauthModal('reauth'); } catch(e){} }
+          try { await showInactivityPrompt(); }
+          catch (e) { try { await showReauthModal({ context: 'reauth' }); } catch(e){} }
           return;
         }
 
+        // 5. Reset timer normally
         resetIdleTimer();
       } catch (e) {
         console.warn('[setupInactivity] visibilityHandler error', e);
       }
     };
 
-    // store ref so duplicates can be removed safely later
     window.__fg_inactivity_visibility_handler_ref = visibilityHandler;
     document.addEventListener('visibilitychange', window.__fg_inactivity_visibility_handler_ref, { passive: true });
-    // pageshow helps for bfcache restores on some mobile browsers
     try { window.addEventListener('pageshow', visibilityHandler, { passive: true }); } catch (e) {}
 
-    // ensure lastActive exists and start timer
     try {
       if (!localStorage.getItem('lastActive')) localStorage.setItem('lastActive', String(Date.now()));
     } catch (e) {}
@@ -13929,60 +13922,21 @@ async function setupInactivity() {
 }
 
 
-/**
- * showInactivityPrompt()
- * - Debounced small "are you still there?" flow that verifies shouldReauth() then opens reauth UI
- */
-async function showInactivityPrompt() {
-  if (__reauthPromptShowing) return;
-  __reauthPromptShowing = true;
+  // ---------- Public init: automatically run setup ----------
+  // If you prefer manual start, comment the next line and call setupInactivity() yourself.
+  try { setupInactivity(); } catch (e) { console.error('[inactivity] failed to start setup', e); }
 
-  try {
-    // Double-check server authority before showing soft prompt
-    let reauthCheck = null;
-    try { reauthCheck = await checkServerReauthStatus(); } catch(e) { console.warn('[showInactivityPrompt] server check failed', e); reauthCheck = null; }
+  // Expose some utilities for debugging/integration
+  window.__fg_inactivity = {
+    resetIdleTimer,
+    setupInactivity,
+    setExpectedReauthAt,
+    clearExpectedReauthAt,
+    getExpectedReauthAt,
+    hasCanonicalLocalFlag
+  };
+})();
 
-    if (reauthCheck && (reauthCheck.needsReauth || reauthCheck.reauthRequired)) {
-      // server insists on full reauth -> show full modal immediately
-      try { await showReauthModal({ context: 'reauth' }); } catch(e){ try { await initReauthModal({ show: true, context: 'reauth' }); } catch(_){} }
-      return;
-    }
-
-    // Otherwise fall back to soft path (but still confirm client-side shouldReauth)
-    try {
-      const clientCheck = (typeof shouldReauth === 'function') ? await shouldReauth() : { needsReauth: true };
-      if (!clientCheck || !clientCheck.needsReauth) {
-        __reauthPromptShowing = false;
-        return;
-      }
-    } catch (e) {
-      console.warn('[showInactivityPrompt] shouldReauth threw; proceeding to show soft prompt', e);
-    }
-
-    // show the soft "are you still there?" interaction (existing UI)
-    console.debug('[inactivity] showing soft reauth prompt (are you still there?)');
-    // keep wrapper call so if you renamed the function we call whichever exists
-    if (typeof showInactivityPromptUI === 'function') {
-      // optional custom UI handler
-      await showInactivityPromptUI();
-    } else {
-      // your existing small prompt function (name kept as showInactivityPrompt in file originally)
-      // If you don't have a separate UI, call the main modal as fallback.
-      try {
-        // If you have a dedicated small prompt function, it should be used here.
-        // Some projects reuse the full modal with a different context — adjust if necessary.
-        await (typeof presentSmallInactivityDialog === 'function' ? presentSmallInactivityDialog() : showReauthModal({ context: 'inactivity' }));
-      } catch (e) {
-        console.warn('[showInactivityPrompt] soft prompt display failed, falling back to showReauthModal', e);
-        try { await showReauthModal({ context: 'reauth' }); } catch (ignore) {}
-      }
-    }
-  } catch (err) {
-    console.error('[inactivity] prompt error', err);
-  } finally {
-    __reauthPromptShowing = false;
-  }
-}
 
 
 
