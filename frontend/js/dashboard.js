@@ -13674,7 +13674,7 @@ window.shouldReauth = window.shouldReauth || shouldReauth; // expose globally if
 
 // thresholds (you already chose 1min / 2min)
 const SOFT_IDLE_MS = 1 * 60 * 1000; // 1 minute while visible
-const HARD_IDLE_MS = 2 * 60 * 1000; // 2 minutes server-enforced when hidden
+const HARD_IDLE_MS = 60 * 60 * 1000; // 1 hour server-enforced when hidden
 
 // local-first keys & helpers
 const FG_EXPECTED_KEY = 'fg_expected_reauth_at';
