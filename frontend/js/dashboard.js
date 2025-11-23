@@ -14589,7 +14589,7 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
     console.log('[REAUTH-LOCK] Lock received from another tab');
     
     // Show reauth modal if not already showing
-    if (!isReauthModalVisibleNew()) {
+    if (!isReauthModalVisible()) {
       try {
         await showReauthModalSafe({ 
           context: 'reauth', 
@@ -14608,7 +14608,7 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
     console.log('[REAUTH-LOCK] Unlock received from another tab');
     
     // Hide reauth modal if showing
-    if (isReauthModalVisibleNew()) {
+    if (isReauthModalVisible()) {
       try {
         hideReauthModalSafe();
       } catch (e) {
@@ -14686,7 +14686,7 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
     
     const lock = getReauthLock();
     
-    if (lock && lock.locked && !isReauthModalVisibleNew()) {
+    if (lock && lock.locked && !isReauthModalVisible()) {
       console.log('[REAUTH-LOCK] Lock exists but modal not visible, showing:', lock);
       
       try {
@@ -14708,23 +14708,37 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
       clearInterval(lockCheckInterval);
     }
     
+    // Track how many times modal is visible without lock (to allow grace period)
+    let modalVisibleWithoutLockCount = 0;
+    
     lockCheckInterval = setInterval(() => {
       const lock = getReauthLock();
-      const modalVisible = isReauthModalVisibleNew();
+      const modalVisible = isReauthModalVisible();
       
       // If lock exists but modal not visible -> show modal
       if (lock && lock.locked && !modalVisible) {
-        console.warn('[REAUTH-LOCK] Lock/modal mismatch detected - correcting');
+        console.warn('[REAUTH-LOCK] Lock/modal mismatch detected - showing modal');
+        modalVisibleWithoutLockCount = 0; // Reset counter
         showReauthModalSafe({ 
           context: 'reauth', 
           reason: lock.reason || 'periodic-check' 
         });
       }
       
-      // If no lock but modal visible -> hide modal (shouldn't happen)
+      // If no lock but modal visible -> only hide after 3 consecutive checks (15 seconds grace)
+      // This prevents hiding modal if lock is being set asynchronously
       if (!lock && modalVisible) {
-        console.warn('[REAUTH-LOCK] Modal visible without lock - hiding');
-        hideReauthModalSafe();
+        modalVisibleWithoutLockCount++;
+        console.warn(`[REAUTH-LOCK] Modal visible without lock (count: ${modalVisibleWithoutLockCount}/3)`);
+        
+        if (modalVisibleWithoutLockCount >= 3) {
+          console.warn('[REAUTH-LOCK] Modal visible without lock for 15+ seconds - hiding');
+          hideReauthModalSafe();
+          modalVisibleWithoutLockCount = 0;
+        }
+      } else {
+        // Reset counter if lock exists or modal not visible
+        modalVisibleWithoutLockCount = 0;
       }
     }, 5000); // Check every 5 seconds
     
@@ -14746,7 +14760,7 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
   /**
    * Check if reauth modal is visible
    */
-  function isReauthModalVisibleNew() {
+  function isReauthModalVisible() {
     // Check global flags
     if (window.__reauthModalOpen === true) return true;
     if (window.reauthModalOpen === true) return true;
@@ -14909,13 +14923,13 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
     complete: completeReauthUnlock,
     
     // State checking
-    isModalVisible: isReauthModalVisibleNew,
+    isModalVisible: isReauthModalVisible,
     
     // Debug helpers
     getState: () => ({
       locked: isReauthLocked(),
       lock: getReauthLock(),
-      modalVisible: isReauthModalVisibleNew(),
+      modalVisible: isReauthModalVisible(),
       broadcastChannelActive: !!broadcastChannel
     })
   };
@@ -14932,43 +14946,6 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
     initPersistentReauthLock();
   }
   
-})();
-
-// ============================================
-// INTEGRATION PATCH FOR IDLE DETECTION
-// ============================================
-
-(function patchIdleDetectionForLock() {
-  // Wait for idle detection to be available
-  function tryPatch() {
-    if (!window.__idleDetection) {
-      setTimeout(tryPatch, 100);
-      return;
-    }
-    
-    console.log('[REAUTH-LOCK] Patching idle detection integration');
-    
-    // Override showReauthModalSafe in idle detection to set lock
-    const originalShowReauthModalSafe = window.showReauthModalSafe;
-    
-    window.showReauthModalSafe = async function(options) {
-      console.log('[REAUTH-LOCK] showReauthModalSafe called, setting lock');
-      
-      // Set persistent lock
-      if (window.__persistentReauthLock) {
-        window.__persistentReauthLock.setLock(options?.reason || 'reauth-required');
-      }
-      
-      // Call original if exists
-      if (typeof originalShowReauthModalSafe === 'function') {
-        return await originalShowReauthModalSafe(options);
-      }
-    };
-    
-    console.log('[REAUTH-LOCK] Idle detection patch complete');
-  }
-  
-  tryPatch();
 })();
 
 
@@ -15830,6 +15807,7 @@ async function onSuccessfulReauth() {
     // Clear persistent lock first
   if (window.__persistentReauthLock) {
     window.__persistentReauthLock.clearLock();
+    console.log('[reauth] persistent reauth lock cleared');
   }
   try {
     // mark modal closed locally (UI state)
