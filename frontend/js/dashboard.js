@@ -5,6 +5,10 @@ import {
   onPayClicked
 } from '/frontend/js/checkout.js';
 
+// thresholds (you already chose 1min / 2min)
+const SOFT_IDLE_MS = 1 * 60 * 1000; // 1 minute while visible
+const HARD_IDLE_MS = 60 * 60 * 1000; // 1 hour server-enforced when hidden
+
 function saveCurrentAppState() {
   const state = {
     // ==================== MODALS – FIXED & BULLETPROOF ====================
@@ -13704,9 +13708,7 @@ window.shouldReauth = window.shouldReauth || shouldReauth; // expose globally if
 
 // === Inactivity helpers (full drop-in update) ===
 
-// thresholds (you already chose 1min / 2min)
-const SOFT_IDLE_MS = 1 * 60 * 1000; // 1 minute while visible
-const HARD_IDLE_MS = 60 * 60 * 1000; // 1 hour server-enforced when hidden
+
 
 // local-first keys & helpers
 const FG_EXPECTED_KEY = 'fg_expected_reauth_at';
