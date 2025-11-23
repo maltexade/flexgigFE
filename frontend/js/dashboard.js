@@ -1304,6 +1304,55 @@ async function getSession() {
 window.getSession = getSession;
 
 
+// Run observer only on dashboard
+if (window.location.pathname.includes('dashboard.html')) {
+  window.addEventListener('load', () => { // Or 'DOMContentLoaded' if preferred
+    console.log('[DEBUG] window.load: Starting MutationObserver');
+    observeForElements();
+    onDashboardLoad();
+  });
+}
+
+// --- Observer to wait for elements ---
+function observeForElements() {
+  const targetNode = document.body; // Or a specific parent like document.querySelector('.user-greeting')
+  const config = { childList: true, subtree: true }; // Watch for added/removed nodes
+
+  const observer = new MutationObserver((mutations, obs) => {
+    const greetEl = document.getElementById('greet');
+    const firstnameEl = document.getElementById('firstname');
+    const avatarEl = document.getElementById('avatar');
+
+    if (greetEl && firstnameEl && avatarEl) {
+      console.log('[DEBUG] MutationObserver: Elements detected, running getSession');
+      const cachedUserData = localStorage.getItem('userData');
+      if (cachedUserData) {
+        try {
+          const parsed = JSON.parse(cachedUserData);
+          const firstName = parsed.fullName?.split(' ')[0] || 'User';
+          applySessionToDOM(parsed, firstName);
+        } catch (e) { /* ignore */ }
+      }
+      getSession(); // Call directly (no need for safeGetSession retries here)
+      obs.disconnect(); // Stop observing once elements are found
+    }
+  });
+
+  observer.observe(targetNode, config);
+  console.log('[DEBUG] MutationObserver: Started watching for elements');
+  
+  // Fallback: If elements already exist, call immediately
+  const greetEl = document.getElementById('greet');
+  const firstnameEl = document.getElementById('firstname');
+  const avatarEl = document.getElementById('avatar');
+  if (greetEl && firstnameEl && avatarEl) {
+    console.log('[DEBUG] MutationObserver: Elements already present');
+    getSession();
+    observer.disconnect();
+  }
+}
+
+
 // Helper: Apply user data to DOM elements
 function applySessionToDOM(user) {
   const greetEl = document.getElementById('greet');
@@ -1815,6 +1864,7 @@ async function onDashboardLoad() {
 // If we were away long enough, ask server whether session is locked.
 // If locked -> open the full reauth modal immediately. Otherwise fall back to soft prompt.
 try {
+  const IDLE_TIME = 30 * 60 * 1000; // 30 minutes
   const last = parseInt(localStorage.getItem('lastActive')) || 0;
   if (Date.now() - last > IDLE_TIME) {
     let reauthCheck = null;
