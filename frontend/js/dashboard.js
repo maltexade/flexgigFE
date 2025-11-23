@@ -14398,6 +14398,579 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
   tryInit();
 })();
 
+// ============================================
+// PERSISTENT REAUTH LOCK SYSTEM
+// Survives reload, hard reload, and tab switching
+// ============================================
+
+(function() {
+  'use strict';
+  
+  // ============================================
+  // CONSTANTS
+  // ============================================
+  const LOCK_KEY = 'fg_reauth_lock_v2'; // Persistent lock flag
+  const BROADCAST_CHANNEL_NAME = 'fg-reauth-sync';
+  const STALE_LOCK_MS = 10 * 60 * 1000; // Consider lock stale after 10 minutes (safety)
+  
+  // ============================================
+  // STATE
+  // ============================================
+  let broadcastChannel = null;
+  let lockCheckInterval = null;
+  
+  // ============================================
+  // LOCK MANAGEMENT
+  // ============================================
+  
+  /**
+   * Create a lock object with metadata
+   */
+  function createLock(reason = 'unknown') {
+    return {
+      locked: true,
+      reason: reason,
+      timestamp: Date.now(),
+      token: generateToken()
+    };
+  }
+  
+  /**
+   * Generate unique token for lock
+   */
+  function generateToken() {
+    try {
+      if (crypto && crypto.randomUUID) {
+        return crypto.randomUUID();
+      }
+    } catch (e) {}
+    
+    return `lock_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+  }
+  
+  /**
+   * Set reauth lock (persist to localStorage)
+   */
+  function setReauthLock(reason = 'reauth-required') {
+    try {
+      const lock = createLock(reason);
+      localStorage.setItem(LOCK_KEY, JSON.stringify(lock));
+      console.log('[REAUTH-LOCK] Lock set:', lock);
+      
+      // Broadcast to other tabs
+      broadcastLockChange('lock', lock);
+      
+      // Also set the canonical flag for compatibility
+      try {
+        localStorage.setItem('fg_reauth_required_v1', JSON.stringify(lock));
+      } catch (e) {}
+      
+      return lock;
+    } catch (e) {
+      console.error('[REAUTH-LOCK] Failed to set lock:', e);
+      return null;
+    }
+  }
+  
+  /**
+   * Clear reauth lock
+   */
+  function clearReauthLock() {
+    try {
+      const oldLock = getReauthLock();
+      localStorage.removeItem(LOCK_KEY);
+      console.log('[REAUTH-LOCK] Lock cleared');
+      
+      // Broadcast to other tabs
+      broadcastLockChange('unlock', null);
+      
+      // Also clear canonical flag
+      try {
+        localStorage.removeItem('fg_reauth_required_v1');
+        localStorage.removeItem('reauthPending');
+      } catch (e) {}
+      
+      return oldLock;
+    } catch (e) {
+      console.error('[REAUTH-LOCK] Failed to clear lock:', e);
+      return null;
+    }
+  }
+  
+  /**
+   * Get current reauth lock
+   */
+  function getReauthLock() {
+    try {
+      const raw = localStorage.getItem(LOCK_KEY);
+      if (!raw) return null;
+      
+      const lock = JSON.parse(raw);
+      
+      // Check if lock is stale
+      if (Date.now() - lock.timestamp > STALE_LOCK_MS) {
+        console.warn('[REAUTH-LOCK] Lock is stale, removing');
+        clearReauthLock();
+        return null;
+      }
+      
+      return lock;
+    } catch (e) {
+      console.error('[REAUTH-LOCK] Failed to get lock:', e);
+      return null;
+    }
+  }
+  
+  /**
+   * Check if reauth is locked
+   */
+  function isReauthLocked() {
+    const lock = getReauthLock();
+    return !!(lock && lock.locked);
+  }
+  
+  // ============================================
+  // CROSS-TAB COMMUNICATION
+  // ============================================
+  
+  /**
+   * Initialize BroadcastChannel for cross-tab sync
+   */
+  function initBroadcastChannel() {
+    try {
+      if (typeof BroadcastChannel === 'undefined') {
+        console.warn('[REAUTH-LOCK] BroadcastChannel not supported');
+        return;
+      }
+      
+      broadcastChannel = new BroadcastChannel(BROADCAST_CHANNEL_NAME);
+      
+      broadcastChannel.onmessage = (event) => {
+        try {
+          const { type, lock } = event.data;
+          console.log('[REAUTH-LOCK] Received broadcast:', type, lock);
+          
+          if (type === 'lock') {
+            // Another tab set lock - show modal
+            handleLockReceived(lock);
+          } else if (type === 'unlock') {
+            // Another tab cleared lock - hide modal
+            handleUnlockReceived();
+          }
+        } catch (e) {
+          console.error('[REAUTH-LOCK] Broadcast message error:', e);
+        }
+      };
+      
+      console.log('[REAUTH-LOCK] BroadcastChannel initialized');
+    } catch (e) {
+      console.error('[REAUTH-LOCK] Failed to init BroadcastChannel:', e);
+    }
+  }
+  
+  /**
+   * Broadcast lock change to other tabs
+   */
+  function broadcastLockChange(type, lock) {
+    try {
+      if (!broadcastChannel) return;
+      
+      broadcastChannel.postMessage({ type, lock });
+      console.log('[REAUTH-LOCK] Broadcasted:', type);
+    } catch (e) {
+      console.error('[REAUTH-LOCK] Failed to broadcast:', e);
+    }
+  }
+  
+  /**
+   * Handle lock received from another tab
+   */
+  async function handleLockReceived(lock) {
+    console.log('[REAUTH-LOCK] Lock received from another tab');
+    
+    // Show reauth modal if not already showing
+    if (!isReauthModalVisible()) {
+      try {
+        await showReauthModalSafe({ 
+          context: 'reauth', 
+          reason: lock?.reason || 'cross-tab-lock' 
+        });
+      } catch (e) {
+        console.error('[REAUTH-LOCK] Failed to show modal on lock receive:', e);
+      }
+    }
+  }
+  
+  /**
+   * Handle unlock received from another tab
+   */
+  function handleUnlockReceived() {
+    console.log('[REAUTH-LOCK] Unlock received from another tab');
+    
+    // Hide reauth modal if showing
+    if (isReauthModalVisible()) {
+      try {
+        hideReauthModalSafe();
+      } catch (e) {
+        console.error('[REAUTH-LOCK] Failed to hide modal on unlock receive:', e);
+      }
+    }
+  }
+  
+  // ============================================
+  // STORAGE EVENT LISTENER (fallback for cross-tab)
+  // ============================================
+  
+  /**
+   * Listen for storage events (fallback if BroadcastChannel not available)
+   */
+  function initStorageListener() {
+    window.addEventListener('storage', (event) => {
+      if (event.key !== LOCK_KEY) return;
+      
+      console.log('[REAUTH-LOCK] Storage event detected:', event.newValue);
+      
+      if (event.newValue) {
+        // Lock was set
+        try {
+          const lock = JSON.parse(event.newValue);
+          handleLockReceived(lock);
+        } catch (e) {
+          console.error('[REAUTH-LOCK] Failed to parse lock from storage event:', e);
+        }
+      } else {
+        // Lock was cleared
+        handleUnlockReceived();
+      }
+    });
+    
+    console.log('[REAUTH-LOCK] Storage listener initialized');
+  }
+  
+  // ============================================
+  // PAGE LIFECYCLE HANDLERS
+  // ============================================
+  
+  /**
+   * Check lock on page load
+   */
+  async function checkLockOnLoad() {
+    console.log('[REAUTH-LOCK] Checking lock on page load');
+    
+    const lock = getReauthLock();
+    
+    if (lock && lock.locked) {
+      console.log('[REAUTH-LOCK] Found existing lock, showing modal:', lock);
+      
+      // Show reauth modal immediately
+      try {
+        await showReauthModalSafe({ 
+          context: 'reauth', 
+          reason: lock.reason || 'persisted-lock' 
+        });
+      } catch (e) {
+        console.error('[REAUTH-LOCK] Failed to show modal on load:', e);
+      }
+    } else {
+      console.log('[REAUTH-LOCK] No lock found on load');
+    }
+  }
+  
+  /**
+   * Check lock on visibility change (tab switch)
+   */
+  async function checkLockOnVisibilityChange() {
+    if (document.visibilityState !== 'visible') return;
+    
+    console.log('[REAUTH-LOCK] Checking lock on visibility change');
+    
+    const lock = getReauthLock();
+    
+    if (lock && lock.locked && !isReauthModalVisible()) {
+      console.log('[REAUTH-LOCK] Lock exists but modal not visible, showing:', lock);
+      
+      try {
+        await showReauthModalSafe({ 
+          context: 'reauth', 
+          reason: lock.reason || 'visibility-check' 
+        });
+      } catch (e) {
+        console.error('[REAUTH-LOCK] Failed to show modal on visibility:', e);
+      }
+    }
+  }
+  
+  /**
+   * Periodic lock check (safety net)
+   */
+  function startLockCheckInterval() {
+    if (lockCheckInterval) {
+      clearInterval(lockCheckInterval);
+    }
+    
+    lockCheckInterval = setInterval(() => {
+      const lock = getReauthLock();
+      const modalVisible = isReauthModalVisible();
+      
+      // If lock exists but modal not visible -> show modal
+      if (lock && lock.locked && !modalVisible) {
+        console.warn('[REAUTH-LOCK] Lock/modal mismatch detected - correcting');
+        showReauthModalSafe({ 
+          context: 'reauth', 
+          reason: lock.reason || 'periodic-check' 
+        });
+      }
+      
+      // If no lock but modal visible -> hide modal (shouldn't happen)
+      if (!lock && modalVisible) {
+        console.warn('[REAUTH-LOCK] Modal visible without lock - hiding');
+        hideReauthModalSafe();
+      }
+    }, 5000); // Check every 5 seconds
+    
+    console.log('[REAUTH-LOCK] Periodic lock check started');
+  }
+  
+  function stopLockCheckInterval() {
+    if (lockCheckInterval) {
+      clearInterval(lockCheckInterval);
+      lockCheckInterval = null;
+      console.log('[REAUTH-LOCK] Periodic lock check stopped');
+    }
+  }
+  
+  // ============================================
+  // MODAL HELPERS
+  // ============================================
+  
+  /**
+   * Check if reauth modal is visible
+   */
+  function isReauthModalVisibleNew() {
+    // Check global flags
+    if (window.__reauthModalOpen === true) return true;
+    if (window.reauthModalOpen === true) return true;
+    
+    // Check DOM
+    const reauthModal = document.getElementById('reauthModal') || 
+                        document.querySelector('.reauth-modal') ||
+                        document.querySelector('[data-reauth-modal]');
+    
+    if (reauthModal && !reauthModal.classList.contains('hidden')) {
+      return true;
+    }
+    
+    return false;
+  }
+  
+  /**
+   * Show reauth modal (safe wrapper)
+   */
+  async function showReauthModalSafe(options) {
+    try {
+      console.log('[REAUTH-LOCK] Showing reauth modal');
+      
+      // Try multiple APIs
+      if (window.__reauth && typeof window.__reauth.showReauthModal === 'function') {
+        await window.__reauth.showReauthModal(options.context || 'reauth');
+      } else if (typeof showReauthModal === 'function') {
+        await showReauthModal(options.context || 'reauth');
+      } else if (typeof initReauthModal === 'function') {
+        await initReauthModal({ show: true, context: options.context || 'reauth' });
+      } else {
+        console.error('[REAUTH-LOCK] No reauth modal function available');
+      }
+    } catch (e) {
+      console.error('[REAUTH-LOCK] Failed to show reauth modal:', e);
+    }
+  }
+  
+  /**
+   * Hide reauth modal (safe wrapper)
+   */
+  function hideReauthModalSafe() {
+    try {
+      console.log('[REAUTH-LOCK] Hiding reauth modal');
+      
+      // Try multiple APIs
+      if (typeof guardedHideReauthModal === 'function') {
+        guardedHideReauthModal();
+      } else if (window.__reauth && typeof window.__reauth.hideReauthModal === 'function') {
+        window.__reauth.hideReauthModal();
+      } else {
+        // Fallback: direct DOM manipulation
+        const reauthModal = document.getElementById('reauthModal');
+        if (reauthModal) {
+          reauthModal.classList.add('hidden');
+        }
+      }
+    } catch (e) {
+      console.error('[REAUTH-LOCK] Failed to hide reauth modal:', e);
+    }
+  }
+  
+  // ============================================
+  // INTEGRATION WITH IDLE SYSTEM
+  // ============================================
+  
+  /**
+   * Trigger reauth lock (call this when reauth is needed)
+   */
+  function triggerReauthLock(reason = 'reauth-required') {
+    console.log('[REAUTH-LOCK] Triggering reauth lock, reason:', reason);
+    
+    // Set lock
+    const lock = setReauthLock(reason);
+    
+    // Show modal
+    showReauthModalSafe({ context: 'reauth', reason });
+    
+    // Stop idle timers
+    if (window.__idleDetection && typeof window.__idleDetection.reset === 'function') {
+      // Note: Don't restart timer, just clear them
+      if (window.__idleDetection.getState) {
+        const state = window.__idleDetection.getState();
+        console.log('[REAUTH-LOCK] Idle detection state:', state);
+      }
+    }
+    
+    return lock;
+  }
+  
+  /**
+   * Clear reauth lock after successful authentication
+   */
+  function completeReauthUnlock() {
+    console.log('[REAUTH-LOCK] Completing reauth unlock');
+    
+    // Clear lock
+    clearReauthLock();
+    
+    // Hide modal
+    hideReauthModalSafe();
+    
+    // Restart idle timers
+    if (window.__idleDetection && typeof window.__idleDetection.reset === 'function') {
+      window.__idleDetection.reset();
+    }
+    
+    // Dispatch event for other systems
+    try {
+      window.dispatchEvent(new CustomEvent('reauth:unlocked', {
+        detail: { timestamp: Date.now() }
+      }));
+    } catch (e) {}
+  }
+  
+  // ============================================
+  // INITIALIZATION
+  // ============================================
+  
+  function initPersistentReauthLock() {
+    console.log('[REAUTH-LOCK] Initializing persistent reauth lock system');
+    
+    // Initialize cross-tab communication
+    initBroadcastChannel();
+    initStorageListener();
+    
+    // Check lock on load
+    checkLockOnLoad();
+    
+    // Listen for visibility changes
+    document.addEventListener('visibilitychange', checkLockOnVisibilityChange, { passive: true });
+    
+    // Listen for pageshow (handles bfcache)
+    window.addEventListener('pageshow', (event) => {
+      if (event.persisted) {
+        console.log('[REAUTH-LOCK] Page restored from bfcache');
+        checkLockOnLoad();
+      }
+    }, { passive: true });
+    
+    // Start periodic check
+    startLockCheckInterval();
+    
+    console.log('[REAUTH-LOCK] Initialization complete');
+  }
+  
+  // ============================================
+  // EXPOSE PUBLIC API
+  // ============================================
+  
+  window.__persistentReauthLock = {
+    // Core functions
+    setLock: setReauthLock,
+    clearLock: clearReauthLock,
+    getLock: getReauthLock,
+    isLocked: isReauthLocked,
+    
+    // High-level functions
+    trigger: triggerReauthLock,
+    complete: completeReauthUnlock,
+    
+    // State checking
+    isModalVisible: isReauthModalVisibleNew,
+    
+    // Debug helpers
+    getState: () => ({
+      locked: isReauthLocked(),
+      lock: getReauthLock(),
+      modalVisible: isReauthModalVisibleNew(),
+      broadcastChannelActive: !!broadcastChannel
+    })
+  };
+  
+  // Backward compatibility aliases
+  window.setReauthLock = setReauthLock;
+  window.clearReauthLock = clearReauthLock;
+  window.isReauthLocked = isReauthLocked;
+  
+  // Auto-initialize
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initPersistentReauthLock);
+  } else {
+    initPersistentReauthLock();
+  }
+  
+})();
+
+// ============================================
+// INTEGRATION PATCH FOR IDLE DETECTION
+// ============================================
+
+(function patchIdleDetectionForLock() {
+  // Wait for idle detection to be available
+  function tryPatch() {
+    if (!window.__idleDetection) {
+      setTimeout(tryPatch, 100);
+      return;
+    }
+    
+    console.log('[REAUTH-LOCK] Patching idle detection integration');
+    
+    // Override showReauthModalSafe in idle detection to set lock
+    const originalShowReauthModalSafe = window.showReauthModalSafe;
+    
+    window.showReauthModalSafe = async function(options) {
+      console.log('[REAUTH-LOCK] showReauthModalSafe called, setting lock');
+      
+      // Set persistent lock
+      if (window.__persistentReauthLock) {
+        window.__persistentReauthLock.setLock(options?.reason || 'reauth-required');
+      }
+      
+      // Call original if exists
+      if (typeof originalShowReauthModalSafe === 'function') {
+        return await originalShowReauthModalSafe(options);
+      }
+    };
+    
+    console.log('[REAUTH-LOCK] Idle detection patch complete');
+  }
+  
+  tryPatch();
+})();
+
 
 
 
@@ -15254,6 +15827,10 @@ async function completeReauth() {
 
 // Robust async onSuccessfulReauth — updated: clears fg_expected_reauth_at appropriately
 async function onSuccessfulReauth() {
+    // Clear persistent lock first
+  if (window.__persistentReauthLock) {
+    window.__persistentReauthLock.clearLock();
+  }
   try {
     // mark modal closed locally (UI state)
     reauthModalOpen = false;
