@@ -14432,7 +14432,108 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
   let lockCheckInterval = null;
   
   // ============================================
-  // LOCK MANAGEMENT
+  // SERVER SYNC
+  // ============================================
+  
+  /**
+   * Check server for active reauth lock
+   */
+  async function checkServerLock() {
+    try {
+      const apiBase = window.__SEC_API_BASE || window.API_BASE || '';
+      const url = `${apiBase}/reauth/status`;
+      
+      const res = await fetch(url, {
+        method: 'GET',
+        credentials: 'include',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache' 
+        }
+      });
+      
+      if (!res.ok) {
+        console.warn('[REAUTH-LOCK] Server check returned', res.status);
+        return null;
+      }
+      
+      const data = await res.json();
+      
+      // Server returns { reauthRequired: true/false, token?, reason? }
+      if (data && data.reauthRequired) {
+        return {
+          locked: true,
+          reason: data.reason || 'server-timeout',
+          token: data.token || null
+        };
+      }
+      
+      return null;
+    } catch (e) {
+      console.error('[REAUTH-LOCK] Failed to check server lock:', e);
+      return null;
+    }
+  }
+  
+  /**
+   * Notify server to set reauth lock
+   */
+  async function setServerLock(reason = 'client-idle') {
+    try {
+      const apiBase = window.__SEC_API_BASE || window.API_BASE || '';
+      const url = `${apiBase}/reauth/require`;
+      
+      const res = await fetch(url, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason })
+      });
+      
+      if (!res.ok) {
+        console.warn('[REAUTH-LOCK] Server lock set failed:', res.status);
+        return null;
+      }
+      
+      const data = await res.json();
+      console.log('[REAUTH-LOCK] Server lock set successfully:', data);
+      return data;
+    } catch (e) {
+      console.error('[REAUTH-LOCK] Failed to set server lock:', e);
+      return null;
+    }
+  }
+  
+  /**
+   * Notify server to clear reauth lock
+   */
+  async function clearServerLock() {
+    try {
+      const apiBase = window.__SEC_API_BASE || window.API_BASE || '';
+      const url = `${apiBase}/reauth/complete`;
+      
+      const res = await fetch(url, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
+      if (!res.ok) {
+        console.warn('[REAUTH-LOCK] Server lock clear failed:', res.status);
+        return false;
+      }
+      
+      const data = await res.json();
+      console.log('[REAUTH-LOCK] Server lock cleared successfully:', data);
+      return data.ok || false;
+    } catch (e) {
+      console.error('[REAUTH-LOCK] Failed to clear server lock:', e);
+      return false;
+    }
+  }
+  
+  // ============================================
+  // LOCK MANAGEMENT (updated to sync with server)
   // ============================================
   
   /**
@@ -14664,27 +14765,56 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
   // ============================================
   
   /**
-   * Check lock on page load
+   * Check lock on page load (with server sync)
    */
   async function checkLockOnLoad() {
-    console.log('[REAUTH-LOCK] Checking lock on page load');
+    console.log('[REAUTH-LOCK] Checking lock on page load (client + server)');
     
-    const lock = getReauthLock();
+    // 1. Check local lock first (fast)
+    const localLock = getReauthLock();
     
-    if (lock && lock.locked) {
-      console.log('[REAUTH-LOCK] Found existing lock, showing modal:', lock);
+    if (localLock && localLock.locked) {
+      console.log('[REAUTH-LOCK] Found local lock, showing modal:', localLock);
       
       // Show reauth modal immediately
       try {
         await showReauthModalSafe({ 
           context: 'reauth', 
-          reason: lock.reason || 'persisted-lock' 
+          reason: localLock.reason || 'persisted-lock' 
         });
       } catch (e) {
         console.error('[REAUTH-LOCK] Failed to show modal on load:', e);
       }
-    } else {
-      console.log('[REAUTH-LOCK] No lock found on load');
+      return; // Local lock found, no need to check server
+    }
+    
+    // 2. No local lock - check server (survives cookie/cache clear)
+    console.log('[REAUTH-LOCK] No local lock, checking server...');
+    
+    try {
+      const serverLock = await checkServerLock();
+      
+      if (serverLock && serverLock.locked) {
+        console.log('[REAUTH-LOCK] Server lock found, syncing to client:', serverLock);
+        
+        // Sync server lock to client
+        const lock = setReauthLock(serverLock.reason || 'server-lock');
+        
+        // Show modal
+        try {
+          await showReauthModalSafe({ 
+            context: 'reauth', 
+            reason: serverLock.reason || 'server-lock' 
+          });
+        } catch (e) {
+          console.error('[REAUTH-LOCK] Failed to show modal after server sync:', e);
+        }
+      } else {
+        console.log('[REAUTH-LOCK] No lock found (client or server)');
+      }
+    } catch (e) {
+      console.error('[REAUTH-LOCK] Failed to check server lock:', e);
+      // Continue without server lock (degrade gracefully)
     }
   }
   
