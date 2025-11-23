@@ -13657,9 +13657,7 @@ window.shouldReauth = window.shouldReauth || shouldReauth; // expose globally if
 
 // === Inactivity helpers (full drop-in update) ===
 
-// thresholds (you already chose 1min / 2min)
-const SOFT_IDLE_MS = 1 * 60 * 1000; // 1 minute while visible
-const HARD_IDLE_MS = 60 * 60 * 1000; // 1 hour server-enforced when hidden
+
 
 // local-first keys & helpers
 const FG_EXPECTED_KEY = 'fg_expected_reauth_at';
@@ -13714,6 +13712,7 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
   // ============================================
   let softIdleTimeout = null;
   let hardIdleTimeout = null;
+  let promptTimeout = null; // Track prompt auto-dismiss timeout
   let lastActivityTimestamp = Date.now();
   let pageHiddenTimestamp = null;
   let lastResetCall = 0;
@@ -13772,6 +13771,26 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
   }
   
   // ============================================
+  // REAUTH MODAL STATE CHECKER
+  // ============================================
+  function isReauthModalOpen() {
+    // Check multiple possible flags
+    if (window.__reauthModalOpen === true) return true;
+    if (window.reauthModalOpen === true) return true;
+    
+    // Check DOM for visible reauth modal
+    const reauthModal = document.getElementById('reauthModal') || 
+                        document.querySelector('.reauth-modal') ||
+                        document.querySelector('[data-reauth-modal]');
+    
+    if (reauthModal && !reauthModal.classList.contains('hidden')) {
+      return true;
+    }
+    
+    return false;
+  }
+  
+  // ============================================
   // SOFT IDLE TIMER (user inactive while visible)
   // ============================================
   function startSoftIdleTimer() {
@@ -13788,15 +13807,21 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
     }
     
     // Don't start if reauth modal is already open
-    if (window.__reauthModalOpen || window.reauthModalOpen) {
+    if (isReauthModalOpen()) {
       console.log('[IDLE] Soft timer NOT started (reauth modal open)');
       return;
     }
     
-    console.log('[IDLE] Soft timer started (2 min countdown)');
+    console.log('[IDLE] Soft timer started (1 min countdown)');
     
     softIdleTimeout = setTimeout(async () => {
-      console.log('⏰ [SOFT IDLE] 2 minutes of inactivity');
+      console.log('⏰ [SOFT IDLE] 1 minute of inactivity');
+      
+      // Double-check reauth modal isn't open before showing prompt
+      if (isReauthModalOpen()) {
+        console.log('[SOFT IDLE] Reauth modal already open, skipping prompt');
+        return;
+      }
       
       // Show inactivity prompt (NOT full reauth modal)
       try {
@@ -13816,7 +13841,7 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
   }
   
   // ============================================
-  // HARD IDLE TIMER (tab hidden for 1 hour)
+  // HARD IDLE TIMER (tab hidden for 2 minutes)
   // ============================================
   function scheduleHardIdleCheck() {
     if (hardIdleTimeout) {
@@ -13831,7 +13856,7 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
     console.log(`[IDLE] Hard idle scheduled for ${Math.round(remaining / 1000 / 60)} minutes`);
     
     hardIdleTimeout = setTimeout(async () => {
-      console.log('🔥 [HARD IDLE] 1 hour threshold reached');
+      console.log('🔥 [HARD IDLE] 2 minutes threshold reached');
       
       // Only trigger if page is STILL hidden
       if (document.visibilityState === 'hidden') {
@@ -13850,6 +13875,13 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
   
   async function triggerHardIdleReauth() {
     console.log('🔒 [HARD IDLE] Triggering reauth modal');
+    
+    // Stop all timers
+    stopSoftIdleTimer();
+    if (promptTimeout) {
+      clearTimeout(promptTimeout);
+      promptTimeout = null;
+    }
     
     // Check local first (fast)
     const localCheck = shouldReauthLocal('reauth');
@@ -13878,6 +13910,11 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
       return;
     }
     
+    // Don't reset timer if reauth modal is open
+    if (isReauthModalOpen()) {
+      return;
+    }
+    
     // Debounce for performance
     const now = Date.now();
     if (now - lastResetCall < RESET_DEBOUNCE_MS) {
@@ -13903,6 +13940,12 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
       // Stop soft idle (no point counting while hidden)
       stopSoftIdleTimer();
       
+      // Stop prompt timeout if active
+      if (promptTimeout) {
+        clearTimeout(promptTimeout);
+        promptTimeout = null;
+      }
+      
       // Record when page was hidden
       pageHiddenTimestamp = Date.now();
       setItem(KEYS.PAGE_HIDDEN_AT, pageHiddenTimestamp);
@@ -13919,8 +13962,8 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
       // Check if we need to trigger hard idle reauth
       checkHardIdleOnVisible();
       
-      // Resume soft idle timer (if no reauth needed)
-      if (!hasCanonicalReauthFlag()) {
+      // Resume soft idle timer (if no reauth needed and modal not open)
+      if (!hasCanonicalReauthFlag() && !isReauthModalOpen()) {
         startSoftIdleTimer();
       }
     }
@@ -13978,6 +14021,12 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
       return;
     }
     
+    // Critical check: Never show if reauth modal is open
+    if (isReauthModalOpen()) {
+      console.log('[PROMPT] Reauth modal is open, skipping prompt');
+      return;
+    }
+    
     promptShowing = true;
     
     try {
@@ -13994,6 +14043,7 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
         const serverCheck = await checkServerReauthStatus();
         if (serverCheck && (serverCheck.needsReauth || serverCheck.reauthRequired)) {
           // Server says full reauth required - skip prompt, go straight to modal
+          console.log('[PROMPT] Server requires immediate reauth - skipping prompt');
           await showReauthModalSafe({ context: 'reauth' });
           return;
         }
@@ -14002,13 +14052,12 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
       }
       
       // Show the soft prompt UI
-      console.log('[PROMPT] Showing inactivity prompt');
+      console.log('[PROMPT] Showing inactivity prompt (5s countdown to reauth)');
       
-      // Try multiple selectors to find your inactivity prompt modal
-      const promptModal = document.getElementById('inactivityPrompt')
+      const promptModal = document.getElementById('inactivityPrompt');
       
       if (!promptModal) {
-        console.warn('[PROMPT] Prompt modal not found (tried multiple selectors) - showing reauth modal instead');
+        console.warn('[PROMPT] Prompt modal not found - showing reauth modal instead');
         console.warn('[PROMPT] Available modal IDs:', Array.from(document.querySelectorAll('[id*="modal"]')).map(el => el.id));
         await showReauthModalSafe({ context: 'inactivity' });
         return;
@@ -14016,6 +14065,7 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
       
       console.log('[PROMPT] Found prompt modal:', promptModal.id || promptModal.className);
       
+      // Show prompt
       promptModal.classList.remove('hidden');
       promptModal.setAttribute('aria-modal', 'true');
       promptModal.setAttribute('role', 'dialog');
@@ -14026,31 +14076,66 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
         try { yesBtn.focus(); } catch(e) {}
       }
       
-      // Auto-dismiss after 30 seconds
-      const dismissTimeout = setTimeout(() => {
-        if (!promptModal.classList.contains('hidden')) {
-          promptModal.classList.add('hidden');
-          console.log('[PROMPT] Auto-dismissed after 30s');
+      // Auto-dismiss after 5 seconds and show reauth modal
+      promptTimeout = setTimeout(async () => {
+        console.log('[PROMPT] 5 seconds elapsed - hiding prompt and showing reauth modal');
+        
+        // Hide prompt
+        promptModal.classList.add('hidden');
+        promptModal.removeAttribute('aria-modal');
+        promptModal.removeAttribute('role');
+        
+        // Reset flag
+        promptShowing = false;
+        
+        // Stop soft idle timer (reauth modal will be shown)
+        stopSoftIdleTimer();
+        
+        // Show reauth modal
+        try {
+          await showReauthModalSafe({ context: 'reauth', reason: 'soft-idle-timeout' });
+        } catch (e) {
+          console.error('[PROMPT] Failed to show reauth modal after timeout', e);
         }
-      }, 30000);
+      }, 5000); // 5 seconds
       
       // Setup close handlers (only once)
       if (!promptModal.__handlersAttached) {
         if (yesBtn) {
           yesBtn.addEventListener('click', () => {
+            console.log('[PROMPT] User clicked "Yes, I\'m here" - dismissing prompt');
+            
+            // Clear timeout
+            if (promptTimeout) {
+              clearTimeout(promptTimeout);
+              promptTimeout = null;
+            }
+            
+            // Hide prompt
             promptModal.classList.add('hidden');
-            clearTimeout(dismissTimeout);
-            startSoftIdleTimer(); // Resume timer
+            promptModal.removeAttribute('aria-modal');
+            promptModal.removeAttribute('role');
+            
+            // Reset flag
+            promptShowing = false;
+            
+            // Resume soft idle timer
+            startSoftIdleTimer();
           });
         }
         
         promptModal.__handlersAttached = true;
       }
       
+      console.log('[PROMPT] Prompt visible - will show reauth modal in 5 seconds if no response');
+      
     } catch (err) {
       console.error('[PROMPT] Error showing prompt', err);
     } finally {
-      promptShowing = false;
+      // Only reset flag if timeout wasn't set (error case)
+      if (!promptTimeout) {
+        promptShowing = false;
+      }
     }
   }
   
@@ -14059,6 +14144,18 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
   // ============================================
   async function showReauthModalSafe(options) {
     try {
+      // Stop all idle timers when showing reauth modal
+      console.log('[IDLE] Stopping all timers - reauth modal will be shown');
+      stopSoftIdleTimer();
+      if (hardIdleTimeout) {
+        clearTimeout(hardIdleTimeout);
+        hardIdleTimeout = null;
+      }
+      if (promptTimeout) {
+        clearTimeout(promptTimeout);
+        promptTimeout = null;
+      }
+      
       // Try multiple APIs in order of preference
       if (window.__reauth && typeof window.__reauth.showReauthModal === 'function') {
         await window.__reauth.showReauthModal(options.context || 'reauth');
@@ -14162,11 +14259,11 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
     // Attach visibility change listener
     document.addEventListener('visibilitychange', handleVisibilityChange, { passive: true });
     
-    // Check if we need to show reauth on load (user left for 1+ hour)
+    // Check if we need to show reauth on load (user left for 2+ minutes)
     await checkHardIdleOnVisible();
     
-    // Start soft idle timer if page is visible
-    if (document.visibilityState === 'visible' && !hasCanonicalReauthFlag()) {
+    // Start soft idle timer if page is visible and modal not open
+    if (document.visibilityState === 'visible' && !hasCanonicalReauthFlag() && !isReauthModalOpen()) {
       startSoftIdleTimer();
     }
     
@@ -14191,16 +14288,21 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
     
     // Clear state
     pageHiddenTimestamp = null;
+    promptShowing = false;
     
-    // Clear timers
+    // Clear ALL timers
     stopSoftIdleTimer();
     if (hardIdleTimeout) {
       clearTimeout(hardIdleTimeout);
       hardIdleTimeout = null;
     }
+    if (promptTimeout) {
+      clearTimeout(promptTimeout);
+      promptTimeout = null;
+    }
     
-    // Restart soft timer if visible
-    if (document.visibilityState === 'visible') {
+    // Restart soft timer if visible and modal not open
+    if (document.visibilityState === 'visible' && !isReauthModalOpen()) {
       startSoftIdleTimer();
     }
   }
@@ -14223,6 +14325,10 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
       clearTimeout(hardIdleTimeout);
       hardIdleTimeout = null;
     }
+    if (promptTimeout) {
+      clearTimeout(promptTimeout);
+      promptTimeout = null;
+    }
     
     // Clear storage
     removeItem(KEYS.LAST_ACTIVE);
@@ -14230,6 +14336,7 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
     clearExpectedReauthAt();
     
     setupComplete = false;
+    promptShowing = false;
   }
   
   // ============================================
@@ -14244,8 +14351,11 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
     getState: () => ({
       softIdleActive: !!softIdleTimeout,
       hardIdleActive: !!hardIdleTimeout,
+      promptActive: !!promptTimeout,
+      promptShowing: promptShowing,
       lastActivity: lastActivityTimestamp,
       pageHidden: pageHiddenTimestamp,
+      reauthModalOpen: isReauthModalOpen(),
       setupComplete
     })
   };
