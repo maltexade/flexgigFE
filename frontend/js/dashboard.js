@@ -382,6 +382,39 @@ async function fullClientLogout() {
   }
 }
 
+/**
+ * Notify server that reauth is complete and clear the lock
+ */
+async function notifyReauthComplete() {
+  try {
+    const apiBase = window.__SEC_API_BASE || window.API_BASE || '';
+    const url = `${apiBase}/reauth/complete`;
+    
+    const res = await fetch(url, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache'
+      }
+    });
+    
+    if (!res.ok) {
+      console.warn('[REAUTH] Failed to notify server of completion:', res.status);
+      return false;
+    }
+    
+    const data = await res.json();
+    console.log('[REAUTH] ✅ Server lock cleared:', data);
+    return data.ok || false;
+    
+  } catch (err) {
+    console.error('[REAUTH] Failed to call /reauth/complete:', err);
+    return false;
+  }
+}
+window.notifyReauthComplete = notifyReauthComplete;
+
 // ===== Sticky reauth bootstrap (drop near top of dashboard.js, BEFORE initFlow boot) =====
 (function ensurePersistentReauthBootstrap(){
   try {
