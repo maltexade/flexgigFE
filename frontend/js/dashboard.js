@@ -14004,7 +14004,7 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
       // Show the soft prompt UI
       console.log('[PROMPT] Showing inactivity prompt');
       
-      const promptModal = document.getElementById('promptModal');
+      const promptModal = document.getElementById('inactivityPrompt');
       if (!promptModal) {
         console.warn('[PROMPT] promptModal not found - showing reauth modal instead');
         await showReauthModalSafe({ context: 'inactivity' });
@@ -14016,7 +14016,7 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
       promptModal.setAttribute('role', 'dialog');
       
       // Focus "Yes" button if it exists
-      const yesBtn = promptModal.querySelector('#yesBtn, .yes-btn, [data-yes]');
+      const yesBtn = promptModal.querySelector('#yesActiveBtn, .yes-btn, [data-yes]');
       if (yesBtn) {
         try { yesBtn.focus(); } catch(e) {}
       }
