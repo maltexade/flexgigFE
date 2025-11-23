@@ -1618,72 +1618,72 @@ async function handleBioToggle(e) {
 
 
 // // === Safety shim: ensure pollStatus exists (place this near top, before onDashboardLoad runs) ===
-// if (typeof pollStatus === 'undefined') {
-//   // keep minimal global guards
-//   window.__fg_poll_inflight = window.__fg_poll_inflight || null;
-//   window.__fg_last_poll_ts = window.__fg_last_poll_ts || 0;
-//   window.FG_POLL_MIN_MS = window.FG_POLL_MIN_MS || 600;
+if (typeof pollStatus === 'undefined') {
+  // keep minimal global guards
+  window.__fg_poll_inflight = window.__fg_poll_inflight || null;
+  window.__fg_last_poll_ts = window.__fg_last_poll_ts || 0;
+  window.FG_POLL_MIN_MS = window.FG_POLL_MIN_MS || 600;
 
-//   window.pollStatus = async function pollStatus() {
-//     const now = Date.now();
+  window.pollStatus = async function pollStatus() {
+    const now = Date.now();
 
-//     // dedupe in-flight
-//     if (window.__fg_poll_inflight) {
-//       console.debug('pollStatus shim: reusing in-flight');
-//       return window.__fg_poll_inflight;
-//     }
+    // dedupe in-flight
+    if (window.__fg_poll_inflight) {
+      console.debug('pollStatus shim: reusing in-flight');
+      return window.__fg_poll_inflight;
+    }
 
-//     // throttle
-//     if (now - (window.__fg_last_poll_ts || 0) < (window.FG_POLL_MIN_MS || 600)) {
-//       console.debug('pollStatus shim: called too soon — skipping');
-//       return Promise.resolve();
-//     }
+    // throttle
+    if (now - (window.__fg_last_poll_ts || 0) < (window.FG_POLL_MIN_MS || 600)) {
+      console.debug('pollStatus shim: called too soon — skipping');
+      return Promise.resolve();
+    }
 
-//     window.__fg_poll_inflight = (async () => {
-//       try {
-//         if (typeof _pollStatus_internal === 'function') {
-//           // preferred: call your internal implementation
-//           return await _pollStatus_internal();
-//         }
+    window.__fg_poll_inflight = (async () => {
+      try {
+        if (typeof _pollStatus_internal === 'function') {
+          // preferred: call your internal implementation
+          return await _pollStatus_internal();
+        }
 
-//         // fallback: simple processable fetch (keeps UI stable until real implementation available)
-//         try {
-//           const apiBase = (window.__SEC_API_BASE || (typeof API_BASE !== 'undefined' ? API_BASE : ''));
-//           const url = apiBase ? `${apiBase}/api/status` : '/api/status';
-//           const res = await fetch(url, { credentials: 'include', cache: 'no-store' });
-//           let body = null;
-//           try {
-//             const ct = res.headers && typeof res.headers.get === 'function' ? res.headers.get('content-type') : null;
-//             if (res.status !== 204 && ct && ct.toLowerCase().includes('application/json')) {
-//               body = await res.json();
-//             }
-//           } catch (e) { /* ignore parse */ }
+        // fallback: simple processable fetch (keeps UI stable until real implementation available)
+        try {
+          const apiBase = (window.__SEC_API_BASE || (typeof API_BASE !== 'undefined' ? API_BASE : ''));
+          const url = apiBase ? `${apiBase}/api/status` : '/api/status';
+          const res = await fetch(url, { credentials: 'include', cache: 'no-store' });
+          let body = null;
+          try {
+            const ct = res.headers && typeof res.headers.get === 'function' ? res.headers.get('content-type') : null;
+            if (res.status !== 204 && ct && ct.toLowerCase().includes('application/json')) {
+              body = await res.json();
+            }
+          } catch (e) { /* ignore parse */ }
 
-//           if (body && body.notification) {
-//             const notif = Array.isArray(body.notification) ? (body.notification[0] || null) : body.notification;
-//             if (notif) {
-//               try {
-//                 showBanner(notif.message || '', { persistent: !!notif.sticky, serverId: notif.id });
-//                 window.__fg_currentBanner = window.__fg_currentBanner || {};
-//                 window.__fg_currentBanner.serverId = notif.id;
-//                 localStorage.setItem('active_broadcast_id', String(notif.id));
-//               } catch (e) { console.warn('pollStatus shim: showBanner failed', e); }
-//             }
-//           }
-//           return res;
-//         } catch (e) {
-//           console.debug('pollStatus shim: fallback fetch failed', e);
-//           return null;
-//         }
-//       } finally {
-//         window.__fg_last_poll_ts = Date.now();
-//         window.__fg_poll_inflight = null;
-//       }
-//     })();
+          if (body && body.notification) {
+            const notif = Array.isArray(body.notification) ? (body.notification[0] || null) : body.notification;
+            if (notif) {
+              try {
+                showBanner(notif.message || '', { persistent: !!notif.sticky, serverId: notif.id });
+                window.__fg_currentBanner = window.__fg_currentBanner || {};
+                window.__fg_currentBanner.serverId = notif.id;
+                localStorage.setItem('active_broadcast_id', String(notif.id));
+              } catch (e) { console.warn('pollStatus shim: showBanner failed', e); }
+            }
+          }
+          return res;
+        } catch (e) {
+          console.debug('pollStatus shim: fallback fetch failed', e);
+          return null;
+        }
+      } finally {
+        window.__fg_last_poll_ts = Date.now();
+        window.__fg_poll_inflight = null;
+      }
+    })();
 
-//     return window.__fg_poll_inflight;
-//   };
-// }
+    return window.__fg_poll_inflight;
+  };
+}
 
 
 // After getSession succeeds
@@ -1899,55 +1899,11 @@ try {
     await window.__idleDetection.setup();
   }
 
-  // 🚀 NEW: Automatic Updates & Notifications
-  const STATUS_BANNER = document.getElementById('status-banner');
-  const BANNER_MSG = document.querySelector('.banner-msg');
+  // Initial status fetch
+if (typeof pollStatus === 'function') pollStatus();
 
-  async function pollStatus() {
-    try {
-      const res = await fetch('/api/status', { credentials: 'include' });
-      if (!res.ok) throw new Error('Status fetch failed');
-      const { status, message } = await res.json();
-      if (status === 'down' && message) {
-        showBanner(message);
-      } else {
-        hideBanner();
-      }
-    } catch (err) {
-      showBanner('Network downtime detected. Retrying...');
-    }
-  }
-
-
-
-// Subscribe to Supabase Realtime channel for instant updates
-const channel = supabaseClient.channel('network-status');
-channel
-  .on('broadcast', { event: 'network-update' }, ({ payload }) => {
-    console.log('[DEBUG] Realtime push received:', payload);
-    if (payload.status === 'down' && payload.message) {
-      showBanner(payload.message);  // Instant display
-    } else {
-      hideBanner();  // Instant hide
-    }
-  })
-  .subscribe((status) => {
-    console.log('[DEBUG] Realtime subscription status:', status);
-    if (status === 'SUBSCRIBED') {
-      // Optional: Fetch initial status via API if needed
-      fetch(`${window.__SEC_API_BASE}/api/status`, { credentials: 'include' })
-        .then(res => res.json())
-        .then(data => {
-          if (data.status === 'down' && data.message) showBanner(data.message);
-        })
-        .catch(() => showBanner('Network issue detected. Checking...'));
-    }
-  });
-
-// Network listeners (fallback for offline)
-window.addEventListener('online', hideBanner);
-window.addEventListener('offline', () => showBanner('You are offline. Working with cached data.'));
-
+// Start polling
+setInterval(() => pollStatus(), 30000);
 
 
   // Rocket: register SW, start pollStatus, etc.
