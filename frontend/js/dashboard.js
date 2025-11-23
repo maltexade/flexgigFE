@@ -13948,34 +13948,56 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
     }, remaining);
   }
   
-  async function triggerHardIdleReauth() {
-    console.log('🔒 [HARD IDLE] Triggering reauth modal');
-    
-    // Stop all timers
-    stopSoftIdleTimer();
-    if (promptTimeout) {
-      clearTimeout(promptTimeout);
-      promptTimeout = null;
-    }
-    
-    // Check local first (fast)
-    const localCheck = shouldReauthLocal('reauth');
-    if (localCheck.needsReauth) {
-      await showReauthModalSafe({ context: 'reauth', reason: 'hard-idle' });
-      return;
-    }
-    
-    // Fallback: server check
-    try {
-      const serverCheck = await checkServerReauthStatus();
-      if (serverCheck && (serverCheck.needsReauth || serverCheck.reauthRequired)) {
-        await showReauthModalSafe({ context: 'reauth', reason: 'hard-idle' });
-      }
-    } catch (e) {
-      console.warn('[HARD IDLE] Server check failed', e);
-    }
+  // ============================================
+// HARD IDLE TIMER (tab hidden for 30 minutes)
+// ============================================
+async function triggerHardIdleReauth() {
+  console.log('🔒 [HARD IDLE] Triggering reauth modal');
+  
+  // Stop all timers
+  stopSoftIdleTimer();
+  if (promptTimeout) {
+    clearTimeout(promptTimeout);
+    promptTimeout = null;
   }
   
+  // ✅ CREATE SERVER LOCK BEFORE SHOWING MODAL
+  try {
+    const apiBase = window.__SEC_API_BASE || window.API_BASE || '';
+    const lockRes = await fetch(`${apiBase}/reauth/require`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason: 'hard_idle_timeout' })
+    });
+    
+    if (lockRes.ok) {
+      const lockData = await lockRes.json();
+      console.log('[HARD IDLE] ✅ Server lock created:', lockData);
+    } else {
+      console.warn('[HARD IDLE] ⚠️ Server lock creation failed:', lockRes.status);
+    }
+  } catch (lockErr) {
+    console.error('[HARD IDLE] ❌ Failed to create server lock:', lockErr);
+  }
+  
+  // Check local first (fast)
+  const localCheck = shouldReauthLocal('reauth');
+  if (localCheck.needsReauth) {
+    await showReauthModalSafe({ context: 'reauth', reason: 'hard-idle' });
+    return;
+  }
+  
+  // Fallback: server check
+  try {
+    const serverCheck = await checkServerReauthStatus();
+    if (serverCheck && (serverCheck.needsReauth || serverCheck.reauthRequired)) {
+      await showReauthModalSafe({ context: 'reauth', reason: 'hard-idle' });
+    }
+  } catch (e) {
+    console.warn('[HARD IDLE] Server check failed', e);
+  }
+}
   // ============================================
   // USER ACTIVITY HANDLER (resets soft idle)
   // ============================================
@@ -14044,175 +14066,234 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
     }
   }
   
-  async function checkHardIdleOnVisible() {
-    // Check canonical flag first (authoritative)
-    if (hasCanonicalReauthFlag()) {
-      console.log('[IDLE] Canonical reauth flag present - showing modal');
-      await showReauthModalSafe({ context: 'reauth', reason: 'hard-idle' });
-      return;
-    }
+  // ============================================
+// VISIBILITY CHANGE: CHECK ON RETURN
+// ============================================
+async function checkHardIdleOnVisible() {
+  // Check canonical flag first (authoritative)
+  if (hasCanonicalReauthFlag()) {
+    console.log('[IDLE] Canonical reauth flag present - showing modal');
+    await showReauthModalSafe({ context: 'reauth', reason: 'hard-idle' });
+    return;
+  }
+  
+  // Check expected reauth timestamp (local prediction)
+  const expected = getExpectedReauthAt();
+  if (expected && Date.now() >= expected) {
+    console.log('[IDLE] Expected reauth time exceeded - creating lock and showing modal');
     
-    // Check expected reauth timestamp (local prediction)
-    const expected = getExpectedReauthAt();
-    if (expected && Date.now() >= expected) {
-      console.log('[IDLE] Expected reauth time exceeded - showing modal');
-      await showReauthModalSafe({ context: 'reauth', reason: 'hard-idle' });
-      return;
-    }
-    
-    // Fallback: calculate idle time manually
-    const hiddenAt = getItem(KEYS.PAGE_HIDDEN_AT, 0);
-    if (hiddenAt) {
-      const awayTime = Date.now() - hiddenAt;
-      console.log(`[IDLE] User was away for ${Math.round(awayTime / 1000 / 60)} minutes`);
+    // ✅ CREATE SERVER LOCK BEFORE SHOWING MODAL
+    try {
+      const apiBase = window.__SEC_API_BASE || window.API_BASE || '';
+      const lockRes = await fetch(`${apiBase}/reauth/require`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: 'hard_idle_on_return' })
+      });
       
-      if (awayTime >= HARD_IDLE_MS) {
-        console.log('🔥 [HARD IDLE] Threshold exceeded on return');
-        
-        // Clear timestamps
-        removeItem(KEYS.PAGE_HIDDEN_AT);
-        clearExpectedReauthAt();
-        pageHiddenTimestamp = null;
-        
-        // Show reauth
-        await showReauthModalSafe({ context: 'reauth', reason: 'hard-idle' });
-        return;
+      if (lockRes.ok) {
+        const lockData = await lockRes.json();
+        console.log('[IDLE] ✅ Server lock created on return:', lockData);
       }
+    } catch (lockErr) {
+      console.error('[IDLE] ❌ Failed to create server lock:', lockErr);
+    }
+    
+    await showReauthModalSafe({ context: 'reauth', reason: 'hard-idle' });
+    return;
+  }
+  
+  // Fallback: calculate idle time manually
+  const hiddenAt = getItem(KEYS.PAGE_HIDDEN_AT, 0);
+  if (hiddenAt) {
+    const awayTime = Date.now() - hiddenAt;
+    console.log(`[IDLE] User was away for ${Math.round(awayTime / 1000 / 60)} minutes`);
+    
+    if (awayTime >= HARD_IDLE_MS) {
+      console.log('🔥 [HARD IDLE] Threshold exceeded on return - creating lock');
       
-      // Threshold not exceeded - clear timestamps
-      console.log('✅ [IDLE] Threshold not exceeded - resuming normally');
+      // Clear timestamps
       removeItem(KEYS.PAGE_HIDDEN_AT);
       clearExpectedReauthAt();
       pageHiddenTimestamp = null;
+      
+      // ✅ CREATE SERVER LOCK BEFORE SHOWING MODAL
+      try {
+        const apiBase = window.__SEC_API_BASE || window.API_BASE || '';
+        const lockRes = await fetch(`${apiBase}/reauth/require`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason: 'hard_idle_exceeded' })
+        });
+        
+        if (lockRes.ok) {
+          const lockData = await lockRes.json();
+          console.log('[IDLE] ✅ Server lock created:', lockData);
+        }
+      } catch (lockErr) {
+        console.error('[IDLE] ❌ Failed to create server lock:', lockErr);
+      }
+      
+      // Show reauth
+      await showReauthModalSafe({ context: 'reauth', reason: 'hard-idle' });
+      return;
     }
+    
+    // Threshold not exceeded - clear timestamps
+    console.log('✅ [IDLE] Threshold not exceeded - resuming normally');
+    removeItem(KEYS.PAGE_HIDDEN_AT);
+    clearExpectedReauthAt();
+    pageHiddenTimestamp = null;
   }
+}
   
   // ============================================
-  // INACTIVITY PROMPT (soft idle notification)
-  // ============================================
-  async function showInactivityPrompt() {
-    if (promptShowing) {
-      console.log('[PROMPT] Already showing, skipping');
+// INACTIVITY PROMPT (soft idle notification)
+// ============================================
+async function showInactivityPrompt() {
+  if (promptShowing) {
+    console.log('[PROMPT] Already showing, skipping');
+    return;
+  }
+  
+  // Critical check: Never show if reauth modal is open
+  if (isReauthModalOpen()) {
+    console.log('[PROMPT] Reauth modal is open, skipping prompt');
+    return;
+  }
+  
+  promptShowing = true;
+  
+  try {
+    // Double-check that reauth is actually needed
+    const localCheck = shouldReauthLocal('reauth');
+    if (!localCheck.needsReauth) {
+      console.log('[PROMPT] Reauth not needed, skipping');
+      promptShowing = false;
       return;
     }
     
-    // Critical check: Never show if reauth modal is open
-    if (isReauthModalOpen()) {
-      console.log('[PROMPT] Reauth modal is open, skipping prompt');
-      return;
-    }
-    
-    promptShowing = true;
-    
+    // Check server authority
     try {
-      // Double-check that reauth is actually needed
-      const localCheck = shouldReauthLocal('reauth');
-      if (!localCheck.needsReauth) {
-        console.log('[PROMPT] Reauth not needed, skipping');
-        promptShowing = false;
+      const serverCheck = await checkServerReauthStatus();
+      if (serverCheck && (serverCheck.needsReauth || serverCheck.reauthRequired)) {
+        // Server says full reauth required - skip prompt, go straight to modal
+        console.log('[PROMPT] Server requires immediate reauth - skipping prompt');
+        await showReauthModalSafe({ context: 'reauth', reason: 'server-required' });
         return;
       }
+    } catch (e) {
+      console.warn('[PROMPT] Server check failed', e);
+    }
+    
+    // Show the soft prompt UI
+    console.log('[PROMPT] Showing inactivity prompt (5s countdown to reauth)');
+    
+    const promptModal = document.getElementById('inactivityPrompt');
+    
+    if (!promptModal) {
+      console.warn('[PROMPT] Prompt modal not found - showing reauth modal instead');
+      await showReauthModalSafe({ context: 'inactivity' });
+      return;
+    }
+    
+    console.log('[PROMPT] Found prompt modal:', promptModal.id || promptModal.className);
+    
+    // Show prompt
+    promptModal.classList.remove('hidden');
+    promptModal.setAttribute('aria-modal', 'true');
+    promptModal.setAttribute('role', 'dialog');
+    
+    // Focus "Yes" button if it exists
+    const yesBtn = promptModal.querySelector('#yesActiveBtn, .yes-btn, [data-yes]');
+    if (yesBtn) {
+      try { yesBtn.focus(); } catch(e) {}
+    }
+    
+    // Auto-dismiss after 5 seconds and show reauth modal
+    promptTimeout = setTimeout(async () => {
+      console.log('[PROMPT] 5 seconds elapsed - creating server lock and showing reauth modal');
       
-      // Check server authority
+      // Hide prompt
+      promptModal.classList.add('hidden');
+      promptModal.removeAttribute('aria-modal');
+      promptModal.removeAttribute('role');
+      
+      // Reset flag
+      promptShowing = false;
+      
+      // Stop soft idle timer (reauth modal will be shown)
+      stopSoftIdleTimer();
+      
+      // ✅ CREATE SERVER LOCK BEFORE SHOWING MODAL
       try {
-        const serverCheck = await checkServerReauthStatus();
-        if (serverCheck && (serverCheck.needsReauth || serverCheck.reauthRequired)) {
-          // Server says full reauth required - skip prompt, go straight to modal
-          console.log('[PROMPT] Server requires immediate reauth - skipping prompt');
-          await showReauthModalSafe({ context: 'reauth' });
-          return;
+        const apiBase = window.__SEC_API_BASE || window.API_BASE || '';
+        const lockRes = await fetch(`${apiBase}/reauth/require`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason: 'soft_idle_timeout' })
+        });
+        
+        if (lockRes.ok) {
+          const lockData = await lockRes.json();
+          console.log('[PROMPT] ✅ Server lock created:', lockData);
+        } else {
+          console.warn('[PROMPT] ⚠️ Server lock creation failed:', lockRes.status);
         }
+      } catch (lockErr) {
+        console.error('[PROMPT] ❌ Failed to create server lock:', lockErr);
+      }
+      
+      // Show reauth modal
+      try {
+        await showReauthModalSafe({ context: 'reauth', reason: 'soft-idle-timeout' });
       } catch (e) {
-        console.warn('[PROMPT] Server check failed', e);
+        console.error('[PROMPT] Failed to show reauth modal after timeout', e);
       }
-      
-      // Show the soft prompt UI
-      console.log('[PROMPT] Showing inactivity prompt (5s countdown to reauth)');
-      
-      const promptModal = document.getElementById('inactivityPrompt');
-      
-      if (!promptModal) {
-        console.warn('[PROMPT] Prompt modal not found - showing reauth modal instead');
-        console.warn('[PROMPT] Available modal IDs:', Array.from(document.querySelectorAll('[id*="modal"]')).map(el => el.id));
-        await showReauthModalSafe({ context: 'inactivity' });
-        return;
-      }
-      
-      console.log('[PROMPT] Found prompt modal:', promptModal.id || promptModal.className);
-      
-      // Show prompt
-      promptModal.classList.remove('hidden');
-      promptModal.setAttribute('aria-modal', 'true');
-      promptModal.setAttribute('role', 'dialog');
-      
-      // Focus "Yes" button if it exists
-      const yesBtn = promptModal.querySelector('#yesActiveBtn, .yes-btn, [data-yes]');
+    }, 5000); // 5 seconds
+    
+    // Setup close handlers (only once)
+    if (!promptModal.__handlersAttached) {
       if (yesBtn) {
-        try { yesBtn.focus(); } catch(e) {}
+        yesBtn.addEventListener('click', () => {
+          console.log('[PROMPT] User clicked "Yes, I\'m here" - dismissing prompt');
+          
+          // Clear timeout
+          if (promptTimeout) {
+            clearTimeout(promptTimeout);
+            promptTimeout = null;
+          }
+          
+          // Hide prompt
+          promptModal.classList.add('hidden');
+          promptModal.removeAttribute('aria-modal');
+          promptModal.removeAttribute('role');
+          
+          // Reset flag
+          promptShowing = false;
+          
+          // Resume soft idle timer
+          startSoftIdleTimer();
+        });
       }
       
-      // Auto-dismiss after 5 seconds and show reauth modal
-      promptTimeout = setTimeout(async () => {
-        console.log('[PROMPT] 5 seconds elapsed - hiding prompt and showing reauth modal');
-        
-        // Hide prompt
-        promptModal.classList.add('hidden');
-        promptModal.removeAttribute('aria-modal');
-        promptModal.removeAttribute('role');
-        
-        // Reset flag
-        promptShowing = false;
-        
-        // Stop soft idle timer (reauth modal will be shown)
-        stopSoftIdleTimer();
-        
-        // Show reauth modal
-        try {
-          await showReauthModalSafe({ context: 'reauth', reason: 'soft-idle-timeout' });
-        } catch (e) {
-          console.error('[PROMPT] Failed to show reauth modal after timeout', e);
-        }
-      }, 5000); // 5 seconds
-      
-      // Setup close handlers (only once)
-      if (!promptModal.__handlersAttached) {
-        if (yesBtn) {
-          yesBtn.addEventListener('click', () => {
-            console.log('[PROMPT] User clicked "Yes, I\'m here" - dismissing prompt');
-            
-            // Clear timeout
-            if (promptTimeout) {
-              clearTimeout(promptTimeout);
-              promptTimeout = null;
-            }
-            
-            // Hide prompt
-            promptModal.classList.add('hidden');
-            promptModal.removeAttribute('aria-modal');
-            promptModal.removeAttribute('role');
-            
-            // Reset flag
-            promptShowing = false;
-            
-            // Resume soft idle timer
-            startSoftIdleTimer();
-          });
-        }
-        
-        promptModal.__handlersAttached = true;
-      }
-      
-      console.log('[PROMPT] Prompt visible - will show reauth modal in 5 seconds if no response');
-      
-    } catch (err) {
-      console.error('[PROMPT] Error showing prompt', err);
-    } finally {
-      // Only reset flag if timeout wasn't set (error case)
-      if (!promptTimeout) {
-        promptShowing = false;
-      }
+      promptModal.__handlersAttached = true;
+    }
+    
+    console.log('[PROMPT] Prompt visible - will show reauth modal in 5 seconds if no response');
+    
+  } catch (err) {
+    console.error('[PROMPT] Error showing prompt', err);
+  } finally {
+    // Only reset flag if timeout wasn't set (error case)
+    if (!promptTimeout) {
+      promptShowing = false;
     }
   }
+}
   
   // ============================================
   // REAUTH MODAL HELPERS (safe wrappers)
