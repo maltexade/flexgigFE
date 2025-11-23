@@ -893,6 +893,23 @@ function showBanner(msg, opts = {}) {
     if (opts.serverId && !opts.clientSticky) window.__fg_currentBanner.clientSticky = false;
   } catch (e) { /* swallow */ }
 }
+// 🔥 MAKE BROADCAST ENGINE GLOBAL (required since dashboard.js is an ES module)
+window.setBannerMessage = setBannerMessage;
+window.showBanner = showBanner;
+window.hideBanner = hideBanner;
+
+window.setupBroadcastSubscription = setupBroadcastSubscription;
+window.safeUnsubscribeChannel = safeUnsubscribeChannel;
+
+window.fetchActiveBroadcasts = fetchActiveBroadcasts;
+window.fetchWithAutoRefresh = fetchWithAutoRefresh;
+
+window.handleBroadcast = handleBroadcast;
+
+// Optional internal state (for debugging)
+window.__fg_currentBanner = window.__fg_currentBanner || {};
+window.__fg_broadcast_channel = window.__fg_broadcast_channel || null;
+
 
 function hideBanner(force = false) {
   // If a sticky banner is present, do not hide unless force === true
@@ -1644,6 +1661,8 @@ async function onDashboardLoad() {
     console.warn('[onDashboardLoad] getSession() failed:', err);
     session = null;
   }
+  setupBroadcastSubscription();
+
 
   // 🔥 ADD THESE TWO LINES (after the single getSession)
   await renderDashboardCardsFromState({ preferServer: true });
@@ -1741,7 +1760,7 @@ async function onDashboardLoad() {
     }
   }
 
-  setupBroadcastSubscription();
+
   if (window.__reauth && typeof window.__reauth.initReauthModal === 'function') {
     await window.__reauth.initReauthModal();
   } else {
