@@ -13697,8 +13697,8 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
   // ============================================
   // CONSTANTS
   // ============================================
-  const SOFT_IDLE_MS = 2 * 60 * 1000;  // 2 minutes (user inactive while visible)
-  const HARD_IDLE_MS = 60 * 60 * 1000; // 1 hour (tab hidden)
+  const SOFT_IDLE_MS = 1 * 60 * 1000;  // 1 minute (user inactive while visible)
+  const HARD_IDLE_MS = 2 * 60 * 1000; // 2 minutes (tab hidden)
   const RESET_DEBOUNCE_MS = /Mobi|Android/i.test(navigator.userAgent) ? 500 : 150;
   
   // Storage keys
@@ -14004,12 +14004,17 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
       // Show the soft prompt UI
       console.log('[PROMPT] Showing inactivity prompt');
       
-      const promptModal = document.getElementById('inactivityPrompt');
+      // Try multiple selectors to find your inactivity prompt modal
+      const promptModal = document.getElementById('inactivityPrompt')
+      
       if (!promptModal) {
-        console.warn('[PROMPT] promptModal not found - showing reauth modal instead');
+        console.warn('[PROMPT] Prompt modal not found (tried multiple selectors) - showing reauth modal instead');
+        console.warn('[PROMPT] Available modal IDs:', Array.from(document.querySelectorAll('[id*="modal"]')).map(el => el.id));
         await showReauthModalSafe({ context: 'inactivity' });
         return;
       }
+      
+      console.log('[PROMPT] Found prompt modal:', promptModal.id || promptModal.className);
       
       promptModal.classList.remove('hidden');
       promptModal.setAttribute('aria-modal', 'true');
@@ -14281,9 +14286,7 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
   }
   
   tryInit();
-})(); 
-
-
+})();
 
 
 
