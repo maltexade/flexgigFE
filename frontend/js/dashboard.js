@@ -13714,8 +13714,8 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
   // ============================================
   // CONSTANTS
   // ============================================
-  const SOFT_IDLE_MS = 1 * 60 * 1000;  // 1 minute (user inactive while visible)
-  const HARD_IDLE_MS = 2 * 60 * 1000; // 2 minutes (tab hidden)
+  const SOFT_IDLE_MS = 2 * 60 * 1000;  // 2 minutes (user inactive while visible)
+  const HARD_IDLE_MS = 30 * 60 * 1000; // 30 minutes (tab hidden)
   const RESET_DEBOUNCE_MS = /Mobi|Android/i.test(navigator.userAgent) ? 500 : 150;
   
   // Storage keys
