@@ -14142,7 +14142,7 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
   // ============================================
   // REAUTH MODAL HELPERS (safe wrappers)
   // ============================================
-  async function showReauthModalSafe(options) {
+    async function showReauthModalSafe(options = {}) {
     try {
       // Stop all idle timers when showing reauth modal
       console.log('[IDLE] Stopping all timers - reauth modal will be shown');
@@ -14155,6 +14155,17 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
         clearTimeout(promptTimeout);
         promptTimeout = null;
       }
+
+      // --- NEW: set persistent reauth lock BEFORE showing modal (if available) ---
+      try {
+        if (window.__persistentReauthLock && typeof window.__persistentReauthLock.setLock === 'function') {
+          console.log('[IDLE] Setting persistent reauth lock, reason:', options.reason || 'reauth-required');
+          window.__persistentReauthLock.setLock(options.reason || 'reauth-required');
+        }
+      } catch (e) {
+        console.warn('[IDLE] Failed to set persistent reauth lock (continuing):', e);
+      }
+      // -----------------------------------------------------------------------
       
       // Try multiple APIs in order of preference
       if (window.__reauth && typeof window.__reauth.showReauthModal === 'function') {
@@ -14170,6 +14181,7 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
       console.error('[IDLE] Failed to show reauth modal', e);
     }
   }
+
   
   function shouldReauthLocal(context = 'reauth') {
     try {
