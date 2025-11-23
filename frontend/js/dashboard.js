@@ -13947,6 +13947,33 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
       }
     }, remaining);
   }
+
+  // ============================================
+// HELPER: CREATE SERVER LOCK IN BACKGROUND
+// ============================================
+function createServerLockInBackground(reason) {
+  // Fire-and-forget (don't block UI)
+  const apiBase = window.__SEC_API_BASE || window.API_BASE || '';
+  
+  fetch(`${apiBase}/reauth/require`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason })
+  })
+    .then(res => {
+      if (res.ok) {
+        return res.json();
+      }
+      throw new Error(`Server returned ${res.status}`);
+    })
+    .then(data => {
+      console.log(`[LOCK] ✅ Server lock created (reason: ${reason}):`, data);
+    })
+    .catch(err => {
+      console.error(`[LOCK] ❌ Failed to create server lock (reason: ${reason}):`, err);
+    });
+}
   
   // ============================================
 // HARD IDLE TIMER (tab hidden for 30 minutes)
@@ -13961,30 +13988,14 @@ async function triggerHardIdleReauth() {
     promptTimeout = null;
   }
   
-  // ✅ CREATE SERVER LOCK BEFORE SHOWING MODAL
-  try {
-    const apiBase = window.__SEC_API_BASE || window.API_BASE || '';
-    const lockRes = await fetch(`${apiBase}/reauth/require`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reason: 'hard_idle_timeout' })
-    });
-    
-    if (lockRes.ok) {
-      const lockData = await lockRes.json();
-      console.log('[HARD IDLE] ✅ Server lock created:', lockData);
-    } else {
-      console.warn('[HARD IDLE] ⚠️ Server lock creation failed:', lockRes.status);
-    }
-  } catch (lockErr) {
-    console.error('[HARD IDLE] ❌ Failed to create server lock:', lockErr);
-  }
-  
   // Check local first (fast)
   const localCheck = shouldReauthLocal('reauth');
   if (localCheck.needsReauth) {
+    // ✅ SHOW MODAL FIRST (instant UX)
     await showReauthModalSafe({ context: 'reauth', reason: 'hard-idle' });
+    
+    // ✅ CREATE SERVER LOCK IN BACKGROUND (non-blocking)
+    createServerLockInBackground('hard_idle_timeout');
     return;
   }
   
@@ -13992,7 +14003,11 @@ async function triggerHardIdleReauth() {
   try {
     const serverCheck = await checkServerReauthStatus();
     if (serverCheck && (serverCheck.needsReauth || serverCheck.reauthRequired)) {
+      // ✅ SHOW MODAL FIRST
       await showReauthModalSafe({ context: 'reauth', reason: 'hard-idle' });
+      
+      // ✅ CREATE LOCK IN BACKGROUND
+      createServerLockInBackground('hard_idle_timeout');
     }
   } catch (e) {
     console.warn('[HARD IDLE] Server check failed', e);
@@ -14074,33 +14089,22 @@ async function checkHardIdleOnVisible() {
   if (hasCanonicalReauthFlag()) {
     console.log('[IDLE] Canonical reauth flag present - showing modal');
     await showReauthModalSafe({ context: 'reauth', reason: 'hard-idle' });
+    
+    // Create lock in background
+    createServerLockInBackground('hard_idle_on_return');
     return;
   }
   
   // Check expected reauth timestamp (local prediction)
   const expected = getExpectedReauthAt();
   if (expected && Date.now() >= expected) {
-    console.log('[IDLE] Expected reauth time exceeded - creating lock and showing modal');
+    console.log('[IDLE] Expected reauth time exceeded - showing modal');
     
-    // ✅ CREATE SERVER LOCK BEFORE SHOWING MODAL
-    try {
-      const apiBase = window.__SEC_API_BASE || window.API_BASE || '';
-      const lockRes = await fetch(`${apiBase}/reauth/require`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason: 'hard_idle_on_return' })
-      });
-      
-      if (lockRes.ok) {
-        const lockData = await lockRes.json();
-        console.log('[IDLE] ✅ Server lock created on return:', lockData);
-      }
-    } catch (lockErr) {
-      console.error('[IDLE] ❌ Failed to create server lock:', lockErr);
-    }
-    
+    // ✅ SHOW MODAL FIRST (instant UX)
     await showReauthModalSafe({ context: 'reauth', reason: 'hard-idle' });
+    
+    // ✅ CREATE LOCK IN BACKGROUND
+    createServerLockInBackground('hard_idle_on_return');
     return;
   }
   
@@ -14111,33 +14115,18 @@ async function checkHardIdleOnVisible() {
     console.log(`[IDLE] User was away for ${Math.round(awayTime / 1000 / 60)} minutes`);
     
     if (awayTime >= HARD_IDLE_MS) {
-      console.log('🔥 [HARD IDLE] Threshold exceeded on return - creating lock');
+      console.log('🔥 [HARD IDLE] Threshold exceeded on return');
       
       // Clear timestamps
       removeItem(KEYS.PAGE_HIDDEN_AT);
       clearExpectedReauthAt();
       pageHiddenTimestamp = null;
       
-      // ✅ CREATE SERVER LOCK BEFORE SHOWING MODAL
-      try {
-        const apiBase = window.__SEC_API_BASE || window.API_BASE || '';
-        const lockRes = await fetch(`${apiBase}/reauth/require`, {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ reason: 'hard_idle_exceeded' })
-        });
-        
-        if (lockRes.ok) {
-          const lockData = await lockRes.json();
-          console.log('[IDLE] ✅ Server lock created:', lockData);
-        }
-      } catch (lockErr) {
-        console.error('[IDLE] ❌ Failed to create server lock:', lockErr);
-      }
-      
-      // Show reauth
+      // ✅ SHOW MODAL FIRST (instant UX)
       await showReauthModalSafe({ context: 'reauth', reason: 'hard-idle' });
+      
+      // ✅ CREATE LOCK IN BACKGROUND
+      createServerLockInBackground('hard_idle_exceeded');
       return;
     }
     
@@ -14214,7 +14203,7 @@ async function showInactivityPrompt() {
     
     // Auto-dismiss after 5 seconds and show reauth modal
     promptTimeout = setTimeout(async () => {
-      console.log('[PROMPT] 5 seconds elapsed - creating server lock and showing reauth modal');
+      console.log('[PROMPT] 5 seconds elapsed - showing reauth modal');
       
       // Hide prompt
       promptModal.classList.add('hidden');
@@ -14227,32 +14216,16 @@ async function showInactivityPrompt() {
       // Stop soft idle timer (reauth modal will be shown)
       stopSoftIdleTimer();
       
-      // ✅ CREATE SERVER LOCK BEFORE SHOWING MODAL
-      try {
-        const apiBase = window.__SEC_API_BASE || window.API_BASE || '';
-        const lockRes = await fetch(`${apiBase}/reauth/require`, {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ reason: 'soft_idle_timeout' })
-        });
-        
-        if (lockRes.ok) {
-          const lockData = await lockRes.json();
-          console.log('[PROMPT] ✅ Server lock created:', lockData);
-        } else {
-          console.warn('[PROMPT] ⚠️ Server lock creation failed:', lockRes.status);
-        }
-      } catch (lockErr) {
-        console.error('[PROMPT] ❌ Failed to create server lock:', lockErr);
-      }
-      
-      // Show reauth modal
+      // ✅ SHOW MODAL FIRST (instant UX)
       try {
         await showReauthModalSafe({ context: 'reauth', reason: 'soft-idle-timeout' });
       } catch (e) {
         console.error('[PROMPT] Failed to show reauth modal after timeout', e);
       }
+      
+      // ✅ CREATE SERVER LOCK IN BACKGROUND (non-blocking)
+      createServerLockInBackground('soft_idle_timeout');
+      
     }, 5000); // 5 seconds
     
     // Setup close handlers (only once)
