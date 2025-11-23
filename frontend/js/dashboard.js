@@ -14589,7 +14589,7 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
     console.log('[REAUTH-LOCK] Lock received from another tab');
     
     // Show reauth modal if not already showing
-    if (!isReauthModalVisible()) {
+    if (!isReauthModalVisibleNew()) {
       try {
         await showReauthModalSafe({ 
           context: 'reauth', 
@@ -14608,7 +14608,7 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
     console.log('[REAUTH-LOCK] Unlock received from another tab');
     
     // Hide reauth modal if showing
-    if (isReauthModalVisible()) {
+    if (isReauthModalVisibleNew()) {
       try {
         hideReauthModalSafe();
       } catch (e) {
@@ -14686,7 +14686,7 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
     
     const lock = getReauthLock();
     
-    if (lock && lock.locked && !isReauthModalVisible()) {
+    if (lock && lock.locked && !isReauthModalVisibleNew()) {
       console.log('[REAUTH-LOCK] Lock exists but modal not visible, showing:', lock);
       
       try {
@@ -14710,7 +14710,7 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
     
     lockCheckInterval = setInterval(() => {
       const lock = getReauthLock();
-      const modalVisible = isReauthModalVisible();
+      const modalVisible = isReauthModalVisibleNew();
       
       // If lock exists but modal not visible -> show modal
       if (lock && lock.locked && !modalVisible) {
