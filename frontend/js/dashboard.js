@@ -4922,43 +4922,43 @@ updateBalanceDisplay();
     payBtn.disabled = false;
     payBtn.textContent = 'Pay';
   }, 1000); 
-  // --- ADD MONEY HANDLER ---
-  const addMoneyBtn = document.querySelector('.card.add-money');
-  addMoneyBtn.addEventListener('click', () => {
-    const amount = prompt('Enter amount to fund (₦):', '1000');
-    if (!amount || isNaN(amount) || amount <= 0) {
-      alert('Please enter a valid amount.');
-      console.error('[ERROR] addMoneyBtn: Invalid amount:', amount);
-      return;
-    }
-    const fundAmount = parseFloat(amount);
-    // Mock API call
-    const mockResponse = { success: true, transactionId: `TX${Date.now()}` };
-    console.log('[DEBUG] addMoneyBtn: Mock API response:', mockResponse);
+  // // --- ADD MONEY HANDLER ---
+  // const addMoneyBtn = document.querySelector('.card.add-money1');
+  // addMoneyBtn.addEventListener('click', () => {
+  //   const amount = prompt('Enter amount to fund (₦):', '1000');
+  //   if (!amount || isNaN(amount) || amount <= 0) {
+  //     alert('Please enter a valid amount.');
+  //     console.error('[ERROR] addMoneyBtn: Invalid amount:', amount);
+  //     return;
+  //   }
+  //   const fundAmount = parseFloat(amount);
+  //   // Mock API call
+  //   const mockResponse = { success: true, transactionId: `TX${Date.now()}` };
+  //   console.log('[DEBUG] addMoneyBtn: Mock API response:', mockResponse);
 
-    // Update balance
-    userBalance += fundAmount;
-    updateBalanceDisplay();
+  //   // Update balance
+  //   userBalance += fundAmount;
+  //   updateBalanceDisplay();
 
-    // Add to transactions
-    const transaction = {
-      type: 'receive',
-      description: 'Fund Wallet',
-      amount: fundAmount,
-      phone: null,
-      provider: null,
-      subType: null,
-      data: null,
-      duration: null,
-      timestamp: new Date().toISOString(),
-      status: 'success' // Mock success
-    };
-    transactions.push(transaction);
-    renderTransactions();
+  //   // Add to transactions
+  //   const transaction = {
+  //     type: 'receive',
+  //     description: 'Fund Wallet',
+  //     amount: fundAmount,
+  //     phone: null,
+  //     provider: null,
+  //     subType: null,
+  //     data: null,
+  //     duration: null,
+  //     timestamp: new Date().toISOString(),
+  //     status: 'success' // Mock success
+  //   };
+  //   transactions.push(transaction);
+  //   renderTransactions();
 
-    alert(`Successfully funded ₦${fundAmount}!`);
-    console.log('[DEBUG] addMoneyBtn: Funding processed, new balance:', userBalance, 'Transaction:', transaction);
-  });
+  //   alert(`Successfully funded ₦${fundAmount}!`);
+  //   console.log('[DEBUG] addMoneyBtn: Funding processed, new balance:', userBalance, 'Transaction:', transaction);
+  // });
 
 /* ===========================================================
    PIN modal — unified keypad + keyboard input + toast system

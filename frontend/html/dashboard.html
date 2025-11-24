@@ -203,7 +203,7 @@
               </div>
             </div>
           </div>
-          <div class="card add-money">
+          <div id="addMoneyBtn" class="card add-money">
             <div style="display:flex;gap:12px;align-items:center">
               <div class="icon-wrap">
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
@@ -216,6 +216,70 @@
             </div>
           </div>
         </div>
+
+<!-- Add Money Modal -->
+<div id="addMoneyModal" class="addMoney-modal">
+
+  <!-- Header -->
+  <div class="addMoney-modal-header">
+    <div class="addMoney-pull-handle"></div>
+
+    <div class="addMoney-header-row">
+      <button class="addMoney-modal-close" data-close>&times;</button>
+
+      <h3 class="addMoney-modal-title">Add Money</h3>
+
+      <div></div> <!-- spacer -->
+    </div>
+  </div>
+  <div id="addMoneyFocusGuard" tabindex="-1" style="outline: none;"></div>
+
+
+  <div class="addMoney-modal-content">
+
+    <!-- KYC / Bank Card -->
+    <div class="addMoney-account-section">
+      <div class="addMoney-account-icon">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+          <path d="M3 10l9-6 9 6v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V10z"
+                stroke="#00AAFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+
+      <div class="addMoney-account-text">
+        <h4>Get a permanent bank account</h4>
+        <span class="addMoney-account-subtitle">Complete KYC</span>
+      </div>
+    </div>
+
+    <!-- Instant Deposit Label -->
+    <div class="addMoney-instant-label">Instant Deposit</div>
+    
+
+    <!-- Amount Input -->
+    <div class="addMoney-amount-section">
+      <input type="text" id="addMoneyAmountInput"
+             class="addMoney-amount-input"
+             autocomplete="off"
+             placeholder="₦ Enter amount" />
+    </div>
+
+    <!-- Quick Amount Buttons -->
+    <div class="addMoney-quick-amounts">
+      <button class="addMoney-quick-btn">₦500</button>
+      <button class="addMoney-quick-btn">₦1,000</button>
+      <button class="addMoney-quick-btn">₦2,000</button>
+      <button class="addMoney-quick-btn">₦3,000</button>
+      <button class="addMoney-quick-btn">₦5,000</button>
+      <button class="addMoney-quick-btn">₦10,000</button>
+    </div>
+
+    <!-- Fund Wallet Button -->
+    <button id="addMoneyFundBtn" class="addMoney-fund-btn">Fund Wallet</button>
+
+  </div>
+</div>
+
 
         <!-- Services -->
         <div class="shortcuts">
@@ -1527,5 +1591,6 @@
   <script src="/frontend/js/referral.js" defer></script>
   <script src="/frontend/js/checkout.js" defer></script>
   <script src="/frontend/js/history.js" defer></script>
+  <script src="/frontend/js/addMoney.js" defer></script>
 </body>
 </html>

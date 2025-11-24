@@ -4315,3 +4315,221 @@ a[style*="color: #f00"] { color: var(--danger); }
   stroke: #00d4a0 !important;
 }
 
+
+
+/* Modal wrapper */
+.addMoney-modal {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 65vh;
+  background: #181818;
+  border-top-left-radius: 22px;
+  border-top-right-radius: 22px;
+  transform: translateY(100%);
+  transition: transform 0.35s ease;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 -4px 35px rgba(0,0,0,0.5);
+}
+
+/* Header */
+.addMoney-modal-header {
+  padding: 14px 18px 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  backdrop-filter: blur(18px);
+}
+
+.addMoney-pull-handle {
+  width: 42px;
+  height: 5px;
+  background: rgba(255,255,255,0.35);
+  border-radius: 3px;
+  margin: 0 auto 12px;
+  backdrop-filter: blur(12px);
+}
+
+.addMoney-header-row {
+  display: grid;
+  grid-template-columns: 40px 1fr 40px;
+  align-items: center;
+}
+
+.addMoney-modal-close {
+  background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.12);
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  font-size: 18px;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  backdrop-filter: blur(16px);
+  transition: 0.2s;
+}
+.addMoney-modal-close:hover {
+  background: rgba(255,255,255,0.18);
+}
+
+.addMoney-modal-title {
+  color: white;
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  text-align: center;
+}
+
+/* Content */
+.addMoney-modal-content {
+  flex: 1;
+  padding: 18px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  backdrop-filter: blur(14px);
+}
+
+/* KYC / account card */
+.addMoney-account-section {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,0.15);
+  backdrop-filter: blur(22px);
+  box-shadow: 0 4px 28px rgba(0,0,0,0.25);
+}
+
+.addMoney-account-text h4 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: white;
+}
+
+.addMoney-account-subtitle {
+  font-size: 12px;
+  color: rgba(255,255,255,0.6);
+}
+
+/* Instant deposit label */
+.addMoney-instant-label {
+  font-size: 13px;
+  color: #00aaff;
+  font-weight: 600;
+  text-align: left;
+  margin-top: -6px;
+  opacity: 0.85;
+}
+
+/* Amount input */
+.addMoney-amount-input {
+  width: 100%;
+  padding: 15px;
+  font-size: 17px;
+  border-radius: 14px;
+  background: rgba(255,255,255,0.07);
+  color: white;
+  border: 1px solid rgba(255,255,255,0.12);
+  backdrop-filter: blur(14px);
+}
+.addMoney-amount-input:focus {
+  border-color: #00aaff;
+  background: rgba(255,255,255,0.12);
+}
+
+/* Quick buttons */
+.addMoney-quick-amounts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.addMoney-quick-btn {
+  flex: 1 1 30%;
+  padding: 14px 0;
+  background: rgba(0,170,255,0.15);
+  color: #00c8ff;
+  border-radius: 14px;
+  font-weight: 600;
+  border: 1px solid rgba(0,170,255,0.35);
+  backdrop-filter: blur(14px);
+  cursor: pointer;
+  transition: 0.25s;
+  box-shadow: 0 0 8px rgba(0,170,255,0.2);
+}
+
+.addMoney-quick-btn:hover {
+  background: #00aaff;
+  color: white;
+  box-shadow: 0 0 12px rgba(0,170,255,0.55);
+}
+
+/* Fund wallet button */
+.addMoney-fund-btn {
+  width: 100%;
+  padding: 16px;
+  background: linear-gradient(135deg, #00aaff, #0090ff);
+  color: white;
+  border: none;
+  border-radius: 18px;
+  font-size: 17px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: auto;
+  box-shadow: 0 4px 25px rgba(0,150,255,0.4);
+  transition: 0.25s;
+}
+
+.addMoney-fund-btn:hover {
+  box-shadow: 0 6px 32px rgba(0,170,255,0.6);
+  transform: translateY(-2px);
+}
+.addMoney-quick-btn.selected {
+  background: #00aaff;
+  color: white;
+  border-color: #00aaff;
+  transform: scale(1.03);
+}
+.addMoney-generated-content {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  text-align: center;
+  color: white;
+}
+
+.addMoney-generated-body p {
+  margin: 6px 0;
+  font-size: 15px;
+}
+
+.addMoney-bank-logo {
+  width: 40px;
+  vertical-align: middle;
+  margin-left: 6px;
+}
+
+.copy-btn {
+  margin-left: 8px;
+  background: rgba(255,255,255,0.1);
+  border: none;
+  padding: 4px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  color: white;
+  font-size: 14px;
+  transition: 0.2s;
+}
+
+.copy-btn:hover {
+  background: #00aaff;
+}

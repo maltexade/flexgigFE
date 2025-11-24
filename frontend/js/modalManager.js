@@ -223,6 +223,7 @@
     updateProfileModal: 'dashboardUpdateProfileCard',
     changePwdModal: 'changePWD',
     checkoutModal: 'continueBtn',
+    addMoneyModal: 'addMoneyBtn'
   };
 
   // Modals that should NOT affect nav tab active states (card/button triggered, not nav items)
@@ -455,6 +456,7 @@
     referralModal: { id: 'referralModal', element: null, hasPullHandle: false },
     checkoutModal: { id: 'checkoutModal', element: null, hasPullHandle: false },
     historyModal: { id: 'historyModal', element: null, hasPullHandle: false },
+    addMoneyModal: {id: 'addMoneyModal', element: null, hasPullHandle: true},
   };
 
   // Utility: Check if modal is visible
@@ -739,12 +741,29 @@ if (skipHistory && document.getElementById(modalId)) {
         log('debug', 'openModal: Dispatched security:pin-modal-opened for securityPinModal');
       }
 
+      // --- Special rule for Add Money Modal to prevent input auto-focus ---
+if (modalId === 'addMoneyModal') {
+  const amt = document.getElementById('addMoneyAmountInput');
+  const guard = document.getElementById('addMoneyFocusGuard');
+
+  if (amt) {
+    amt.blur();                            // prevent ghost focus
+    amt.setAttribute("readonly", true);    // block auto keyboard
+    setTimeout(() => amt.removeAttribute("readonly"), 250); // re-enable after animation
+  }
+
+  if (guard) guard.focus();                // force focus elsewhere
+}
+
+
       if (focusTarget) {
         focusTarget.setAttribute('tabindex', '-1');
         focusTarget.focus();
       }
 
       trapFocus(modal);
+      document.dispatchEvent(new CustomEvent("modalOpened", { detail: modalId }));
+
     });
   }
 
@@ -1128,6 +1147,7 @@ log('debug', 'handlePopstate: openModalsStack snapshot', { stack: openModalsStac
       referralsBtn: 'referralModal',
       continueBtn: 'checkoutModal',
       historyNavLink: 'historyModal',
+      addMoneyBtn: 'addMoneyModal',
     };
 
     // Bind triggers to open modals
