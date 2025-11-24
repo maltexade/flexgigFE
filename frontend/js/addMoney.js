@@ -135,40 +135,16 @@ amountInput.addEventListener("input", () => {
   quickBtns.forEach(b => b.classList.remove("selected"));
 });
 
-function parseAmountFromInput(inputEl) {
+function parseAmountFromInputEl(inputEl) {
   if (!inputEl) return 0;
   const digits = (inputEl.value || '').replace(/[^0-9]/g, '');
   return digits ? parseInt(digits, 10) : 0;
 }
 
 
-
 // --- Fund Wallet Button ---
 // inside assignAddMoneyEvents() where you handle fundBtn click:
-fundBtn.addEventListener('click', async () => {
-  const amount = parseAmountFromInputEl(amountInput); // <- sanitized
-  if (!amount || amount <= 0) return showGeneratedError('Please enter a valid amount.');
 
-  fundBtn.disabled = true;
-  fundBtn.textContent = 'Processing...';
-
-  try {
-    const res = await apiFetch('/api/fund-wallet', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ amount })
-    });
-    const data = await res.json();
-    if (res.ok) showGeneratedAccount(data);
-    else showGeneratedError(data.message || 'Failed to generate account. Try again.');
-  } catch (err) {
-    console.error(err);
-    showGeneratedError('Network error, try again.');
-  } finally {
-    fundBtn.disabled = false;
-    fundBtn.textContent = 'Fund Wallet';
-  }
-});
 
 // if the modal HTML is already present on page load:
 assignAddMoneyEvents();
@@ -187,9 +163,13 @@ function showGeneratedError(message = 'Failed to generate account. Try again.') 
   `;
 
   // Close button
-  contentContainer.querySelector('.addMoney-modal-close').addEventListener('click', () => {
-    modalManager.closeModal('addMoneyModal');
+  contentContainer.querySelector('.addMoney-modal-close')
+  .addEventListener('click', () => {
+    openAddMoneyModalContent();
   });
+
+
+  
 
   // Retry button
   document.getElementById('retryFundBtn').addEventListener('click', () => {
@@ -272,27 +252,30 @@ function assignAddMoneyEvents() {
   // Fund wallet button
   fundBtn.addEventListener('click', async () => {
     const amount = parseInt(amountInput.value.replace(/[^0-9]/g,""));
-    if (!amount || amount <= 0) return Notification('Please enter a valid amount.', 'error');
+    if (!amount || amount <= 0) return window.notify('Please enter a valid amount.', 'error');
 
     fundBtn.disabled = true;
+    
     fundBtn.textContent = 'Processing...';
-
+    return window.withLoader(async () => {
     try {
-      const res = await fetch('/api/fund-wallet', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ amount })
-      });
-      const data = await res.json();
-      if (res.ok) showGeneratedAccount(data);
-      else showGeneratedError(data.message || 'Failed to generate account. Try again.');
+      const res = await apiFetch('/api/fund-wallet', {
+  method: 'POST',
+  body: { amount }
+});
+
+
+      if (res.ok) showGeneratedAccount(res.data);
+      else showGeneratedError(res.error?.message  || 'Failed to generate account. Try again.');
     } catch (err) {
       console.error(err);
       showGeneratedError('Network error, try again.');
     } finally {
       fundBtn.disabled = false;
+    
       fundBtn.textContent = 'Fund Wallet';
     }
+   });
   });
 }
 

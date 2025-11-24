@@ -808,7 +808,7 @@ async function withLoader(task) {
     try { hideLoader(); } catch (e) { /* ignore */ }
   }
 }
-
+window.withLoader = window.withLoader || withLoader
 
 // Robust error parser: returns { message, code, raw }
 async function parseErrorResponse(res) {
