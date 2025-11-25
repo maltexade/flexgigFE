@@ -81,77 +81,20 @@ async function apiFetch(path, opts = {}) {
   }
 }
 
+// --- Global countdown timer reference ---
+let countdownTimerInterval = null;
 
 // --- Modal Elements ---
 const addMoneyModal = document.getElementById('addMoneyModal');
-const amountInput = document.getElementById('addMoneyAmountInput');
-const quickBtns = document.querySelectorAll('.addMoney-quick-btn');
-const fundBtn = document.getElementById('addMoneyFundBtn');
 
-// Keep raw value for backend
-let rawAmount = "";
-
-amountInput.addEventListener("input", () => {
-  let v = amountInput.value.replace(/[^0-9]/g, ""); // numbers only
-  rawAmount = v;
-
-  if (!v) {
-    amountInput.value = "";
-    return;
+// --- Show Error Screen ---
+function showGeneratedError(message = 'Failed to generate account. Try again.') {
+  // Clear any existing countdown
+  if (countdownTimerInterval) {
+    clearInterval(countdownTimerInterval);
+    countdownTimerInterval = null;
   }
 
-  amountInput.value = "₦" + Number(v).toLocaleString();
-});
-
-// Quick amount buttons click
-document.querySelectorAll(".addMoney-quick-btn").forEach(btn => {
-  btn.addEventListener("click", () => {
-    const value = btn.textContent.replace(/[^0-9]/g, "");
-    rawAmount = value;
-    amountInput.value = "₦" + Number(value).toLocaleString();
-  });
-});
-
-// --- Quick amount buttons ---
-// --- Quick Amount Buttons ---
-quickBtns.forEach(btn => {
-  btn.addEventListener("click", () => {
-
-    // Remove previously selected
-    quickBtns.forEach(b => b.classList.remove("selected"));
-
-    // Mark this button as selected
-    btn.classList.add("selected");
-
-    // Get value
-    const value = btn.textContent.replace(/[^0-9]/g, "");
-    rawAmount = value;
-    amountInput.value = "₦" + Number(value).toLocaleString();
-  });
-});
-
-// --- Remove selection ONLY when typing ---
-amountInput.addEventListener("input", () => {
-  quickBtns.forEach(b => b.classList.remove("selected"));
-});
-
-function parseAmountFromInputEl(inputEl) {
-  if (!inputEl) return 0;
-  const digits = (inputEl.value || '').replace(/[^0-9]/g, '');
-  return digits ? parseInt(digits, 10) : 0;
-}
-
-
-// --- Fund Wallet Button ---
-// inside assignAddMoneyEvents() where you handle fundBtn click:
-
-
-// if the modal HTML is already present on page load:
-assignAddMoneyEvents();
-
-
-
-function showGeneratedError(message = 'Failed to generate account. Try again.') {
   const contentContainer = addMoneyModal.querySelector('.addMoney-modal-content');
   contentContainer.innerHTML = `
     <div class="addMoney-generated-error">
@@ -164,20 +107,24 @@ function showGeneratedError(message = 'Failed to generate account. Try again.') 
 
   // Close button
   contentContainer.querySelector('.addMoney-modal-close')
-  .addEventListener('click', () => {
-    openAddMoneyModalContent();
-  });
-
-
-  
+    .addEventListener('click', () => {
+      openAddMoneyModalContent();
+    });
 
   // Retry button
   document.getElementById('retryFundBtn').addEventListener('click', () => {
-    // Reopen the original Add Money modal content
     openAddMoneyModalContent();
   });
 }
+
+// --- Open Original Add Money Modal Content ---
 function openAddMoneyModalContent() {
+  // Clear any existing countdown
+  if (countdownTimerInterval) {
+    clearInterval(countdownTimerInterval);
+    countdownTimerInterval = null;
+  }
+
   const contentContainer = addMoneyModal.querySelector('.addMoney-modal-content');
   contentContainer.innerHTML = `
     <!-- KYC / Bank Card -->
@@ -223,10 +170,13 @@ function openAddMoneyModalContent() {
   assignAddMoneyEvents();
 }
 
+// --- Assign Events to Add Money Modal ---
 function assignAddMoneyEvents() {
   const amountInput = document.getElementById('addMoneyAmountInput');
   const quickBtns = document.querySelectorAll('.addMoney-quick-btn');
   const fundBtn = document.getElementById('addMoneyFundBtn');
+
+  if (!amountInput || !fundBtn) return;
 
   let rawAmount = "";
 
@@ -251,159 +201,205 @@ function assignAddMoneyEvents() {
 
   // Fund wallet button
   fundBtn.addEventListener('click', async () => {
-    const amount = parseInt(amountInput.value.replace(/[^0-9]/g,""));
-    if (!amount || amount <= 0) return window.notify('Please enter a valid amount.', 'error');
+    const amount = parseInt(amountInput.value.replace(/[^0-9]/g, ""));
+    
+    if (!amount || amount <= 0) {
+      if (window.notify) {
+        window.notify('Please enter a valid amount.', 'error');
+      } else {
+        alert('Please enter a valid amount.');
+      }
+      return;
+    }
 
     fundBtn.disabled = true;
-    
     fundBtn.textContent = 'Processing...';
-    return window.withLoader(async () => {
-    try {
-      const res = await apiFetch('/api/fund-wallet', {
-  method: 'POST',
-  body: { amount }
-});
 
+    // Use window.withLoader if available, otherwise just execute
+    const executeRequest = async () => {
+      try {
+        const res = await apiFetch('/api/fund-wallet', {
+          method: 'POST',
+          body: { amount }
+        });
 
-      if (res.ok) showGeneratedAccount(res.data);
-      else showGeneratedError(res.error?.message  || 'Failed to generate account. Try again.');
-    } catch (err) {
-      console.error(err);
-      showGeneratedError('Network error, try again.');
-    } finally {
-      fundBtn.disabled = false;
-    
-      fundBtn.textContent = 'Fund Wallet';
+        if (res.ok) {
+          showGeneratedAccount(res.data);
+        } else {
+          showGeneratedError(res.error?.message || 'Failed to generate account. Try again.');
+        }
+      } catch (err) {
+        console.error('[Fund Wallet Error]', err);
+        showGeneratedError('Network error, try again.');
+      } finally {
+        fundBtn.disabled = false;
+        fundBtn.textContent = 'Fund Wallet';
+      }
+    };
+
+    if (window.withLoader) {
+      await window.withLoader(executeRequest);
+    } else {
+      await executeRequest();
     }
-   });
   });
 }
 
-
-
 // --- Show Generated Bank Account ---
 function showGeneratedAccount(data) {
-  // Start 30-minute countdown
-  let countdown = 30 * 60; // 30 minutes in seconds
+  // Clear any existing countdown
+  if (countdownTimerInterval) {
+    clearInterval(countdownTimerInterval);
+    countdownTimerInterval = null;
+  }
+
+  // Calculate expiration time in seconds
+  let countdown;
+  if (data.expiresAt) {
+    // If backend sends ISO timestamp
+    const expiryDate = new Date(data.expiresAt);
+    const now = new Date();
+    countdown = Math.floor((expiryDate - now) / 1000); // seconds remaining
+    
+    if (countdown < 0) countdown = 0; // Already expired
+  } else {
+    // Default: 30 minutes
+    countdown = 30 * 60;
+  }
+
+  console.log('[Generated Account]', data);
+  console.log('[Countdown]', countdown, 'seconds');
 
   const modalContent = document.createElement('div');
   modalContent.classList.add('addMoney-generated-content');
 
   modalContent.innerHTML = `
     <div class="addMoney-generated-body"
-     style="padding:10px; background:rgb(7, 7, 7); height:60vh; overflow-y:hidden; color:#ffffff; display: flex; flex-direction: column; justify-content: left;">
+     style="padding:20px; background:rgb(7, 7, 7); min-height:60vh; overflow-y:auto; color:#ffffff; display: flex; flex-direction: column;">
 
-  <!-- LABEL: Amount to Pay -->
-  <p style="margin:0; font-size:10px; opacity:0.75;">
-    Amount to Pay
-  </p>
+      <!-- Close Button -->
+      <button class="addMoney-modal-close" style="
+        position: absolute;
+        top: 15px;
+        right: 15px;
+        background: transparent;
+        border: none;
+        color: #fff;
+        font-size: 28px;
+        cursor: pointer;
+        line-height: 1;
+      ">&times;</button>
 
-  <!-- VALUE -->
-  <div style="font-size:20px; font-weight:600; margin:6px 0 20px;">
-    ₦${Number(data.amount).toLocaleString()}
-  </div>
+      <!-- LABEL: Amount to Pay -->
+      <p style="margin:0; font-size:11px; opacity:0.75; text-transform: uppercase; letter-spacing: 0.5px;">
+        Amount to Pay
+      </p>
 
+      <!-- VALUE -->
+      <div style="font-size:24px; font-weight:700; margin:8px 0 24px;">
+        ₦${Number(data.amount).toLocaleString()}
+      </div>
 
+      <!-- BANK SECTION -->
+      <div style="margin-bottom:24px;">
+        <!-- LABEL -->
+        <p style="margin:0; font-size:11px; opacity:0.75; text-transform: uppercase; letter-spacing: 0.5px;">Bank</p>
 
-  <!-- BANK SECTION -->
-  <div style="margin-bottom:20px;">
+        <!-- VALUE -->
+        <div style="font-size:18px; font-weight:600; margin-top:6px;">
+          ${data.bankName || 'OPay'}
+        </div>
 
-    <!-- LABEL -->
-    <p style="margin:0; font-size:10px; opacity:0.75;">Bank</p>
+        <!-- LOGO (Optional - remove if you don't have the image) -->
+        <img src="/frontend/img/opay-image.png"
+             alt="Bank Logo"
+             onerror="this.style.display='none'"
+             style="width:65px; height:20px; margin-top:10px; object-fit: contain;">
+      </div>
 
-    <!-- VALUE -->
-    <div style="font-size:17px; font-weight:600; margin-top:5px;">
-      ${data.bankName}
-    </div>
+      <!-- ACCOUNT NUMBER -->
+      <div style="margin-bottom:24px;">
+        <p style="margin:0; font-size:11px; opacity:0.75; text-transform: uppercase; letter-spacing: 0.5px;">Account Number</p>
 
-    <!-- LOGO -->
-    <img src="/frontend/img/opay-image.png"
-         alt="Bank Logo"
-         style="width:65px; height:20px; margin-top:10px;">
-  </div>
+        <div style="display:flex; align-items:center; gap:10px; margin-top:6px;">
+          <span style="font-size:20px; font-weight:700; letter-spacing:1px;">
+            ${data.accountNumber}
+          </span>
 
+          <button class="copy-btn" data-copy="${data.accountNumber}"
+            style="
+              border:none;
+              background:#3b82f6;
+              padding:8px 10px;
+              border-radius:8px;
+              cursor:pointer;
+              display:flex;
+              align-items:center;
+              justify-content:center;
+              transition: background 0.2s;
+            "
+            onmouseover="this.style.background='#2563eb'"
+            onmouseout="this.style.background='#3b82f6'">
+            <svg width="20px" height="20px" viewBox="0 0 24 24" fill="none">
+              <path d="M6 11C6 8.17157 6 6.75736 6.87868 5.87868C7.75736 5 9.17157 5 12 5H15C17.8284 5 19.2426 5 20.1213 5.87868C21 6.75736 21 8.17157 21 11V16C21 18.8284 21 20.2426 20.1213 21.1213C19.2426 22 17.8284 22 15 22H12C9.17157 22 7.75736 22 6.87868 21.1213C6 20.2426 6 18.8284 6 16V11Z" stroke="#ffffff" stroke-width="1.5"></path>
+              <path opacity="0.5" d="M6 19C4.34315 19 3 17.6569 3 16V10C3 6.22876 3 4.34315 4.17157 3.17157C5.34315 2 7.22876 2 11 2H15C16.6569 2 18 3.34315 18 5" stroke="#ffffff" stroke-width="1.5"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
 
+      <!-- ACCOUNT NAME (Dynamic - only show if provided) -->
+      ${data.accountName ? `
+      <div style="margin-bottom:24px;">
+        <p style="margin:0; font-size:11px; opacity:0.75; text-transform: uppercase; letter-spacing: 0.5px;">Account Name</p>
+        <div style="font-size:18px; font-weight:600; margin-top:6px;">
+          ${data.accountName}
+        </div>
+      </div>
+      ` : ''}
 
-  <!-- ACCOUNT NUMBER -->
-  <div style="margin-bottom:20px;">
-    <p style="margin:0; font-size:10px; opacity:0.75;">Account Number</p>
+      <!-- EXPIRES IN -->
+      <div style="margin-bottom:16px;">
+        <p style="margin:0; font-size:11px; opacity:0.75; text-transform: uppercase; letter-spacing: 0.5px;">Expires In</p>
 
-    <div style="display:flex; align-items:center; gap:10px; margin-top:5px;">
-
-      <span style="font-size:18px; font-weight:600; letter-spacing:0.5px;">
-        ${data.accountNumber}
-      </span>
-
-      <button class="copy-btn" data-copy="${data.accountNumber}"
-        style="
-          border:none;
-          background:#eef2ff;
-          padding:6px 8px;
-          border-radius:8px;
-          cursor:pointer;
-          display:flex;
-          align-items:center;
-          justify-content:center;
+        <div style="
+          margin-top:8px;
+          background: #10b981;
+          padding:14px 18px;
+          border-radius:12px;
+          font-size:22px;
+          font-weight:700;
+          color:#ffffff;
+          display:inline-block;
+          box-shadow: 0 4px 6px rgba(16, 185, 129, 0.3);
         ">
-        <svg width="22px" height="22px" viewBox="0 0 24 24" fill="none">
-          <path d="M6 11C6 8.17157 6 6.75736 6.87868 5.87868C7.75736 5 9.17157 5 12 5H15C17.8284 5 19.2426 5 20.1213 5.87868C21 6.75736 21 8.17157 21 11V16C21 18.8284 21 20.2426 20.1213 21.1213C19.2426 22 17.8284 22 15 22H12C9.17157 22 7.75736 22 
-          6.87868 21.1213C6 20.2426 6 18.8284 6 16V11Z" stroke="#1C274C" stroke-width="1.5"></path>
-          <path opacity="0.5" d="M6 19C4.34315 19 3 17.6569 3 16V10C3 6.22876 3 4.34315 4.17157 3.17157C5.34315 2 7.22876 2 11 2H15C16.6569 2 18 3.34315 18 5" stroke="#1C274C" stroke-width="1.5"></path>
-        </svg>
-      </button>
+          <span id="genCountdown">30:00</span>
+        </div>
+      </div>
+
+      <!-- INSTRUCTION -->
+      <p style="
+        margin-top:16px;
+        font-size:13px;
+        line-height:1.6;
+        opacity:0.7;
+      ">
+        Transfer the exact amount to this account. Your wallet will be credited instantly once payment is confirmed.
+      </p>
+
+      <!-- Reference Info (Optional) -->
+      <div style="
+        margin-top:20px;
+        padding:12px;
+        background:#1f2937;
+        border-radius:8px;
+        font-size:11px;
+        opacity:0.6;
+      ">
+        <strong>Reference:</strong> ${data.reference || data.orderNo || 'N/A'}
+      </div>
 
     </div>
-  </div>
-
-
-
-  <!-- ACCOUNT NAME -->
-  <div style="margin-bottom:20px;">
-    <p style="margin:0; font-size:10px; opacity:0.75;">Account Name</p>
-
-    <div style="font-size:17px; font-weight:600; margin-top:5px;">
-      ${data.accountName}
-    </div>
-  </div>
-
-
-
-  <!-- EXPIRES IN -->
-  <div style="margin-bottom:10px;">
-    <p style="margin:0; font-size:10px; opacity:0.75;">Expires In</p>
-
-    <div style="
-      margin-top:6px;
-      background: #3be080;
-      padding:12px 16px;
-      border-radius:10px;
-      font-size:18px;
-      font-weight:700;
-      color:#2a5e40;
-      display:inline-block;
-    ">
-      <span id="genCountdown">30:00</span>
-    </div>
-  </div>
-
-
-
-  <!-- INSTRUCTION -->
-  <p style="
-    margin-top:10px;
-    font-size:12px;
-    line-height:1.55;
-    opacity:0.6;
-  ">
-    Use this account to deposit and your wallet will be funded instantly.
-  </p>
-
-</div>
-
-
-
-
-
   `;
 
   // Replace modal content
@@ -411,51 +407,101 @@ function showGeneratedAccount(data) {
   contentContainer.innerHTML = '';
   contentContainer.appendChild(modalContent);
 
-  // Close button
-  modalContent.querySelector('.addMoney-modal-close').addEventListener('click', () => {
-    modalManager.closeModal('addMoneyModal');
-  });
+  // Close button handler
+  const closeBtn = modalContent.querySelector('.addMoney-modal-close');
+  if (closeBtn) {
+    closeBtn.addEventListener('click', () => {
+      if (window.modalManager && window.modalManager.closeModal) {
+        window.modalManager.closeModal('addMoneyModal');
+      } else {
+        addMoneyModal.style.transform = 'translateY(100%)';
+      }
+      // Clear countdown when closing
+      if (countdownTimerInterval) {
+        clearInterval(countdownTimerInterval);
+        countdownTimerInterval = null;
+      }
+    });
+  }
 
   // Copy account number
-  modalContent.querySelector('.copy-btn').addEventListener('click', (e) => {
-    const accountNum = e.currentTarget.dataset.copy;
-    navigator.clipboard.writeText(accountNum).then(() => {
-      alert('Account number copied!');
+  const copyBtn = modalContent.querySelector('.copy-btn');
+  if (copyBtn) {
+    copyBtn.addEventListener('click', (e) => {
+      const accountNum = e.currentTarget.dataset.copy;
+      navigator.clipboard.writeText(accountNum).then(() => {
+        if (window.notify) {
+          window.notify('Account number copied!', 'success');
+        } else {
+          alert('Account number copied!');
+        }
+      }).catch(() => {
+        alert('Failed to copy. Please copy manually: ' + accountNum);
+      });
     });
-  });
+  }
 
-  // Countdown timer
+  // Countdown timer - FIXED
   const countdownEl = modalContent.querySelector('#genCountdown');
-  const timerInterval = setInterval(() => {
-    const minutes = Math.floor(countdown / 60);
-    const seconds = countdown % 60;
-    countdownEl.textContent = `${String(minutes).padStart(2,'0')}:${String(seconds).padStart(2,'0')}`;
-    countdown--;
-    if (countdown < 0) clearInterval(timerInterval);
-  }, 1000);
+  if (countdownEl) {
+    // Update immediately
+    const updateCountdown = () => {
+      if (countdown < 0) {
+        countdownEl.textContent = 'EXPIRED';
+        countdownEl.parentElement.style.background = '#ef4444';
+        if (countdownTimerInterval) {
+          clearInterval(countdownTimerInterval);
+          countdownTimerInterval = null;
+        }
+        return;
+      }
+
+      const minutes = Math.floor(countdown / 60);
+      const seconds = countdown % 60;
+      countdownEl.textContent = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+    };
+
+    // Initial display
+    updateCountdown();
+
+    // Start countdown
+    countdownTimerInterval = setInterval(() => {
+      countdown--;
+      updateCountdown();
+    }, 1000);
+  }
 }
 
+// --- Initialize when DOM is ready ---
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => {
+    if (addMoneyModal) {
+      assignAddMoneyEvents();
+    }
+  });
+} else {
+  if (addMoneyModal) {
+    assignAddMoneyEvents();
+  }
+}
 
-// Redirect focus away from amount input when Add Money modal opens
+// --- Redirect focus away from amount input when Add Money modal opens ---
 document.addEventListener("modalOpened", (e) => {
-    amountInput.blur();     // forcefully remove focus
-amountInput.setAttribute("readonly", true); // block browser from focusing
-
-  if (e.detail === "addMoneyModal") {
+  const amountInput = document.getElementById('addMoneyAmountInput');
+  if (amountInput && e.detail === "addMoneyModal") {
     setTimeout(() => {
+      amountInput.blur();
+      amountInput.setAttribute("readonly", true);
+      
       const guard = document.getElementById("addMoneyFocusGuard");
-      if (guard) guard.focus(); // <-- Focus here instead of the input
+      if (guard) guard.focus();
     }, 20);
   }
 });
 
-
-// --- Optional: open modal function ---
-function openAddMoneyModal() {
-  addMoneyModal.style.transform = 'translateY(0)';
-}
-
-// --- Optional: close modal function ---
-function closeAddMoneyModal() {
-  addMoneyModal.style.transform = 'translateY(100%)';
-}
+// --- Cleanup countdown on page unload ---
+window.addEventListener('beforeunload', () => {
+  if (countdownTimerInterval) {
+    clearInterval(countdownTimerInterval);
+  }
+});
