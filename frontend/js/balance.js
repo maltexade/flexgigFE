@@ -24,10 +24,54 @@
     }
   }
 
-  function updateBalanceDisplay() {
-    if (realSpan) realSpan.textContent = formatBalance(_userBalance);
-    try { localStorage.setItem('userBalance', String(_userBalance)); } catch (e) {}
-  }
+  // --- Replace your updateBalanceDisplay() with this ---
+function updateBalanceDisplay() {
+  const formatted = formatBalance(_userBalance);
+
+  // 1) Update the authoritative ".balance-real" span (keeps mask module in control of visibility)
+  if (realSpan) realSpan.textContent = formatted;
+
+  // 2) Update other visible balance targets in the app so the user actually sees the change.
+  //    We update elements that commonly hold balances in your dashboard:
+  //    - any element with attribute [data-balance]
+  //    - any element with class ".balance-value"
+  //    - any element with id "topbar-balance" (common custom id)
+  try {
+    document.querySelectorAll('[data-balance]').forEach(el => {
+      // if element is input-like, set value, else set textContent
+      if ('value' in el) el.value = formatted;
+      else el.textContent = formatted;
+    });
+  } catch (e) { /* ignore */ }
+
+  try {
+    document.querySelectorAll('.balance-value').forEach(el => {
+      if ('value' in el) el.value = formatted;
+      else el.textContent = formatted;
+    });
+  } catch (e) {}
+
+  try {
+    const tb = document.getElementById('topbar-balance');
+    if (tb) {
+      if ('value' in tb) tb.value = formatted;
+      else tb.textContent = formatted;
+    }
+  } catch (e) {}
+
+  // 3) Persist fallback copy locally
+  try { localStorage.setItem('userBalance', String(_userBalance)); } catch (e) {}
+
+  // 4) Emit an event so other modules (toaster, toggle, analytics) can react
+  try {
+    const ev = new CustomEvent('balance:updated', { detail: { balance: _userBalance, formatted }});
+    window.dispatchEvent(ev);
+  } catch (e) {}
+
+  // 5) Debug log (leave in for a bit to confirm behavior)
+  console.debug('[balance.js] updateBalanceDisplay ->', { raw: _userBalance, formatted });
+}
+
 
   // expose updateBalanceDisplay if not already present
   window.updateBalanceDisplay = window.updateBalanceDisplay || updateBalanceDisplay;
@@ -129,7 +173,7 @@
         try {
           const msg = JSON.parse(ev.data);
           if (msg && msg.type === 'balance_update') {
-            const currentUid = window.__USER_UID || null;
+            const currentUid = window.__USER_UID || localStorage.getItem('userId') || null;
             if (!msg.user_uid || !currentUid || msg.user_uid === currentUid) {
               if (typeof msg.balance !== 'undefined') {
                 _userBalance = Number(msg.balance);
