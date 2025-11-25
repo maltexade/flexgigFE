@@ -1389,33 +1389,31 @@ window.getSession = getSession;
     }, 10000);
   }
 
-  // ──────────────────────────────────────────────────────────────
-// BEAUTIFUL BALANCE COUNTDOWN ANIMATION (Fast & Smooth)
-// ──────────────────────────────────────────────────────────────
+// FINAL VERSION: Animated + Masked Balance + All Elements Updated
 let currentDisplayedBalance = 0;
 let animationFrame = null;
+let isBalanceMasked = true; // Default: hidden (you can toggle this later)
+
+function easeOutCubic(t) {
+  return 1 - Math.pow(1 - t, 3);
+}
 
 window.updateAllBalances = function (newBalance) {
   newBalance = Number(newBalance) || 0;
-  
+
   // Cancel any running animation
   if (animationFrame) cancelAnimationFrame(animationFrame);
 
   const startBalance = currentDisplayedBalance;
   const endBalance = newBalance;
-  const duration = 1200; // 1.2 seconds (feels premium)
+  const duration = Math.abs(endBalance - startBalance) < 5000 ? 800 : 1400;
   const startTime = performance.now();
 
-  function easeOutCubic(t) {
-    return 1 - Math.pow(1 - t, 3);
-  }
-
-  function animate(currentTime) {
-    const elapsed = currentTime - startTime;
+  function animate(time) {
+    const elapsed = time - startTime;
     const progress = Math.min(elapsed / duration, 1);
-    const easeProgress = easeOutCubic(progress);
-
-    const current = startBalance + (endBalance - startBalance) * easeProgress;
+    const eased = easeOutCubic(progress);
+    const current = startBalance + (endBalance - startBalance) * eased;
     currentDisplayedBalance = current;
 
     const formatted = '₦' + current.toLocaleString('en-NG', {
@@ -1423,31 +1421,62 @@ window.updateAllBalances = function (newBalance) {
       maximumFractionDigits: 2
     });
 
-    // Update ALL balance elements
-    document.querySelectorAll('[data-balance]').forEach(el => {
-      el.textContent = formatted;
+    // 1. Update REAL balance (only visible when unmasked)
+    document.querySelectorAll('[data-balance], .balance-real, .balance p').forEach(el => {
+      if (el.textContent !== formatted) {
+        el.textContent = formatted;
+      }
     });
 
-    // Update masked/real spans
-    const realSpan = document.querySelector('.balance-real');
-    const maskedSpan = document.querySelector('.balance-masked');
-    if (realSpan) realSpan.textContent = formatted;
-    if (maskedSpan) maskedSpan.textContent = '••••••';
-
-    // Legacy fallback
-    const legacyP = document.querySelector('.balance p');
-    if (legacyP) legacyP.textContent = formatted;
+    // 2. Update MASKED version (••••••) — this is what users see by default
+    document.querySelectorAll('.balance-masked').forEach(el => {
+      el.textContent = isBalanceMasked ? '••••••' : formatted;
+    });
 
     if (progress < 1) {
       animationFrame = requestAnimationFrame(animate);
     } else {
-      currentDisplayedBalance = endBalance;
       animationFrame = null;
     }
   }
 
   animationFrame = requestAnimationFrame(animate);
 };
+
+// BONUS: Toggle mask on eye click (add this if you have an eye icon)
+document.addEventListener('click', function(e) {
+  if (e.target.closest('.balance-eye') || e.target.matches('.balance-eye')) {
+    isBalanceMasked = !isBalanceMasked;
+
+    const eyeIcon = e.target.closest('.balance-eye') || e.target;
+    const realSpans = document.querySelectorAll('.balance-real, [data-balance]');
+    const maskedSpans = document.querySelectorAll('.balance-masked');
+
+    if (isBalanceMasked) {
+      eyeIcon.classList.remove('active');
+      realSpans.forEach(el => el.style.display = 'none');
+      maskedSpans.forEach(el => el.style.display = 'block');
+      maskedSpans.forEach(el => el.textContent = '••••••');
+    } else {
+      eyeIcon.classList.add('active');
+      realSpans.forEach(el => el.style.display = 'block');
+      maskedSpans.forEach(el => el.style.display = 'none');
+      // Force refresh real balance
+      updateAllBalances(currentDisplayedBalance);
+    }
+
+    // Optional: save preference
+    try { localStorage.setItem('balanceMasked', isBalanceMasked); } catch(e) {}
+  }
+});
+
+// Restore mask preference on load
+try {
+  const saved = localStorage.getItem('balanceMasked');
+  if (saved !== null) isBalanceMasked = saved === 'true';
+} catch(e) {}
+
+console.log('[Balance] Animated + Masked system ready!');
 
   connectWS();
 })();
