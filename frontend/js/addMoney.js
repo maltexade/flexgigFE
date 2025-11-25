@@ -86,7 +86,6 @@ let countdownTimerInterval = null;
 const addMoneyModal = document.getElementById('addMoneyModal');
 
 
-
 // AUTO-CLOSE FUND MODAL + SUCCESS TOAST WHEN PAYMENT ARRIVES
 (function() {
   const MODAL_ID = 'addMoneyModal';
@@ -390,66 +389,61 @@ function showGeneratedAccount(data) {
   color: #ffffff;
   min-height: 55vh;
   max-height: 60vh;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;   /* ← makes spacing even */
+  overflow-y: auto;
+  display: block;
+  text-align: left;
   box-sizing: border-box;
 ">
 
-  <!-- TOP GROUP -->
-  <div style="display:flex; flex-direction:column; gap:14px;">
+  <!-- LABEL: Amount to Pay -->
+  <p style="margin:0; font-size:10px; opacity:0.75; text-transform: uppercase;">
+    Amount to Pay
+  </p>
 
-    <!-- LABEL: Amount to Pay -->
-    <div>
-      <p style="margin:0; font-size:10px; opacity:0.75; text-transform: uppercase;">
-        Amount to Pay
-      </p>
-      <div style="font-size:20px; font-weight:700; margin-top:4px;">
-        ₦${Number(data.amount).toLocaleString()}
-      </div>
-    </div>
-
-    <!-- BANK SECTION -->
-    <div>
-      <p style="margin:0; font-size:10px; opacity:0.75; text-transform: uppercase;">Bank</p>
-      <div style="font-size:15px; font-weight:600; margin-top:4px;">
-        ${data.bankName || 'OPay'}
-      </div>
-      <img src="/frontend/img/opay-image.png"
-           alt="Bank Logo"
-           onerror="this.style.display='none'"
-           style="width:55px; height:16px; margin-top:6px; object-fit: contain;">
-    </div>
-
-    <!-- ACCOUNT NAME -->
-    <div>
-      <p style="margin:0; font-size:10px; opacity:0.75; text-transform: uppercase;">Account Name</p>
-      <div style="font-size:15px; font-weight:600; margin-top:4px;">
-        Flexgig Digital Network
-      </div>
-    </div>
-
-    <!-- ACCOUNT NUMBER -->
-    <div>
-      <p style="margin:0; font-size:10px; opacity:0.75; text-transform: uppercase;">Account Number</p>
-      <div style="display:flex; align-items:center; gap:10px; margin-top:6px; flex-wrap: wrap;">
-        <span style="font-size:18px; font-weight:700; letter-spacing:1px; word-break: break-all;">
-          ${data.accountNumber}
-        </span>
-        <button class="copy-btn" data-copy="${data.accountNumber}"
-          style="border:none; background:#3b82f6; padding:8px 10px; border-radius:8px; cursor:pointer;">
-          <svg width="18px" height="18px" viewBox="0 0 24 24" fill="none">
-            <path d="M6 11C6 8.17157 6 6.75736 6.87868 5.87868C7.75736 5 9.17157 5 12 5H15C17.8284 5 19.2426 5 20.1213 5.87868C21 6.75736 21 8.17157 21 11V16C21 18.8284 21 20.2426 20.1213 21.1213C19.2426 22 17.8284 22 15 22H12C9.17157 22 7.75736 22 6.87868 21.1213C6 20.2426 6 18.8284 6 16V11Z" stroke="#ffffff" stroke-width="1.3"></path>
-            <path opacity="0.5" d="M6 19C4.34315 19 3 17.6569 3 16V10C3 6.22876 3 4.34315 4.17157 3.17157C5.34315 2 7.22876 2 11 2H15C16.6569 2 18 3.34315 18 5" stroke="#ffffff" stroke-width="1.3"></path>
-          </svg>
-        </button>
-      </div>
-    </div>
-
+  <!-- VALUE -->
+  <div style="font-size:20px; font-weight:700; margin:6px 0 14px;">
+    ₦${Number(data.amount).toLocaleString()}
   </div>
 
-  <!-- COUNTDOWN (bottom block) -->
-  <div>
+  <!-- BANK SECTION -->
+  <div style="margin-bottom:12px;">
+    <p style="margin:0; font-size:10px; opacity:0.75; text-transform: uppercase;">Bank</p>
+    <div style="font-size:15px; font-weight:600; margin-top:4px;">
+      ${data.bankName || 'OPay'}
+    </div>
+    <img src="/frontend/img/opay-image.png"
+         alt="Bank Logo"
+         onerror="this.style.display='none'"
+         style="width:55px; height:16px; margin-top:6px; object-fit: contain;">
+  </div>
+
+  <!-- ACCOUNT NAME -->
+  <div style="margin-bottom:12px;">
+    <p style="margin:0; font-size:10px; opacity:0.75; text-transform: uppercase;">Account Name</p>
+    <div style="font-size:15px; font-weight:600; margin-top:4px;">
+      Flexgig Digital Network
+    </div>
+  </div>
+
+  <!-- ACCOUNT NUMBER -->
+  <div style="margin-bottom:14px;">
+    <p style="margin:0; font-size:10px; opacity:0.75; text-transform: uppercase;">Account Number</p>
+    <div style="display:flex; align-items:center; gap:10px; margin-top:6px; flex-wrap: wrap;">
+      <span style="font-size:18px; font-weight:700; letter-spacing:1px; word-break: break-all;">
+        ${data.accountNumber}
+      </span>
+      <button class="copy-btn" data-copy="${data.accountNumber}"
+        style="border:none; background:#3b82f6; padding:8px 10px; border-radius:8px; cursor:pointer;">
+        <svg width="18px" height="18px" viewBox="0 0 24 24" fill="none">
+          <path d="M6 11C6 8.17157 6 6.75736 6.87868 5.87868C7.75736 5 9.17157 5 12 5H15C17.8284 5 19.2426 5 20.1213 5.87868C21 6.75736 21 8.17157 21 11V16C21 18.8284 21 20.2426 20.1213 21.1213C19.2426 22 17.8284 22 15 22H12C9.17157 22 7.75736 22 6.87868 21.1213C6 20.2426 6 18.8284 6 16V11Z" stroke="#ffffff" stroke-width="1.3"></path>
+          <path opacity="0.5" d="M6 19C4.34315 19 3 17.6569 3 16V10C3 6.22876 3 4.34315 4.17157 3.17157C5.34315 2 7.22876 2 11 2H15C16.6569 2 18 3.34315 18 5" stroke="#ffffff" stroke-width="1.3"></path>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- EXPIRES IN -->
+  <div style="margin-bottom:10px;">
     <p style="margin:0; font-size:10px; opacity:0.75; text-transform: uppercase;">Expires In</p>
     <div style="margin-top:6px; background:#10b981; padding:6px 12px; border-radius:10px; font-size:18px; font-weight:700; display:inline-block;">
       <span id="genCountdown">30:00</span>
@@ -457,7 +451,6 @@ function showGeneratedAccount(data) {
   </div>
 
 </div>
-
 
 
   `;
