@@ -86,135 +86,60 @@ let countdownTimerInterval = null;
 const addMoneyModal = document.getElementById('addMoneyModal');
 
 
-// REALTIME BALANCE + AUTO-CLOSE MODAL + DEBUG LOGS (FINAL VERSION)
+// AUTO-CLOSE FUND MODAL + SUCCESS TOAST WHEN PAYMENT ARRIVES
 (function() {
-  console.log('Realtime balance system starting...');
-  const uid = window.__USER_UID || localStorage.getItem('uid');
-  if (!uid) {
-    console.warn('No user UID found — realtime disabled');
-    return;
-  }
-  console.log('User UID detected:', uid);
-
-  let hasShownSuccess = false;
   const MODAL_ID = 'addMoneyModal';
+  let hasShownSuccess = false;
 
-  // Listen for balance updates from WebSocket
-  function handleBalanceUpdate(data) {
-    console.log('balance_update RECEIVED:', data);
+  // Listen for balance update from WebSocket
+  window.addEventListener('message', (e) => {
+    if (e.data && e.data.type === 'balance_update') {
+      const { balance, amount } = e.data;
 
-    if (hasShownSuccess) {
-      console.log('Already showed success for this session — ignoring');
-      return;
-    }
-    hasShownSuccess = true;
+      // Only trigger once per session
+      if (hasShownSuccess) return;
+      hasShownSuccess = true;
 
-    const amount = data.amount || 0;
-    const balance = data.balance || 0;
-
-    console.log(`Payment detected: ₦${amount.toLocaleString()} → New balance: ₦${balance.toLocaleString()}`);
-
-    // 1. CLOSE MODAL USING MODALMANAGER
-    let modalClosed = false;
-    if (window.modalManager && typeof window.modalManager.closeModal === 'function') {
-      try {
+      // 1. Close modal using ModalManager (your system)
+      if (window.modalManager && typeof window.modalManager.closeModal === 'function') {
         window.modalManager.closeModal(MODAL_ID);
-        console.log('Modal closed via ModalManager');
-        modalClosed = true;
-      } catch (e) {
-        console.error('ModalManager.closeModal failed:', e);
+      } else if (document.getElementById(MODAL_ID)) {
+        document.getElementById(MODAL_ID).style.transform = 'translateY(100%)';
       }
-    }
 
-    if (!modalClosed) {
-      const modal = document.getElementById(MODAL_ID);
-      if (modal) {
-        modal.style.transform = 'translateY(100%)';
-        modal.style.opacity = '0';
-        console.log('Modal closed via direct style');
-        modalClosed = true;
-      } else {
-        console.warn('addMoneyModal not found in DOM');
-      }
-    }
+      // 2. Show beautiful success toast
+      showSuccessToast(`₦${Number(amount).toLocaleString()} received!`, `Wallet updated to ₦${Number(balance).toLocaleString()}`);
 
-    // 2. SHOW SUCCESS TOAST
-    showSuccessToast(`₦${Number(amount).toLocaleString()} received!`, `Wallet updated to ₦${Number(balance).toLocaleString()}`);
-
-    // 3. PLAY SOUND
-    try {
-      const audio = new Audio('/frontend/sounds/success.mp3');
-      audio.volume = 0.5;
-      audio.play().catch(() => console.log('Sound blocked (user interaction required)'));
-    } catch (e) {}
-
-    // 4. Reset after 30s
-    setTimeout(() => {
-      hasShownSuccess = false;
-      console.log('Success toast reset — ready for next payment');
-    }, 30000);
-  }
-
-  // WebSocket connection
-  function connectWebSocket() {
-    try {
-      console.log('Connecting to WebSocket...');
-      const ws = new WebSocket('wss://api.flexgig.com.ng/ws/wallet');
-
-      ws.onopen = () => {
-        console.log('WebSocket CONNECTED');
-        ws.send(JSON.stringify({ type: 'subscribe', user_uid: uid }));
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          console.log('Raw WebSocket message:', data);
-          if (data.type === 'balance_update') {
-            handleBalanceUpdate(data);
-          }
-        } catch (e) {
-          console.error('Failed to parse WebSocket message:', e);
-        }
-      };
-
-      ws.onerror = (err) => {
-        console.error('WebSocket error:', err);
-      };
-
-      ws.onclose = () => {
-        console.warn('WebSocket closed — reconnecting in 3s...');
-        setTimeout(connectWebSocket, 3000);
-      };
-    } catch (e) {
-      console.error('WebSocket setup failed:', e);
-      startPollingFallback();
-    }
-  }
-
-  // Fallback polling
-  function startPollingFallback() {
-    console.log('Starting polling fallback (every 8s)');
-    setInterval(async () => {
+      // 3. Play subtle sound (optional)
       try {
-        const res = await apiFetch('/api/session?light=true');
-        if (res.ok && res.data?.user?.wallet_balance !== undefined) {
-          const newBal = Number(res.data.user.wallet_balance);
-          const currentEls = document.querySelectorAll('[data-balance]');
-          if (currentEls.length > 0) {
-            const currentBal = parseFloat(currentEls[0].textContent.replace(/[^0-9.-]+/g, "") || '0');
-            if (newBal > currentBal) {
-              console.log(`Polling detected payment! ₦${currentBal} → ₦${newBal}`);
-              handleBalanceUpdate({ balance: newBal, amount: newBal - currentBal });
-            }
-          }
-        }
+        const audio = new Audio('/frontend/sounds/success.mp3');
+        audio.volume = 0.4;
+        audio.play().catch(() => {});
       } catch (e) {}
-    }, 8000);
+
+      // 4. Reset flag after 30s (allow next payment)
+      setTimeout(() => { hasShownSuccess = false; }, 30000);
+    }
+  });
+
+  // Also listen for WebSocket directly (fallback)
+  if (window.WebSocket) {
+    const oldHandler = window.onmessage;
+    window.onmessage = (e) => {
+      if (oldHandler) oldHandler(e);
+      if (e.data && typeof e.data === 'string') {
+        try {
+          const parsed = JSON.parse(e.data);
+          if (parsed.type === 'balance_update') {
+            window.dispatchEvent(new MessageEvent('message', { data: parsed }));
+          }
+        } catch (e) {}
+      }
+    };
   }
 
-  // Beautiful toast
-  function showSuccessToast(title, subtitle) {
+  // BEAUTIFUL SUCCESS TOAST
+  function showSuccessToast(title, subtitle = '') {
     const toast = document.createElement('div');
     toast.style.cssText = `
       position: fixed;
@@ -223,51 +148,45 @@ const addMoneyModal = document.getElementById('addMoneyModal');
       transform: translateX(-50%);
       background: linear-gradient(135deg, #10b981, #059669);
       color: white;
-      padding: 18px 28px;
-      border-radius: 20px;
-      box-shadow: 0 20px 40px rgba(16, 156, 103, 0.5);
-      z-index: 999999;
+      padding: 16px 24px;
+      border-radius: 16px;
+      box-shadow: 0 10px 30px rgba(16, 156, 103, 0.4);
+      z-index: 99999;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       text-align: center;
-      animation: slideDown 0.6s ease, fadeOut 0.8s 3.5s forwards;
+      animation: slideDown 0.5s ease, fadeOut 0.6s 3s forwards;
       max-width: 90%;
-      border: 1px solid rgba(255,255,255,0.3);
-      backdrop-filter: blur(12px);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,0.2);
     `;
 
     toast.innerHTML = `
-      <div style="font-size: 20px; font-weight: 800; margin-bottom: 6px;">
+      <div style="font-size: 18px; font-weight: 800; margin-bottom: 4px;">
         ✓ ${title}
       </div>
-      <div style="font-size: 15px; opacity: 0.95;">
-        ${subtitle}
-      </div>
+      ${subtitle ? `<div style="font-size: 14px; opacity: 0.9;">${subtitle}</div>` : ''}
     `;
 
     document.body.appendChild(toast);
 
-    setTimeout(() => toast.remove(), 4500);
+    // Auto-remove
+    setTimeout(() => {
+      if (toast.parentNode) toast.parentNode.removeChild(toast);
+    }, 4000);
   }
 
-  // Animation
-  if (!document.getElementById('realtime-toast-style')) {
-    const style = document.createElement('style');
-    style.id = 'realtime-toast-style';
-    style.textContent = `
-      @keyframes slideDown {
-        from { transform: translateX(-50%) translateY(-120px); opacity: 0; }
-        to { transform: translateX(-50%) translateY(0); opacity: 1; }
-      }
-      @keyframes fadeOut {
-        to { opacity: 0; transform: translateX(-50%) translateY(-30px); }
-      }
-    `;
-    document.head.appendChild(style);
-  }
-
-  // START
-  connectWebSocket();
-  console.log('Realtime balance system ACTIVE');
+  // Animations
+  const style = document.createElement('style');
+  style.textContent = `
+    @keyframes slideDown {
+      from { transform: translateX(-50%) translateY(-100px); opacity: 0; }
+      to { transform: translateX(-50%) translateY(0); opacity: 1; }
+    }
+    @keyframes fadeOut {
+      to { opacity: 0; transform: translateX(-50%) translateY(-20px); }
+    }
+  `;
+  document.head.appendChild(style);
 })();
 
 
