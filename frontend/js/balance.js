@@ -1,20 +1,19 @@
 // balance.js
-// Minimal: only manages the numeric balance value (no eye/toggle logic).
-// Expects server endpoints:
-//   GET  /api/wallet/balance
-//   POST /api/fund-wallet
-// WS endpoint: /ws (server should authenticate and attach user_uid to socket if needed)
+// Minimal: manages numeric balance with proper global exposure, WS updates, and server sync.
 
 (function () {
-  let _userBalance = 0;
+  // ----------------------
+  // Internal state
+  // ----------------------
+  let _userBalance = parseFloat(localStorage.getItem('userBalance')) || 0;
   let __ws = null;
 
-  // Back-compat: if an existing global userBalance or saved value exists, prefer it
-  window._userBalance = window._userBalance || _userBalance || userBalance;
-
-  // DOM node for the real balance value (we do not control masking/toggle)
+  // DOM node for the authoritative balance display
   const realSpan = document.querySelector('.balance-real');
 
+  // ----------------------
+  // Formatting
+  // ----------------------
   function formatBalance(n) {
     const num = Number(n) || 0;
     try {
@@ -24,117 +23,93 @@
     }
   }
 
-  // --- Replace your updateBalanceDisplay() with this ---
-function updateBalanceDisplay() {
-  const formatted = formatBalance(_userBalance);
+  // ----------------------
+  // Update DOM & localStorage
+  // ----------------------
+  function updateBalanceDisplay() {
+    const formatted = formatBalance(_userBalance);
 
-  // 1) Update the authoritative ".balance-real" span (keeps mask module in control of visibility)
-  if (realSpan) realSpan.textContent = formatted;
+    // 1) Update primary span
+    if (realSpan) realSpan.textContent = formatted;
 
-  // 2) Update other visible balance targets in the app so the user actually sees the change.
-  //    We update elements that commonly hold balances in your dashboard:
-  //    - any element with attribute [data-balance]
-  //    - any element with class ".balance-value"
-  //    - any element with id "topbar-balance" (common custom id)
-  try {
-    document.querySelectorAll('[data-balance]').forEach(el => {
-      // if element is input-like, set value, else set textContent
-      if ('value' in el) el.value = formatted;
-      else el.textContent = formatted;
-    });
-  } catch (e) { /* ignore */ }
-
-  try {
-    document.querySelectorAll('.balance-value').forEach(el => {
-      if ('value' in el) el.value = formatted;
-      else el.textContent = formatted;
-    });
-  } catch (e) {}
-
-  try {
-    const tb = document.getElementById('topbar-balance');
-    if (tb) {
-      if ('value' in tb) tb.value = formatted;
-      else tb.textContent = formatted;
-    }
-  } catch (e) {}
-
-  // 3) Persist fallback copy locally
-  try { localStorage.setItem('userBalance', String(_userBalance)); } catch (e) {}
-
-  // 4) Emit an event so other modules (toaster, toggle, analytics) can react
-  try {
-    const ev = new CustomEvent('balance:updated', { detail: { balance: _userBalance, formatted }});
-    window.dispatchEvent(ev);
-  } catch (e) {}
-
-  // 5) Debug log (leave in for a bit to confirm behavior)
-  console.debug('[balance.js] updateBalanceDisplay ->', { raw: _userBalance, formatted });
-}
-
-
-  // expose updateBalanceDisplay if not already present
-  window.updateBalanceDisplay = window.updateBalanceDisplay || updateBalanceDisplay;
-
-  // Backwards-compatible global property window.userBalance (reads/writes to internal state)
-  if (typeof window !== 'undefined') {
-    // if a property already exists, preserve it; otherwise define it
-    if (!Object.prototype.hasOwnProperty.call(window, 'userBalance')) {
-      Object.defineProperty(window, 'userBalance', {
-        configurable: true,
-        enumerable: true,
-        get() { return _userBalance; },
-        set(v) {
-          const n = Number(v);
-          if (!Number.isNaN(n)) {
-            _userBalance = Number(n.toFixed(2));
-            updateBalanceDisplay();
-          }
-        }
+    // 2) Update other targets
+    try {
+      document.querySelectorAll('[data-balance]').forEach(el => {
+        if ('value' in el) el.value = formatted;
+        else el.textContent = formatted;
       });
-    }
+    } catch {}
+
+    try {
+      document.querySelectorAll('.balance-value').forEach(el => {
+        if ('value' in el) el.value = formatted;
+        else el.textContent = formatted;
+      });
+    } catch {}
+
+    try {
+      const tb = document.getElementById('topbar-balance');
+      if (tb) {
+        if ('value' in tb) tb.value = formatted;
+        else tb.textContent = formatted;
+      }
+    } catch {}
+
+    // 3) Persist locally
+    try { localStorage.setItem('userBalance', _userBalance); } catch(e) {}
+
+    // 4) Emit event
+    try {
+      const ev = new CustomEvent('balance:updated', { detail: { balance: _userBalance, formatted }});
+      window.dispatchEvent(ev);
+    } catch {}
+
+    console.debug('[balance.js] updateBalanceDisplay ->', { raw: _userBalance, formatted });
   }
 
-  // --- Named helpers (declare first, attach after) ---
-
-  function getUserBalance() {
-    return Number(_userBalance);
+  // ----------------------
+  // Expose as global getter/setter
+  // ----------------------
+  if (!Object.prototype.hasOwnProperty.call(window, 'userBalance')) {
+    Object.defineProperty(window, 'userBalance', {
+      configurable: true,
+      enumerable: true,
+      get() { return _userBalance; },
+      set(v) {
+        const n = Number(v);
+        if (!Number.isNaN(n)) {
+          _userBalance = Number(n.toFixed(2));
+          updateBalanceDisplay();
+        }
+      }
+    });
   }
 
-  function setUserBalance(amount) {
-    const n = Number(amount);
-    if (Number.isNaN(n)) return;
-    _userBalance = Number(n.toFixed(2));
-    updateBalanceDisplay();
-  }
+  // ----------------------
+  // Helpers
+  // ----------------------
+  window.getUserBalance = window.getUserBalance || (() => _userBalance);
+  window.setUserBalance = window.setUserBalance || ((v) => { window.userBalance = v; });
 
   async function fetchBalanceFromServer() {
     try {
       const res = await fetch('/api/wallet/balance', { credentials: 'include' });
-      if (!res.ok) {
-        // fallback to localStorage
-        _userBalance = parseFloat(localStorage.getItem('userBalance')) || 0;
-        updateBalanceDisplay();
-        return;
-      }
+      if (!res.ok) throw new Error('Failed to fetch');
+
       const data = await res.json();
       if (typeof data.balance !== 'undefined') {
-        _userBalance = Number(data.balance);
-        updateBalanceDisplay();
+        window.userBalance = Number(data.balance);
       } else {
         console.warn('[balance.js] /api/wallet/balance returned unexpected body', data);
       }
     } catch (err) {
       console.error('[balance.js] fetchBalanceFromServer error', err);
-      _userBalance = parseFloat(localStorage.getItem('userBalance')) || 0;
-      updateBalanceDisplay();
+      window.userBalance = parseFloat(localStorage.getItem('userBalance')) || 0;
     }
   }
 
   async function createVirtualAccount(amount) {
-    if (!amount || Number.isNaN(Number(amount)) || Number(amount) <= 0) {
-      throw new Error('Invalid amount');
-    }
+    if (!amount || Number(amount) <= 0) throw new Error('Invalid amount');
     const res = await fetch('/api/fund-wallet', {
       method: 'POST',
       credentials: 'include',
@@ -145,7 +120,7 @@ function updateBalanceDisplay() {
       const body = await res.json().catch(() => ({}));
       throw new Error(body?.message || `Fund wallet failed (${res.status})`);
     }
-    return await res.json(); // virtual account details
+    return await res.json();
   }
 
   function initBalanceWebSocket() {
@@ -163,7 +138,6 @@ function updateBalanceDisplay() {
 
       const ws = new WebSocket(url);
       __ws = ws;
-      // expose the socket reference (but only set if not already present)
       window.__balanceWS = window.__balanceWS || ws;
 
       ws.addEventListener('open', () => console.debug('[balance.js] ws open'));
@@ -172,14 +146,10 @@ function updateBalanceDisplay() {
       ws.addEventListener('message', (ev) => {
         try {
           const msg = JSON.parse(ev.data);
-          if (msg && msg.type === 'balance_update') {
+          if (msg?.type === 'balance_update') {
             const currentUid = window.__USER_UID || localStorage.getItem('userId') || null;
             if (!msg.user_uid || !currentUid || msg.user_uid === currentUid) {
-              if (typeof msg.balance !== 'undefined') {
-                _userBalance = Number(msg.balance);
-                updateBalanceDisplay();
-                console.debug('[balance.js] balance updated via ws ->', _userBalance);
-              }
+              if (typeof msg.balance !== 'undefined') window.userBalance = Number(msg.balance);
             }
           }
         } catch (e) {
@@ -191,26 +161,20 @@ function updateBalanceDisplay() {
     }
   }
 
-  // --- Attach public API to window, but preserve existing definitions if present ---
-
-  window.getUserBalance = window.getUserBalance || getUserBalance;
-  window.setUserBalance = window.setUserBalance || setUserBalance;
+  // ----------------------
+  // Public API
+  // ----------------------
   window.syncBalance = window.syncBalance || fetchBalanceFromServer;
   window.createVirtualAccount = window.createVirtualAccount || createVirtualAccount;
   window.initBalanceWebSocket = window.initBalanceWebSocket || initBalanceWebSocket;
 
-  // Also ensure a global alias for the ws reference exists (preserve if present)
-  window.__balanceWS = window.__balanceWS || __ws;
-
-  // Init: show stored/zero quickly, then fetch authoritative balance & open WS
+  // ----------------------
+  // Init
+  // ----------------------
   (function init() {
-    _userBalance = parseFloat(localStorage.getItem('userBalance')) || 0;
-    updateBalanceDisplay();
-    // attach initial _userBalance to window as well (without overwriting if already set)
-    window._userBalance = window._userBalance || _userBalance;
-    // fetch authoritative balance & open websocket
-    fetchBalanceFromServer();
-    initBalanceWebSocket();
+    updateBalanceDisplay();      // show local/0 quickly
+    fetchBalanceFromServer();    // fetch authoritative balance
+    initBalanceWebSocket();      // open WS
   })();
 
 })();
