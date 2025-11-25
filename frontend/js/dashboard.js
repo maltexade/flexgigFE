@@ -1338,7 +1338,7 @@ window.getSession = getSession;
 
 // PRODUCTION-LEVEL REALTIME BALANCE (WebSocket + Polling Fallback)
 (function() {
-  const uid = window.__USER_UID || localStorage.getItem('uid');
+  const uid = window.__USER_UID || localStorage.getItem('userId');
   if (!uid) return;
 
   let ws = null;
