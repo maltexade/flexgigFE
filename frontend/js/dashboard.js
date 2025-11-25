@@ -1389,29 +1389,26 @@ window.getSession = getSession;
     }, 10000);
   }
 
-// FINAL: Animated Balance + Masked + Persistent Eye State + Reload Safe
+// FINAL: Works with your absolute-positioned masked balance
 let currentDisplayedBalance = 0;
 let animationFrame = null;
-let isBalanceMasked = true; // Default: hidden
+let isBalanceMasked = true;
 
-// Restore user preference on load
+// Restore preference
 try {
   const saved = localStorage.getItem('balanceMasked');
-  isBalanceMasked = saved === null ? true : saved === 'true'; // default true
+  isBalanceMasked = saved === null ? true : saved === 'true';
 } catch (e) {
   isBalanceMasked = true;
 }
 
-// Easing function
 function easeOutCubic(t) {
   return 1 - Math.pow(1 - t, 3);
 }
 
-// MAIN: Animated balance update
 window.updateAllBalances = function (newBalance) {
   newBalance = Number(newBalance) || 0;
 
-  // Cancel any running animation
   if (animationFrame) cancelAnimationFrame(animationFrame);
 
   const startBalance = currentDisplayedBalance;
@@ -1431,9 +1428,11 @@ window.updateAllBalances = function (newBalance) {
       maximumFractionDigits: 2
     });
 
-    // Always update the real balance (hidden or visible)
-    document.querySelectorAll('[data-balance], .balance-real, .balance p').forEach(el => {
-      if (el.textContent !== formatted) el.textContent = formatted;
+    // Update ALL real balance elements
+    document.querySelectorAll('[data-balance], .balance-real').forEach(el => {
+      if (el.textContent !== formatted) {
+        el.textContent = formatted;
+      }
     });
 
     // Update masked version
@@ -1441,12 +1440,19 @@ window.updateAllBalances = function (newBalance) {
       el.textContent = isBalanceMasked ? '••••••' : formatted;
     });
 
-    // Show/hide based on mask state
-    document.querySelectorAll('.balance-real, [data-balance]').forEach(el => {
-      el.style.display = isBalanceMasked ? 'none' : 'block';
+    // TOGGLE VISIBILITY using your exact method
+    document.querySelectorAll('.balance-real').forEach(el => {
+      if (isBalanceMasked) {
+        el.style.display = 'none';
+        el.style.opacity = '0';
+      } else {
+        el.style.display = 'inline';
+        el.style.opacity = '1';
+      }
     });
+
     document.querySelectorAll('.balance-masked').forEach(el => {
-      el.style.display = isBalanceMasked ? 'block' : 'none';
+      el.style.display = isBalanceMasked ? 'inline' : 'none';
     });
 
     if (progress < 1) {
@@ -1459,12 +1465,11 @@ window.updateAllBalances = function (newBalance) {
   animationFrame = requestAnimationFrame(animate);
 };
 
-// EYE TOGGLE: Click to show/hide balance
+// EYE TOGGLE — works with your SVG eye
 document.addEventListener('click', function(e) {
-  const eyeBtn = e.target.closest('.balance-eye') || e.target;
-  if (!eyeBtn) return;
+  const eye = e.target.closest('.balance-eye');
+  if (!eye) return;
 
-  // Toggle state
   isBalanceMasked = !isBalanceMasked;
 
   // Save preference
@@ -1472,33 +1477,33 @@ document.addEventListener('click', function(e) {
     localStorage.setItem('balanceMasked', isBalanceMasked);
   } catch (e) {}
 
-  // Update eye icon (you can use SVG or class)
+  // Update eye state
   if (isBalanceMasked) {
-    eyeBtn.classList.remove('open');
-    eyeBtn.classList.add('closed');
+    eye.classList.remove('open');
+    eye.classList.add('closed');
   } else {
-    eyeBtn.classList.remove('closed');
-    eyeBtn.classList.add('open');
+    eye.classList.remove('closed');
+    eye.classList.add('open');
   }
 
-  // Trigger instant refresh (no animation needed on toggle)
+  // Force instant refresh (no re-animation on toggle)
   updateAllBalances(currentDisplayedBalance);
 });
 
-// On page load: Apply correct state immediately
+// On load: Apply correct state
 document.addEventListener('DOMContentLoaded', () => {
-  const eyeBtn = document.querySelector('.balance-eye');
-  if (eyeBtn) {
+  const eye = document.querySelector('.balance-eye');
+  if (eye) {
     if (isBalanceMasked) {
-      eyeBtn.classList.remove('open');
-      eyeBtn.classList.add('closed');
+      eye.classList.remove('open');
+      eye.classList.add('closed');
     } else {
-      eyeBtn.classList.remove('closed');
-      eyeBtn.classList.add('open');
+      eye.classList.remove('closed');
+      eye.classList.add('open');
     }
   }
 
-  // Force initial display
+  // Apply initial visibility
   updateAllBalances(currentDisplayedBalance || 0);
 });
 
