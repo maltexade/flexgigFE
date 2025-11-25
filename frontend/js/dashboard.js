@@ -1336,6 +1336,68 @@ async function getSession() {
 
 window.getSession = getSession;
 
+// PRODUCTION-LEVEL REALTIME BALANCE (WebSocket + Polling Fallback)
+(function() {
+  const uid = window.__USER_UID || localStorage.getItem('uid');
+  if (!uid) return;
+
+  let ws = null;
+  let pollInterval = null;
+
+  // Try WebSocket first
+  function connectWS() {
+    try {
+      ws = new WebSocket('wss://api.flexgig.com.ng/ws/wallet');
+
+      ws.onopen = () => {
+        console.log('WebSocket connected');
+        ws.send(JSON.stringify({ type: 'subscribe', user_uid: uid }));
+        if (pollInterval) clearInterval(pollInterval); // kill polling
+      };
+
+      ws.onmessage = (e) => {
+        const data = JSON.parse(e.data);
+        if (data.type === 'balance_update') {
+          updateAllBalances(data.balance);
+          if (window.notify) window.notify(`₦${data.amount.toLocaleString()} credited!`, 'success');
+        }
+      };
+
+      ws.onclose = () => {
+        console.warn('WebSocket closed → starting polling fallback');
+        startPolling();
+      };
+    } catch (e) {
+      startPolling();
+    }
+  }
+
+  // Fallback polling
+  function startPolling() {
+    pollInterval = setInterval(async () => {
+      try {
+        const res = await apiFetch('/api/session?light=true');
+        if (res.ok) {
+          const newBal = res.data.user.wallet_balance;
+          const current = parseFloat(document.querySelector('[data-balance]')?.textContent.replace(/[^0-9.-]+/g,"") || '0');
+          if (newBal > current) {
+            updateAllBalances(newBal);
+            if (window.notify) window.notify('Payment received!', 'success');
+          }
+        }
+      } catch(e) {}
+    }, 10000);
+  }
+
+  function updateAllBalances(balance) {
+    document.querySelectorAll('[data-balance]').forEach(el => {
+      el.textContent = '₦' + Number(balance).toLocaleString();
+    });
+  }
+
+  connectWS();
+})();
+
 
 // Run observer only on dashboard
 if (window.location.pathname.includes('dashboard.html')) {

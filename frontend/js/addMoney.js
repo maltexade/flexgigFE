@@ -295,12 +295,12 @@ function showGeneratedAccount(data) {
   </p>
 
   <!-- VALUE -->
-  <div style="font-size:20px; font-weight:700; margin:6px 0 16px;">
+  <div style="font-size:20px; font-weight:700; margin:6px 0 14px;">
     ₦${Number(data.amount).toLocaleString()}
   </div>
 
   <!-- BANK SECTION -->
-  <div style="margin-bottom:14px;">
+  <div style="margin-bottom:12px;">
     <p style="margin:0; font-size:10px; opacity:0.75; text-transform: uppercase;">Bank</p>
     <div style="font-size:15px; font-weight:600; margin-top:4px;">
       ${data.bankName || 'OPay'}
@@ -308,11 +308,11 @@ function showGeneratedAccount(data) {
     <img src="/frontend/img/opay-image.png"
          alt="Bank Logo"
          onerror="this.style.display='none'"
-         style="width:55px; height:16px; margin-top:8px; object-fit: contain;">
+         style="width:55px; height:16px; margin-top:6px; object-fit: contain;">
   </div>
 
   <!-- ACCOUNT NAME -->
-  <div style="margin-bottom:14px;">
+  <div style="margin-bottom:12px;">
     <p style="margin:0; font-size:10px; opacity:0.75; text-transform: uppercase;">Account Name</p>
     <div style="font-size:15px; font-weight:600; margin-top:4px;">
       ${data.accountName}
@@ -320,7 +320,7 @@ function showGeneratedAccount(data) {
   </div>
 
   <!-- ACCOUNT NUMBER -->
-  <div style="margin-bottom:16px;">
+  <div style="margin-bottom:14px;">
     <p style="margin:0; font-size:10px; opacity:0.75; text-transform: uppercase;">Account Number</p>
     <div style="display:flex; align-items:center; gap:10px; margin-top:6px; flex-wrap: wrap;">
       <span style="font-size:18px; font-weight:700; letter-spacing:1px; word-break: break-all;">
@@ -337,24 +337,15 @@ function showGeneratedAccount(data) {
   </div>
 
   <!-- EXPIRES IN -->
-  <div style="margin-bottom:14px;">
+  <div style="margin-bottom:10px;">
     <p style="margin:0; font-size:10px; opacity:0.75; text-transform: uppercase;">Expires In</p>
-    <div style="margin-top:8px; background:#10b981; padding:8px 14px; border-radius:12px; font-size:20px; font-weight:700; display:inline-block;">
+    <div style="margin-top:6px; background:#10b981; padding:6px 12px; border-radius:10px; font-size:18px; font-weight:700; display:inline-block;">
       <span id="genCountdown">30:00</span>
     </div>
   </div>
 
-  <!-- INSTRUCTION -->
-  <p style="margin-top:8px; font-size:12px; line-height:1.5; opacity:0.8;">
-    Transfer the exact amount to this account. Your wallet will be credited instantly once payment is confirmed.
-  </p>
-
-  <!-- Reference -->
-  <div style="margin-top:10px; padding:10px; background:#1f2937; border-radius:8px; font-size:11px; opacity:0.75;">
-    <strong>Reference:</strong> ${data.reference || data.orderNo || 'N/A'}
-  </div>
-
 </div>
+
 
   `;
 
