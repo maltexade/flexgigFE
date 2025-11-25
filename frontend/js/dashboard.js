@@ -4861,35 +4861,154 @@ payBtn.addEventListener('click', () => {
 
 
 
-/* --- BALANCE MANAGEMENT (keep original globals intact) --- */
-/* --- BALANCE MANAGEMENT (keep original globals intact) --- */
-// keep same global names so other functions still work
-const balanceEl = document.querySelector('.balance p'); // same selector you used before
-
-// helper: format number as Naira with commas & 2 decimals
-function formatBalance(n) {
-  try {
-    return '₦' + Number(n).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  } catch (e) {
-    return '₦' + Number(n).toFixed(2);
+/* ===========================================================
+   REAL-TIME BALANCE FROM SUPABASE (WebSocket + Fallback Polling)
+   =========================================================== */
+(function () {
+  const uid = window.__USER_UID || localStorage.getItem('userId');
+  if (!uid) {
+    console.warn('[Balance] No user ID found — skipping real-time balance');
+    return;
   }
-}
 
-// attempt to find the masked/real spans (preferred)
-const maskedSpan = document.querySelector('.balance-masked');
-const realSpan = document.querySelector('.balance-real');
+  let currentBalance = null;
 
+  // Format balance consistently everywhere
+  function formatBalance(amount) {
+    if (amount === null || amount === undefined) return '₦–';
+    return '₦' + Number(amount).toLocaleString('en-NG', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+  }
 
+  // Update ALL balance displays (header, masked, cards, etc.)
+  window.updateAllBalances = function (newBalance) {
+    if (newBalance !== currentBalance) {
+      console.log('[Balance] Updating UI from', currentBalance, '→', newBalance);
+      currentBalance = newBalance;
+    }
 
+    const formatted = formatBalance(newBalance);
 
+    // Update all elements with data-balance attribute
+    document.querySelectorAll('[data-balance]').forEach(el => {
+      if (el.textContent.trim() !== formatted) {
+        el.textContent = formatted;
+      }
+    });
 
-// initialize balance display (same as your previous code)
+    // Update masked balance spans (real + masked)
+    const realSpan = document.querySelector('.balance-real');
+    const maskedSpan = document.querySelector('.balance-masked');
+    if (realSpan) realSpan.textContent = formatted;
+    if (maskedSpan) maskedSpan.textContent = '••••••';
 
-/* --- REMOVED VISIBILITY TOGGLE SECTION ---
-   Document 1 (balance sync V3) handles ALL visibility logic.
-   This script now ONLY handles balance updates and formatting.
-   DO NOT include any eye toggle logic here to avoid conflicts.
-*/
+    // Update legacy <p> fallback
+    const legacyP = document.querySelector('.balance p');
+    if (legacyP) legacyP.textContent = formatted;
+
+    // Optional: update global variable if any legacy code still uses it
+    window.userBalance = newBalance;
+    try { localStorage.setItem('userBalanceCache', String(newBalance)); } catch (e) {}
+  };
+
+  // Initial load from session
+  async function loadInitialBalance() {
+    try {
+      const session = await getSession();
+      if (session?.user?.wallet_balance !== undefined) {
+        console.log('[Balance] Initial balance from session:', session.user.wallet_balance);
+        updateAllBalances(session.user.wallet_balance);
+      }
+    } catch (err) {
+      console.warn('[Balance] Failed to load initial balance from session', err);
+    }
+  }
+
+  // WebSocket connection
+  function connectWebSocket() {
+    try {
+      const ws = new WebSocket('wss://api.flexgig.com.ng/ws/wallet');
+
+      ws.onopen = () => {
+        console.log('[Balance] WebSocket connected');
+        ws.send(JSON.stringify({ type: 'subscribe', user_uid: uid }));
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'balance_update' && data.balance !== undefined) {
+            console.log('[Balance] WebSocket update →', data.balance);
+            updateAllBalances(data.balance);
+
+            // Optional: show toast on credit
+            if (data.amount > 0 && typeof window.notify === 'function') {
+              window.notify(`₦${Number(data.amount).toLocaleString()} credited!`, 'success');
+            }
+          }
+        } catch (e) {
+          console.warn('[Balance] Invalid WS message', e);
+        }
+      };
+
+      ws.onclose = () => {
+        console.warn('[Balance] WebSocket closed → falling back to polling');
+        startPolling();
+      };
+
+      ws.onerror = (err) => {
+        console.error('[Balance] WebSocket error', err);
+        ws.close();
+      };
+
+      return ws;
+    } catch (err) {
+      console.warn('[Balance] WebSocket failed to start', err);
+      startPolling();
+    }
+  }
+
+  // Fallback polling every 12 seconds
+  let pollTimeout = null;
+  function startPolling() {
+    if (pollTimeout) clearTimeout(pollTimeout);
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`${window.__SEC_API_BASE}/api/session?light=true`, {
+          credentials: 'include',
+          cache: 'no-store'
+        });
+        if (res.ok) {
+          const json = await res.json();
+          const newBal = json.user?.wallet_balance;
+          if (newBal !== undefined && newBal !== currentBalance) {
+            console.log('[Balance] Polling update →', newBal);
+            updateAllBalances(newBal);
+          }
+        }
+      } catch (err) {
+        console.warn('[Balance] Polling failed', err);
+      } finally {
+        pollTimeout = setTimeout(poll, 12000);
+      }
+    };
+
+    poll();
+  }
+
+  // Start everything
+  loadInitialBalance();
+  connectWebSocket();
+
+  // Also update on successful login/session restore
+  window.addEventListener('fg:reauth-success', loadInitialBalance);
+  window.addEventListener('session:restored', loadInitialBalance);
+
+  console.log('[Balance] Real-time balance system initialized for UID:', uid);
+})();
 
 
 
@@ -4962,6 +5081,44 @@ const realSpan = document.querySelector('.balance-real');
     payBtn.disabled = false;
     payBtn.textContent = 'Pay';
   }, 1000); 
+  // // --- ADD MONEY HANDLER ---
+  // const addMoneyBtn = document.querySelector('.card.add-money1');
+  // addMoneyBtn.addEventListener('click', () => {
+  //   const amount = prompt('Enter amount to fund (₦):', '1000');
+  //   if (!amount || isNaN(amount) || amount <= 0) {
+  //     alert('Please enter a valid amount.');
+  //     console.error('[ERROR] addMoneyBtn: Invalid amount:', amount);
+  //     return;
+  //   }
+  //   const fundAmount = parseFloat(amount);
+  //   // Mock API call
+  //   const mockResponse = { success: true, transactionId: `TX${Date.now()}` };
+  //   console.log('[DEBUG] addMoneyBtn: Mock API response:', mockResponse);
+
+  //   // Update balance
+  //   userBalance += fundAmount;
+  //   updateBalanceDisplay();
+
+  //   // Add to transactions
+  //   const transaction = {
+  //     type: 'receive',
+  //     description: 'Fund Wallet',
+  //     amount: fundAmount,
+  //     phone: null,
+  //     provider: null,
+  //     subType: null,
+  //     data: null,
+  //     duration: null,
+  //     timestamp: new Date().toISOString(),
+  //     status: 'success' // Mock success
+  //   };
+  //   transactions.push(transaction);
+  //   renderTransactions();
+
+  //   alert(`Successfully funded ₦${fundAmount}!`);
+  //   console.log('[DEBUG] addMoneyBtn: Funding processed, new balance:', userBalance, 'Transaction:', transaction);
+  // });
+
 /* ===========================================================
    PIN modal — unified keypad + keyboard input + toast system
    =========================================================== */
