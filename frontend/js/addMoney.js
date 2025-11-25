@@ -277,76 +277,85 @@ function showGeneratedAccount(data) {
 
   modalContent.innerHTML = `
     <div class="addMoney-generated-body" style="
-  padding: 20px;
+  padding: 14px;
   background: #111010ff;
-  border-radius: 20px;
+  border-radius: 16px;
   color: #ffffff;
-  min-height: 70vh;
-  max-height: 90vh;
+  min-height: 55vh;
+  max-height: 60vh;
   overflow-y: auto;
-  display: block;                    /* ← THIS IS THE KEY FIX */
-  text-align: left;                  /* ← Force left alignment */
+  display: block;
+  text-align: left;
   box-sizing: border-box;
 ">
-  <!-- All your content below — no changes needed -->
-  
+
   <!-- LABEL: Amount to Pay -->
-  <p style="margin:0; font-size:11px; opacity:0.75; text-transform: uppercase; letter-spacing: 0.5px;">
+  <p style="margin:0; font-size:10px; opacity:0.75; text-transform: uppercase;">
     Amount to Pay
   </p>
 
   <!-- VALUE -->
-  <div style="font-size:24px; font-weight:700; margin:8px 0 24px;">
+  <div style="font-size:20px; font-weight:700; margin:6px 0 16px;">
     ₦${Number(data.amount).toLocaleString()}
   </div>
 
   <!-- BANK SECTION -->
-  <div style="margin-bottom:24px;">
-    <p style="margin:0; font-size:11px; opacity:0.75; text-transform: uppercase; letter-spacing: 0.5px;">Bank</p>
-    <div style="font-size:18px; font-weight:600; margin-top:6px;">
+  <div style="margin-bottom:14px;">
+    <p style="margin:0; font-size:10px; opacity:0.75; text-transform: uppercase;">Bank</p>
+    <div style="font-size:15px; font-weight:600; margin-top:4px;">
       ${data.bankName || 'OPay'}
     </div>
     <img src="/frontend/img/opay-image.png"
          alt="Bank Logo"
          onerror="this.style.display='none'"
-         style="width:65px; height:20px; margin-top:10px; object-fit: contain;">
+         style="width:55px; height:16px; margin-top:8px; object-fit: contain;">
+  </div>
+
+  <!-- ACCOUNT NAME -->
+  <div style="margin-bottom:14px;">
+    <p style="margin:0; font-size:10px; opacity:0.75; text-transform: uppercase;">Account Name</p>
+    <div style="font-size:15px; font-weight:600; margin-top:4px;">
+      ${data.accountName}
+    </div>
   </div>
 
   <!-- ACCOUNT NUMBER -->
-  <div style="margin-bottom:24px;">
-    <p style="margin:0; font-size:11px; opacity:0.75; text-transform: uppercase; letter-spacing: 0.5px;">Account Number</p>
-    <div style="display:flex; align-items:center; gap:12px; margin-top:8px; flex-wrap: wrap;">
-      <span style="font-size:22px; font-weight:700; letter-spacing:1.5px; word-break: break-all;">
+  <div style="margin-bottom:16px;">
+    <p style="margin:0; font-size:10px; opacity:0.75; text-transform: uppercase;">Account Number</p>
+    <div style="display:flex; align-items:center; gap:10px; margin-top:6px; flex-wrap: wrap;">
+      <span style="font-size:18px; font-weight:700; letter-spacing:1px; word-break: break-all;">
         ${data.accountNumber}
       </span>
       <button class="copy-btn" data-copy="${data.accountNumber}"
-        style="border:none; background:#3b82f6; padding:10px 12px; border-radius:10px; cursor:pointer;">
-        <svg width="20px" height="20px" viewBox="0 0 24 24" fill="none">
-          <path d="M6 11C6 8.17157 6 6.75736 6.87868 5.87868C7.75736 5 9.17157 5 12 5H15C17.8284 5 19.2426 5 20.1213 5.87868C21 6.75736 21 8.17157 21 11V16C21 18.8284 21 20.2426 20.1213 21.1213C19.2426 22 17.8284 22 15 22H12C9.17157 22 7.75736 22 6.87868 21.1213C6 20.2426 6 18.8284 6 16V11Z" stroke="#ffffff" stroke-width="1.5"></path>
-          <path opacity="0.5" d="M6 19C4.34315 19 3 17.6569 3 16V10C3 6.22876 3 4.34315 4.17157 3.17157C5.34315 2 7.22876 2 11 2H15C16.6569 2 18 3.34315 18 5" stroke="#ffffff" stroke-width="1.5"></path>
+        style="border:none; background:#3b82f6; padding:8px 10px; border-radius:8px; cursor:pointer;">
+        <svg width="18px" height="18px" viewBox="0 0 24 24" fill="none">
+          <path d="M6 11C6 8.17157 6 6.75736 6.87868 5.87868C7.75736 5 9.17157 5 12 5H15C17.8284 5 19.2426 5 20.1213 5.87868C21 6.75736 21 8.17157 21 11V16C21 18.8284 21 20.2426 20.1213 21.1213C19.2426 22 17.8284 22 15 22H12C9.17157 22 7.75736 22 6.87868 21.1213C6 20.2426 6 18.8284 6 16V11Z" stroke="#ffffff" stroke-width="1.3"></path>
+          <path opacity="0.5" d="M6 19C4.34315 19 3 17.6569 3 16V10C3 6.22876 3 4.34315 4.17157 3.17157C5.34315 2 7.22876 2 11 2H15C16.6569 2 18 3.34315 18 5" stroke="#ffffff" stroke-width="1.3"></path>
         </svg>
       </button>
     </div>
   </div>
 
   <!-- EXPIRES IN -->
-  <div style="margin-bottom:20px;">
-    <p style="margin:0; font-size:11px; opacity:0.75; text-transform: uppercase; letter-spacing: 0.5px;">Expires In</p>
-    <div style="margin-top:10px; background:#10b981; padding:10px 20px; border-radius:14px; font-size:26px; font-weight:700; color:#fff; display:inline-block; box-shadow:0 4px 12px rgba(16,185,129,0.4);">
+  <div style="margin-bottom:14px;">
+    <p style="margin:0; font-size:10px; opacity:0.75; text-transform: uppercase;">Expires In</p>
+    <div style="margin-top:8px; background:#10b981; padding:8px 14px; border-radius:12px; font-size:20px; font-weight:700; display:inline-block;">
       <span id="genCountdown">30:00</span>
     </div>
   </div>
 
   <!-- INSTRUCTION -->
-  <p style="margin-top:10px; font-size:14px; line-height:1.7; opacity:0.8;">
+  <p style="margin-top:8px; font-size:12px; line-height:1.5; opacity:0.8;">
     Transfer the exact amount to this account. Your wallet will be credited instantly once payment is confirmed.
   </p>
 
-  <!-- Reference Info -->
-  <div style="margin-top:10px; padding:14px; background:#1f2937; border-radius:10px; font-size:12px; opacity:0.7;">
+  <!-- Reference -->
+  <div style="margin-top:10px; padding:10px; background:#1f2937; border-radius:8px; font-size:11px; opacity:0.75;">
     <strong>Reference:</strong> ${data.reference || data.orderNo || 'N/A'}
   </div>
+
 </div>
+
   `;
 
   // Replace modal content
