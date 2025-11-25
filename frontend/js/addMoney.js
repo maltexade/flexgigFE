@@ -200,49 +200,53 @@ function assignAddMoneyEvents() {
   });
 
   // Fund wallet button
-  fundBtn.addEventListener('click', async () => {
-    const amount = parseInt(amountInput.value.replace(/[^0-9]/g, ""));
-    
-    if (!amount || amount <= 0) {
-      if (window.notify) {
-        window.notify('Please enter a valid amount.', 'error');
-      } else {
-        alert('Please enter a valid amount.');
-      }
-      return;
-    }
+ let isFundingInProgress = false; // ← This is the magic line
 
-    fundBtn.disabled = true;
-    fundBtn.textContent = 'Processing...';
+fundBtn.addEventListener('click', async () => {
+  // PREVENT DOUBLE-CLICK / DOUBLE-EXECUTION
+  if (isFundingInProgress) {
+    console.log('[Fund Wallet] Already processing — ignoring duplicate click');
+    return;
+  }
 
-    // Use window.withLoader if available, otherwise just execute
-    const executeRequest = async () => {
-      try {
-        const res = await apiFetch('/api/fund-wallet', {
+  const amount = parseInt(amountInput.value.replace(/[^0-9]/g, ""), 10);
+  if (!amount || amount <= 0) {
+    window.notify?.('Please enter a valid amount.', 'error');
+    return;
+  }
+
+  // Mark as in progress + disable button
+  isFundingInProgress = true;
+  fundBtn.disabled = true;
+  fundBtn.textContent = 'Processing...';
+
+  try {
+    // This keeps your loading spinner exactly as before
+    const res = window.withLoader
+      ? await window.withLoader(() => apiFetch('/api/fund-wallet', {
+          method: 'POST',
+          body: { amount }
+        }))
+      : await apiFetch('/api/fund-wallet', {
           method: 'POST',
           body: { amount }
         });
 
-        if (res.ok) {
-          showGeneratedAccount(res.data);
-        } else {
-          showGeneratedError(res.error?.message || 'Failed to generate account. Try again.');
-        }
-      } catch (err) {
-        console.error('[Fund Wallet Error]', err);
-        showGeneratedError('Network error, try again.');
-      } finally {
-        fundBtn.disabled = false;
-        fundBtn.textContent = 'Fund Wallet';
-      }
-    };
-
-    if (window.withLoader) {
-      await window.withLoader(executeRequest);
+    if (res.ok) {
+      showGeneratedAccount(res.data);
     } else {
-      await executeRequest();
+      showGeneratedError(res.error?.message || 'Failed to generate account.');
     }
-  });
+  } catch (err) {
+    console.error('[Fund Wallet Error]', err);
+    showGeneratedError('Network error. Try again.');
+  } finally {
+    // Always reset — even if error
+    isFundingInProgress = false;
+    fundBtn.disabled = false;
+    fundBtn.textContent = 'Fund Wallet';
+  }
+});
 }
 
 // --- Show Generated Bank Account ---
@@ -274,132 +278,77 @@ function showGeneratedAccount(data) {
   modalContent.classList.add('addMoney-generated-content');
 
   modalContent.innerHTML = `
-    <div class="addMoney-generated-body"
-     style="padding:20px; background:rgb(7, 7, 7); min-height:60vh; overflow-y:auto; color:#ffffff; display: flex; flex-direction: column;">
+    <div class="addMoney-generated-body" style="
+  padding: 20px;
+  background: #111010ff;
+  border-radius: 20px;
+  color: #ffffff;
+  min-height: 70vh;
+  max-height: 90vh;
+  overflow-y: auto;
+  display: block;                    /* ← THIS IS THE KEY FIX */
+  text-align: left;                  /* ← Force left alignment */
+  box-sizing: border-box;
+">
+  <!-- All your content below — no changes needed -->
+  
+  <!-- LABEL: Amount to Pay -->
+  <p style="margin:0; font-size:11px; opacity:0.75; text-transform: uppercase; letter-spacing: 0.5px;">
+    Amount to Pay
+  </p>
 
-      <!-- Close Button -->
-      <button class="addMoney-modal-close" style="
-        position: absolute;
-        top: 15px;
-        right: 15px;
-        background: transparent;
-        border: none;
-        color: #fff;
-        font-size: 28px;
-        cursor: pointer;
-        line-height: 1;
-      ">&times;</button>
+  <!-- VALUE -->
+  <div style="font-size:24px; font-weight:700; margin:8px 0 24px;">
+    ₦${Number(data.amount).toLocaleString()}
+  </div>
 
-      <!-- LABEL: Amount to Pay -->
-      <p style="margin:0; font-size:11px; opacity:0.75; text-transform: uppercase; letter-spacing: 0.5px;">
-        Amount to Pay
-      </p>
-
-      <!-- VALUE -->
-      <div style="font-size:24px; font-weight:700; margin:8px 0 24px;">
-        ₦${Number(data.amount).toLocaleString()}
-      </div>
-
-      <!-- BANK SECTION -->
-      <div style="margin-bottom:24px;">
-        <!-- LABEL -->
-        <p style="margin:0; font-size:11px; opacity:0.75; text-transform: uppercase; letter-spacing: 0.5px;">Bank</p>
-
-        <!-- VALUE -->
-        <div style="font-size:18px; font-weight:600; margin-top:6px;">
-          ${data.bankName || 'OPay'}
-        </div>
-
-        <!-- LOGO (Optional - remove if you don't have the image) -->
-        <img src="/frontend/img/opay-image.png"
-             alt="Bank Logo"
-             onerror="this.style.display='none'"
-             style="width:65px; height:20px; margin-top:10px; object-fit: contain;">
-      </div>
-
-      <!-- ACCOUNT NUMBER -->
-      <div style="margin-bottom:24px;">
-        <p style="margin:0; font-size:11px; opacity:0.75; text-transform: uppercase; letter-spacing: 0.5px;">Account Number</p>
-
-        <div style="display:flex; align-items:center; gap:10px; margin-top:6px;">
-          <span style="font-size:20px; font-weight:700; letter-spacing:1px;">
-            ${data.accountNumber}
-          </span>
-
-          <button class="copy-btn" data-copy="${data.accountNumber}"
-            style="
-              border:none;
-              background:#3b82f6;
-              padding:8px 10px;
-              border-radius:8px;
-              cursor:pointer;
-              display:flex;
-              align-items:center;
-              justify-content:center;
-              transition: background 0.2s;
-            "
-            onmouseover="this.style.background='#2563eb'"
-            onmouseout="this.style.background='#3b82f6'">
-            <svg width="20px" height="20px" viewBox="0 0 24 24" fill="none">
-              <path d="M6 11C6 8.17157 6 6.75736 6.87868 5.87868C7.75736 5 9.17157 5 12 5H15C17.8284 5 19.2426 5 20.1213 5.87868C21 6.75736 21 8.17157 21 11V16C21 18.8284 21 20.2426 20.1213 21.1213C19.2426 22 17.8284 22 15 22H12C9.17157 22 7.75736 22 6.87868 21.1213C6 20.2426 6 18.8284 6 16V11Z" stroke="#ffffff" stroke-width="1.5"></path>
-              <path opacity="0.5" d="M6 19C4.34315 19 3 17.6569 3 16V10C3 6.22876 3 4.34315 4.17157 3.17157C5.34315 2 7.22876 2 11 2H15C16.6569 2 18 3.34315 18 5" stroke="#ffffff" stroke-width="1.5"></path>
-            </svg>
-          </button>
-        </div>
-      </div>
-
-      <!-- ACCOUNT NAME (Dynamic - only show if provided) -->
-      ${data.accountName ? `
-      <div style="margin-bottom:24px;">
-        <p style="margin:0; font-size:11px; opacity:0.75; text-transform: uppercase; letter-spacing: 0.5px;">Account Name</p>
-        <div style="font-size:18px; font-weight:600; margin-top:6px;">
-          ${data.accountName}
-        </div>
-      </div>
-      ` : ''}
-
-      <!-- EXPIRES IN -->
-      <div style="margin-bottom:16px;">
-        <p style="margin:0; font-size:11px; opacity:0.75; text-transform: uppercase; letter-spacing: 0.5px;">Expires In</p>
-
-        <div style="
-          margin-top:8px;
-          background: #10b981;
-          padding:14px 18px;
-          border-radius:12px;
-          font-size:22px;
-          font-weight:700;
-          color:#ffffff;
-          display:inline-block;
-          box-shadow: 0 4px 6px rgba(16, 185, 129, 0.3);
-        ">
-          <span id="genCountdown">30:00</span>
-        </div>
-      </div>
-
-      <!-- INSTRUCTION -->
-      <p style="
-        margin-top:16px;
-        font-size:13px;
-        line-height:1.6;
-        opacity:0.7;
-      ">
-        Transfer the exact amount to this account. Your wallet will be credited instantly once payment is confirmed.
-      </p>
-
-      <!-- Reference Info (Optional) -->
-      <div style="
-        margin-top:20px;
-        padding:12px;
-        background:#1f2937;
-        border-radius:8px;
-        font-size:11px;
-        opacity:0.6;
-      ">
-        <strong>Reference:</strong> ${data.reference || data.orderNo || 'N/A'}
-      </div>
-
+  <!-- BANK SECTION -->
+  <div style="margin-bottom:24px;">
+    <p style="margin:0; font-size:11px; opacity:0.75; text-transform: uppercase; letter-spacing: 0.5px;">Bank</p>
+    <div style="font-size:18px; font-weight:600; margin-top:6px;">
+      ${data.bankName || 'OPay'}
     </div>
+    <img src="/frontend/img/opay-image.png"
+         alt="Bank Logo"
+         onerror="this.style.display='none'"
+         style="width:65px; height:20px; margin-top:10px; object-fit: contain;">
+  </div>
+
+  <!-- ACCOUNT NUMBER -->
+  <div style="margin-bottom:24px;">
+    <p style="margin:0; font-size:11px; opacity:0.75; text-transform: uppercase; letter-spacing: 0.5px;">Account Number</p>
+    <div style="display:flex; align-items:center; gap:12px; margin-top:8px; flex-wrap: wrap;">
+      <span style="font-size:22px; font-weight:700; letter-spacing:1.5px; word-break: break-all;">
+        ${data.accountNumber}
+      </span>
+      <button class="copy-btn" data-copy="${data.accountNumber}"
+        style="border:none; background:#3b82f6; padding:10px 12px; border-radius:10px; cursor:pointer;">
+        <svg width="20px" height="20px" viewBox="0 0 24 24" fill="none">
+          <path d="M6 11C6 8.17157 6 6.75736 6.87868 5.87868C7.75736 5 9.17157 5 12 5H15C17.8284 5 19.2426 5 20.1213 5.87868C21 6.75736 21 8.17157 21 11V16C21 18.8284 21 20.2426 20.1213 21.1213C19.2426 22 17.8284 22 15 22H12C9.17157 22 7.75736 22 6.87868 21.1213C6 20.2426 6 18.8284 6 16V11Z" stroke="#ffffff" stroke-width="1.5"></path>
+          <path opacity="0.5" d="M6 19C4.34315 19 3 17.6569 3 16V10C3 6.22876 3 4.34315 4.17157 3.17157C5.34315 2 7.22876 2 11 2H15C16.6569 2 18 3.34315 18 5" stroke="#ffffff" stroke-width="1.5"></path>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- EXPIRES IN -->
+  <div style="margin-bottom:20px;">
+    <p style="margin:0; font-size:11px; opacity:0.75; text-transform: uppercase; letter-spacing: 0.5px;">Expires In</p>
+    <div style="margin-top:10px; background:#10b981; padding:16px 20px; border-radius:14px; font-size:26px; font-weight:700; color:#fff; display:inline-block; box-shadow:0 4px 12px rgba(16,185,129,0.4);">
+      <span id="genCountdown">30:00</span>
+    </div>
+  </div>
+
+  <!-- INSTRUCTION -->
+  <p style="margin-top:20px; font-size:14px; line-height:1.7; opacity:0.8;">
+    Transfer the exact amount to this account. Your wallet will be credited instantly once payment is confirmed.
+  </p>
+
+  <!-- Reference Info -->
+  <div style="margin-top:24px; padding:14px; background:#1f2937; border-radius:10px; font-size:12px; opacity:0.7;">
+    <strong>Reference:</strong> ${data.reference || data.orderNo || 'N/A'}
+  </div>
+</div>
   `;
 
   // Replace modal content
