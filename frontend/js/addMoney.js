@@ -112,7 +112,7 @@ const addMoneyModal = document.getElementById('addMoneyModal');
 
       // 3. Play subtle sound (optional)
       try {
-        const audio = new Audio('/frontend/sounds/success.mp3');
+        const audio = new Audio('/frontend/sound/success.mp3');
         audio.volume = 0.4;
         audio.play().catch(() => {});
       } catch (e) {}
@@ -151,7 +151,7 @@ const addMoneyModal = document.getElementById('addMoneyModal');
       padding: 16px 24px;
       border-radius: 16px;
       box-shadow: 0 10px 30px rgba(16, 156, 103, 0.4);
-      z-index: 99999;
+      z-index: 99999999 !mportant;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       text-align: center;
       animation: slideDown 0.5s ease, fadeOut 0.6s 3s forwards;
@@ -558,3 +558,5 @@ window.addEventListener('beforeunload', () => {
     clearInterval(countdownTimerInterval);
   }
 });
+
+

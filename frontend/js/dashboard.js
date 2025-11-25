@@ -4864,7 +4864,6 @@ payBtn.addEventListener('click', () => {
 /* --- BALANCE MANAGEMENT (keep original globals intact) --- */
 /* --- BALANCE MANAGEMENT (keep original globals intact) --- */
 // keep same global names so other functions still work
-let userBalance = parseFloat(localStorage.getItem('userBalance')) || 50000; // Initialize to ₦50,000
 const balanceEl = document.querySelector('.balance p'); // same selector you used before
 
 // helper: format number as Naira with commas & 2 decimals
@@ -4880,32 +4879,11 @@ function formatBalance(n) {
 const maskedSpan = document.querySelector('.balance-masked');
 const realSpan = document.querySelector('.balance-real');
 
-// update function (keeps localStorage like your original)
-function updateBalanceDisplay() {
-  const formatted = formatBalance(userBalance);
 
-  // if page includes the .balance-real span, update it (preserves masking)
-  if (realSpan) {
-    realSpan.textContent = formatted;
-  } else if (balanceEl) {
-    // fallback: match your old behavior and write directly to <p>
-    balanceEl.textContent = formatted;
-  }
 
-  try { localStorage.setItem('userBalance', String(userBalance)); } catch (e) { /* ignore storage errors */ }
-  console.log('[DEBUG] updateBalanceDisplay: Balance updated:', formatted);
-}
 
-// expose setter so other modules can update the balance (keeps same global var)
-window.setUserBalance = function(amount) {
-  const parsed = parseFloat(amount);
-  if (isNaN(parsed)) return;
-  userBalance = parsed;
-  updateBalanceDisplay();
-};
 
 // initialize balance display (same as your previous code)
-updateBalanceDisplay();
 
 /* --- REMOVED VISIBILITY TOGGLE SECTION ---
    Document 1 (balance sync V3) handles ALL visibility logic.
@@ -4984,44 +4962,6 @@ updateBalanceDisplay();
     payBtn.disabled = false;
     payBtn.textContent = 'Pay';
   }, 1000); 
-  // // --- ADD MONEY HANDLER ---
-  // const addMoneyBtn = document.querySelector('.card.add-money1');
-  // addMoneyBtn.addEventListener('click', () => {
-  //   const amount = prompt('Enter amount to fund (₦):', '1000');
-  //   if (!amount || isNaN(amount) || amount <= 0) {
-  //     alert('Please enter a valid amount.');
-  //     console.error('[ERROR] addMoneyBtn: Invalid amount:', amount);
-  //     return;
-  //   }
-  //   const fundAmount = parseFloat(amount);
-  //   // Mock API call
-  //   const mockResponse = { success: true, transactionId: `TX${Date.now()}` };
-  //   console.log('[DEBUG] addMoneyBtn: Mock API response:', mockResponse);
-
-  //   // Update balance
-  //   userBalance += fundAmount;
-  //   updateBalanceDisplay();
-
-  //   // Add to transactions
-  //   const transaction = {
-  //     type: 'receive',
-  //     description: 'Fund Wallet',
-  //     amount: fundAmount,
-  //     phone: null,
-  //     provider: null,
-  //     subType: null,
-  //     data: null,
-  //     duration: null,
-  //     timestamp: new Date().toISOString(),
-  //     status: 'success' // Mock success
-  //   };
-  //   transactions.push(transaction);
-  //   renderTransactions();
-
-  //   alert(`Successfully funded ₦${fundAmount}!`);
-  //   console.log('[DEBUG] addMoneyBtn: Funding processed, new balance:', userBalance, 'Transaction:', transaction);
-  // });
-
 /* ===========================================================
    PIN modal — unified keypad + keyboard input + toast system
    =========================================================== */
