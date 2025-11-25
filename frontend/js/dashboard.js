@@ -1389,11 +1389,65 @@ window.getSession = getSession;
     }, 10000);
   }
 
-  function updateAllBalances(balance) {
-    document.querySelectorAll('[data-balance]').forEach(el => {
-      el.textContent = '₦' + Number(balance).toLocaleString();
-    });
+  // ──────────────────────────────────────────────────────────────
+// BEAUTIFUL BALANCE COUNTDOWN ANIMATION (Fast & Smooth)
+// ──────────────────────────────────────────────────────────────
+let currentDisplayedBalance = 0;
+let animationFrame = null;
+
+window.updateAllBalances = function (newBalance) {
+  newBalance = Number(newBalance) || 0;
+  
+  // Cancel any running animation
+  if (animationFrame) cancelAnimationFrame(animationFrame);
+
+  const startBalance = currentDisplayedBalance;
+  const endBalance = newBalance;
+  const duration = 1200; // 1.2 seconds (feels premium)
+  const startTime = performance.now();
+
+  function easeOutCubic(t) {
+    return 1 - Math.pow(1 - t, 3);
   }
+
+  function animate(currentTime) {
+    const elapsed = currentTime - startTime;
+    const progress = Math.min(elapsed / duration, 1);
+    const easeProgress = easeOutCubic(progress);
+
+    const current = startBalance + (endBalance - startBalance) * easeProgress;
+    currentDisplayedBalance = current;
+
+    const formatted = '₦' + current.toLocaleString('en-NG', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+
+    // Update ALL balance elements
+    document.querySelectorAll('[data-balance]').forEach(el => {
+      el.textContent = formatted;
+    });
+
+    // Update masked/real spans
+    const realSpan = document.querySelector('.balance-real');
+    const maskedSpan = document.querySelector('.balance-masked');
+    if (realSpan) realSpan.textContent = formatted;
+    if (maskedSpan) maskedSpan.textContent = '••••••';
+
+    // Legacy fallback
+    const legacyP = document.querySelector('.balance p');
+    if (legacyP) legacyP.textContent = formatted;
+
+    if (progress < 1) {
+      animationFrame = requestAnimationFrame(animate);
+    } else {
+      currentDisplayedBalance = endBalance;
+      animationFrame = null;
+    }
+  }
+
+  animationFrame = requestAnimationFrame(animate);
+};
 
   connectWS();
 })();
