@@ -4936,36 +4936,7 @@ payBtn.addEventListener('click', () => {
     });
   }
 
-  // Update ALL balance displays (header, masked, cards, etc.)
-  window.updateAllBalances = function (newBalance) {
-    if (newBalance !== currentBalance) {
-      console.log('[Balance] Updating UI from', currentBalance, '→', newBalance);
-      currentBalance = newBalance;
-    }
 
-    const formatted = formatBalance(newBalance);
-
-    // Update all elements with data-balance attribute
-    document.querySelectorAll('[data-balance]').forEach(el => {
-      if (el.textContent.trim() !== formatted) {
-        el.textContent = formatted;
-      }
-    });
-
-    // Update masked balance spans (real + masked)
-    const realSpan = document.querySelector('.balance-real');
-    const maskedSpan = document.querySelector('.balance-masked');
-    if (realSpan) realSpan.textContent = formatted;
-    if (maskedSpan) maskedSpan.textContent = '••••••';
-
-    // Update legacy <p> fallback
-    const legacyP = document.querySelector('.balance p');
-    if (legacyP) legacyP.textContent = formatted;
-
-    // Optional: update global variable if any legacy code still uses it
-    window.userBalance = newBalance;
-    try { localStorage.setItem('userBalanceCache', String(newBalance)); } catch (e) {}
-  };
 
   // Initial load from session
   async function loadInitialBalance() {
