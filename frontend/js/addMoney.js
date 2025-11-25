@@ -425,7 +425,7 @@ function showGeneratedAccount(data) {
     <div>
       <p style="margin:0; font-size:10px; opacity:0.75; text-transform: uppercase;">Account Name</p>
       <div style="font-size:15px; font-weight:600; margin-top:4px;">
-        ${data.accountName}
+        Flexgig Digital Network
       </div>
     </div>
 
