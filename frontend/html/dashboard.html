@@ -1592,5 +1592,86 @@
   <script src="/frontend/js/checkout.js" defer></script>
   <script src="/frontend/js/history.js" defer></script>
   <script src="/frontend/js/addMoney.js" defer></script>
+  <script>
+// FORCE LOAD REALTIME BALANCE — THIS WILL WORK
+(function() {
+  console.log('REALTIME BALANCE SYSTEM STARTING...');
+
+  // MARK THAT CODE LOADED
+  window.__flexgig_ws_debug = true;
+  console.log('WebSocket debug flag set → true');
+
+  // GET UID — TRY EVERYTHING
+  const uid = 
+    window.__USER_UID || 
+    localStorage.getItem('uid') || 
+    localStorage.getItem('userId') ||
+    (window.__SERVER_USER_DATA__ && window.__SERVER_USER_DATA__.uid);
+
+  if (!uid || uid === 'undefined') {
+    console.error('NO UID FOUND — realtime disabled');
+    return;
+  }
+
+  console.log('USER UID FOUND:', uid);
+  window.__USER_UID = uid; // force it
+
+  let ws = null;
+
+  function connect() {
+    try {
+      console.log('Connecting to WebSocket...');
+      ws = new WebSocket('wss://api.flexgig.com.ng/ws/wallet');
+
+      ws.onopen = () => {
+        console.log('WEBSOCKET CONNECTED');
+        ws.send(JSON.stringify({ type: 'subscribe', user_uid: uid }));
+      };
+
+      ws.onmessage = (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          console.log('WEBSOCKET MESSAGE:', data);
+          if (data.type === 'balance_update') {
+            // UPDATE ALL BALANCE ELEMENTS
+            document.querySelectorAll('[data-balance], .wallet-balance, #walletBalance').forEach(el => {
+              el.textContent = '₦' + Number(data.balance).toLocaleString();
+            });
+
+            // SHOW TOAST
+            if (window.notify) {
+              window.notify(`₦${Number(data.amount).toLocaleString()} received!`, 'success');
+            }
+
+            // AUTO CLOSE MODAL
+            const modal = document.getElementById('addMoneyModal');
+            if (modal && !modal.classList.contains('hidden')) {
+              if (window.modalManager?.closeModal) {
+                window.modalManager.closeModal('addMoneyModal');
+              } else {
+                modal.style.transform = 'translateY(100%)';
+              }
+              console.log('Modal auto-closed');
+            }
+          }
+        } catch (e) {}
+      };
+
+      ws.onerror = (e) => console.error('WS ERROR:', e);
+      ws.onclose = () => {
+        console.warn('WS CLOSED — reconnecting in 3s');
+        setTimeout(connect, 3000);
+      };
+
+    } catch (e) {
+      console.error('WS FAILED:', e);
+      setTimeout(connect, 5000);
+    }
+  }
+
+  connect();
+  console.log('REALTIME SYSTEM FULLY LOADED');
+})();
+</script>
 </body>
 </html>
