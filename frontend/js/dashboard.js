@@ -1498,12 +1498,62 @@ document.addEventListener('click', function(e) {
 
 // On load: Apply correct state
 // ON PAGE LOAD: Fix the reload bug — force correct visibility
+// ---------- DEBUGGED updateAllBalances (with extra logs) ----------
+function debugPrintElementState(prefix, el) {
+  if (!el) return `${prefix}: <none>`;
+  const cs = getComputedStyle(el);
+  return `${prefix}: tag=${el.tagName.toLowerCase()} class="${el.className}" text="${el.textContent.trim()}" display=${cs.display} visibility=${cs.visibility} opacity=${cs.opacity} rect=${el.getBoundingClientRect().width}x${el.getBoundingClientRect().height}`;
+}
+
+function logBalanceDebug(note, newBalance) {
+  const realEls = Array.from(document.querySelectorAll('[data-balance], .balance-real'));
+  const maskedEls = Array.from(document.querySelectorAll('.balance-masked'));
+  console.debug('[Balance][DBG]', note, {
+    newBalance,
+    currentDisplayedBalance,
+    realCount: realEls.length,
+    maskedCount: maskedEls.length,
+    firstRealComputed: realEls[0] ? getComputedStyle(realEls[0]) : null,
+    firstMaskedComputed: maskedEls[0] ? getComputedStyle(maskedEls[0]) : null
+  });
+  if (realEls[0]) console.debug(debugPrintElementState('firstReal', realEls[0]));
+  if (maskedEls[0]) console.debug(debugPrintElementState('firstMasked', maskedEls[0]));
+}
+
+(function attachDebugToUpdate() {
+  const orig = window.updateAllBalances;
+  if (!orig) return;
+  window.updateAllBalances = function (newBalance) {
+    logBalanceDebug('enter updateAllBalances', newBalance);
+    const result = orig.apply(this, arguments);
+    // After a small delay, log final state
+    setTimeout(() => logBalanceDebug('after updateAllBalances tick', newBalance), 1200);
+    return result;
+  };
+})();
+
+// If updateAllBalances not defined yet (in case ordering differs), provide a small wrapper to be safe
+if (typeof window.updateAllBalances === 'undefined') {
+  // no-op placeholder; real implementation should already exist later in script
+  window.updateAllBalances = function(newBalance) {
+    console.debug('[Balance][DBG] placeholder updateAllBalances called with', newBalance);
+  };
+}
+
+// ---------- Robust DOMContentLoaded initializer (replace your prior block) ----------
 document.addEventListener('DOMContentLoaded', () => {
   const eye = document.querySelector('.balance-eye');
-  const realSpans = document.querySelectorAll('.balance-real, [data-balance]');
-  const maskedSpans = document.querySelectorAll('.balance-masked');
+  const realSpans = Array.from(document.querySelectorAll('.balance-real, [data-balance]'));
+  const maskedSpans = Array.from(document.querySelectorAll('.balance-masked'));
 
-  // If the eye exists, force its class to match saved state.
+  console.debug('[Balance][INIT] DOMContentLoaded — found', {
+    eye: !!eye,
+    realSpans: realSpans.length,
+    maskedSpans: maskedSpans.length,
+    isBalanceMasked
+  });
+
+  // 1) Ensure eye class is correct if it exists
   if (eye) {
     if (isBalanceMasked) {
       eye.classList.remove('open');
@@ -1513,39 +1563,104 @@ document.addEventListener('DOMContentLoaded', () => {
       eye.classList.add('open');
     }
   } else {
-    // helpful debug when running on pages without the eye
-    console.debug('[Balance] no .balance-eye found on page — continuing to apply visibility for balance elements');
+    console.debug('[Balance][INIT] .balance-eye not found — continuing without it');
   }
 
-  // FORCE VISIBILITY for all balance elements (don't rely on eye existing)
-  realSpans.forEach(el => {
-    // ensure we do not accidentally leave them hidden
-    el.style.display = isBalanceMasked ? 'none' : 'inline';
-    el.style.opacity = isBalanceMasked ? '0' : '1';
-  });
+  // Helper to force-show (or hide) real/masked elements — clears multiple possible hiding mechanisms
+  function applyVisibilityToElements(showReal) {
+    realSpans.forEach(el => {
+      try {
+        el.classList.remove('hidden');
+        // If showing real balances: make them visible; else hide them
+        if (showReal) {
+          el.style.display = 'inline';
+          el.style.visibility = 'visible';
+          el.style.opacity = '1';
+        } else {
+          // hide visually but keep layout if desired — we use display:none to match prior behaviour
+          el.style.display = 'none';
+          el.style.visibility = 'hidden';
+          el.style.opacity = '0';
+        }
+      } catch (e) { /* swallow */ }
+    });
 
-  maskedSpans.forEach(el => {
-    el.style.display = isBalanceMasked ? 'inline' : 'none';
-    // ensure mask is visible (some CSS might set opacity)
-    el.style.opacity = isBalanceMasked ? '1' : '0';
-  });
+    maskedSpans.forEach(el => {
+      try {
+        el.classList.remove('hidden');
+        if (showReal) {
+          el.style.display = 'none';
+          el.style.visibility = 'hidden';
+          el.style.opacity = '0';
+        } else {
+          el.style.display = 'inline';
+          el.style.visibility = 'visible';
+          el.style.opacity = '1';
+        }
+      } catch (e) { /* swallow */ }
+    });
+  }
 
-  // Try to seed currentDisplayedBalance from an existing data-balance DOM node
+  // Immediately apply visibility according to saved preference
+  applyVisibilityToElements(!isBalanceMasked);
+  console.debug('[Balance][INIT] visibility applied synchronously — forcing layout');
+
+  // Force a layout/read to ensure styles take effect before we animate text changes
+  try {
+    // reading offsetWidth forces layout/reflow
+    const readSize = (realSpans[0] || maskedSpans[0] || document.body).offsetWidth;
+    console.debug('[Balance][INIT] forced layout read:', readSize);
+  } catch (e) {
+    console.debug('[Balance][INIT] forced layout read failed', e);
+  }
+
+  // Seed currentDisplayedBalance from existing DOM content if present
   try {
     const firstData = document.querySelector('[data-balance]');
-    if (firstData && firstData.textContent) {
-      // parse numeric out of an existing display like "₦1,234.00"
-      const parsed = parseFloat(firstData.textContent.replace(/[^0-9.-]+/g, ''));
-      if (!Number.isNaN(parsed)) currentDisplayedBalance = parsed;
+    if (firstData) {
+      // Try data attribute first (fast, predictable), then parse text
+      const attrVal = firstData.getAttribute('data-balance-val');
+      if (attrVal && !Number.isNaN(Number(attrVal))) {
+        currentDisplayedBalance = Number(attrVal);
+        console.debug('[Balance][INIT] seeded currentDisplayedBalance from data-balance-val attr:', currentDisplayedBalance);
+      } else if (firstData.textContent) {
+        const parsed = parseFloat(firstData.textContent.replace(/[^0-9.-]+/g, ''));
+        if (!Number.isNaN(parsed)) {
+          currentDisplayedBalance = parsed;
+          console.debug('[Balance][INIT] seeded currentDisplayedBalance by parsing text:', currentDisplayedBalance);
+        } else {
+          console.debug('[Balance][INIT] parsing existing text failed; leaving seed as', currentDisplayedBalance);
+        }
+      }
     }
   } catch (e) {
-    console.debug('[Balance] seed parse failed', e);
+    console.debug('[Balance][INIT] seed parse failed', e);
   }
 
-  // Now trigger balance display (will respect the state above)
-  updateAllBalances(currentDisplayedBalance || 0);
+  // If the first load is with the eye open (show real) we found blankness — add an extra defensive update.
+  // Delay the actual animation a few ms to allow the browser to commit styles. This helps browsers that
+  // defer painting until JS finishes.
+  setTimeout(() => {
+    try {
+      console.debug('[Balance][INIT] invoking updateAllBalances with', currentDisplayedBalance || 0);
+      updateAllBalances(currentDisplayedBalance || 0);
+    } catch (e) {
+      console.error('[Balance][INIT] updateAllBalances call failed', e);
+    }
+  }, 40); // small tick; adjust up to 100ms if environment (older phones) still flickers
 
-  console.log('[Balance] Reload state fixed — masked:', isBalanceMasked, 'seedBalance:', currentDisplayedBalance);
+  // Extra defensive step: if eye exists, also ensure its class toggles once to force repaint on some browsers
+  if (eye) {
+    try {
+      // toggle quickly (no visible change because we reapply classes immediately)
+      eye.classList.add('__dbg_tmp');
+      // force layout then remove
+      void eye.offsetWidth;
+      eye.classList.remove('__dbg_tmp');
+    } catch (e) {}
+  }
+
+  console.debug('[Balance][INIT] completed init sequence');
 });
 
 
