@@ -1389,12 +1389,13 @@ window.getSession = getSession;
     }, 10000);
   }
 
-// FINAL: Works with your absolute-positioned masked balance
+// FINAL: NO BLANKNESS, NO FLASH, PERFECT ON RELOAD
 let currentDisplayedBalance = 0;
 let animationFrame = null;
 let isBalanceMasked = true;
+let hasReceivedRealBalance = false;  // ← THIS IS THE KEY
 
-// Restore preference
+// Restore mask preference
 try {
   const saved = localStorage.getItem('balanceMasked');
   isBalanceMasked = saved === null ? true : saved === 'true';
@@ -1409,11 +1410,51 @@ function easeOutCubic(t) {
 window.updateAllBalances = function (newBalance) {
   newBalance = Number(newBalance) || 0;
 
+  // FIRST TIME we get real balance → INSTANT display (no animation)
+  if (!hasReceivedRealBalance) {
+    console.log('[Balance] First real balance received → instant display:', newBalance);
+    hasReceivedRealBalance = true;
+    currentDisplayedBalance = newBalance;
+
+    const formatted = '₦' + newBalance.toLocaleString('en-NG', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+
+    // Instantly set everything
+    document.querySelectorAll('[data-balance], .balance-real, .balance p').forEach(el => {
+      el.textContent = formatted;
+    });
+
+    document.querySelectorAll('.balance-masked').forEach(el => {
+      el.textContent = isBalanceMasked ? '••••••' : formatted;
+    });
+
+    // Apply visibility
+    document.querySelectorAll('.balance-real, [data-balance]').forEach(el => {
+      el.style.display = isBalanceMasked ? 'none' : 'inline';
+      el.style.opacity = isBalanceMasked ? '0' : '1';
+    });
+    document.querySelectorAll('.balance-masked').forEach(el => {
+      el.style.display = isBalanceMasked ? 'inline' : 'none';
+    });
+
+    return; // ← Skip animation on first load
+  }
+
+  // AFTER first load → animate normally
   if (animationFrame) cancelAnimationFrame(animationFrame);
 
   const startBalance = currentDisplayedBalance;
   const endBalance = newBalance;
-  const duration = Math.abs(endBalance - startBalance) < 5000 ? 800 : 1400;
+
+  // Only animate if change is meaningful
+  if (Math.abs(endBalance - startBalance) < 1) {
+    currentDisplayedBalance = endBalance;
+    return;
+  }
+
+  const duration = Math.abs(endBalance - startBalance) < 5000 ? 800 : 1200;
   const startTime = performance.now();
 
   function animate(time) {
@@ -1428,31 +1469,12 @@ window.updateAllBalances = function (newBalance) {
       maximumFractionDigits: 2
     });
 
-    // Update ALL real balance elements
-    document.querySelectorAll('[data-balance], .balance-real').forEach(el => {
-      if (el.textContent !== formatted) {
-        el.textContent = formatted;
-      }
+    document.querySelectorAll('[data-balance], .balance-real, .balance p').forEach(el => {
+      el.textContent = formatted;
     });
 
-    // Update masked version
     document.querySelectorAll('.balance-masked').forEach(el => {
       el.textContent = isBalanceMasked ? '••••••' : formatted;
-    });
-
-    // TOGGLE VISIBILITY using your exact method
-    document.querySelectorAll('.balance-real').forEach(el => {
-      if (isBalanceMasked) {
-        el.style.display = 'none';
-        el.style.opacity = '0';
-      } else {
-        el.style.display = 'inline';
-        el.style.opacity = '1';
-      }
-    });
-
-    document.querySelectorAll('.balance-masked').forEach(el => {
-      el.style.display = isBalanceMasked ? 'inline' : 'none';
     });
 
     if (progress < 1) {
@@ -1467,72 +1489,26 @@ window.updateAllBalances = function (newBalance) {
 
 // EYE TOGGLE — works with your SVG eye
 // EYE TOGGLE — now 100% consistent
-document.addEventListener('click', function(e) {
-  const eye = e.target.closest('.balance-eye');
-  if (!eye) return;
+document.addEventListener('DOMContentLoaded', () => {
+  const eye = document.querySelector('.balance-eye');
+  if (eye) {
+    eye.classList.toggle('open', !isBalanceMasked);
+    eye.classList.toggle('closed', isBalanceMasked);
+  }
 
-  isBalanceMasked = !isBalanceMasked;
-
-  // Save
-  try {
-    localStorage.setItem('balanceMasked', isBalanceMasked);
-  } catch (e) {}
-
-  // Update eye
-  eye.classList.toggle('open', !isBalanceMasked);
-  eye.classList.toggle('closed', isBalanceMasked);
-
-  // FORCE visibility (same as on load)
+  // Force correct visibility immediately
   document.querySelectorAll('.balance-real, [data-balance]').forEach(el => {
     el.style.display = isBalanceMasked ? 'none' : 'inline';
     el.style.opacity = isBalanceMasked ? '0' : '1';
   });
-
   document.querySelectorAll('.balance-masked').forEach(el => {
     el.style.display = isBalanceMasked ? 'inline' : 'none';
   });
 
-  // Refresh display
-  updateAllBalances(currentDisplayedBalance);
-});
-
-// On load: Apply correct state
-// ON PAGE LOAD: Fix the reload bug — force correct visibility
-document.addEventListener('DOMContentLoaded', () => {
-  const eye = document.querySelector('.balance-eye');
-  const realSpans = document.querySelectorAll('.balance-real, [data-balance]');
-  const maskedSpans = document.querySelectorAll('.balance-masked');
-
-  if (!eye) return;
-
-  // Force correct class on eye
-  if (isBalanceMasked) {
-    eye.classList.remove('open');
-    eye.classList.add('closed');
-  } else {
-    eye.classList.remove('closed');
-    eye.classList.add('open');
+  // If we already have balance from server, show it instantly
+  if (hasReceivedRealBalance) {
+    updateAllBalances(currentDisplayedBalance);
   }
-
-  // FORCE VISIBILITY — this is the key fix!
-  realSpans.forEach(el => {
-    if (isBalanceMasked) {
-      el.style.display = 'none';
-      el.style.opacity = '0';
-    } else {
-      el.style.display = 'inline';
-      el.style.opacity = '1';
-    }
-  });
-
-  maskedSpans.forEach(el => {
-    el.style.display = isBalanceMasked ? 'inline' : 'none';
-  });
-
-  // Now trigger balance display (will respect the state above)
-  updateAllBalances(currentDisplayedBalance || 0);
-
-  console.log('[Balance] Reload state fixed — masked:', isBalanceMasked);
 });
 
   connectWS();
