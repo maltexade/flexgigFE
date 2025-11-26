@@ -1503,37 +1503,51 @@ document.addEventListener('DOMContentLoaded', () => {
   const realSpans = document.querySelectorAll('.balance-real, [data-balance]');
   const maskedSpans = document.querySelectorAll('.balance-masked');
 
-  if (!eye) return;
-
-  // Force correct class on eye
-  if (isBalanceMasked) {
-    eye.classList.remove('open');
-    eye.classList.add('closed');
+  // If the eye exists, force its class to match saved state.
+  if (eye) {
+    if (isBalanceMasked) {
+      eye.classList.remove('open');
+      eye.classList.add('closed');
+    } else {
+      eye.classList.remove('closed');
+      eye.classList.add('open');
+    }
   } else {
-    eye.classList.remove('closed');
-    eye.classList.add('open');
+    // helpful debug when running on pages without the eye
+    console.debug('[Balance] no .balance-eye found on page — continuing to apply visibility for balance elements');
   }
 
-  // FORCE VISIBILITY — this is the key fix!
+  // FORCE VISIBILITY for all balance elements (don't rely on eye existing)
   realSpans.forEach(el => {
-    if (isBalanceMasked) {
-      el.style.display = 'none';
-      el.style.opacity = '0';
-    } else {
-      el.style.display = 'inline';
-      el.style.opacity = '1';
-    }
+    // ensure we do not accidentally leave them hidden
+    el.style.display = isBalanceMasked ? 'none' : 'inline';
+    el.style.opacity = isBalanceMasked ? '0' : '1';
   });
 
   maskedSpans.forEach(el => {
     el.style.display = isBalanceMasked ? 'inline' : 'none';
+    // ensure mask is visible (some CSS might set opacity)
+    el.style.opacity = isBalanceMasked ? '1' : '0';
   });
+
+  // Try to seed currentDisplayedBalance from an existing data-balance DOM node
+  try {
+    const firstData = document.querySelector('[data-balance]');
+    if (firstData && firstData.textContent) {
+      // parse numeric out of an existing display like "₦1,234.00"
+      const parsed = parseFloat(firstData.textContent.replace(/[^0-9.-]+/g, ''));
+      if (!Number.isNaN(parsed)) currentDisplayedBalance = parsed;
+    }
+  } catch (e) {
+    console.debug('[Balance] seed parse failed', e);
+  }
 
   // Now trigger balance display (will respect the state above)
   updateAllBalances(currentDisplayedBalance || 0);
 
-  console.log('[Balance] Reload state fixed — masked:', isBalanceMasked);
+  console.log('[Balance] Reload state fixed — masked:', isBalanceMasked, 'seedBalance:', currentDisplayedBalance);
 });
+
 
   connectWS();
 })();
