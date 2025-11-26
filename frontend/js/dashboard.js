@@ -1339,7 +1339,8 @@ window.getSession = getSession;
 // 🔥 MOVE THESE TO GLOBAL SCOPE (before the IIFE)
 window.currentDisplayedBalance = 0;  // ✅ GLOBAL
 window.isBalanceMasked = true;       // ✅ GLOBAL
-window.animationFrame = null;        // ✅ GLOBAL (NEW - fixes the error)
+window.animationFrame = null;        // ✅ GLOBAL
+window.balanceInitialized = false;   // ✅ NEW - track if balance has been set
 
 // Restore preference
 try {
@@ -1365,7 +1366,7 @@ try {
       ws.onopen = () => {
         console.log('[Balance] WebSocket connected');
         ws.send(JSON.stringify({ type: 'subscribe', user_uid: uid }));
-        if (pollInterval) clearInterval(pollInterval); // kill polling
+        if (pollInterval) clearInterval(pollInterval);
       };
 
       ws.onmessage = (e) => {
@@ -1415,44 +1416,31 @@ try {
     return 1 - Math.pow(1 - t, 3);
   }
 
-  window.updateAllBalances = function (newBalance) {
+  window.updateAllBalances = function (newBalance, skipAnimation = false) {
     newBalance = Number(newBalance) || 0;
 
-    // ✅ Use window.animationFrame (global)
-    if (window.animationFrame) cancelAnimationFrame(window.animationFrame);
+    // ✅ If this is the first load and balance hasn't been initialized, show immediately without animation
+    if (!window.balanceInitialized || skipAnimation) {
+      window.balanceInitialized = true;
+      window.currentDisplayedBalance = newBalance;
 
-    const startBalance = window.currentDisplayedBalance;  // ✅ Use global
-    const endBalance = newBalance;
-    const duration = Math.abs(endBalance - startBalance) < 5000 ? 800 : 1400;
-    const startTime = performance.now();
-
-    function animate(time) {
-      const elapsed = time - startTime;
-      const progress = Math.min(elapsed / duration, 1);
-      const eased = easeOutCubic(progress);
-      const current = startBalance + (endBalance - startBalance) * eased;
-      window.currentDisplayedBalance = current;  // ✅ Use global
-
-      const formatted = '₦' + current.toLocaleString('en-NG', {
+      const formatted = '₦' + newBalance.toLocaleString('en-NG', {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2
       });
 
-      // Update ALL real balance elements
+      // Update ALL elements immediately
       document.querySelectorAll('[data-balance], .balance-real').forEach(el => {
-        if (el.textContent !== formatted) {
-          el.textContent = formatted;
-        }
+        el.textContent = formatted;
       });
 
-      // Update masked version
       document.querySelectorAll('.balance-masked').forEach(el => {
-        el.textContent = window.isBalanceMasked ? '••••••' : formatted;  // ✅ Use global
+        el.textContent = window.isBalanceMasked ? '••••••' : formatted;
       });
 
-      // TOGGLE VISIBILITY
+      // Set correct visibility
       document.querySelectorAll('.balance-real').forEach(el => {
-        if (window.isBalanceMasked) {  // ✅ Use global
+        if (window.isBalanceMasked) {
           el.style.display = 'none';
           el.style.opacity = '0';
         } else {
@@ -1462,18 +1450,64 @@ try {
       });
 
       document.querySelectorAll('.balance-masked').forEach(el => {
-        el.style.display = window.isBalanceMasked ? 'inline' : 'none';  // ✅ Use global
+        el.style.display = window.isBalanceMasked ? 'inline' : 'none';
+      });
+
+      console.log('[Balance] Initial balance set (no animation):', formatted);
+      return; // Exit early, no animation
+    }
+
+    // ✅ Normal animated update (for subsequent changes)
+    if (window.animationFrame) cancelAnimationFrame(window.animationFrame);
+
+    const startBalance = window.currentDisplayedBalance;
+    const endBalance = newBalance;
+    const duration = Math.abs(endBalance - startBalance) < 5000 ? 800 : 1400;
+    const startTime = performance.now();
+
+    function animate(time) {
+      const elapsed = time - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      const eased = easeOutCubic(progress);
+      const current = startBalance + (endBalance - startBalance) * eased;
+      window.currentDisplayedBalance = current;
+
+      const formatted = '₦' + current.toLocaleString('en-NG', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      });
+
+      document.querySelectorAll('[data-balance], .balance-real').forEach(el => {
+        if (el.textContent !== formatted) {
+          el.textContent = formatted;
+        }
+      });
+
+      document.querySelectorAll('.balance-masked').forEach(el => {
+        el.textContent = window.isBalanceMasked ? '••••••' : formatted;
+      });
+
+      document.querySelectorAll('.balance-real').forEach(el => {
+        if (window.isBalanceMasked) {
+          el.style.display = 'none';
+          el.style.opacity = '0';
+        } else {
+          el.style.display = 'inline';
+          el.style.opacity = '1';
+        }
+      });
+
+      document.querySelectorAll('.balance-masked').forEach(el => {
+        el.style.display = window.isBalanceMasked ? 'inline' : 'none';
       });
 
       if (progress < 1) {
-        // ✅ Store in window.animationFrame (global)
         window.animationFrame = requestAnimationFrame(animate);
       } else {
         window.animationFrame = null;
       }
     }
 
-    // ✅ Start animation and store in global
     window.animationFrame = requestAnimationFrame(animate);
   };
 
@@ -1482,7 +1516,7 @@ try {
     const eye = e.target.closest('.balance-eye-toggle');
     if (!eye) return;
 
-    window.isBalanceMasked = !window.isBalanceMasked;  // ✅ Use global
+    window.isBalanceMasked = !window.isBalanceMasked;
 
     try {
       localStorage.setItem('balanceMasked', window.isBalanceMasked);
@@ -1500,7 +1534,8 @@ try {
       el.style.display = window.isBalanceMasked ? 'inline' : 'none';
     });
 
-    window.updateAllBalances(window.currentDisplayedBalance);  // ✅ Use global
+    // ✅ Force immediate update (no animation) when toggling mask
+    window.updateAllBalances(window.currentDisplayedBalance, true);
   });
 
   // On load fix
@@ -1510,7 +1545,7 @@ try {
     const maskedSpans = document.querySelectorAll('.balance-masked');
 
     if (eye) {
-      if (window.isBalanceMasked) {  // ✅ Use global
+      if (window.isBalanceMasked) {
         eye.classList.remove('open');
         eye.classList.add('closed');
       } else {
@@ -1520,7 +1555,7 @@ try {
     }
 
     realSpans.forEach(el => {
-      if (window.isBalanceMasked) {  // ✅ Use global
+      if (window.isBalanceMasked) {
         el.style.display = 'none';
         el.style.opacity = '0';
       } else {
@@ -1530,13 +1565,12 @@ try {
     });
 
     maskedSpans.forEach(el => {
-      el.style.display = window.isBalanceMasked ? 'inline' : 'none';  // ✅ Use global
+      el.style.display = window.isBalanceMasked ? 'inline' : 'none';
     });
 
     console.log('[Balance] DOM ready — waiting for session');
   });
 
-  // ✅ NOW call connectWS (it's defined above)
   connectWS();
 })();
 
