@@ -1466,18 +1466,46 @@ window.updateAllBalances = function (newBalance) {
 };
 
 // EYE TOGGLE — works with your SVG eye
+// EYE TOGGLE — now 100% consistent
 document.addEventListener('click', function(e) {
   const eye = e.target.closest('.balance-eye');
   if (!eye) return;
 
   isBalanceMasked = !isBalanceMasked;
 
-  // Save preference
+  // Save
   try {
     localStorage.setItem('balanceMasked', isBalanceMasked);
   } catch (e) {}
 
-  // Update eye state
+  // Update eye
+  eye.classList.toggle('open', !isBalanceMasked);
+  eye.classList.toggle('closed', isBalanceMasked);
+
+  // FORCE visibility (same as on load)
+  document.querySelectorAll('.balance-real, [data-balance]').forEach(el => {
+    el.style.display = isBalanceMasked ? 'none' : 'inline';
+    el.style.opacity = isBalanceMasked ? '0' : '1';
+  });
+
+  document.querySelectorAll('.balance-masked').forEach(el => {
+    el.style.display = isBalanceMasked ? 'inline' : 'none';
+  });
+
+  // Refresh display
+  updateAllBalances(currentDisplayedBalance);
+});
+
+// On load: Apply correct state
+// ON PAGE LOAD: Fix the reload bug — force correct visibility
+document.addEventListener('DOMContentLoaded', () => {
+  const eye = document.querySelector('.balance-eye');
+  const realSpans = document.querySelectorAll('.balance-real, [data-balance]');
+  const maskedSpans = document.querySelectorAll('.balance-masked');
+
+  if (!eye) return;
+
+  // Force correct class on eye
   if (isBalanceMasked) {
     eye.classList.remove('open');
     eye.classList.add('closed');
@@ -1486,25 +1514,25 @@ document.addEventListener('click', function(e) {
     eye.classList.add('open');
   }
 
-  // Force instant refresh (no re-animation on toggle)
-  updateAllBalances(currentDisplayedBalance);
-});
-
-// On load: Apply correct state
-document.addEventListener('DOMContentLoaded', () => {
-  const eye = document.querySelector('.balance-eye');
-  if (eye) {
+  // FORCE VISIBILITY — this is the key fix!
+  realSpans.forEach(el => {
     if (isBalanceMasked) {
-      eye.classList.remove('open');
-      eye.classList.add('closed');
+      el.style.display = 'none';
+      el.style.opacity = '0';
     } else {
-      eye.classList.remove('closed');
-      eye.classList.add('open');
+      el.style.display = 'inline';
+      el.style.opacity = '1';
     }
-  }
+  });
 
-  // Apply initial visibility
+  maskedSpans.forEach(el => {
+    el.style.display = isBalanceMasked ? 'inline' : 'none';
+  });
+
+  // Now trigger balance display (will respect the state above)
   updateAllBalances(currentDisplayedBalance || 0);
+
+  console.log('[Balance] Reload state fixed — masked:', isBalanceMasked);
 });
 
   connectWS();
