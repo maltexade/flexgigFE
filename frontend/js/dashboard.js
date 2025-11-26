@@ -1499,69 +1499,49 @@ document.addEventListener('click', function(e) {
 // On load: Apply correct state
 // ON PAGE LOAD: Fix the reload bug — force correct visibility
 document.addEventListener('DOMContentLoaded', () => {
-  console.log("[Balance][DOM] Document loaded. isBalanceMasked =", isBalanceMasked);
-
-  const eye = document.querySelector('.balance-eye');
+  const eye = document.querySelector('.balance-eye-toggle'); // Fixed selector
   const realSpans = document.querySelectorAll('.balance-real, [data-balance]');
   const maskedSpans = document.querySelectorAll('.balance-masked');
 
-  console.log("[Balance][DOM] Elements found:", {
-    eye: !!eye,
-    realCount: realSpans.length,
-    maskedCount: maskedSpans.length
-  });
+  if (eye) {
+    // Force correct class on eye
+    if (isBalanceMasked) {
+      eye.classList.remove('open');
+      eye.classList.add('closed');
+    } else {
+      eye.classList.remove('closed');
+      eye.classList.add('open');
+    }
+  }
 
-  // ---- EARLY FORCE VISIBILITY ----
-  // This kills the blank screen issue.
+  // FORCE VISIBILITY — this is the key fix!
   realSpans.forEach(el => {
-    el.style.display = isBalanceMasked ? "none" : "inline";
-    el.style.opacity = isBalanceMasked ? "0" : "1";
+    if (isBalanceMasked) {
+      el.style.display = 'none';
+      el.style.opacity = '0';
+    } else {
+      el.style.display = 'inline';
+      el.style.opacity = '1';
+    }
   });
 
   maskedSpans.forEach(el => {
-    el.style.display = isBalanceMasked ? "inline" : "none";
-    el.style.opacity = isBalanceMasked ? "1" : "0";
+    el.style.display = isBalanceMasked ? 'inline' : 'none';
   });
 
-  console.log("[Balance][DOM] Early visibility applied");
-
-  // ---- Update the eye icon if present ----
-  if (eye) {
-    if (isBalanceMasked) {
-      eye.classList.remove("open");
-      eye.classList.add("closed");
-    } else {
-      eye.classList.remove("closed");
-      eye.classList.add("open");
-    }
-    console.log("[Balance][DOM] Eye state updated:", isBalanceMasked);
-  } else {
-    console.warn("[Balance][DOM] Eye element NOT FOUND — continuing");
-  }
-
-  // ---- Try to seed balance from DOM ----
-  try {
-    const firstData = document.querySelector("[data-balance]");
-    if (firstData && firstData.textContent.trim()) {
-      const parsed = parseFloat(firstData.textContent.replace(/[^0-9.-]+/g, ""));
-      if (!Number.isNaN(parsed)) {
-        currentDisplayedBalance = parsed;
-        console.log("[Balance][DOM] Seeded existing balance:", parsed);
-      } else {
-        console.warn("[Balance][DOM] Could not parse existing balance");
-      }
-    } else {
-      console.log("[Balance][DOM] No existing balance in DOM to seed");
-    }
-  } catch (e) {
-    console.error("[Balance][Error] Seed parse failed:", e);
-  }
-
-  // ---- Final render pass ----
-  updateAllBalances(currentDisplayedBalance || 0);
-  console.log("[Balance][DOM] Final balance render executed");
+  // DON'T call updateAllBalances here - let getSession handle it
+  console.log('[Balance] DOM ready — waiting for session');
 });
 
+// Trigger session fetch immediately
+(async () => {
+  try {
+    await getSession();
+    console.log('[Balance] Session loaded, balance should be visible');
+  } catch (err) {
+    console.error('[Balance] Session load failed', err);
+  }
+})();
 
   connectWS();
 })();
@@ -1661,6 +1641,26 @@ function applySessionToDOM(user) {
       avatarEl.textContent = initial;
       avatarEl.setAttribute('aria-label', displayNameCapitalized);
     }
+  }
+
+  // ADD THIS: Set initial balance without animation
+  if (user.wallet_balance !== undefined) {
+    const newBalance = Number(user.wallet_balance) || 0;
+    currentDisplayedBalance = newBalance; // Set without animation
+    
+    const formatted = '₦' + newBalance.toLocaleString('en-NG', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+    
+    // Update all balance elements immediately
+    document.querySelectorAll('[data-balance], .balance-real').forEach(el => {
+      el.textContent = formatted;
+    });
+    
+    document.querySelectorAll('.balance-masked').forEach(el => {
+      el.textContent = isBalanceMasked ? '••••••' : formatted;
+    });
   }
 }
 
