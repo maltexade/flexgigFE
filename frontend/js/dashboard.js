@@ -1390,12 +1390,13 @@ window.getSession = getSession;
   }
 
 // FINAL: NO BLANKNESS, NO FLASH, PERFECT ON RELOAD
+// FINAL FINAL FINAL — NO BLANKNESS, MASK ALWAYS WORKS, RELOAD PERFECT
 let currentDisplayedBalance = 0;
 let animationFrame = null;
 let isBalanceMasked = true;
-let hasReceivedRealBalance = false;  // ← THIS IS THE KEY
+let hasInitialized = false; // ← Only skip animation on first real balance
 
-// Restore mask preference
+// Restore user preference
 try {
   const saved = localStorage.getItem('balanceMasked');
   isBalanceMasked = saved === null ? true : saved === 'true';
@@ -1407,30 +1408,37 @@ function easeOutCubic(t) {
   return 1 - Math.pow(1 - t, 3);
 }
 
+// Format helper
+function formatBalance(amount) {
+  return '₦' + Number(amount).toLocaleString('en-NG', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+}
+
+// MAIN UPDATE FUNCTION — FINAL VERSION
 window.updateAllBalances = function (newBalance) {
   newBalance = Number(newBalance) || 0;
 
-  // FIRST TIME we get real balance → INSTANT display (no animation)
-  if (!hasReceivedRealBalance) {
-    console.log('[Balance] First real balance received → instant display:', newBalance);
-    hasReceivedRealBalance = true;
+  // First time we get real balance → INSTANT display (no animation)
+  if (!hasInitialized) {
+    console.log('[Balance] First real balance → instant display:', newBalance);
+    hasInitialized = true;
     currentDisplayedBalance = newBalance;
 
-    const formatted = '₦' + newBalance.toLocaleString('en-NG', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    });
+    const formatted = formatBalance(newBalance);
 
-    // Instantly set everything
+    // Update text
     document.querySelectorAll('[data-balance], .balance-real, .balance p').forEach(el => {
       el.textContent = formatted;
     });
 
+    // Update masked
     document.querySelectorAll('.balance-masked').forEach(el => {
       el.textContent = isBalanceMasked ? '••••••' : formatted;
     });
 
-    // Apply visibility
+    // Apply visibility based on current mask state
     document.querySelectorAll('.balance-real, [data-balance]').forEach(el => {
       el.style.display = isBalanceMasked ? 'none' : 'inline';
       el.style.opacity = isBalanceMasked ? '0' : '1';
@@ -1439,16 +1447,15 @@ window.updateAllBalances = function (newBalance) {
       el.style.display = isBalanceMasked ? 'inline' : 'none';
     });
 
-    return; // ← Skip animation on first load
+    return;
   }
 
-  // AFTER first load → animate normally
+  // Subsequent updates → animate
   if (animationFrame) cancelAnimationFrame(animationFrame);
 
   const startBalance = currentDisplayedBalance;
   const endBalance = newBalance;
 
-  // Only animate if change is meaningful
   if (Math.abs(endBalance - startBalance) < 1) {
     currentDisplayedBalance = endBalance;
     return;
@@ -1464,10 +1471,7 @@ window.updateAllBalances = function (newBalance) {
     const current = startBalance + (endBalance - startBalance) * eased;
     currentDisplayedBalance = current;
 
-    const formatted = '₦' + current.toLocaleString('en-NG', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    });
+    const formatted = formatBalance(current);
 
     document.querySelectorAll('[data-balance], .balance-real, .balance p').forEach(el => {
       el.textContent = formatted;
@@ -1486,6 +1490,53 @@ window.updateAllBalances = function (newBalance) {
 
   animationFrame = requestAnimationFrame(animate);
 };
+
+// EYE TOGGLE — PERFECT
+document.addEventListener('click', function(e) {
+  const eye = e.target.closest('.balance-eye');
+  if (!eye) return;
+
+  isBalanceMasked = !isBalanceMasked;
+
+  try {
+    localStorage.setItem('balanceMasked', isBalanceMasked);
+  } catch (e) {}
+
+  eye.classList.toggle('open', !isBalanceMasked);
+  eye.classList.toggle('closed', isBalanceMasked);
+
+  // Instantly apply visibility
+  document.querySelectorAll('.balance-real, [data-balance]').forEach(el => {
+    el.style.display = isBalanceMasked ? 'none' : 'inline';
+    el.style.opacity = isBalanceMasked ? '0' : '1';
+  });
+  document.querySelectorAll('.balance-masked').forEach(el => {
+    el.style.display = isBalanceMasked ? 'inline' : 'none';
+  });
+
+  // Refresh display (no animation on toggle)
+  updateAllBalances(currentDisplayedBalance);
+});
+
+// ON PAGE LOAD — FORCE CORRECT STATE
+document.addEventListener('DOMContentLoaded', () => {
+  const eye = document.querySelector('.balance-eye');
+  if (eye) {
+    eye.classList.toggle('open', !isBalanceMasked);
+    eye.classList.toggle('closed', isBalanceMasked);
+  }
+
+  // Force visibility immediately
+  document.querySelectorAll('.balance-real, [data-balance]').forEach(el => {
+    el.style.display = isBalanceMasked ? 'none' : 'inline';
+    el.style.opacity = isBalanceMasked ? '0' : '1';
+  });
+  document.querySelectorAll('.balance-masked').forEach(el => {
+    el.style.display = isBalanceMasked ? 'inline' : 'none';
+  });
+
+  console.log('[Balance] Reload state applied — masked:', isBalanceMasked);
+});
 
 // EYE TOGGLE — works with your SVG eye
 // EYE TOGGLE — now 100% consistent
