@@ -1534,6 +1534,54 @@ function observeForElements() {
 }
 
 
+// Helper: Apply user data to DOM elements
+function applySessionToDOM(user) {
+  const greetEl = document.getElementById('greet');
+  const firstnameEl = document.getElementById('firstname');
+  const avatarEl = document.getElementById('avatar');
+
+  if (!greetEl || !firstnameEl || !avatarEl) {
+    console.warn('[WARN] applySessionToDOM: Elements not found');
+    return;
+  }
+
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? 'Good Morning' : hour < 18 ? 'Good Afternoon' : 'Good Evening';
+  
+  if (greetEl.textContent !== greeting) {
+    greetEl.textContent = greeting;
+  }
+
+  const displayName = user.username || user.firstName || user.fullName?.split(' ')[0] || 'User';
+  const displayNameCapitalized = displayName.charAt(0).toUpperCase() + displayName.slice(1);
+  
+  if (firstnameEl.textContent !== displayNameCapitalized) {
+    firstnameEl.textContent = displayNameCapitalized;
+  }
+
+  const profilePicture = user.profilePicture || '';
+  const isValidImage = profilePicture && /^(data:image\/|https?:\/\/|\/)/i.test(profilePicture);
+  
+  if (isValidImage) {
+    const currentSrc = avatarEl.querySelector('img')?.src || '';
+    const picturePath = profilePicture.split('?')[0];
+    
+    if (!currentSrc.includes(picturePath)) {
+      avatarEl.innerHTML = `<img src="${profilePicture}" alt="Profile" class="avatar-img" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`;
+      avatarEl.removeAttribute('aria-label');
+    }
+  } else {
+    const initial = displayName.charAt(0).toUpperCase();
+    const currentText = avatarEl.textContent?.trim() || '';
+    
+    if (currentText !== initial) {
+      avatarEl.innerHTML = '';
+      avatarEl.textContent = initial;
+      avatarEl.setAttribute('aria-label', displayNameCapitalized);
+    }
+  }
+
+  // ADD THIS: Set initial balance without animation
 // ADD THIS: Set initial balance without animation
 if (user.wallet_balance !== undefined) {
   const newBalance = Number(user.wallet_balance) || 0;
@@ -1551,7 +1599,10 @@ if (user.wallet_balance !== undefined) {
   
   document.querySelectorAll('.balance-masked').forEach(el => {
     el.textContent = window.isBalanceMasked ? '••••••' : formatted;  // ✅ Use window.isBalanceMasked
-  });
+
+
+    });
+  }
 }
 
 // Helper: Update localStorage with user data
