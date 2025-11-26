@@ -1337,19 +1337,6 @@ async function getSession() {
 window.getSession = getSession;
 
 // PRODUCTION-LEVEL REALTIME BALANCE (WebSocket + Polling Fallback)
-// 🔥 MOVE THESE TO GLOBAL SCOPE (before the IIFE)
-window.currentDisplayedBalance = 0;  // ✅ GLOBAL
-window.isBalanceMasked = true;
-let animationFrame = null;
-
-// Restore preference
-try {
-  const saved = localStorage.getItem('balanceMasked');
-  window.isBalanceMasked = saved === null ? true : saved === 'true';
-} catch (e) {
-  window.isBalanceMasked = true;
-}
-
 (function() {
   const uid = window.__USER_UID || localStorage.getItem('userId');
   if (!uid) return;
@@ -1357,7 +1344,59 @@ try {
   let ws = null;
   let pollInterval = null;
 
-  // ... WebSocket code stays the same ...
+  // ✅ Define connectWS as a function
+  function connectWS() {
+    try {
+      ws = new WebSocket('wss://api.flexgig.com.ng/ws/wallet');
+
+      ws.onopen = () => {
+        console.log('WebSocket connected');
+        ws.send(JSON.stringify({ type: 'subscribe', user_uid: uid }));
+        if (pollInterval) clearInterval(pollInterval); // kill polling
+      };
+
+      ws.onmessage = (e) => {
+        const data = JSON.parse(e.data);
+        if (data.type === 'balance_update') {
+          window.updateAllBalances(data.balance);
+          if (window.notify) window.notify(`₦${data.amount.toLocaleString()} credited!`, 'success');
+        }
+      };
+
+      ws.onclose = () => {
+        console.warn('WebSocket closed → starting polling fallback');
+        startPolling();
+      };
+    } catch (e) {
+      console.error('WebSocket connection failed:', e);
+      startPolling();
+    }
+  }
+
+  // Fallback polling
+  function startPolling() {
+    if (pollInterval) clearInterval(pollInterval);
+    pollInterval = setInterval(async () => {
+      try {
+        const res = await fetch(`${window.__SEC_API_BASE}/api/session?light=true`, {
+          credentials: 'include'
+        });
+        if (res.ok) {
+          const json = await res.json();
+          const newBal = json.user?.wallet_balance;
+          if (newBal !== undefined) {
+            const current = window.currentDisplayedBalance;
+            if (newBal > current) {
+              window.updateAllBalances(newBal);
+              if (window.notify) window.notify('Payment received!', 'success');
+            }
+          }
+        }
+      } catch(e) {
+        console.warn('Polling failed:', e);
+      }
+    }, 10000);
+  }
 
   function easeOutCubic(t) {
     return 1 - Math.pow(1 - t, 3);
@@ -1368,7 +1407,7 @@ try {
 
     if (animationFrame) cancelAnimationFrame(animationFrame);
 
-    const startBalance = window.currentDisplayedBalance;  // ✅ Use global
+    const startBalance = window.currentDisplayedBalance;
     const endBalance = newBalance;
     const duration = Math.abs(endBalance - startBalance) < 5000 ? 800 : 1400;
     const startTime = performance.now();
@@ -1378,28 +1417,25 @@ try {
       const progress = Math.min(elapsed / duration, 1);
       const eased = easeOutCubic(progress);
       const current = startBalance + (endBalance - startBalance) * eased;
-      window.currentDisplayedBalance = current;  // ✅ Use global
+      window.currentDisplayedBalance = current;
 
       const formatted = '₦' + current.toLocaleString('en-NG', {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2
       });
 
-      // Update ALL real balance elements
       document.querySelectorAll('[data-balance], .balance-real').forEach(el => {
         if (el.textContent !== formatted) {
           el.textContent = formatted;
         }
       });
 
-      // Update masked version
       document.querySelectorAll('.balance-masked').forEach(el => {
-        el.textContent = window.isBalanceMasked ? '••••••' : formatted;  // ✅ Use global
+        el.textContent = window.isBalanceMasked ? '••••••' : formatted;
       });
 
-      // TOGGLE VISIBILITY
       document.querySelectorAll('.balance-real').forEach(el => {
-        if (window.isBalanceMasked) {  // ✅ Use global
+        if (window.isBalanceMasked) {
           el.style.display = 'none';
           el.style.opacity = '0';
         } else {
@@ -1409,7 +1445,7 @@ try {
       });
 
       document.querySelectorAll('.balance-masked').forEach(el => {
-        el.style.display = window.isBalanceMasked ? 'inline' : 'none';  // ✅ Use global
+        el.style.display = window.isBalanceMasked ? 'inline' : 'none';
       });
 
       if (progress < 1) {
@@ -1427,7 +1463,7 @@ try {
     const eye = e.target.closest('.balance-eye-toggle');
     if (!eye) return;
 
-    window.isBalanceMasked = !window.isBalanceMasked;  // ✅ Use global
+    window.isBalanceMasked = !window.isBalanceMasked;
 
     try {
       localStorage.setItem('balanceMasked', window.isBalanceMasked);
@@ -1445,7 +1481,7 @@ try {
       el.style.display = window.isBalanceMasked ? 'inline' : 'none';
     });
 
-    window.updateAllBalances(window.currentDisplayedBalance);  // ✅ Use global
+    window.updateAllBalances(window.currentDisplayedBalance);
   });
 
   // On load fix
@@ -1455,7 +1491,7 @@ try {
     const maskedSpans = document.querySelectorAll('.balance-masked');
 
     if (eye) {
-      if (window.isBalanceMasked) {  // ✅ Use global
+      if (window.isBalanceMasked) {
         eye.classList.remove('open');
         eye.classList.add('closed');
       } else {
@@ -1465,7 +1501,7 @@ try {
     }
 
     realSpans.forEach(el => {
-      if (window.isBalanceMasked) {  // ✅ Use global
+      if (window.isBalanceMasked) {
         el.style.display = 'none';
         el.style.opacity = '0';
       } else {
@@ -1475,12 +1511,13 @@ try {
     });
 
     maskedSpans.forEach(el => {
-      el.style.display = window.isBalanceMasked ? 'inline' : 'none';  // ✅ Use global
+      el.style.display = window.isBalanceMasked ? 'inline' : 'none';
     });
 
     console.log('[Balance] DOM ready — waiting for session');
   });
 
+  // ✅ NOW call connectWS (it's defined above)
   connectWS();
 })();
 
