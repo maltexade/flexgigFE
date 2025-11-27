@@ -1162,10 +1162,7 @@ async function fetchWithAutoRefresh(url, opts = {}) {
 const APP_VERSION = '1.0.0';
 
 
-const updateProfileModal = document.getElementById('updateProfileModal');
-if (updateProfileModal && updateProfileModal.classList.contains('active')) {
-  openUpdateProfileModal();
-}
+
 
 
 
@@ -6861,13 +6858,6 @@ for (const [key, element] of Object.entries(requiredElements)) {
 
 
 
-const updateProfileCard = document.querySelector('.card.update-profile');
-if (updateProfileCard) {
-  updateProfileCard.addEventListener('click', () => {
-    console.log('[DEBUG] Update Profile card clicked');
-    openUpdateProfileModal({});
-  });
-}
 
 // --- Helper: get file from input safely and ensure FormData has it ---
 // --- Helper: ensure file is in FormData ---
@@ -8623,14 +8613,7 @@ loadProfileToSettings().catch(e => console.warn('loadProfileToSettings failed', 
 
 
 
-  // Edit profile action
-  if (openUpdateProfile) {
-    openUpdateProfile.addEventListener('click', () => {
-      lastModalSource = 'settings';
-      openUpdateProfileModal();
-      hideModal(); // Ensure scroll is restored when opening another modal
-    });
-  }
+
 
   // Get the profile open button and update profile modal
   const profileOpenBtn = document.getElementById('profileopenbtn');
