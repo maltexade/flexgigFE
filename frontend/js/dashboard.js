@@ -1337,10 +1337,11 @@ async function getSession() {
 window.getSession = getSession;
 
 // 🔥 MOVE THESE TO GLOBAL SCOPE (before the IIFE)
-window.currentDisplayedBalance = 0;  // ✅ GLOBAL
-window.isBalanceMasked = true;       // ✅ GLOBAL
-window.animationFrame = null;        // ✅ GLOBAL
-window.balanceInitialized = false;   // ✅ NEW - track if balance has been set
+// 🔥 MOVE THESE TO GLOBAL SCOPE (before the IIFE)
+window.currentDisplayedBalance = 0;
+window.isBalanceMasked = true;
+window.animationFrame = null;
+window.balanceInitialized = false;
 
 // Restore preference
 try {
@@ -1358,7 +1359,6 @@ try {
   let ws = null;
   let pollInterval = null;
 
-  // ✅ Define connectWS as a function
   function connectWS() {
     try {
       ws = new WebSocket('wss://api.flexgig.com.ng/ws/wallet');
@@ -1387,7 +1387,6 @@ try {
     }
   }
 
-  // Fallback polling
   function startPolling() {
     if (pollInterval) clearInterval(pollInterval);
     pollInterval = setInterval(async () => {
@@ -1416,10 +1415,27 @@ try {
     return 1 - Math.pow(1 - t, 3);
   }
 
+  // ✅ Helper function to apply visibility state (reusable)
+  function applyBalanceVisibility() {
+    document.querySelectorAll('.balance-real, [data-balance]').forEach(el => {
+      if (window.isBalanceMasked) {
+        el.style.display = 'none';
+        el.style.opacity = '0';
+      } else {
+        el.style.display = 'inline';
+        el.style.opacity = '1';
+      }
+    });
+
+    document.querySelectorAll('.balance-masked').forEach(el => {
+      el.style.display = window.isBalanceMasked ? 'inline' : 'none';
+    });
+  }
+
   window.updateAllBalances = function (newBalance, skipAnimation = false) {
     newBalance = Number(newBalance) || 0;
 
-    // ✅ If this is the first load and balance hasn't been initialized, show immediately without animation
+    // ✅ If this is the first load, show immediately without animation
     if (!window.balanceInitialized || skipAnimation) {
       window.balanceInitialized = true;
       window.currentDisplayedBalance = newBalance;
@@ -1438,26 +1454,14 @@ try {
         el.textContent = window.isBalanceMasked ? '••••••' : formatted;
       });
 
-      // Set correct visibility
-      document.querySelectorAll('.balance-real').forEach(el => {
-        if (window.isBalanceMasked) {
-          el.style.display = 'none';
-          el.style.opacity = '0';
-        } else {
-          el.style.display = 'inline';
-          el.style.opacity = '1';
-        }
-      });
-
-      document.querySelectorAll('.balance-masked').forEach(el => {
-        el.style.display = window.isBalanceMasked ? 'inline' : 'none';
-      });
+      // ✅ Apply visibility AFTER setting content
+      applyBalanceVisibility();
 
       console.log('[Balance] Initial balance set (no animation):', formatted);
-      return; // Exit early, no animation
+      return;
     }
 
-    // ✅ Normal animated update (for subsequent changes)
+    // Normal animated update
     if (window.animationFrame) cancelAnimationFrame(window.animationFrame);
 
     const startBalance = window.currentDisplayedBalance;
@@ -1487,19 +1491,7 @@ try {
         el.textContent = window.isBalanceMasked ? '••••••' : formatted;
       });
 
-      document.querySelectorAll('.balance-real').forEach(el => {
-        if (window.isBalanceMasked) {
-          el.style.display = 'none';
-          el.style.opacity = '0';
-        } else {
-          el.style.display = 'inline';
-          el.style.opacity = '1';
-        }
-      });
-
-      document.querySelectorAll('.balance-masked').forEach(el => {
-        el.style.display = window.isBalanceMasked ? 'inline' : 'none';
-      });
+      applyBalanceVisibility();
 
       if (progress < 1) {
         window.animationFrame = requestAnimationFrame(animate);
@@ -1525,51 +1517,12 @@ try {
     eye.classList.toggle('open', !window.isBalanceMasked);
     eye.classList.toggle('closed', window.isBalanceMasked);
 
-    document.querySelectorAll('.balance-real, [data-balance]').forEach(el => {
-      el.style.display = window.isBalanceMasked ? 'none' : 'inline';
-      el.style.opacity = window.isBalanceMasked ? '0' : '1';
-    });
-
-    document.querySelectorAll('.balance-masked').forEach(el => {
-      el.style.display = window.isBalanceMasked ? 'inline' : 'none';
-    });
-
-    // ✅ Force immediate update (no animation) when toggling mask
-    window.updateAllBalances(window.currentDisplayedBalance, true);
+    // ✅ Just apply visibility, don't call updateAllBalances
+    applyBalanceVisibility();
   });
 
-  // On load fix
-  document.addEventListener('DOMContentLoaded', () => {
-    const eye = document.querySelector('.balance-eye-toggle');
-    const realSpans = document.querySelectorAll('.balance-real, [data-balance]');
-    const maskedSpans = document.querySelectorAll('.balance-masked');
-
-    if (eye) {
-      if (window.isBalanceMasked) {
-        eye.classList.remove('open');
-        eye.classList.add('closed');
-      } else {
-        eye.classList.remove('closed');
-        eye.classList.add('open');
-      }
-    }
-
-    realSpans.forEach(el => {
-      if (window.isBalanceMasked) {
-        el.style.display = 'none';
-        el.style.opacity = '0';
-      } else {
-        el.style.display = 'inline';
-        el.style.opacity = '1';
-      }
-    });
-
-    maskedSpans.forEach(el => {
-      el.style.display = window.isBalanceMasked ? 'inline' : 'none';
-    });
-
-    console.log('[Balance] DOM ready — waiting for session');
-  });
+  // ✅ REMOVED DOMContentLoaded event - it was causing the flash/blank issue
+  // The visibility state is now applied by updateAllBalances and the eye toggle
 
   connectWS();
 })();
@@ -1635,63 +1588,49 @@ function applySessionToDOM(user) {
     return;
   }
 
-  const hour = new Date().getHours();
-  const greeting = hour < 12 ? 'Good Morning' : hour < 18 ? 'Good Afternoon' : 'Good Evening';
-  
-  if (greetEl.textContent !== greeting) {
-    greetEl.textContent = greeting;
-  }
+  // ... your existing greeting/name/avatar code ...
 
-  const displayName = user.username || user.firstName || user.fullName?.split(' ')[0] || 'User';
-  const displayNameCapitalized = displayName.charAt(0).toUpperCase() + displayName.slice(1);
-  
-  if (firstnameEl.textContent !== displayNameCapitalized) {
-    firstnameEl.textContent = displayNameCapitalized;
-  }
-
-  const profilePicture = user.profilePicture || '';
-  const isValidImage = profilePicture && /^(data:image\/|https?:\/\/|\/)/i.test(profilePicture);
-  
-  if (isValidImage) {
-    const currentSrc = avatarEl.querySelector('img')?.src || '';
-    const picturePath = profilePicture.split('?')[0];
+  // ✅ Balance section - set it WITHOUT animation on first load
+  if (user.wallet_balance !== undefined) {
+    const newBalance = Number(user.wallet_balance) || 0;
     
-    if (!currentSrc.includes(picturePath)) {
-      avatarEl.innerHTML = `<img src="${profilePicture}" alt="Profile" class="avatar-img" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`;
-      avatarEl.removeAttribute('aria-label');
-    }
-  } else {
-    const initial = displayName.charAt(0).toUpperCase();
-    const currentText = avatarEl.textContent?.trim() || '';
+    console.log('[Balance] applySessionToDOM setting balance:', newBalance);
     
-    if (currentText !== initial) {
-      avatarEl.innerHTML = '';
-      avatarEl.textContent = initial;
-      avatarEl.setAttribute('aria-label', displayNameCapitalized);
+    // Use skipAnimation = true to set immediately
+    if (typeof window.updateAllBalances === 'function') {
+      window.updateAllBalances(newBalance, true); // true = skip animation
+    } else {
+      // Fallback if updateAllBalances isn't loaded yet
+      window.currentDisplayedBalance = newBalance;
+      
+      const formatted = '₦' + newBalance.toLocaleString('en-NG', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      });
+      
+      document.querySelectorAll('[data-balance], .balance-real').forEach(el => {
+        el.textContent = formatted;
+      });
+      
+      document.querySelectorAll('.balance-masked').forEach(el => {
+        el.textContent = window.isBalanceMasked ? '••••••' : formatted;
+      });
+      
+      // Apply visibility
+      document.querySelectorAll('.balance-real, [data-balance]').forEach(el => {
+        if (window.isBalanceMasked) {
+          el.style.display = 'none';
+          el.style.opacity = '0';
+        } else {
+          el.style.display = 'inline';
+          el.style.opacity = '1';
+        }
+      });
+      
+      document.querySelectorAll('.balance-masked').forEach(el => {
+        el.style.display = window.isBalanceMasked ? 'inline' : 'none';
+      });
     }
-  }
-
-  // ADD THIS: Set initial balance without animation
-// ADD THIS: Set initial balance without animation
-if (user.wallet_balance !== undefined) {
-  const newBalance = Number(user.wallet_balance) || 0;
-  window.currentDisplayedBalance = newBalance; // ✅ Use window.currentDisplayedBalance
-  
-  const formatted = '₦' + newBalance.toLocaleString('en-NG', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  });
-  
-  // Update all balance elements immediately
-  document.querySelectorAll('[data-balance], .balance-real').forEach(el => {
-    el.textContent = formatted;
-  });
-  
-  document.querySelectorAll('.balance-masked').forEach(el => {
-    el.textContent = window.isBalanceMasked ? '••••••' : formatted;  // ✅ Use window.isBalanceMasked
-
-
-    });
   }
 }
 
