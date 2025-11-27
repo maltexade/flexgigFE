@@ -2194,24 +2194,6 @@ setInterval(() => pollStatus(), 30000);
 }
 
 
-function populateProfileForm() {
-  const user = JSON.parse(localStorage.getItem('userData') || '{}');  // ← Changed from 'userProfile' to 'userData'
-
-  if (fullNameInput) fullNameInput.value = user.fullName || '';
-  if (usernameInput) usernameInput.value = user.username || '';
-  if (phoneNumberInput) phoneNumberInput.value = user.phoneNumber || '';
-  if (emailInput) emailInput.value = user.email || localStorage.getItem('userEmail') || '';
-  if (addressInput) addressInput.value = user.address || '';
-
-  const pic = user.profilePicture || localStorage.getItem('profilePicture') || '';
-  if (profilePicturePreview && pic) {
-    profilePicturePreview.innerHTML = `<img src="${pic}?v=${Date.now()}" alt="Profile" class="avatar-img" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`;
-  }
-
-  console.log('[Profile Form] Populated with real data:', user);  // ← Check console for data
-}
-
-window.populateProfileForm = window.populateProfileForm || populateProfileForm;
 // ============================================
 // SMART DASHBOARD CARDS (Setup Pin + Update Profile)
 // ============================================
@@ -7234,6 +7216,27 @@ function validatePhoneNumberField(inputElement, errorElement) {
   }
   return !error;
 }
+
+
+
+function populateProfileForm() {
+  const user = JSON.parse(localStorage.getItem('userData') || '{}');  // ← Changed from 'userProfile' to 'userData'
+
+  if (fullNameInput) fullNameInput.value = user.fullName || '';
+  if (usernameInput) usernameInput.value = user.username || '';
+  if (phoneNumberInput) phoneNumberInput.value = user.phoneNumber || '';
+  if (emailInput) emailInput.value = user.email || localStorage.getItem('userEmail') || '';
+  if (addressInput) addressInput.value = user.address || '';
+
+  const pic = user.profilePicture || localStorage.getItem('profilePicture') || '';
+  if (profilePicturePreview && pic) {
+    profilePicturePreview.innerHTML = `<img src="${pic}?v=${Date.now()}" alt="Profile" class="avatar-img" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`;
+  }
+
+  console.log('[Profile Form] Populated with real data:', user);  // ← Check console for data
+}
+
+window.populateProfileForm = window.populateProfileForm || populateProfileForm;
 
 
 
