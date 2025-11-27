@@ -2197,6 +2197,26 @@ setInterval(() => pollStatus(), 30000);
 }
 
 
+function populateProfileForm() {
+  const user = JSON.parse(localStorage.getItem('userProfile') || '{}');
+
+  if (fullNameInput) fullNameInput.value = user.fullName || '';
+  if (usernameInput) usernameInput.value = user.username || '';
+  if (phoneNumberInput) phoneNumberInput.value = user.phoneNumber || '';
+  if (emailInput) emailInput.value = user.email || localStorage.getItem('userEmail') || '';
+  if (addressInput) addressInput.value = user.address || '';
+
+  // Profile picture
+  if (profilePicturePreview && user.profilePicture) {
+    profilePicturePreview.innerHTML = `<img src="${user.profilePicture}?v=${Date.now()}" alt="Profile" class="avatar-img" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`;
+  } else if (profilePicturePreview) {
+    const name = (user.fullName || user.username || 'User').trim();
+    profilePicturePreview.textContent = name.charAt(0).toUpperCase();
+  }
+
+  console.log('[Profile Form] Filled with fresh data:', user);
+}
+
 // ============================================
 // SMART DASHBOARD CARDS (Setup Pin + Update Profile)
 // ============================================
@@ -6836,55 +6856,7 @@ for (const [key, element] of Object.entries(requiredElements)) {
   }
 }
 
-if (updateProfileBtn) {
-  updateProfileBtn.addEventListener('click', () => {
-    lastModalSource = 'dashboard';
-    openUpdateProfileModal();
-  });
-}
 
-
-// ====== Force Profile Modal Open Above ModalManager ======
-// if (settingsUpdateBtn) {
-//   settingsUpdateBtn.addEventListener(
-//     'click',
-//     (event) => {
-//       event.preventDefault();
-//       event.stopImmediatePropagation();
-//       lastModalSource = 'settings';
-//       if (typeof openUpdateProfileModal === 'function') {
-//         openUpdateProfileModal();
-//         if (updateProfileModal) {
-//           // Force active and remove hidden
-//           updateProfileModal.classList.add('active');
-//           updateProfileModal.classList.remove('hidden');
-//           updateProfileModal.style.display = 'flex';
-//           updateProfileModal.style.opacity = 1;
-//           // CRITICAL: Push proper history state with modalDepth
-//           // Get current depth from ModalManager if available
-//           const currentDepth = window.ModalManager?.getCurrentDepth?.() || 1;
-//           history.pushState(
-//             { 
-//               isModal: true,
-//               modalId: 'updateProfileModal',
-//               modalDepth: currentDepth + 1
-//             }, 
-//             '', 
-//             '#updateProfileModal'
-//           );
-//           console.log('[INFO] updateProfileModal forced visible with history', {
-//             classList: updateProfileModal.className,
-//             display: updateProfileModal.style.display,
-//             modalDepth: currentDepth + 1
-//           });
-//           // Run validation safely
-//           setTimeout(() => validateProfileForm(true), 50);
-//         }
-//       }
-//     },
-//     true
-//   );
-// }
 
 
 
@@ -8190,11 +8162,23 @@ if (settingsUpdateBtn) {
   });
 }
 
+// FINAL WORKING VERSION — OPEN UPDATE PROFILE MODAL WITH DATA
 if (updateProfileBtn) {
-  updateProfileBtn.addEventListener('click', () => {
+  updateProfileBtn.addEventListener('click', async () => {
     lastModalSource = 'dashboard';
+    await loadUserProfile(true);     // Force fresh data from server
+    populateProfileForm();           // Fill all fields
     window.ModalManager?.openModal('updateProfileModal');
-    setTimeout(() => validateProfileForm(true), 450);
+  });
+}
+
+if (settingsUpdateBtn) {
+  settingsUpdateBtn.addEventListener('click', async (e) => {
+    e.preventDefault();
+    lastModalSource = 'settings';
+    await loadUserProfile(true);     // Force fresh data from server
+    populateProfileForm();           // Fill all fields
+    window.ModalManager?.openModal('updateProfileModal');
   });
 }
 
