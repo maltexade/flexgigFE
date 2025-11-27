@@ -1162,7 +1162,10 @@ async function fetchWithAutoRefresh(url, opts = {}) {
 const APP_VERSION = '1.0.0';
 
 
-
+const updateProfileModal = document.getElementById('updateProfileModal');
+if (updateProfileModal && updateProfileModal.classList.contains('active')) {
+  openUpdateProfileModal();
+}
 
 
 
@@ -1585,49 +1588,63 @@ function applySessionToDOM(user) {
     return;
   }
 
-  // ... your existing greeting/name/avatar code ...
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? 'Good Morning' : hour < 18 ? 'Good Afternoon' : 'Good Evening';
+  
+  if (greetEl.textContent !== greeting) {
+    greetEl.textContent = greeting;
+  }
 
-  // ✅ Balance section - set it WITHOUT animation on first load
-  if (user.wallet_balance !== undefined) {
-    const newBalance = Number(user.wallet_balance) || 0;
+  const displayName = user.username || user.firstName || user.fullName?.split(' ')[0] || 'User';
+  const displayNameCapitalized = displayName.charAt(0).toUpperCase() + displayName.slice(1);
+  
+  if (firstnameEl.textContent !== displayNameCapitalized) {
+    firstnameEl.textContent = displayNameCapitalized;
+  }
+
+  const profilePicture = user.profilePicture || '';
+  const isValidImage = profilePicture && /^(data:image\/|https?:\/\/|\/)/i.test(profilePicture);
+  
+  if (isValidImage) {
+    const currentSrc = avatarEl.querySelector('img')?.src || '';
+    const picturePath = profilePicture.split('?')[0];
     
-    console.log('[Balance] applySessionToDOM setting balance:', newBalance);
-    
-    // Use skipAnimation = true to set immediately
-    if (typeof window.updateAllBalances === 'function') {
-      window.updateAllBalances(newBalance, true); // true = skip animation
-    } else {
-      // Fallback if updateAllBalances isn't loaded yet
-      window.currentDisplayedBalance = newBalance;
-      
-      const formatted = '₦' + newBalance.toLocaleString('en-NG', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
-      });
-      
-      document.querySelectorAll('[data-balance], .balance-real').forEach(el => {
-        el.textContent = formatted;
-      });
-      
-      document.querySelectorAll('.balance-masked').forEach(el => {
-        el.textContent = window.isBalanceMasked ? '••••••' : formatted;
-      });
-      
-      // Apply visibility
-      document.querySelectorAll('.balance-real, [data-balance]').forEach(el => {
-        if (window.isBalanceMasked) {
-          el.style.display = 'none';
-          el.style.opacity = '0';
-        } else {
-          el.style.display = 'inline';
-          el.style.opacity = '1';
-        }
-      });
-      
-      document.querySelectorAll('.balance-masked').forEach(el => {
-        el.style.display = window.isBalanceMasked ? 'inline' : 'none';
-      });
+    if (!currentSrc.includes(picturePath)) {
+      avatarEl.innerHTML = `<img src="${profilePicture}" alt="Profile" class="avatar-img" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`;
+      avatarEl.removeAttribute('aria-label');
     }
+  } else {
+    const initial = displayName.charAt(0).toUpperCase();
+    const currentText = avatarEl.textContent?.trim() || '';
+    
+    if (currentText !== initial) {
+      avatarEl.innerHTML = '';
+      avatarEl.textContent = initial;
+      avatarEl.setAttribute('aria-label', displayNameCapitalized);
+    }
+  }
+
+  // ADD THIS: Set initial balance without animation
+// ADD THIS: Set initial balance without animation
+if (user.wallet_balance !== undefined) {
+  const newBalance = Number(user.wallet_balance) || 0;
+  window.currentDisplayedBalance = newBalance; // ✅ Use window.currentDisplayedBalance
+  
+  const formatted = '₦' + newBalance.toLocaleString('en-NG', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+  
+  // Update all balance elements immediately
+  document.querySelectorAll('[data-balance], .balance-real').forEach(el => {
+    el.textContent = formatted;
+  });
+  
+  document.querySelectorAll('.balance-masked').forEach(el => {
+    el.textContent = window.isBalanceMasked ? '••••••' : formatted;  // ✅ Use window.isBalanceMasked
+
+
+    });
   }
 }
 
@@ -6833,11 +6850,66 @@ for (const [key, element] of Object.entries(requiredElements)) {
   }
 }
 
+if (updateProfileBtn) {
+  updateProfileBtn.addEventListener('click', () => {
+    lastModalSource = 'dashboard';
+    openUpdateProfileModal();
+  });
+}
+
+
+// ====== Force Profile Modal Open Above ModalManager ======
+// if (settingsUpdateBtn) {
+//   settingsUpdateBtn.addEventListener(
+//     'click',
+//     (event) => {
+//       event.preventDefault();
+//       event.stopImmediatePropagation();
+//       lastModalSource = 'settings';
+//       if (typeof openUpdateProfileModal === 'function') {
+//         openUpdateProfileModal();
+//         if (updateProfileModal) {
+//           // Force active and remove hidden
+//           updateProfileModal.classList.add('active');
+//           updateProfileModal.classList.remove('hidden');
+//           updateProfileModal.style.display = 'flex';
+//           updateProfileModal.style.opacity = 1;
+//           // CRITICAL: Push proper history state with modalDepth
+//           // Get current depth from ModalManager if available
+//           const currentDepth = window.ModalManager?.getCurrentDepth?.() || 1;
+//           history.pushState(
+//             { 
+//               isModal: true,
+//               modalId: 'updateProfileModal',
+//               modalDepth: currentDepth + 1
+//             }, 
+//             '', 
+//             '#updateProfileModal'
+//           );
+//           console.log('[INFO] updateProfileModal forced visible with history', {
+//             classList: updateProfileModal.className,
+//             display: updateProfileModal.style.display,
+//             modalDepth: currentDepth + 1
+//           });
+//           // Run validation safely
+//           setTimeout(() => validateProfileForm(true), 50);
+//         }
+//       }
+//     },
+//     true
+//   );
+// }
 
 
 
 
-
+const updateProfileCard = document.querySelector('.card.update-profile');
+if (updateProfileCard) {
+  updateProfileCard.addEventListener('click', () => {
+    console.log('[DEBUG] Update Profile card clicked');
+    openUpdateProfileModal({});
+  });
+}
 
 // --- Helper: get file from input safely and ensure FormData has it ---
 // --- Helper: ensure file is in FormData ---
@@ -7216,27 +7288,6 @@ function validatePhoneNumberField(inputElement, errorElement) {
   }
   return !error;
 }
-
-
-
-function populateProfileForm() {
-  const user = JSON.parse(localStorage.getItem('userData') || '{}');  // ← Changed from 'userProfile' to 'userData'
-
-  if (fullNameInput) fullNameInput.value = user.fullName || '';
-  if (usernameInput) usernameInput.value = user.username || '';
-  if (phoneNumberInput) phoneNumberInput.value = user.phoneNumber || '';
-  if (emailInput) emailInput.value = user.email || localStorage.getItem('userEmail') || '';
-  if (addressInput) addressInput.value = user.address || '';
-
-  const pic = user.profilePicture || localStorage.getItem('profilePicture') || '';
-  if (profilePicturePreview && pic) {
-    profilePicturePreview.innerHTML = `<img src="${pic}?v=${Date.now()}" alt="Profile" class="avatar-img" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`;
-  }
-
-  console.log('[Profile Form] Populated with real data:', user);  // ← Check console for data
-}
-
-window.populateProfileForm = window.populateProfileForm || populateProfileForm;
 
 
 
@@ -8131,42 +8182,6 @@ if (addressInput && !addressInput.disabled) {
 
 
 
-function closeUpdateProfileModal() {
-    if (!updateProfileModal) return;
-    detachProfileListeners();
-    updateProfileModal.classList.remove('active');
-    updateProfileModal.setAttribute('aria-hidden', 'true');
-    document.body.classList.remove('modal-open');
-    setTimeout(() => {
-        updateProfileModal.style.display = 'none';
-    }, 400);
-    console.log('[DEBUG] closeUpdateProfileModal: Modal closed');
-
-    // Ensure settings-tab is active
-    const tabs = document.querySelectorAll('.nav-link');
-    const settingsTab = document.getElementById('settings-tab');
-    tabs.forEach(t => t.classList.remove('active'));
-    if (settingsTab) settingsTab.classList.add('active');
-
-    // Reopen settings modal if source was settings
-    if (lastModalSource === 'settings') {
-        const settingsModal = document.getElementById('settingsModal') || document.getElementById('settings');
-        if (settingsModal) {
-            settingsModal.style.display = 'flex';
-            document.documentElement.style.overflow = 'hidden';
-            const settingsBtn = document.getElementById('settingsBtn');
-            if (settingsBtn) settingsBtn.classList.add('active');
-        }
-    } else {
-        // Activate dashboard tab
-        const homeTab = document.getElementById('home-tab');
-        if (homeTab) homeTab.classList.add('active');
-    }
-
-    lastModalSource = null;
-}
-
-
 
 // ===== FINAL CLEAN VERSION — DELETE EVERYTHING BELOW THIS LINE IN YOUR FILE =====
 
@@ -8189,23 +8204,11 @@ if (settingsUpdateBtn) {
   });
 }
 
-// FINAL WORKING VERSION — OPEN UPDATE PROFILE MODAL WITH DATA
 if (updateProfileBtn) {
-  updateProfileBtn.addEventListener('click', async () => {
+  updateProfileBtn.addEventListener('click', () => {
     lastModalSource = 'dashboard';
-    await loadUserProfile(true);     // Force fresh data from server
-    populateProfileForm();           // Fill all fields
     window.ModalManager?.openModal('updateProfileModal');
-  });
-}
-
-if (settingsUpdateBtn) {
-  settingsUpdateBtn.addEventListener('click', async (e) => {
-    e.preventDefault();
-    lastModalSource = 'settings';
-    await loadUserProfile(true);     // Force fresh data from server
-    populateProfileForm();           // Fill all fields
-    window.ModalManager?.openModal('updateProfileModal');
+    setTimeout(() => validateProfileForm(true), 450);
   });
 }
 
@@ -8650,7 +8653,14 @@ loadProfileToSettings().catch(e => console.warn('loadProfileToSettings failed', 
 
 
 
-
+  // Edit profile action
+  if (openUpdateProfile) {
+    openUpdateProfile.addEventListener('click', () => {
+      lastModalSource = 'settings';
+      openUpdateProfileModal();
+      hideModal(); // Ensure scroll is restored when opening another modal
+    });
+  }
 
   // Get the profile open button and update profile modal
   const profileOpenBtn = document.getElementById('profileopenbtn');
