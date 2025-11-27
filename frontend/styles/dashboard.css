@@ -3901,31 +3901,16 @@ a[style*="color: #f00"] { color: var(--danger); }
 
 .balance-masked,
 .balance-real {
-  /* Position absolutely so they stack on top of each other */
-  position: absolute;
+   position: absolute;
   left: 0;
   top: 0;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
   pointer-events: none;
-  /* ❌ REMOVED: display: inline !important; - this was blocking JS */
-}
-
-/* ✅ Add default states that JS can override */
-.balance-masked {
-  display: inline; /* Default: visible when masked */
-  opacity: 1;
-}
-
-.balance-real {
-  display: none; /* Default: hidden when masked */
-  opacity: 0;
-}
-
-/* Optional: smooth transition when toggling */
-.balance-masked,
-.balance-real {
-  transition: opacity 0.2s ease;
+  /* Both always display:inline, positioned in same flow */
+  display: inline !important;
+  
+  /* Prevent any layout shifts */
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 /* Optional: if you want them to overlap perfectly (absolute positioning) */
@@ -3934,6 +3919,15 @@ a[style*="color: #f00"] { color: var(--danger); }
   display: inline-block;
 }
 
+.balance-masked,
+.balance-real {
+  /* Position absolutely so they stack on top of each other */
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: inline-block !important;
+  white-space: nowrap;
+}
 
 
 /* ===== Referral Modal Overlay ===== */
