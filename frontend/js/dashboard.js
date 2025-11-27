@@ -8131,6 +8131,42 @@ if (addressInput && !addressInput.disabled) {
 
 
 
+function closeUpdateProfileModal() {
+    if (!updateProfileModal) return;
+    detachProfileListeners();
+    updateProfileModal.classList.remove('active');
+    updateProfileModal.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('modal-open');
+    setTimeout(() => {
+        updateProfileModal.style.display = 'none';
+    }, 400);
+    console.log('[DEBUG] closeUpdateProfileModal: Modal closed');
+
+    // Ensure settings-tab is active
+    const tabs = document.querySelectorAll('.nav-link');
+    const settingsTab = document.getElementById('settings-tab');
+    tabs.forEach(t => t.classList.remove('active'));
+    if (settingsTab) settingsTab.classList.add('active');
+
+    // Reopen settings modal if source was settings
+    if (lastModalSource === 'settings') {
+        const settingsModal = document.getElementById('settingsModal') || document.getElementById('settings');
+        if (settingsModal) {
+            settingsModal.style.display = 'flex';
+            document.documentElement.style.overflow = 'hidden';
+            const settingsBtn = document.getElementById('settingsBtn');
+            if (settingsBtn) settingsBtn.classList.add('active');
+        }
+    } else {
+        // Activate dashboard tab
+        const homeTab = document.getElementById('home-tab');
+        if (homeTab) homeTab.classList.add('active');
+    }
+
+    lastModalSource = null;
+}
+
+
 
 // ===== FINAL CLEAN VERSION — DELETE EVERYTHING BELOW THIS LINE IN YOUR FILE =====
 
