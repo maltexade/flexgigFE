@@ -29,6 +29,8 @@ openModal: (() => {
 
 
 
+
+
     // Form inputs
     phoneNumber: document.getElementById('phone-input')?.value || '',
     pinInputs: {
@@ -59,6 +61,24 @@ openModal: (() => {
 
   console.log('[StateSaver] UI state saved → openModal:', state.openModal, state);
 }
+
+// ---- Balance Style Mutation Debugger (SAFE VERSION) ----
+(function() {
+  const el = document.querySelector('.balance-real');
+  if (!el) return;
+
+  const obs = new MutationObserver(function(muts) {
+    muts.forEach(function(m) {
+      if (m.attributeName === 'style') {
+        console.warn("🔥 BALANCE STYLE OVERRIDDEN →", el.getAttribute("style"));
+        console.warn("🔥 STACK TRACE →", new Error().stack);
+      }
+    });
+  });
+
+  obs.observe(el, { attributes: true });
+})();
+
 
 
 
