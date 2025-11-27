@@ -1628,7 +1628,8 @@ function applySessionToDOM(user) {
 // ADD THIS: Set initial balance without animation
 if (user.wallet_balance !== undefined) {
   const newBalance = Number(user.wallet_balance) || 0;
-  window.currentDisplayedBalance = newBalance; // ✅ Use window.currentDisplayedBalance
+// ✅ Force proper initialization using the global updater
+window.updateAllBalances(newBalance, true);  // skip animation on first load
   
   const formatted = '₦' + newBalance.toLocaleString('en-NG', {
     minimumFractionDigits: 2,
