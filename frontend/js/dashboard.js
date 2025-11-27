@@ -2195,7 +2195,7 @@ setInterval(() => pollStatus(), 30000);
 
 
 function populateProfileForm() {
-  const user = JSON.parse(localStorage.getItem('userProfile') || '{}');
+  const user = JSON.parse(localStorage.getItem('userData') || '{}');  // ← Changed from 'userProfile' to 'userData'
 
   if (fullNameInput) fullNameInput.value = user.fullName || '';
   if (usernameInput) usernameInput.value = user.username || '';
@@ -2203,17 +2203,13 @@ function populateProfileForm() {
   if (emailInput) emailInput.value = user.email || localStorage.getItem('userEmail') || '';
   if (addressInput) addressInput.value = user.address || '';
 
-  // Profile picture
-  if (profilePicturePreview && user.profilePicture) {
-    profilePicturePreview.innerHTML = `<img src="${user.profilePicture}?v=${Date.now()}" alt="Profile" class="avatar-img" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`;
-  } else if (profilePicturePreview) {
-    const name = (user.fullName || user.username || 'User').trim();
-    profilePicturePreview.textContent = name.charAt(0).toUpperCase();
+  const pic = user.profilePicture || localStorage.getItem('profilePicture') || '';
+  if (profilePicturePreview && pic) {
+    profilePicturePreview.innerHTML = `<img src="${pic}?v=${Date.now()}" alt="Profile" class="avatar-img" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`;
   }
 
-  console.log('[Profile Form] Filled with fresh data:', user);
+  console.log('[Profile Form] Populated with real data:', user);  // ← Check console for data
 }
-
 // ============================================
 // SMART DASHBOARD CARDS (Setup Pin + Update Profile)
 // ============================================
