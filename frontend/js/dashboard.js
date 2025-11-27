@@ -2210,6 +2210,8 @@ function populateProfileForm() {
 
   console.log('[Profile Form] Populated with real data:', user);  // ← Check console for data
 }
+
+window.populateProfileForm = window.populateProfileForm || populateProfileForm;
 // ============================================
 // SMART DASHBOARD CARDS (Setup Pin + Update Profile)
 // ============================================
