@@ -1088,6 +1088,73 @@ function setupBroadcastSubscription(force = false) {
   }
 }
 
+/*******************************************
+ * 🔥 BALANCE DEBUGGER – TRACK WHO CLEARS UI
+ *******************************************/
+
+(function balanceDebugger() {
+  function log(...a) { console.log("[BALANCE-DEBUG]", ...a); }
+
+  // Watch all balance elements
+  const els = () => Array.from(document.querySelectorAll('[data-balance], .balance-real'));
+
+  // 1️⃣ Log DOM mutations to the balance elements
+  const mo = new MutationObserver(muts => {
+    muts.forEach(m => {
+      if (m.type === "characterData") {
+        log("TEXT changed:", `"${m.target.data}"`, "parent:", m.target.parentElement);
+      }
+      if (m.type === "attributes") {
+        log("ATTR changed:", m.attributeName, "->", m.target.getAttribute(m.attributeName), m.target);
+      }
+    });
+  });
+
+  setInterval(() => {
+    els().forEach(el => {
+      if (!el.__balanceObserved) {
+        el.__balanceObserved = true;
+        mo.observe(el, { childList: true, characterData: true, subtree: true, attributes: true });
+      }
+      if (!el.textContent.trim()) {
+        log("⚠️ BLANK DETECTED!", el);
+      }
+      const style = window.getComputedStyle(el);
+      if (style.display === "none" || style.opacity === "0" || style.visibility === "hidden") {
+        log("⚠️ HIDDEN DETECTED!", el, {
+          display: style.display,
+          opacity: style.opacity,
+          visibility: style.visibility
+        });
+      }
+    });
+  }, 300);
+
+  // 2️⃣ Patch updateAllBalances
+  const oldUpdate = window.updateAllBalances;
+  window.updateAllBalances = function(newBal, skipAnim) {
+    log("updateAllBalances called:", { newBal, skipAnim });
+    return oldUpdate(newBal, skipAnim);
+  };
+
+  // 3️⃣ Patch applySessionToDOM
+  const oldApply = window.applySessionToDOM;
+  window.applySessionToDOM = function(user) {
+    log("applySessionToDOM – wallet:", user?.wallet_balance);
+    return oldApply(user);
+  };
+
+  // 4️⃣ Patch the WebSocket listener
+  const oldNotify = window.notify;
+  window.notify = function(msg, type) {
+    log("notify:", msg, type);
+    if (oldNotify) oldNotify(msg, type);
+  };
+
+  log("🔥 Balance debugger injected");
+})();
+
+
 
 
 
