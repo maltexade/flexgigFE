@@ -1353,186 +1353,215 @@ try {
   window.isBalanceMasked = true;
 }
 
-// PRODUCTION-LEVEL REALTIME BALANCE (WebSocket + Polling Fallback)
-(function() {
-  const uid = window.__USER_UID || localStorage.getItem('userId');
-  if (!uid) return;
+// ================================================
+//  GLOBAL REALTIME BALANCE SYSTEM (WebSocket + Poll)
+// ================================================
 
-  let ws = null;
-  let pollInterval = null;
+// Pull UID globally
+window.uid = window.__USER_UID || localStorage.getItem('userId');
+if (!window.uid) console.warn('[Balance] No UID found');
 
-  function connectWS() {
-    try {
-      ws = new WebSocket('wss://api.flexgig.com.ng/ws/wallet');
+// Global variables
+window.ws = null;
+window.pollInterval = null;
+window.balanceInitialized = false;
+window.currentDisplayedBalance = 0;
+window.isBalanceMasked = localStorage.getItem('balanceMasked') === 'true';
+window.animationFrame = null;
 
-      ws.onopen = () => {
-        console.log('[Balance] WebSocket connected');
-        ws.send(JSON.stringify({ type: 'subscribe', user_uid: uid }));
-        if (pollInterval) clearInterval(pollInterval);
-      };
 
-      ws.onmessage = (e) => {
-        const data = JSON.parse(e.data);
-        if (data.type === 'balance_update') {
-          window.updateAllBalances(data.balance);
-          if (window.notify) window.notify(`₦${data.amount.toLocaleString()} credited!`, 'success');
-        }
-      };
+// ----------------------------
+// Global WebSocket Connection
+// ----------------------------
+window.connectWS = function () {
+  try {
+    window.ws = new WebSocket('wss://api.flexgig.com.ng/ws/wallet');
 
-      ws.onclose = () => {
-        console.warn('[Balance] WebSocket closed → starting polling fallback');
-        startPolling();
-      };
-    } catch (e) {
-      console.error('[Balance] WebSocket connection failed:', e);
-      startPolling();
-    }
+    window.ws.onopen = () => {
+      console.log('[Balance] WebSocket connected');
+
+      window.ws.send(JSON.stringify({
+        type: 'subscribe',
+        user_uid: window.uid
+      }));
+
+      if (window.pollInterval) clearInterval(window.pollInterval);
+    };
+
+    window.ws.onmessage = (e) => {
+      const data = JSON.parse(e.data);
+
+      if (data.type === 'balance_update') {
+        window.updateAllBalances(data.balance);
+
+        if (window.notify)
+          window.notify(`₦${data.amount.toLocaleString()} credited!`, 'success');
+      }
+    };
+
+    window.ws.onclose = () => {
+      console.warn('[Balance] WS closed → switching to polling');
+      window.startPolling();
+    };
+  } catch (e) {
+    console.error('[Balance] WS ERROR:', e);
+    window.startPolling();
   }
+};
 
-  function startPolling() {
-    if (pollInterval) clearInterval(pollInterval);
-    pollInterval = setInterval(async () => {
-      try {
-        const res = await fetch(`${window.__SEC_API_BASE}/api/session?light=true`, {
-          credentials: 'include'
-        });
-        if (res.ok) {
-          const json = await res.json();
-          const newBal = json.user?.wallet_balance;
-          if (newBal !== undefined) {
-            const current = window.currentDisplayedBalance;
-            if (newBal > current) {
-              window.updateAllBalances(newBal);
-              if (window.notify) window.notify('Payment received!', 'success');
-            }
+
+// ----------------------------
+// Global Polling Fallback
+// ----------------------------
+window.startPolling = function () {
+  if (window.pollInterval) clearInterval(window.pollInterval);
+
+  window.pollInterval = setInterval(async () => {
+    try {
+      const res = await fetch(`${window.__SEC_API_BASE}/api/session?light=true`, {
+        credentials: 'include'
+      });
+
+      if (res.ok) {
+        const json = await res.json();
+        const newBal = json.user?.wallet_balance;
+
+        if (newBal !== undefined) {
+          const cur = window.currentDisplayedBalance;
+
+          if (newBal > cur) {
+            window.updateAllBalances(newBal);
+
+            if (window.notify)
+              window.notify('Payment received!', 'success');
           }
         }
-      } catch(e) {
-        console.warn('[Balance] Polling failed:', e);
       }
-    }, 10000);
-  }
+    } catch (e) {
+      console.warn('[Balance] Polling failed:', e);
+    }
+  }, 10000);
+};
 
-  function easeOutCubic(t) {
-    return 1 - Math.pow(1 - t, 3);
-  }
 
-  // ✅ Helper function to apply visibility state (reusable)
-  function applyBalanceVisibility() {
-    document.querySelectorAll('.balance-real, [data-balance]').forEach(el => {
-      if (window.isBalanceMasked) {
-        el.style.display = 'none';
-        el.style.opacity = '0';
-      } else {
-        el.style.display = 'inline';
-        el.style.opacity = '1';
-      }
+// ----------------------------
+// Global Easing Function
+// ----------------------------
+window.easeOutCubic = function (t) {
+  return 1 - Math.pow(1 - t, 3);
+};
+
+
+// ----------------------------
+// Global Visibility Updater
+// ----------------------------
+window.applyBalanceVisibility = function () {
+  document.querySelectorAll('.balance-real, [data-balance]').forEach(el => {
+    if (window.isBalanceMasked) {
+      el.style.display = 'none';
+      el.style.opacity = '0';
+    } else {
+      el.style.display = 'inline';
+      el.style.opacity = '1';
+    }
+  });
+
+  document.querySelectorAll('.balance-masked').forEach(el => {
+    el.style.display = window.isBalanceMasked ? 'inline' : 'none';
+  });
+};
+
+
+// ----------------------------
+// Global Balance Updater
+// ----------------------------
+window.updateAllBalances = function (newBalance, skipAnimation = false) {
+  newBalance = Number(newBalance) || 0;
+
+  // First-time load
+  if (!window.balanceInitialized || skipAnimation) {
+    window.balanceInitialized = true;
+    window.currentDisplayedBalance = newBalance;
+
+    const formatted = '₦' + newBalance.toLocaleString('en-NG', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+
+    document.querySelectorAll('[data-balance], .balance-real').forEach(el => {
+      el.textContent = formatted;
     });
 
     document.querySelectorAll('.balance-masked').forEach(el => {
-      el.style.display = window.isBalanceMasked ? 'inline' : 'none';
+      el.textContent = window.isBalanceMasked ? '••••••' : formatted;
     });
+
+    window.applyBalanceVisibility();
+    return;
   }
 
+  // Animated transition
+  if (window.animationFrame) cancelAnimationFrame(window.animationFrame);
 
-  // Expose for debugging and external callers
-  window.applyBalanceVisibility = window.applyBalanceVisibility || applyBalanceVisibility;
+  const startBalance = window.currentDisplayedBalance;
+  const endBalance = newBalance;
+  const duration = Math.abs(endBalance - startBalance) < 5000 ? 800 : 1400;
+  const startTime = performance.now();
 
+  function animate(time) {
+    const elapsed = time - startTime;
+    const progress = Math.min(elapsed / duration, 1);
+    const eased = window.easeOutCubic(progress);
 
-  window.updateAllBalances = function (newBalance, skipAnimation = false) {
-    newBalance = Number(newBalance) || 0;
+    const current = startBalance + (endBalance - startBalance) * eased;
+    window.currentDisplayedBalance = current;
 
-    // ✅ If this is the first load, show immediately without animation
-    if (!window.balanceInitialized || skipAnimation) {
-      window.balanceInitialized = true;
-      window.currentDisplayedBalance = newBalance;
+    const formatted = '₦' + current.toLocaleString('en-NG', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
 
-      const formatted = '₦' + newBalance.toLocaleString('en-NG', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
-      });
+    document.querySelectorAll('[data-balance], .balance-real').forEach(el => {
+      if (el.textContent !== formatted) el.textContent = formatted;
+    });
 
-      // Update ALL elements immediately
-      document.querySelectorAll('[data-balance], .balance-real').forEach(el => {
-        el.textContent = formatted;
-      });
+    document.querySelectorAll('.balance-masked').forEach(el => {
+      el.textContent = window.isBalanceMasked ? '••••••' : formatted;
+    });
 
-      document.querySelectorAll('.balance-masked').forEach(el => {
-        el.textContent = window.isBalanceMasked ? '••••••' : formatted;
-      });
+    window.applyBalanceVisibility();
 
-      // ✅ Apply visibility AFTER setting content
-      applyBalanceVisibility();
-
-      console.log('[Balance] Initial balance set (no animation):', formatted);
-      return;
+    if (progress < 1) {
+      window.animationFrame = requestAnimationFrame(animate);
+    } else {
+      window.animationFrame = null;
     }
+  }
 
-    // Normal animated update
-    if (window.animationFrame) cancelAnimationFrame(window.animationFrame);
+  window.animationFrame = requestAnimationFrame(animate);
+};
 
-    const startBalance = window.currentDisplayedBalance;
-    const endBalance = newBalance;
-    const duration = Math.abs(endBalance - startBalance) < 5000 ? 800 : 1400;
-    const startTime = performance.now();
 
-    function animate(time) {
-      const elapsed = time - startTime;
-      const progress = Math.min(elapsed / duration, 1);
-      const eased = easeOutCubic(progress);
-      const current = startBalance + (endBalance - startBalance) * eased;
-      window.currentDisplayedBalance = current;
+// ----------------------------
+// Global Eye Toggle
+// ----------------------------
+document.addEventListener('click', function (e) {
+  const eye = e.target.closest('.balance-eye-toggle');
+  if (!eye) return;
 
-      const formatted = '₦' + current.toLocaleString('en-NG', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
-      });
+  window.isBalanceMasked = !window.isBalanceMasked;
+  try { localStorage.setItem('balanceMasked', window.isBalanceMasked); } catch {}
 
-      document.querySelectorAll('[data-balance], .balance-real').forEach(el => {
-        if (el.textContent !== formatted) {
-          el.textContent = formatted;
-        }
-      });
+  eye.classList.toggle('open', !window.isBalanceMasked);
+  eye.classList.toggle('closed', window.isBalanceMasked);
 
-      document.querySelectorAll('.balance-masked').forEach(el => {
-        el.textContent = window.isBalanceMasked ? '••••••' : formatted;
-      });
+  window.applyBalanceVisibility();
+});
 
-      applyBalanceVisibility();
 
-      if (progress < 1) {
-        window.animationFrame = requestAnimationFrame(animate);
-      } else {
-        window.animationFrame = null;
-      }
-    }
+// Start WebSocket system
+if (window.uid) window.connectWS();
 
-    window.animationFrame = requestAnimationFrame(animate);
-  };
-
-  // Eye toggle handler
-  document.addEventListener('click', function(e) {
-    const eye = e.target.closest('.balance-eye-toggle');
-    if (!eye) return;
-
-    window.isBalanceMasked = !window.isBalanceMasked;
-
-    try {
-      localStorage.setItem('balanceMasked', window.isBalanceMasked);
-    } catch (e) {}
-
-    eye.classList.toggle('open', !window.isBalanceMasked);
-    eye.classList.toggle('closed', window.isBalanceMasked);
-
-    // ✅ Just apply visibility, don't call updateAllBalances
-    applyBalanceVisibility();
-  });
-
-  // ✅ REMOVED DOMContentLoaded event - it was causing the flash/blank issue
-  // The visibility state is now applied by updateAllBalances and the eye toggle
-
-  connectWS();
-})();
 
 
 // Run observer only on dashboard
