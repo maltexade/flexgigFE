@@ -1506,7 +1506,7 @@ try {
   function applyBalanceVisibility() {
     document.querySelectorAll('.balance-real, [data-balance]').forEach(el => {
       if (window.isBalanceMasked) {
-        el.style.display = 'inline';
+        el.style.display = 'none';
         el.style.opacity = '0';
       } else {
         el.style.display = 'inline';
@@ -16892,238 +16892,238 @@ window.addEventListener('storage', function(e) {
 });
 
 /* Balance sync V3 — pinned-position friendly (no layout moves, opacity-only, single-state) */
-(function () {
-  const STORAGE_KEY = 'fg_show_balance';
-  const TOGGLE_SELECTORS = ['#balanceSwitch', '.balance-eye-toggle', '.security-balance-toggle', '[data-balance-toggle]'];
-  const BALANCE_CARD_SELECTOR = '.balance';
-  const MASK_SEL = '.balance-masked';
-  const REAL_SEL = '.balance-real';
+// (function () {
+//   const STORAGE_KEY = 'fg_show_balance';
+//   const TOGGLE_SELECTORS = ['#balanceSwitch', '.balance-eye-toggle', '.security-balance-toggle', '[data-balance-toggle]'];
+//   const BALANCE_CARD_SELECTOR = '.balance';
+//   const MASK_SEL = '.balance-masked';
+//   const REAL_SEL = '.balance-real';
 
-  // internal state
-  let state = true;       // visible by default
-  let updating = false;   // lock while applying update
-  const ANIM_MS = 420;    // animation length (ms)
+//   // internal state
+//   let state = true;       // visible by default
+//   let updating = false;   // lock while applying update
+//   const ANIM_MS = 420;    // animation length (ms)
 
-  function readStored() {
-    try {
-      const v = localStorage.getItem(STORAGE_KEY);
-      if (v === null) return true;
-      return v === 'true';
-    } catch (e) { return true; }
-  }
-  function writeStored(v) {
-    try { localStorage.setItem(STORAGE_KEY, v ? 'true' : 'false'); } catch (e) {}
-  }
+//   function readStored() {
+//     try {
+//       const v = localStorage.getItem(STORAGE_KEY);
+//       if (v === null) return true;
+//       return v === 'true';
+//     } catch (e) { return true; }
+//   }
+//   function writeStored(v) {
+//     try { localStorage.setItem(STORAGE_KEY, v ? 'true' : 'false'); } catch (e) {}
+//   }
 
-  function allToggles() {
-    const els = [];
-    TOGGLE_SELECTORS.forEach(sel => {
-      try { document.querySelectorAll(sel).forEach(el => { if (!els.includes(el)) els.push(el); }); } catch (_) {}
-    });
-    return els;
-  }
+//   function allToggles() {
+//     const els = [];
+//     TOGGLE_SELECTORS.forEach(sel => {
+//       try { document.querySelectorAll(sel).forEach(el => { if (!els.includes(el)) els.push(el); }); } catch (_) {}
+//     });
+//     return els;
+//   }
 
-  // Reserve min-width for balance wrapper so toggling opacity doesn't change layout
-  function reserveWidths() {
-    document.querySelectorAll(BALANCE_CARD_SELECTOR).forEach(card => {
-      try {
-        const wrapper = card.querySelector('p') || card;
-        const real = card.querySelector(REAL_SEL);
-        if (!wrapper || !real) return;
-        // ensure wrapper is inline-block so minWidth applies
-        const prevDisplay = wrapper.style.display;
-        wrapper.style.display = wrapper.style.display || 'inline-block';
+//   // Reserve min-width for balance wrapper so toggling opacity doesn't change layout
+//   function reserveWidths() {
+//     document.querySelectorAll(BALANCE_CARD_SELECTOR).forEach(card => {
+//       try {
+//         const wrapper = card.querySelector('p') || card;
+//         const real = card.querySelector(REAL_SEL);
+//         if (!wrapper || !real) return;
+//         // ensure wrapper is inline-block so minWidth applies
+//         const prevDisplay = wrapper.style.display;
+//         wrapper.style.display = wrapper.style.display || 'inline-block';
 
-        // Make sure real is visible to measure accurately (temporarily)
-        const prevRealOpacity = real.style.opacity;
-        real.style.opacity = '1';
-        // measure required width
-        const needed = wrapper.offsetWidth || real.offsetWidth || 0;
-        if (needed) wrapper.style.minWidth = wrapper.style.minWidth || `${needed}px`;
-        // restore
-        real.style.opacity = prevRealOpacity || (state ? '1' : '0');
-        // Defensive: ensure mask has initial opacity (if not set)
-        const mask = card.querySelector(MASK_SEL);
-        if (mask && (mask.style.opacity === '')) mask.style.opacity = state ? '0' : '1';
-      } catch (e) { /* ignore measurement failures */ }
-    });
-  }
+//         // Make sure real is visible to measure accurately (temporarily)
+//         const prevRealOpacity = real.style.opacity;
+//         real.style.opacity = '1';
+//         // measure required width
+//         const needed = wrapper.offsetWidth || real.offsetWidth || 0;
+//         if (needed) wrapper.style.minWidth = wrapper.style.minWidth || `${needed}px`;
+//         // restore
+//         real.style.opacity = prevRealOpacity || (state ? '1' : '0');
+//         // Defensive: ensure mask has initial opacity (if not set)
+//         const mask = card.querySelector(MASK_SEL);
+//         if (mask && (mask.style.opacity === '')) mask.style.opacity = state ? '0' : '1';
+//       } catch (e) { /* ignore measurement failures */ }
+//     });
+//   }
 
-  function animateEyeBtn(btn, visible) {
-    if (!btn) return;
-    const openSvg = btn.querySelector('.eye-open-svg');
-    const closedSvg = btn.querySelector('.eye-closed-svg');
-    if (openSvg && closedSvg) {
-      openSvg.style.transition = openSvg.style.transition || 'transform 420ms cubic-bezier(.2,.9,.3,1), opacity 320ms ease';
-      closedSvg.style.transition = closedSvg.style.transition || 'transform 420ms cubic-bezier(.2,.9,.3,1), opacity 320ms ease';
-      requestAnimationFrame(() => {
-        if (visible) {
-          openSvg.style.transform = 'translate(-50%,-50%) scaleY(1)'; openSvg.style.opacity = '1';
-          closedSvg.style.transform = 'translate(-50%,-50%) scaleY(.25)'; closedSvg.style.opacity = '0';
-        } else {
-          openSvg.style.transform = 'translate(-50%,-50%) scaleY(.25)'; openSvg.style.opacity = '0';
-          closedSvg.style.transform = 'translate(-50%,-50%) scaleY(1)'; closedSvg.style.opacity = '1';
-        }
-      });
-    } else {
-      if (visible) btn.classList.remove('eye-closed'); else btn.classList.add('eye-closed');
-    }
-  }
+//   function animateEyeBtn(btn, visible) {
+//     if (!btn) return;
+//     const openSvg = btn.querySelector('.eye-open-svg');
+//     const closedSvg = btn.querySelector('.eye-closed-svg');
+//     if (openSvg && closedSvg) {
+//       openSvg.style.transition = openSvg.style.transition || 'transform 420ms cubic-bezier(.2,.9,.3,1), opacity 320ms ease';
+//       closedSvg.style.transition = closedSvg.style.transition || 'transform 420ms cubic-bezier(.2,.9,.3,1), opacity 320ms ease';
+//       requestAnimationFrame(() => {
+//         if (visible) {
+//           openSvg.style.transform = 'translate(-50%,-50%) scaleY(1)'; openSvg.style.opacity = '1';
+//           closedSvg.style.transform = 'translate(-50%,-50%) scaleY(.25)'; closedSvg.style.opacity = '0';
+//         } else {
+//           openSvg.style.transform = 'translate(-50%,-50%) scaleY(.25)'; openSvg.style.opacity = '0';
+//           closedSvg.style.transform = 'translate(-50%,-50%) scaleY(1)'; closedSvg.style.opacity = '1';
+//         }
+//       });
+//     } else {
+//       if (visible) btn.classList.remove('eye-closed'); else btn.classList.add('eye-closed');
+//     }
+//   }
 
-  function applyToAllToggles(visible) {
-    const toggles = allToggles();
-    toggles.forEach(btn => {
-      try {
-        if (btn.id === 'balanceSwitch') {
-          btn.setAttribute('aria-checked', visible ? 'true' : 'false');
-          if (visible) btn.classList.remove('off'); else btn.classList.add('off');
-        } else {
-          btn.setAttribute('aria-pressed', visible ? 'false' : 'true');
-          btn.setAttribute('data-balance-visible', visible ? 'true' : 'false');
-        }
-        animateEyeBtn(btn, visible);
-      } catch (e) {}
-    });
-  }
+//   function applyToAllToggles(visible) {
+//     const toggles = allToggles();
+//     toggles.forEach(btn => {
+//       try {
+//         if (btn.id === 'balanceSwitch') {
+//           btn.setAttribute('aria-checked', visible ? 'true' : 'false');
+//           if (visible) btn.classList.remove('off'); else btn.classList.add('off');
+//         } else {
+//           btn.setAttribute('aria-pressed', visible ? 'false' : 'true');
+//           btn.setAttribute('data-balance-visible', visible ? 'true' : 'false');
+//         }
+//         animateEyeBtn(btn, visible);
+//       } catch (e) {}
+//     });
+//   }
 
-  // Core: toggle opacity only — NO display changes, NO positioning changes
-  function applyToBalances(visible) {
-    const cards = Array.from(document.querySelectorAll(BALANCE_CARD_SELECTOR));
-    cards.forEach(card => {
-      try {
-        const mask = card.querySelector(MASK_SEL);
-        const real = card.querySelector(REAL_SEL);
+//   // Core: toggle opacity only — NO display changes, NO positioning changes
+//   function applyToBalances(visible) {
+//     const cards = Array.from(document.querySelectorAll(BALANCE_CARD_SELECTOR));
+//     cards.forEach(card => {
+//       try {
+//         const mask = card.querySelector(MASK_SEL);
+//         const real = card.querySelector(REAL_SEL);
 
-        if (real && mask) {
-          // Ensure transitions present (only opacity)
-          real.style.transition = real.style.transition || `opacity ${ANIM_MS}ms ease`;
-          mask.style.transition = mask.style.transition || `opacity ${Math.floor(ANIM_MS * 0.66)}ms ease`;
+//         if (real && mask) {
+//           // Ensure transitions present (only opacity)
+//           real.style.transition = real.style.transition || `opacity ${ANIM_MS}ms ease`;
+//           mask.style.transition = mask.style.transition || `opacity ${Math.floor(ANIM_MS * 0.66)}ms ease`;
 
-          // Do not change display/layout. Only animate opacity and pointer-events.
-          if (visible) {
-            // Make real visible (opacity), mask hidden (opacity 0)
-            real.style.opacity = '1';
-            mask.style.opacity = '0';
-            // pointer events toggled after a short delay so immediate clicks don't hit hidden element
-            setTimeout(() => { real.style.pointerEvents = ''; mask.style.pointerEvents = 'none'; }, 30);
-          } else {
-            mask.style.opacity = '1';
-            real.style.opacity = '0';
-            setTimeout(() => { mask.style.pointerEvents = ''; real.style.pointerEvents = 'none'; }, 30);
-          }
-        } else {
-          // fallback: toggle visibility property for safety (keeps layout)
-          const valueEl = card.querySelector('[data-balance]') || card.querySelector('.amount') || card.querySelector('p');
-          if (valueEl) {
-            valueEl.style.visibility = visible ? 'visible' : 'hidden';
-          }
-        }
-      } catch (e) {}
-    });
-  }
+//           // Do not change display/layout. Only animate opacity and pointer-events.
+//           if (visible) {
+//             // Make real visible (opacity), mask hidden (opacity 0)
+//             real.style.opacity = '1';
+//             mask.style.opacity = '0';
+//             // pointer events toggled after a short delay so immediate clicks don't hit hidden element
+//             setTimeout(() => { real.style.pointerEvents = ''; mask.style.pointerEvents = 'none'; }, 30);
+//           } else {
+//             mask.style.opacity = '1';
+//             real.style.opacity = '0';
+//             setTimeout(() => { mask.style.pointerEvents = ''; real.style.pointerEvents = 'none'; }, 30);
+//           }
+//         } else {
+//           // fallback: toggle visibility property for safety (keeps layout)
+//           const valueEl = card.querySelector('[data-balance]') || card.querySelector('.amount') || card.querySelector('p');
+//           if (valueEl) {
+//             valueEl.style.visibility = visible ? 'visible' : 'hidden';
+//           }
+//         }
+//       } catch (e) {}
+//     });
+//   }
 
-  // authoritative updater — idempotent
-  function updateAll(visible, source = 'program') {
-    if (state === !!visible) return;
-    state = !!visible;
-    updating = true;
+//   // authoritative updater — idempotent
+//   function updateAll(visible, source = 'program') {
+//     if (state === !!visible) return;
+//     state = !!visible;
+//     updating = true;
 
-    // Apply reserved widths only once (helps prevent jumps)
-    reserveWidths();
+//     // Apply reserved widths only once (helps prevent jumps)
+//     reserveWidths();
 
-    // optimistically apply UI
-    applyToAllToggles(state);
-    applyToBalances(state);
+//     // optimistically apply UI
+//     applyToAllToggles(state);
+//     applyToBalances(state);
 
-    // persist new state
-    writeStored(state);
+//     // persist new state
+//     writeStored(state);
 
-    // small reapply to override other handlers
-    setTimeout(() => { applyToAllToggles(state); applyToBalances(state); }, 40);
+//     // small reapply to override other handlers
+//     setTimeout(() => { applyToAllToggles(state); applyToBalances(state); }, 40);
 
-    // unlock after animations expected to complete
-    setTimeout(() => { updating = false; }, ANIM_MS + 60);
+//     // unlock after animations expected to complete
+//     setTimeout(() => { updating = false; }, ANIM_MS + 60);
 
-    // notify others
-    try { window.dispatchEvent(new CustomEvent('fg:balance-visibility-changed', { detail: { visible: state, source } })); } catch(e) {}
-  }
+//     // notify others
+//     try { window.dispatchEvent(new CustomEvent('fg:balance-visibility-changed', { detail: { visible: state, source } })); } catch(e) {}
+//   }
 
-  // capture-phase UI handler to prevent conflicting handlers
-  function uiHandler(e) {
-    if (e.button && e.button !== 0) return;
-    try { e.stopImmediatePropagation(); } catch (err) {}
-    e.preventDefault();
+//   // capture-phase UI handler to prevent conflicting handlers
+//   function uiHandler(e) {
+//     if (e.button && e.button !== 0) return;
+//     try { e.stopImmediatePropagation(); } catch (err) {}
+//     e.preventDefault();
 
-    if (updating) return;
-    const next = !state;
-    updateAll(next, 'user');
-  }
+//     if (updating) return;
+//     const next = !state;
+//     updateAll(next, 'user');
+//   }
 
-  function wire() {
-    const toggles = allToggles();
-    toggles.forEach(el => {
-      if (el.__balanceSyncBound) return;
-      el.addEventListener('click', uiHandler, { passive: false, capture: true });
-      el.addEventListener('keydown', (ev) => {
-        if (ev.key === ' ' || ev.key === 'Enter') {
-          try { ev.stopImmediatePropagation(); } catch(_) {}
-          ev.preventDefault();
-          if (!updating) updateAll(!state, 'keyboard');
-        }
-      }, { passive: false, capture: true });
-      el.__balanceSyncBound = true;
-    });
-  }
+//   function wire() {
+//     const toggles = allToggles();
+//     toggles.forEach(el => {
+//       if (el.__balanceSyncBound) return;
+//       el.addEventListener('click', uiHandler, { passive: false, capture: true });
+//       el.addEventListener('keydown', (ev) => {
+//         if (ev.key === ' ' || ev.key === 'Enter') {
+//           try { ev.stopImmediatePropagation(); } catch(_) {}
+//           ev.preventDefault();
+//           if (!updating) updateAll(!state, 'keyboard');
+//         }
+//       }, { passive: false, capture: true });
+//       el.__balanceSyncBound = true;
+//     });
+//   }
 
-  function init() {
-    // measure and reserve widths after fonts.ready if available
-    const start = () => {
-      reserveWidths();
-      state = readStored();
-      applyToAllToggles(state);
-      applyToBalances(state);
-      wire();
+//   function init() {
+//     // measure and reserve widths after fonts.ready if available
+//     const start = () => {
+//       reserveWidths();
+//       state = readStored();
+//       applyToAllToggles(state);
+//       applyToBalances(state);
+//       wire();
 
-      // observe dynamic inserts
-      const mo = new MutationObserver((mutations) => {
-        let needsReserve = false, needsWire = false;
-        for (const m of mutations) {
-          if (!m.addedNodes) continue;
-          for (const n of m.addedNodes) {
-            if (n.nodeType !== 1) continue;
-            try {
-              if (n.matches && n.matches(BALANCE_CARD_SELECTOR)) needsReserve = true;
-              if (n.querySelector && n.querySelector(BALANCE_CARD_SELECTOR)) needsReserve = true;
-              if (TOGGLE_SELECTORS.some(s => { try { return n.matches && n.matches(s); } catch(_) { return false; } })) needsWire = true;
-              if (n.querySelector && TOGGLE_SELECTORS.some(s => n.querySelector(s))) needsWire = true;
-            } catch (_) {}
-          }
-        }
-        if (needsReserve) setTimeout(reserveWidths, 30);
-        if (needsWire) setTimeout(wire, 30);
-      });
-      try { mo.observe(document.body, { subtree: true, childList: true }); } catch (e) {}
-    };
+//       // observe dynamic inserts
+//       const mo = new MutationObserver((mutations) => {
+//         let needsReserve = false, needsWire = false;
+//         for (const m of mutations) {
+//           if (!m.addedNodes) continue;
+//           for (const n of m.addedNodes) {
+//             if (n.nodeType !== 1) continue;
+//             try {
+//               if (n.matches && n.matches(BALANCE_CARD_SELECTOR)) needsReserve = true;
+//               if (n.querySelector && n.querySelector(BALANCE_CARD_SELECTOR)) needsReserve = true;
+//               if (TOGGLE_SELECTORS.some(s => { try { return n.matches && n.matches(s); } catch(_) { return false; } })) needsWire = true;
+//               if (n.querySelector && TOGGLE_SELECTORS.some(s => n.querySelector(s))) needsWire = true;
+//             } catch (_) {}
+//           }
+//         }
+//         if (needsReserve) setTimeout(reserveWidths, 30);
+//         if (needsWire) setTimeout(wire, 30);
+//       });
+//       try { mo.observe(document.body, { subtree: true, childList: true }); } catch (e) {}
+//     };
 
-    if (document.fonts && document.fonts.ready) {
-      document.fonts.ready.then(start).catch(start);
-    } else {
-      setTimeout(start, 20);
-    }
-  }
+//     if (document.fonts && document.fonts.ready) {
+//       document.fonts.ready.then(start).catch(start);
+//     } else {
+//       setTimeout(start, 20);
+//     }
+//   }
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
-  else setTimeout(init, 10);
+//   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+//   else setTimeout(init, 10);
 
-  // public API
-  window.__fg_balance_visibility = {
-    isVisible: () => state,
-    set: (v) => updateAll(!!v, 'api'),
-    toggle: () => { if (!updating) updateAll(!state, 'api-toggle'); }
-  };
-})();
+//   // public API
+//   window.__fg_balance_visibility = {
+//     isVisible: () => state,
+//     set: (v) => updateAll(!!v, 'api'),
+//     toggle: () => { if (!updating) updateAll(!state, 'api-toggle'); }
+//   };
+// })();
 
-updateContinueState();
+// updateContinueState();
 
 
 
