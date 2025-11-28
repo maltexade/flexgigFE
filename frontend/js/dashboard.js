@@ -17161,7 +17161,30 @@ function applyBalanceVisibility(masked) {
 // Expose globally (so console and other modules can call it)
 window.applyBalanceVisibility = applyBalanceVisibility;
 
-
+// ✅ Initialize balance visibility on page load (unmasked by default, adjust if needed)
+document.addEventListener('DOMContentLoaded', function() {
+  // Set initial state (false = unmasked, eye open)
+  window.isBalanceMasked = false; // Or pull from localStorage/user prefs if available
+  applyBalanceVisibility(false);
+  
+  // Add toggle event listeners to eye elements
+  document.addEventListener('click', function(e) {
+    if (e.target.matches('.balance-eye-toggle, .balance-eye-toggle *')) { // Handles clicks on icon or container
+      e.preventDefault(); // Prevent any default link behavior if present
+      const isCurrentlyMasked = !!window.isBalanceMasked;
+      applyBalanceVisibility(!isCurrentlyMasked);
+      
+      // Optional: Persist state (e.g., to localStorage for next visit)
+      localStorage.setItem('balanceMasked', String(!isCurrentlyMasked));
+    }
+  });
+  
+  // Optional: Restore state from storage on load
+  const savedState = localStorage.getItem('balanceMasked');
+  if (savedState !== null) {
+    applyBalanceVisibility(savedState === 'true');
+  }
+});
 
 
 })();
