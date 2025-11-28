@@ -1449,13 +1449,71 @@ function applyBalanceVisibility() {
   });
 }
 
-// ✅ Enhanced eye toggle (with SVG animations; replace your click handler)
+// ✅ Enhanced applyBalanceVisibility (opacity-only, no jumps; add after your existing one)
+function applyBalanceVisibility() {
+  const cards = document.querySelectorAll('.balance'); // Your HTML wrapper
+  cards.forEach(card => {
+    const real = card.querySelector('.balance-real, [data-balance]');
+    const masked = card.querySelector('.balance-masked');
+    if (!real || !masked) return;
+
+    // Reserve space: Set min-width on parent <p> to match real's width (run once per card)
+    const parentP = real.parentElement;
+    if (parentP && !parentP.hasAttribute('data-balance-width-reserved')) {
+      real.style.opacity = '1'; // Temp visible for measure
+      const measuredWidth = parentP.offsetWidth;
+      parentP.style.minWidth = `${measuredWidth}px`;
+      parentP.setAttribute('data-balance-width-reserved', 'true'); // Mark as done
+      real.style.opacity = ''; // Reset
+      console.debug('[Balance] Reserved width for card:', measuredWidth);
+    }
+
+    // Opacity transitions (no display changes = no reflow)
+    real.style.transition = real.style.transition || 'opacity 320ms ease';
+    masked.style.transition = masked.style.transition || 'opacity 420ms ease';
+
+    if (window.isBalanceMasked) {
+      // Masked: hide real, show masked
+      real.style.opacity = '0';
+      masked.style.opacity = '1';
+      // Pointer events after short delay (prevents click-through during fade)
+      setTimeout(() => { 
+        real.style.pointerEvents = 'none'; 
+        masked.style.pointerEvents = ''; 
+      }, 30);
+    } else {
+      // Unmasked: show real, hide masked
+      real.style.opacity = '1';
+      masked.style.opacity = '0';
+      setTimeout(() => { 
+        masked.style.pointerEvents = 'none'; 
+        real.style.pointerEvents = ''; 
+      }, 30);
+    }
+  });
+
+  // Force reflow if no cards (edge case)
+  if (!document.querySelector('.balance')) {
+    console.warn('[Balance] No .balance cards found—skipping apply');
+  }
+}
+
+// ✅ SINGLE enhanced eye toggle (SVG animations; REPLACE the entire old click block with this)
 document.addEventListener('click', function(e) {
   const eye = e.target.closest('.balance-eye-toggle');
   if (!eye) return;
 
+  e.preventDefault(); // Block any default/button behavior
+  e.stopPropagation(); // Stop bubbling to other handlers
+
   window.isBalanceMasked = !window.isBalanceMasked;
-  localStorage.setItem('balanceMasked', window.isBalanceMasked);
+  try {
+    localStorage.setItem('balanceMasked', window.isBalanceMasked);
+  } catch (err) {
+    console.warn('[Balance] localStorage set failed:', err);
+  }
+
+  console.debug('[Balance] Toggle clicked → new masked state:', window.isBalanceMasked);
 
   // Toggle button classes
   eye.classList.toggle('open', !window.isBalanceMasked);
@@ -1467,21 +1525,36 @@ document.addEventListener('click', function(e) {
   const openSvg = eye.querySelector('.eye-open-svg');
   const closedSvg = eye.querySelector('.eye-closed-svg');
   if (openSvg && closedSvg) {
-    if (!window.isBalanceMasked) { // Unmasked: show open, hide closed
+    // Ensure transitions are set (fallback if missing)
+    ['.eye-open-svg', '.eye-closed-svg'].forEach(cls => {
+      const svg = eye.querySelector(cls);
+      if (svg && !svg.style.transition) {
+        svg.style.transition = 'transform 420ms cubic-bezier(.2,.9,.3,1), opacity 320ms ease';
+      }
+    });
+
+    if (!window.isBalanceMasked) { // Unmasked: expand open, squash closed
       openSvg.style.opacity = '1';
       openSvg.style.transform = 'translate(-50%, -50%) scaleY(1)';
       closedSvg.style.opacity = '0';
       closedSvg.style.transform = 'translate(-50%, -50%) scaleY(0.25)';
-    } else { // Masked: show closed, hide open
+    } else { // Masked: squash open, expand closed
       openSvg.style.opacity = '0';
       openSvg.style.transform = 'translate(-50%, -50%) scaleY(0.25)';
       closedSvg.style.opacity = '1';
       closedSvg.style.transform = 'translate(-50%, -50%) scaleY(1)';
     }
+    console.debug('[Balance] SVG animation triggered');
+  } else {
+    console.warn('[Balance] SVGs not found in eye toggle');
   }
 
   applyBalanceVisibility();
-}, { passive: false }); // Non-passive to preventDefault if needed
+}, { passive: false }); // Non-passive: allows preventDefault/stopPropagation
+
+// ✅ Initial apply after restore (add this right after the localStorage restore line)
+applyBalanceVisibility();
+console.debug('[Balance] Initial visibility applied after restore, masked:', window.isBalanceMasked);
 
 
   // Expose for debugging and external callers
@@ -1559,26 +1632,26 @@ document.addEventListener('click', function(e) {
     window.animationFrame = requestAnimationFrame(animate);
   };
 
-  // Eye toggle handler
-  document.addEventListener('click', function(e) {
-    const eye = e.target.closest('.balance-eye-toggle');
-    if (!eye) return;
+  // // Eye toggle handler
+  // document.addEventListener('click', function(e) {
+  //   const eye = e.target.closest('.balance-eye-toggle');
+  //   if (!eye) return;
 
-    window.isBalanceMasked = !window.isBalanceMasked;
+  //   window.isBalanceMasked = !window.isBalanceMasked;
 
-    try {
-      localStorage.setItem('balanceMasked', window.isBalanceMasked);
-    } catch (e) {}
+  //   try {
+  //     localStorage.setItem('balanceMasked', window.isBalanceMasked);
+  //   } catch (e) {}
 
-    eye.classList.toggle('open', !window.isBalanceMasked);
-    eye.classList.toggle('closed', window.isBalanceMasked);
+  //   eye.classList.toggle('open', !window.isBalanceMasked);
+  //   eye.classList.toggle('closed', window.isBalanceMasked);
 
-    // ✅ Just apply visibility, don't call updateAllBalances
-    applyBalanceVisibility();
-  });
+  //   // ✅ Just apply visibility, don't call updateAllBalances
+  //   applyBalanceVisibility();
+  // });
 
-  // ✅ REMOVED DOMContentLoaded event - it was causing the flash/blank issue
-  // The visibility state is now applied by updateAllBalances and the eye toggle
+  // // ✅ REMOVED DOMContentLoaded event - it was causing the flash/blank issue
+  // // The visibility state is now applied by updateAllBalances and the eye toggle
 
   connectWS();
 })();
