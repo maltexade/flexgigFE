@@ -29,8 +29,6 @@ openModal: (() => {
 
 
 
-
-
     // Form inputs
     phoneNumber: document.getElementById('phone-input')?.value || '',
     pinInputs: {
@@ -61,24 +59,6 @@ openModal: (() => {
 
   console.log('[StateSaver] UI state saved → openModal:', state.openModal, state);
 }
-
-// ---- Balance Style Mutation Debugger (SAFE VERSION) ----
-(function() {
-  const el = document.querySelector('.balance-real');
-  if (!el) return;
-
-  const obs = new MutationObserver(function(muts) {
-    muts.forEach(function(m) {
-      if (m.attributeName === 'style') {
-        console.warn("🔥 BALANCE STYLE OVERRIDDEN →", el.getAttribute("style"));
-        console.warn("🔥 STACK TRACE →", new Error().stack);
-      }
-    });
-  });
-
-  obs.observe(el, { attributes: true });
-})();
-
 
 
 
@@ -112,220 +92,6 @@ function inGraceWindow() {
   const ts = getLastPinReauthTs();
   return ts && (Date.now() - ts) < REAUTH_GRACE_SECONDS * 1000;
 }
-
-
-/* =======================================================================
-   FLEXGIG BALANCE HELPER – Unified, race-condition-proof
-   Paste at TOP of dashboard.js BEFORE any other balance-related code.
-   ======================================================================= */
-
-(function() {
-
-  // HTML selectors
-  const REAL = ".balance-real";
-  const MASK = ".balance-masked";
-  const CARD = ".balance";
-  const TOGGLES = [
-    ".balance-eye-toggle",
-    "[data-balance-toggle]",
-    "#balanceSwitch",
-    ".security-balance-toggle"
-  ];
-
-  // LocalStorage key for visibility
-  const KEY = "fg_balance_visible";
-
-  // Internal state
-  let visible = true;
-  let locking = false;
-
-  // --- storage helpers ---
-  function loadState() {
-    try {
-      const v = localStorage.getItem(KEY);
-      return v === null ? true : v === "true";
-    } catch(e) { return true; }
-  }
-
-  function saveState(v) {
-    try { localStorage.setItem(KEY, v ? "true" : "false"); } catch(e) {}
-  }
-
-  // --- APPLY VISIBILITY (no layout changes) ---
-  function applyVisibility(v) {
-    visible = !!v;
-
-    document.querySelectorAll(CARD).forEach(card => {
-      const real = card.querySelector(REAL);
-      const mask = card.querySelector(MASK);
-
-      if (!real || !mask) return;
-
-      real.style.opacity = visible ? "1" : "0";
-      mask.style.opacity = visible ? "0" : "1";
-
-      // remove any display:none that old code tries to force
-      real.style.display = "";
-      mask.style.display = "";
-
-      // optional: pointer clean
-      real.style.pointerEvents = visible ? "auto" : "none";
-      mask.style.pointerEvents = visible ? "none" : "auto";
-    });
-
-    updateToggleUI(v);
-    saveState(v);
-  }
-
-  // --- UPDATE TOGGLE UI ---
-  function updateToggleUI(v) {
-    document.querySelectorAll(TOGGLES.join(",")).forEach(btn => {
-      try {
-        btn.setAttribute("data-balance-visible", v ? "true" : "false");
-        btn.setAttribute("aria-pressed", (!v).toString());
-      } catch(e){}
-    });
-  }
-
-  // --- SET RAW BALANCE (NO VISIBILITY CHANGE) ---
-  function setRawBalance(amount) {
-    const formatted = "₦" + Number(amount).toLocaleString("en-NG", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    });
-
-    // real text
-    document.querySelectorAll(REAL).forEach(el => {
-      el.textContent = formatted;
-    });
-
-    // masked (unchanged)
-    document.querySelectorAll(MASK).forEach(el => {
-      if (el.textContent.trim().length === 0) {
-        el.textContent = "•••••";
-      }
-    });
-  }
-
-  // --- PUBLIC API ---
-window.BalanceHelper = {
-    show() { applyVisibility(true); },
-    hide() { applyVisibility(false); },
-    toggle() { if (!locking) applyVisibility(!visible); },
-    setValue(v) { setRawBalance(v); },
-    isVisible() { return visible; },
-
-    // ★ ADD THIS
-    applyVisibility(v = visible) { applyVisibility(v); }
-};
-
-
-  // --- TOGGLE WIRING ---
-  function wireToggles() {
-    document.querySelectorAll(TOGGLES.join(",")).forEach(el => {
-      if (el.__balBound) return;
-
-      el.addEventListener("click", e => {
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        BalanceHelper.toggle();
-      }, {capture: true});
-
-      el.__balBound = true;
-    });
-  }
-
-  // INIT
-  function init() {
-    visible = loadState();
-    applyVisibility(visible);
-    wireToggles();
-
-    console.log("%c[FLEXGIG BALANCE HELPER] Ready", "color:#27c179;font-weight:bold");
-  }
-
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init);
-  } else {
-    init();
-  }
-
-})();
-
-/* =======================================================================
-   UNIVERSAL BALANCE INTERCEPTOR
-   Routes ALL balance changes to BalanceHelper
-   ======================================================================= */
-(function() {
-
-  const REAL_SEL = ".balance-real";
-  const MASK_SEL = ".balance-masked";
-
-  // --- INTERCEPT DOM CHANGES (MutationObserver) ---
-  const mo = new MutationObserver(mutations => {
-    for (const m of mutations) {
-
-      // catch opacity/display changes attempts
-      if (m.target.matches?.(REAL_SEL) || m.target.matches?.(MASK_SEL)) {
-        const el = m.target;
-
-        // FORCE our visibility back
-        BalanceHelper.applyVisibility();
-
-        // prevent external "display:none"
-        el.style.display = "inline";
-      }
-
-      // If someone replaced balance text manually → override with our formatted version
-      if (m.type === "childList" && m.target.matches?.(REAL_SEL)) {
-        const current = window.currentDisplayedBalance;
-        BalanceHelper.setValue(current);
-      }
-    }
-  });
-
-  try {
-    mo.observe(document.body, {
-      attributes: true,
-      attributeFilter: ["style", "class"],
-      childList: true,
-      subtree: true,
-    });
-  } catch (e) {
-    console.warn("[BALANCE-INTERCEPTOR] Observer failed:", e);
-  }
-
-  // --- INTERCEPT LEGACY VISIBILITY FUNCTIONS IF THEY EXIST ---
-  const legacyNames = [
-    "applyBalanceVisibility",
-    "toggleBalanceVisibility",
-    "setBalanceVisibility",
-  ];
-
-  legacyNames.forEach(name => {
-    if (window[name]) {
-      console.warn(`[BALANCE-INTERCEPTOR] Neutralizing ${name}`);
-
-      window[name] = function() {
-        BalanceHelper.applyVisibility();
-      };
-    }
-  });
-
-  // --- INTERCEPT LEGACY updateAllBalances ---
-  if (window.updateAllBalances) {
-    const old = window.updateAllBalances;
-
-    window.updateAllBalances = function(amount, skipAnimation) {
-      const result = old(amount, skipAnimation);
-      BalanceHelper.applyVisibility();
-      return result;
-    };
-  }
-
-  console.log("%c[BALANCE INTERCEPTOR] Ready", "color:#e1a500;font-weight:bold");
-
-})(); // END INTERCEPTOR
 
 
 // Call this as early as practical (before container paints) - e.g., in onDashboardLoad() before manageDashboardCards() if possible.
@@ -1329,67 +1095,67 @@ function setupBroadcastSubscription(force = false) {
  * 🔥 BALANCE DEBUGGER – TRACK WHO CLEARS UI
  *******************************************/
 
-// (function balanceDebugger() {
-//   function log(...a) { console.log("[BALANCE-DEBUG]", ...a); }
+(function balanceDebugger() {
+  function log(...a) { console.log("[BALANCE-DEBUG]", ...a); }
 
-//   // Watch all balance elements
-//   const els = () => Array.from(document.querySelectorAll('[data-balance], .balance-real'));
+  // Watch all balance elements
+  const els = () => Array.from(document.querySelectorAll('[data-balance], .balance-real'));
 
-//   // 1️⃣ Log DOM mutations to the balance elements
-//   const mo = new MutationObserver(muts => {
-//     muts.forEach(m => {
-//       if (m.type === "characterData") {
-//         log("TEXT changed:", `"${m.target.data}"`, "parent:", m.target.parentElement);
-//       }
-//       if (m.type === "attributes") {
-//         log("ATTR changed:", m.attributeName, "->", m.target.getAttribute(m.attributeName), m.target);
-//       }
-//     });
-//   });
+  // 1️⃣ Log DOM mutations to the balance elements
+  const mo = new MutationObserver(muts => {
+    muts.forEach(m => {
+      if (m.type === "characterData") {
+        log("TEXT changed:", `"${m.target.data}"`, "parent:", m.target.parentElement);
+      }
+      if (m.type === "attributes") {
+        log("ATTR changed:", m.attributeName, "->", m.target.getAttribute(m.attributeName), m.target);
+      }
+    });
+  });
 
-//   setInterval(() => {
-//     els().forEach(el => {
-//       if (!el.__balanceObserved) {
-//         el.__balanceObserved = true;
-//         mo.observe(el, { childList: true, characterData: true, subtree: true, attributes: true });
-//       }
-//       if (!el.textContent.trim()) {
-//         log("⚠️ BLANK DETECTED!", el);
-//       }
-//       const style = window.getComputedStyle(el);
-//       if (style.display === "none" || style.opacity === "0" || style.visibility === "hidden") {
-//         log("⚠️ HIDDEN DETECTED!", el, {
-//           display: style.display,
-//           opacity: style.opacity,
-//           visibility: style.visibility
-//         });
-//       }
-//     });
-//   }, 300);
+  setInterval(() => {
+    els().forEach(el => {
+      if (!el.__balanceObserved) {
+        el.__balanceObserved = true;
+        mo.observe(el, { childList: true, characterData: true, subtree: true, attributes: true });
+      }
+      if (!el.textContent.trim()) {
+        log("⚠️ BLANK DETECTED!", el);
+      }
+      const style = window.getComputedStyle(el);
+      if (style.display === "none" || style.opacity === "0" || style.visibility === "hidden") {
+        log("⚠️ HIDDEN DETECTED!", el, {
+          display: style.display,
+          opacity: style.opacity,
+          visibility: style.visibility
+        });
+      }
+    });
+  }, 300);
 
-//   // 2️⃣ Patch updateAllBalances
-//   const oldUpdate = window.updateAllBalances;
-//   window.updateAllBalances = function(newBal, skipAnim) {
-//     log("updateAllBalances called:", { newBal, skipAnim });
-//     return oldUpdate(newBal, skipAnim);
-//   };
+  // 2️⃣ Patch updateAllBalances
+  const oldUpdate = window.updateAllBalances;
+  window.updateAllBalances = function(newBal, skipAnim) {
+    log("updateAllBalances called:", { newBal, skipAnim });
+    return oldUpdate(newBal, skipAnim);
+  };
 
-//   // 3️⃣ Patch applySessionToDOM
-//   const oldApply = window.applySessionToDOM;
-//   window.applySessionToDOM = function(user) {
-//     log("applySessionToDOM – wallet:", user?.wallet_balance);
-//     return oldApply(user);
-//   };
+  // 3️⃣ Patch applySessionToDOM
+  const oldApply = window.applySessionToDOM;
+  window.applySessionToDOM = function(user) {
+    log("applySessionToDOM – wallet:", user?.wallet_balance);
+    return oldApply(user);
+  };
 
-//   // 4️⃣ Patch the WebSocket listener
-//   const oldNotify = window.notify;
-//   window.notify = function(msg, type) {
-//     log("notify:", msg, type);
-//     if (oldNotify) oldNotify(msg, type);
-//   };
+  // 4️⃣ Patch the WebSocket listener
+  const oldNotify = window.notify;
+  window.notify = function(msg, type) {
+    log("notify:", msg, type);
+    if (oldNotify) oldNotify(msg, type);
+  };
 
-//   log("🔥 Balance debugger injected");
-// })();
+  log("🔥 Balance debugger injected");
+})();
 
 
 
