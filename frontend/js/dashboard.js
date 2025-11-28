@@ -1434,6 +1434,11 @@ try {
     });
   }
 
+
+  // Expose for debugging and external callers
+  window.applyBalanceVisibility = window.applyBalanceVisibility || applyBalanceVisibility;
+
+
   window.updateAllBalances = function (newBalance, skipAnimation = false) {
     newBalance = Number(newBalance) || 0;
 
@@ -17039,6 +17044,177 @@ window.addEventListener('storage', function(e) {
 })();
 
 updateContinueState();
+
+
+// --- debug helper: debugAndForceBalance ---
+// Paste this into dashboard.js (after your balance code IIFE)
+(function installDebugAndForceBalance() {
+  if (window.debugAndForceBalance) return; // don't overwrite if already present
+
+  function formatCurrency(n) {
+    try {
+      const num = Number(n) || 0;
+      return '₦' + num.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    } catch (e) {
+      return '₦' + String(n);
+    }
+  }
+
+  function shortHTML(el) {
+    if (!el) return null;
+    try { return (el.outerHTML || el.tagName).slice(0, 500); } catch (e) { return el.tagName; }
+  }
+
+  function parentChainHidden(el) {
+    const chain = [];
+    let cur = el;
+    while (cur && cur !== document.documentElement) {
+      try {
+        const cs = getComputedStyle(cur);
+        chain.push({
+          tag: cur.tagName,
+          id: cur.id || null,
+          classes: cur.className || null,
+          display: cs.display,
+          visibility: cs.visibility,
+          opacity: cs.opacity,
+          height: cs.height
+        });
+      } catch (e) {
+        chain.push({ tag: cur.tagName, err: String(e) });
+      }
+      cur = cur.parentElement;
+    }
+    return chain;
+  }
+
+  // The actual exported function
+  async function debugAndForceBalance() {
+    console.log('--- debugAndForceBalance START ---');
+
+    const formattedTest = (function () {
+      const n = window.currentDisplayedBalance || 9_783_000;
+      return formatCurrency(n);
+    })();
+
+    const reals = Array.from(document.querySelectorAll('.balance-real, [data-balance]'));
+    const masks = Array.from(document.querySelectorAll('.balance-masked'));
+    const eye = document.querySelector('.balance-eye-toggle');
+
+    console.log('Counts:', { reals: reals.length, masks: masks.length, eye: !!eye });
+
+    reals.forEach((el, i) => {
+      console.log(`[REAL ${i}] tag=${el.tagName} id=${el.id || ''} classes=${el.className || ''}`);
+      console.log('  textContent:', JSON.stringify(el.textContent));
+      console.log('  innerHTML snippet:', shortHTML(el));
+      console.log('  inline-style:', el.getAttribute('style'));
+      try { console.log('  computed:', getComputedStyle(el)); } catch (e) { console.warn('  computed style failed', e); }
+      console.log('  parent chain:', parentChainHidden(el));
+    });
+
+    masks.forEach((el, i) => {
+      console.log(`[MASK ${i}] tag=${el.tagName} id=${el.id || ''} classes=${el.className || ''}`);
+      console.log('  textContent:', JSON.stringify(el.textContent));
+      console.log('  innerHTML snippet:', shortHTML(el));
+      console.log('  inline-style:', el.getAttribute('style'));
+      try { console.log('  computed:', getComputedStyle(el)); } catch (e) { console.warn('  computed style failed', e); }
+      console.log('  parent chain:', parentChainHidden(el));
+    });
+
+    if (eye) {
+      console.log('[EYE] class:', eye.className, 'outerHTML:', shortHTML(eye));
+      try {
+        console.log(' getEventListeners(eye):', typeof getEventListeners === 'function' ? getEventListeners(eye) : 'getEventListeners not available');
+      } catch (e) { console.warn('getEventListeners failed', e); }
+    } else {
+      console.warn('No .balance-eye-toggle element found');
+    }
+
+    // Color / visibility quick check
+    try {
+      const sample = reals[0] || masks[0] || document.body;
+      console.log('Color/visibility check on sample element:', {
+        color: getComputedStyle(sample).color,
+        background: getComputedStyle(sample).backgroundColor
+      });
+    } catch (e) { /* ignore */ }
+
+    // Try the official updater first (skip animation)
+    if (typeof window.updateAllBalances === 'function') {
+      try {
+        console.log('Calling window.updateAllBalances(1234567, true) to force-set balance via official function');
+        window.updateAllBalances(1234567, true);
+        console.log('updateAllBalances called OK');
+      } catch (e) {
+        console.error('updateAllBalances threw:', e);
+      }
+    } else {
+      console.warn('window.updateAllBalances not found — will apply manual DOM write.');
+    }
+
+    // Try to call official applyBalanceVisibility if exists to ensure proper show/hide
+    if (typeof window.applyBalanceVisibility === 'function') {
+      try {
+        // ensure it uses current window.isBalanceMasked (do not change it)
+        window.applyBalanceVisibility();
+        console.log('Called window.applyBalanceVisibility() (if present).');
+      } catch (e) {
+        console.warn('window.applyBalanceVisibility threw:', e);
+      }
+    }
+
+    // Manual DOM write fallback (force-visible)
+    try {
+      reals.forEach(el => {
+        el.textContent = formattedTest;
+        el.style.setProperty('display', el.tagName === 'DIV' ? 'block' : 'inline', 'important');
+        el.style.setProperty('opacity', '1', 'important');
+        el.style.setProperty('visibility', 'visible', 'important');
+      });
+
+      masks.forEach(el => {
+        if (window.isBalanceMasked) el.textContent = '••••••';
+        else el.textContent = formattedTest;
+        el.style.setProperty('display', window.isBalanceMasked ? (el.tagName === 'DIV' ? 'block' : 'inline') : 'none', 'important');
+        el.style.setProperty('opacity', window.isBalanceMasked ? '1' : '0', 'important');
+        el.style.setProperty('visibility', 'visible', 'important');
+      });
+
+      console.log('Manual DOM write applied: wrote', formattedTest, 'to real elements and updated masked elements per window.isBalanceMasked=', window.isBalanceMasked);
+    } catch (e) {
+      console.error('Manual DOM write failed', e);
+    }
+
+    // Small delay to allow transitions to settle then snapshot
+    await new Promise(r => setTimeout(r, 160));
+
+    try {
+      console.log('--- POST-FORCE SNAPSHOT ---');
+      console.log('Reals now:', Array.from(document.querySelectorAll('.balance-real, [data-balance]')).map(el => ({
+        text: el.textContent,
+        display: getComputedStyle(el).display,
+        opacity: getComputedStyle(el).opacity,
+        inline: el.getAttribute('style')
+      })));
+      console.log('Masks now:', Array.from(document.querySelectorAll('.balance-masked')).map(el => ({
+        text: el.textContent,
+        display: getComputedStyle(el).display,
+        opacity: getComputedStyle(el).opacity,
+        inline: el.getAttribute('style')
+      })));
+    } catch (e) {
+      console.warn('Post-snapshot read failed', e);
+    }
+
+    console.log('--- debugAndForceBalance END ---');
+    return true;
+  }
+
+  // Expose on window for console usage
+  window.debugAndForceBalance = debugAndForceBalance;
+  console.log('debugAndForceBalance installed: call window.debugAndForceBalance() from console to run the helper.');
+})();
+
 
 
 
