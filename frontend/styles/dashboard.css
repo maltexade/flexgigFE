@@ -3906,7 +3906,7 @@ a[style*="color: #f00"] { color: var(--danger); }
   top: 0;
   pointer-events: none;
   /* Both always display:inline, positioned in same flow */
-  display: inline;
+  display: inline !important;
   
   /* Prevent any layout shifts */
   font-variant-numeric: tabular-nums;
@@ -3925,7 +3925,7 @@ a[style*="color: #f00"] { color: var(--danger); }
   position: absolute;
   left: 0;
   top: 0;
-  display: inline-block;
+  display: inline-block !important;
   white-space: nowrap;
 }
 
