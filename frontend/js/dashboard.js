@@ -1353,215 +1353,235 @@ try {
   window.isBalanceMasked = true;
 }
 
-// ================================================
-//  GLOBAL REALTIME BALANCE SYSTEM (WebSocket + Poll)
-// ================================================
+// PRODUCTION-LEVEL REALTIME BALANCE (WebSocket + Polling Fallback)
+(function() {
+  const uid = window.__USER_UID || localStorage.getItem('userId');
+  if (!uid) return;
 
-// Pull UID globally
-window.uid = window.__USER_UID || localStorage.getItem('userId');
-if (!window.uid) console.warn('[Balance] No UID found');
+  let ws = null;
+  let pollInterval = null;
 
-// Global variables
-window.ws = null;
-window.pollInterval = null;
-window.balanceInitialized = false;
-window.currentDisplayedBalance = 0;
-window.isBalanceMasked = localStorage.getItem('balanceMasked') === 'true';
-window.animationFrame = null;
-
-
-// ----------------------------
-// Global WebSocket Connection
-// ----------------------------
-window.connectWS = function () {
-  try {
-    window.ws = new WebSocket('wss://api.flexgig.com.ng/ws/wallet');
-
-    window.ws.onopen = () => {
-      console.log('[Balance] WebSocket connected');
-
-      window.ws.send(JSON.stringify({
-        type: 'subscribe',
-        user_uid: window.uid
-      }));
-
-      if (window.pollInterval) clearInterval(window.pollInterval);
-    };
-
-    window.ws.onmessage = (e) => {
-      const data = JSON.parse(e.data);
-
-      if (data.type === 'balance_update') {
-        window.updateAllBalances(data.balance);
-
-        if (window.notify)
-          window.notify(`₦${data.amount.toLocaleString()} credited!`, 'success');
-      }
-    };
-
-    window.ws.onclose = () => {
-      console.warn('[Balance] WS closed → switching to polling');
-      window.startPolling();
-    };
-  } catch (e) {
-    console.error('[Balance] WS ERROR:', e);
-    window.startPolling();
-  }
-};
-
-
-// ----------------------------
-// Global Polling Fallback
-// ----------------------------
-window.startPolling = function () {
-  if (window.pollInterval) clearInterval(window.pollInterval);
-
-  window.pollInterval = setInterval(async () => {
+  function connectWS() {
     try {
-      const res = await fetch(`${window.__SEC_API_BASE}/api/session?light=true`, {
-        credentials: 'include'
-      });
+      ws = new WebSocket('wss://api.flexgig.com.ng/ws/wallet');
 
-      if (res.ok) {
-        const json = await res.json();
-        const newBal = json.user?.wallet_balance;
+      ws.onopen = () => {
+        console.log('[Balance] WebSocket connected');
+        ws.send(JSON.stringify({ type: 'subscribe', user_uid: uid }));
+        if (pollInterval) clearInterval(pollInterval);
+      };
 
-        if (newBal !== undefined) {
-          const cur = window.currentDisplayedBalance;
+      ws.onmessage = (e) => {
+        const data = JSON.parse(e.data);
+        if (data.type === 'balance_update') {
+          window.updateAllBalances(data.balance);
+          if (window.notify) window.notify(`₦${data.amount.toLocaleString()} credited!`, 'success');
+        }
+      };
 
-          if (newBal > cur) {
-            window.updateAllBalances(newBal);
+      ws.onclose = () => {
+        console.warn('[Balance] WebSocket closed → starting polling fallback');
+        startPolling();
+      };
+    } catch (e) {
+      console.error('[Balance] WebSocket connection failed:', e);
+      startPolling();
+    }
+  }
 
-            if (window.notify)
-              window.notify('Payment received!', 'success');
+  function startPolling() {
+    if (pollInterval) clearInterval(pollInterval);
+    pollInterval = setInterval(async () => {
+      try {
+        const res = await fetch(`${window.__SEC_API_BASE}/api/session?light=true`, {
+          credentials: 'include'
+        });
+        if (res.ok) {
+          const json = await res.json();
+          const newBal = json.user?.wallet_balance;
+          if (newBal !== undefined) {
+            const current = window.currentDisplayedBalance;
+            if (newBal > current) {
+              window.updateAllBalances(newBal);
+              if (window.notify) window.notify('Payment received!', 'success');
+            }
           }
         }
+      } catch(e) {
+        console.warn('[Balance] Polling failed:', e);
       }
-    } catch (e) {
-      console.warn('[Balance] Polling failed:', e);
+    }, 10000);
+  }
+
+  function easeOutCubic(t) {
+    return 1 - Math.pow(1 - t, 3);
+  }
+
+// ✅ Enhanced applyBalanceVisibility (opacity-only, no jumps; add after your existing one)
+function applyBalanceVisibility() {
+  const cards = document.querySelectorAll('.balance'); // Your HTML wrapper
+  cards.forEach(card => {
+    const real = card.querySelector('.balance-real, [data-balance]');
+    const masked = card.querySelector('.balance-masked');
+    if (!real || !masked) return;
+
+    // Reserve space: Set min-width on parent <p> to match real's width
+    const parentP = real.parentElement;
+    if (parentP && !parentP.style.minWidth) {
+      real.style.opacity = '1'; // Temp visible for measure
+      parentP.style.minWidth = `${parentP.offsetWidth}px`;
+      real.style.opacity = ''; // Reset
     }
-  }, 10000);
-};
 
+    // Opacity transitions (no display changes = no reflow)
+    real.style.transition = real.style.transition || 'opacity 320ms ease';
+    masked.style.transition = masked.style.transition || 'opacity 420ms ease';
 
-// ----------------------------
-// Global Easing Function
-// ----------------------------
-window.easeOutCubic = function (t) {
-  return 1 - Math.pow(1 - t, 3);
-};
-
-
-// ----------------------------
-// Global Visibility Updater
-// ----------------------------
-window.applyBalanceVisibility = function () {
-  document.querySelectorAll('.balance-real, [data-balance]').forEach(el => {
     if (window.isBalanceMasked) {
-      el.style.display = 'none';
-      el.style.opacity = '0';
+      real.style.opacity = '0';
+      masked.style.opacity = '1';
+      setTimeout(() => { real.style.pointerEvents = 'none'; masked.style.pointerEvents = ''; }, 30);
     } else {
-      el.style.display = 'inline';
-      el.style.opacity = '1';
+      real.style.opacity = '1';
+      masked.style.opacity = '0';
+      setTimeout(() => { masked.style.pointerEvents = 'none'; real.style.pointerEvents = ''; }, 30);
     }
   });
+}
 
-  document.querySelectorAll('.balance-masked').forEach(el => {
-    el.style.display = window.isBalanceMasked ? 'inline' : 'none';
-  });
-};
-
-
-// ----------------------------
-// Global Balance Updater
-// ----------------------------
-window.updateAllBalances = function (newBalance, skipAnimation = false) {
-  newBalance = Number(newBalance) || 0;
-
-  // First-time load
-  if (!window.balanceInitialized || skipAnimation) {
-    window.balanceInitialized = true;
-    window.currentDisplayedBalance = newBalance;
-
-    const formatted = '₦' + newBalance.toLocaleString('en-NG', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    });
-
-    document.querySelectorAll('[data-balance], .balance-real').forEach(el => {
-      el.textContent = formatted;
-    });
-
-    document.querySelectorAll('.balance-masked').forEach(el => {
-      el.textContent = window.isBalanceMasked ? '••••••' : formatted;
-    });
-
-    window.applyBalanceVisibility();
-    return;
-  }
-
-  // Animated transition
-  if (window.animationFrame) cancelAnimationFrame(window.animationFrame);
-
-  const startBalance = window.currentDisplayedBalance;
-  const endBalance = newBalance;
-  const duration = Math.abs(endBalance - startBalance) < 5000 ? 800 : 1400;
-  const startTime = performance.now();
-
-  function animate(time) {
-    const elapsed = time - startTime;
-    const progress = Math.min(elapsed / duration, 1);
-    const eased = window.easeOutCubic(progress);
-
-    const current = startBalance + (endBalance - startBalance) * eased;
-    window.currentDisplayedBalance = current;
-
-    const formatted = '₦' + current.toLocaleString('en-NG', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    });
-
-    document.querySelectorAll('[data-balance], .balance-real').forEach(el => {
-      if (el.textContent !== formatted) el.textContent = formatted;
-    });
-
-    document.querySelectorAll('.balance-masked').forEach(el => {
-      el.textContent = window.isBalanceMasked ? '••••••' : formatted;
-    });
-
-    window.applyBalanceVisibility();
-
-    if (progress < 1) {
-      window.animationFrame = requestAnimationFrame(animate);
-    } else {
-      window.animationFrame = null;
-    }
-  }
-
-  window.animationFrame = requestAnimationFrame(animate);
-};
-
-
-// ----------------------------
-// Global Eye Toggle
-// ----------------------------
-document.addEventListener('click', function (e) {
+// ✅ Enhanced eye toggle (with SVG animations; replace your click handler)
+document.addEventListener('click', function(e) {
   const eye = e.target.closest('.balance-eye-toggle');
   if (!eye) return;
 
   window.isBalanceMasked = !window.isBalanceMasked;
-  try { localStorage.setItem('balanceMasked', window.isBalanceMasked); } catch {}
+  localStorage.setItem('balanceMasked', window.isBalanceMasked);
 
+  // Toggle button classes
   eye.classList.toggle('open', !window.isBalanceMasked);
   eye.classList.toggle('closed', window.isBalanceMasked);
+  eye.setAttribute('aria-pressed', String(!window.isBalanceMasked));
+  eye.setAttribute('aria-label', window.isBalanceMasked ? 'Show balance' : 'Hide balance');
 
-  window.applyBalanceVisibility();
-});
+  // Animate SVGs (matches your HTML inline styles)
+  const openSvg = eye.querySelector('.eye-open-svg');
+  const closedSvg = eye.querySelector('.eye-closed-svg');
+  if (openSvg && closedSvg) {
+    if (!window.isBalanceMasked) { // Unmasked: show open, hide closed
+      openSvg.style.opacity = '1';
+      openSvg.style.transform = 'translate(-50%, -50%) scaleY(1)';
+      closedSvg.style.opacity = '0';
+      closedSvg.style.transform = 'translate(-50%, -50%) scaleY(0.25)';
+    } else { // Masked: show closed, hide open
+      openSvg.style.opacity = '0';
+      openSvg.style.transform = 'translate(-50%, -50%) scaleY(0.25)';
+      closedSvg.style.opacity = '1';
+      closedSvg.style.transform = 'translate(-50%, -50%) scaleY(1)';
+    }
+  }
+
+  applyBalanceVisibility();
+}, { passive: false }); // Non-passive to preventDefault if needed
 
 
-// Start WebSocket system
-if (window.uid) window.connectWS();
+  // Expose for debugging and external callers
+  window.applyBalanceVisibility = window.applyBalanceVisibility || applyBalanceVisibility;
 
+
+  window.updateAllBalances = function (newBalance, skipAnimation = false) {
+    newBalance = Number(newBalance) || 0;
+
+    // ✅ If this is the first load, show immediately without animation
+    if (!window.balanceInitialized || skipAnimation) {
+      window.balanceInitialized = true;
+      window.currentDisplayedBalance = newBalance;
+
+      const formatted = '₦' + newBalance.toLocaleString('en-NG', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      });
+
+      // Update ALL elements immediately
+      document.querySelectorAll('[data-balance], .balance-real').forEach(el => {
+        el.textContent = formatted;
+      });
+
+      document.querySelectorAll('.balance-masked').forEach(el => {
+        el.textContent = window.isBalanceMasked ? '••••••' : formatted;
+      });
+
+      // ✅ Apply visibility AFTER setting content
+      applyBalanceVisibility();
+
+      console.log('[Balance] Initial balance set (no animation):', formatted);
+      return;
+    }
+
+    // Normal animated update
+    if (window.animationFrame) cancelAnimationFrame(window.animationFrame);
+
+    const startBalance = window.currentDisplayedBalance;
+    const endBalance = newBalance;
+    const duration = Math.abs(endBalance - startBalance) < 5000 ? 800 : 1400;
+    const startTime = performance.now();
+
+    function animate(time) {
+      const elapsed = time - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      const eased = easeOutCubic(progress);
+      const current = startBalance + (endBalance - startBalance) * eased;
+      window.currentDisplayedBalance = current;
+
+      const formatted = '₦' + current.toLocaleString('en-NG', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      });
+
+      document.querySelectorAll('[data-balance], .balance-real').forEach(el => {
+        if (el.textContent !== formatted) {
+          el.textContent = formatted;
+        }
+      });
+
+      document.querySelectorAll('.balance-masked').forEach(el => {
+        el.textContent = window.isBalanceMasked ? '••••••' : formatted;
+      });
+
+      applyBalanceVisibility();
+
+      if (progress < 1) {
+        window.animationFrame = requestAnimationFrame(animate);
+      } else {
+        window.animationFrame = null;
+      }
+    }
+
+    window.animationFrame = requestAnimationFrame(animate);
+  };
+
+  // Eye toggle handler
+  document.addEventListener('click', function(e) {
+    const eye = e.target.closest('.balance-eye-toggle');
+    if (!eye) return;
+
+    window.isBalanceMasked = !window.isBalanceMasked;
+
+    try {
+      localStorage.setItem('balanceMasked', window.isBalanceMasked);
+    } catch (e) {}
+
+    eye.classList.toggle('open', !window.isBalanceMasked);
+    eye.classList.toggle('closed', window.isBalanceMasked);
+
+    // ✅ Just apply visibility, don't call updateAllBalances
+    applyBalanceVisibility();
+  });
+
+  // ✅ REMOVED DOMContentLoaded event - it was causing the flash/blank issue
+  // The visibility state is now applied by updateAllBalances and the eye toggle
+
+  connectWS();
+})();
 
 
 // Run observer only on dashboard
@@ -1679,6 +1699,8 @@ window.updateAllBalances(newBalance, true);  // skip animation on first load
   
   document.querySelectorAll('.balance-masked').forEach(el => {
     el.textContent = window.isBalanceMasked ? '••••••' : formatted;  // ✅ Use window.isBalanceMasked
+applyBalanceVisibility();
+
 
 
     });
@@ -16840,237 +16862,237 @@ window.addEventListener('storage', function(e) {
   }
 });
 
-/* Balance sync V3 — pinned-position friendly (no layout moves, opacity-only, single-state) */
-(function () {
-  const STORAGE_KEY = 'fg_show_balance';
-  const TOGGLE_SELECTORS = ['#balanceSwitch', '.balance-eye-toggle', '.security-balance-toggle', '[data-balance-toggle]'];
-  const BALANCE_CARD_SELECTOR = '.balance';
-  const MASK_SEL = '.balance-masked';
-  const REAL_SEL = '.balance-real';
+// /* Balance sync V3 — pinned-position friendly (no layout moves, opacity-only, single-state) */
+// (function () {
+//   const STORAGE_KEY = 'fg_show_balance';
+//   const TOGGLE_SELECTORS = ['#balanceSwitch', '.balance-eye-toggle', '.security-balance-toggle', '[data-balance-toggle]'];
+//   const BALANCE_CARD_SELECTOR = '.balance';
+//   const MASK_SEL = '.balance-masked';
+//   const REAL_SEL = '.balance-real';
 
-  // internal state
-  let state = true;       // visible by default
-  let updating = false;   // lock while applying update
-  const ANIM_MS = 420;    // animation length (ms)
+//   // internal state
+//   let state = true;       // visible by default
+//   let updating = false;   // lock while applying update
+//   const ANIM_MS = 420;    // animation length (ms)
 
-  function readStored() {
-    try {
-      const v = localStorage.getItem(STORAGE_KEY);
-      if (v === null) return true;
-      return v === 'true';
-    } catch (e) { return true; }
-  }
-  function writeStored(v) {
-    try { localStorage.setItem(STORAGE_KEY, v ? 'true' : 'false'); } catch (e) {}
-  }
+//   function readStored() {
+//     try {
+//       const v = localStorage.getItem(STORAGE_KEY);
+//       if (v === null) return true;
+//       return v === 'true';
+//     } catch (e) { return true; }
+//   }
+//   function writeStored(v) {
+//     try { localStorage.setItem(STORAGE_KEY, v ? 'true' : 'false'); } catch (e) {}
+//   }
 
-  function allToggles() {
-    const els = [];
-    TOGGLE_SELECTORS.forEach(sel => {
-      try { document.querySelectorAll(sel).forEach(el => { if (!els.includes(el)) els.push(el); }); } catch (_) {}
-    });
-    return els;
-  }
+//   function allToggles() {
+//     const els = [];
+//     TOGGLE_SELECTORS.forEach(sel => {
+//       try { document.querySelectorAll(sel).forEach(el => { if (!els.includes(el)) els.push(el); }); } catch (_) {}
+//     });
+//     return els;
+//   }
 
-  // Reserve min-width for balance wrapper so toggling opacity doesn't change layout
-  function reserveWidths() {
-    document.querySelectorAll(BALANCE_CARD_SELECTOR).forEach(card => {
-      try {
-        const wrapper = card.querySelector('p') || card;
-        const real = card.querySelector(REAL_SEL);
-        if (!wrapper || !real) return;
-        // ensure wrapper is inline-block so minWidth applies
-        const prevDisplay = wrapper.style.display;
-        wrapper.style.display = wrapper.style.display || 'inline-block';
+//   // Reserve min-width for balance wrapper so toggling opacity doesn't change layout
+//   function reserveWidths() {
+//     document.querySelectorAll(BALANCE_CARD_SELECTOR).forEach(card => {
+//       try {
+//         const wrapper = card.querySelector('p') || card;
+//         const real = card.querySelector(REAL_SEL);
+//         if (!wrapper || !real) return;
+//         // ensure wrapper is inline-block so minWidth applies
+//         const prevDisplay = wrapper.style.display;
+//         wrapper.style.display = wrapper.style.display || 'inline-block';
 
-        // Make sure real is visible to measure accurately (temporarily)
-        const prevRealOpacity = real.style.opacity;
-        real.style.opacity = '1';
-        // measure required width
-        const needed = wrapper.offsetWidth || real.offsetWidth || 0;
-        if (needed) wrapper.style.minWidth = wrapper.style.minWidth || `${needed}px`;
-        // restore
-        real.style.opacity = prevRealOpacity || (state ? '1' : '0');
-        // Defensive: ensure mask has initial opacity (if not set)
-        const mask = card.querySelector(MASK_SEL);
-        if (mask && (mask.style.opacity === '')) mask.style.opacity = state ? '0' : '1';
-      } catch (e) { /* ignore measurement failures */ }
-    });
-  }
+//         // Make sure real is visible to measure accurately (temporarily)
+//         const prevRealOpacity = real.style.opacity;
+//         real.style.opacity = '1';
+//         // measure required width
+//         const needed = wrapper.offsetWidth || real.offsetWidth || 0;
+//         if (needed) wrapper.style.minWidth = wrapper.style.minWidth || `${needed}px`;
+//         // restore
+//         real.style.opacity = prevRealOpacity || (state ? '1' : '0');
+//         // Defensive: ensure mask has initial opacity (if not set)
+//         const mask = card.querySelector(MASK_SEL);
+//         if (mask && (mask.style.opacity === '')) mask.style.opacity = state ? '0' : '1';
+//       } catch (e) { /* ignore measurement failures */ }
+//     });
+//   }
 
-  function animateEyeBtn(btn, visible) {
-    if (!btn) return;
-    const openSvg = btn.querySelector('.eye-open-svg');
-    const closedSvg = btn.querySelector('.eye-closed-svg');
-    if (openSvg && closedSvg) {
-      openSvg.style.transition = openSvg.style.transition || 'transform 420ms cubic-bezier(.2,.9,.3,1), opacity 320ms ease';
-      closedSvg.style.transition = closedSvg.style.transition || 'transform 420ms cubic-bezier(.2,.9,.3,1), opacity 320ms ease';
-      requestAnimationFrame(() => {
-        if (visible) {
-          openSvg.style.transform = 'translate(-50%,-50%) scaleY(1)'; openSvg.style.opacity = '1';
-          closedSvg.style.transform = 'translate(-50%,-50%) scaleY(.25)'; closedSvg.style.opacity = '0';
-        } else {
-          openSvg.style.transform = 'translate(-50%,-50%) scaleY(.25)'; openSvg.style.opacity = '0';
-          closedSvg.style.transform = 'translate(-50%,-50%) scaleY(1)'; closedSvg.style.opacity = '1';
-        }
-      });
-    } else {
-      if (visible) btn.classList.remove('eye-closed'); else btn.classList.add('eye-closed');
-    }
-  }
+//   function animateEyeBtn(btn, visible) {
+//     if (!btn) return;
+//     const openSvg = btn.querySelector('.eye-open-svg');
+//     const closedSvg = btn.querySelector('.eye-closed-svg');
+//     if (openSvg && closedSvg) {
+//       openSvg.style.transition = openSvg.style.transition || 'transform 420ms cubic-bezier(.2,.9,.3,1), opacity 320ms ease';
+//       closedSvg.style.transition = closedSvg.style.transition || 'transform 420ms cubic-bezier(.2,.9,.3,1), opacity 320ms ease';
+//       requestAnimationFrame(() => {
+//         if (visible) {
+//           openSvg.style.transform = 'translate(-50%,-50%) scaleY(1)'; openSvg.style.opacity = '1';
+//           closedSvg.style.transform = 'translate(-50%,-50%) scaleY(.25)'; closedSvg.style.opacity = '0';
+//         } else {
+//           openSvg.style.transform = 'translate(-50%,-50%) scaleY(.25)'; openSvg.style.opacity = '0';
+//           closedSvg.style.transform = 'translate(-50%,-50%) scaleY(1)'; closedSvg.style.opacity = '1';
+//         }
+//       });
+//     } else {
+//       if (visible) btn.classList.remove('eye-closed'); else btn.classList.add('eye-closed');
+//     }
+//   }
 
-  function applyToAllToggles(visible) {
-    const toggles = allToggles();
-    toggles.forEach(btn => {
-      try {
-        if (btn.id === 'balanceSwitch') {
-          btn.setAttribute('aria-checked', visible ? 'true' : 'false');
-          if (visible) btn.classList.remove('off'); else btn.classList.add('off');
-        } else {
-          btn.setAttribute('aria-pressed', visible ? 'false' : 'true');
-          btn.setAttribute('data-balance-visible', visible ? 'true' : 'false');
-        }
-        animateEyeBtn(btn, visible);
-      } catch (e) {}
-    });
-  }
+//   function applyToAllToggles(visible) {
+//     const toggles = allToggles();
+//     toggles.forEach(btn => {
+//       try {
+//         if (btn.id === 'balanceSwitch') {
+//           btn.setAttribute('aria-checked', visible ? 'true' : 'false');
+//           if (visible) btn.classList.remove('off'); else btn.classList.add('off');
+//         } else {
+//           btn.setAttribute('aria-pressed', visible ? 'false' : 'true');
+//           btn.setAttribute('data-balance-visible', visible ? 'true' : 'false');
+//         }
+//         animateEyeBtn(btn, visible);
+//       } catch (e) {}
+//     });
+//   }
 
-  // Core: toggle opacity only — NO display changes, NO positioning changes
-  function applyToBalances(visible) {
-    const cards = Array.from(document.querySelectorAll(BALANCE_CARD_SELECTOR));
-    cards.forEach(card => {
-      try {
-        const mask = card.querySelector(MASK_SEL);
-        const real = card.querySelector(REAL_SEL);
+//   // Core: toggle opacity only — NO display changes, NO positioning changes
+//   function applyToBalances(visible) {
+//     const cards = Array.from(document.querySelectorAll(BALANCE_CARD_SELECTOR));
+//     cards.forEach(card => {
+//       try {
+//         const mask = card.querySelector(MASK_SEL);
+//         const real = card.querySelector(REAL_SEL);
 
-        if (real && mask) {
-          // Ensure transitions present (only opacity)
-          real.style.transition = real.style.transition || `opacity ${ANIM_MS}ms ease`;
-          mask.style.transition = mask.style.transition || `opacity ${Math.floor(ANIM_MS * 0.66)}ms ease`;
+//         if (real && mask) {
+//           // Ensure transitions present (only opacity)
+//           real.style.transition = real.style.transition || `opacity ${ANIM_MS}ms ease`;
+//           mask.style.transition = mask.style.transition || `opacity ${Math.floor(ANIM_MS * 0.66)}ms ease`;
 
-          // Do not change display/layout. Only animate opacity and pointer-events.
-          if (visible) {
-            // Make real visible (opacity), mask hidden (opacity 0)
-            real.style.opacity = '1';
-            mask.style.opacity = '0';
-            // pointer events toggled after a short delay so immediate clicks don't hit hidden element
-            setTimeout(() => { real.style.pointerEvents = ''; mask.style.pointerEvents = 'none'; }, 30);
-          } else {
-            mask.style.opacity = '1';
-            real.style.opacity = '0';
-            setTimeout(() => { mask.style.pointerEvents = ''; real.style.pointerEvents = 'none'; }, 30);
-          }
-        } else {
-          // fallback: toggle visibility property for safety (keeps layout)
-          const valueEl = card.querySelector('[data-balance]') || card.querySelector('.amount') || card.querySelector('p');
-          if (valueEl) {
-            valueEl.style.visibility = visible ? 'visible' : 'hidden';
-          }
-        }
-      } catch (e) {}
-    });
-  }
+//           // Do not change display/layout. Only animate opacity and pointer-events.
+//           if (visible) {
+//             // Make real visible (opacity), mask hidden (opacity 0)
+//             real.style.opacity = '1';
+//             mask.style.opacity = '0';
+//             // pointer events toggled after a short delay so immediate clicks don't hit hidden element
+//             setTimeout(() => { real.style.pointerEvents = ''; mask.style.pointerEvents = 'none'; }, 30);
+//           } else {
+//             mask.style.opacity = '1';
+//             real.style.opacity = '0';
+//             setTimeout(() => { mask.style.pointerEvents = ''; real.style.pointerEvents = 'none'; }, 30);
+//           }
+//         } else {
+//           // fallback: toggle visibility property for safety (keeps layout)
+//           const valueEl = card.querySelector('[data-balance]') || card.querySelector('.amount') || card.querySelector('p');
+//           if (valueEl) {
+//             valueEl.style.visibility = visible ? 'visible' : 'hidden';
+//           }
+//         }
+//       } catch (e) {}
+//     });
+//   }
 
-  // authoritative updater — idempotent
-  function updateAll(visible, source = 'program') {
-    if (state === !!visible) return;
-    state = !!visible;
-    updating = true;
+//   // authoritative updater — idempotent
+//   function updateAll(visible, source = 'program') {
+//     if (state === !!visible) return;
+//     state = !!visible;
+//     updating = true;
 
-    // Apply reserved widths only once (helps prevent jumps)
-    reserveWidths();
+//     // Apply reserved widths only once (helps prevent jumps)
+//     reserveWidths();
 
-    // optimistically apply UI
-    applyToAllToggles(state);
-    applyToBalances(state);
+//     // optimistically apply UI
+//     applyToAllToggles(state);
+//     applyToBalances(state);
 
-    // persist new state
-    writeStored(state);
+//     // persist new state
+//     writeStored(state);
 
-    // small reapply to override other handlers
-    setTimeout(() => { applyToAllToggles(state); applyToBalances(state); }, 40);
+//     // small reapply to override other handlers
+//     setTimeout(() => { applyToAllToggles(state); applyToBalances(state); }, 40);
 
-    // unlock after animations expected to complete
-    setTimeout(() => { updating = false; }, ANIM_MS + 60);
+//     // unlock after animations expected to complete
+//     setTimeout(() => { updating = false; }, ANIM_MS + 60);
 
-    // notify others
-    try { window.dispatchEvent(new CustomEvent('fg:balance-visibility-changed', { detail: { visible: state, source } })); } catch(e) {}
-  }
+//     // notify others
+//     try { window.dispatchEvent(new CustomEvent('fg:balance-visibility-changed', { detail: { visible: state, source } })); } catch(e) {}
+//   }
 
-  // capture-phase UI handler to prevent conflicting handlers
-  function uiHandler(e) {
-    if (e.button && e.button !== 0) return;
-    try { e.stopImmediatePropagation(); } catch (err) {}
-    e.preventDefault();
+//   // capture-phase UI handler to prevent conflicting handlers
+//   function uiHandler(e) {
+//     if (e.button && e.button !== 0) return;
+//     try { e.stopImmediatePropagation(); } catch (err) {}
+//     e.preventDefault();
 
-    if (updating) return;
-    const next = !state;
-    updateAll(next, 'user');
-  }
+//     if (updating) return;
+//     const next = !state;
+//     updateAll(next, 'user');
+//   }
 
-  function wire() {
-    const toggles = allToggles();
-    toggles.forEach(el => {
-      if (el.__balanceSyncBound) return;
-      el.addEventListener('click', uiHandler, { passive: false, capture: true });
-      el.addEventListener('keydown', (ev) => {
-        if (ev.key === ' ' || ev.key === 'Enter') {
-          try { ev.stopImmediatePropagation(); } catch(_) {}
-          ev.preventDefault();
-          if (!updating) updateAll(!state, 'keyboard');
-        }
-      }, { passive: false, capture: true });
-      el.__balanceSyncBound = true;
-    });
-  }
+//   function wire() {
+//     const toggles = allToggles();
+//     toggles.forEach(el => {
+//       if (el.__balanceSyncBound) return;
+//       el.addEventListener('click', uiHandler, { passive: false, capture: true });
+//       el.addEventListener('keydown', (ev) => {
+//         if (ev.key === ' ' || ev.key === 'Enter') {
+//           try { ev.stopImmediatePropagation(); } catch(_) {}
+//           ev.preventDefault();
+//           if (!updating) updateAll(!state, 'keyboard');
+//         }
+//       }, { passive: false, capture: true });
+//       el.__balanceSyncBound = true;
+//     });
+//   }
 
-  function init() {
-    // measure and reserve widths after fonts.ready if available
-    const start = () => {
-      reserveWidths();
-      state = readStored();
-      applyToAllToggles(state);
-      applyToBalances(state);
-      wire();
+//   function init() {
+//     // measure and reserve widths after fonts.ready if available
+//     const start = () => {
+//       reserveWidths();
+//       state = readStored();
+//       applyToAllToggles(state);
+//       applyToBalances(state);
+//       wire();
 
-      // observe dynamic inserts
-      const mo = new MutationObserver((mutations) => {
-        let needsReserve = false, needsWire = false;
-        for (const m of mutations) {
-          if (!m.addedNodes) continue;
-          for (const n of m.addedNodes) {
-            if (n.nodeType !== 1) continue;
-            try {
-              if (n.matches && n.matches(BALANCE_CARD_SELECTOR)) needsReserve = true;
-              if (n.querySelector && n.querySelector(BALANCE_CARD_SELECTOR)) needsReserve = true;
-              if (TOGGLE_SELECTORS.some(s => { try { return n.matches && n.matches(s); } catch(_) { return false; } })) needsWire = true;
-              if (n.querySelector && TOGGLE_SELECTORS.some(s => n.querySelector(s))) needsWire = true;
-            } catch (_) {}
-          }
-        }
-        if (needsReserve) setTimeout(reserveWidths, 30);
-        if (needsWire) setTimeout(wire, 30);
-      });
-      try { mo.observe(document.body, { subtree: true, childList: true }); } catch (e) {}
-    };
+//       // observe dynamic inserts
+//       const mo = new MutationObserver((mutations) => {
+//         let needsReserve = false, needsWire = false;
+//         for (const m of mutations) {
+//           if (!m.addedNodes) continue;
+//           for (const n of m.addedNodes) {
+//             if (n.nodeType !== 1) continue;
+//             try {
+//               if (n.matches && n.matches(BALANCE_CARD_SELECTOR)) needsReserve = true;
+//               if (n.querySelector && n.querySelector(BALANCE_CARD_SELECTOR)) needsReserve = true;
+//               if (TOGGLE_SELECTORS.some(s => { try { return n.matches && n.matches(s); } catch(_) { return false; } })) needsWire = true;
+//               if (n.querySelector && TOGGLE_SELECTORS.some(s => n.querySelector(s))) needsWire = true;
+//             } catch (_) {}
+//           }
+//         }
+//         if (needsReserve) setTimeout(reserveWidths, 30);
+//         if (needsWire) setTimeout(wire, 30);
+//       });
+//       try { mo.observe(document.body, { subtree: true, childList: true }); } catch (e) {}
+//     };
 
-    if (document.fonts && document.fonts.ready) {
-      document.fonts.ready.then(start).catch(start);
-    } else {
-      setTimeout(start, 20);
-    }
-  }
+//     if (document.fonts && document.fonts.ready) {
+//       document.fonts.ready.then(start).catch(start);
+//     } else {
+//       setTimeout(start, 20);
+//     }
+//   }
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
-  else setTimeout(init, 10);
+//   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+//   else setTimeout(init, 10);
 
-  // public API
-  window.__fg_balance_visibility = {
-    isVisible: () => state,
-    set: (v) => updateAll(!!v, 'api'),
-    toggle: () => { if (!updating) updateAll(!state, 'api-toggle'); }
-  };
-})();
+//   // public API
+//   window.__fg_balance_visibility = {
+//     isVisible: () => state,
+//     set: (v) => updateAll(!!v, 'api'),
+//     toggle: () => { if (!updating) updateAll(!state, 'api-toggle'); }
+//   };
+// })();
 
 updateContinueState();
 
