@@ -16988,39 +16988,28 @@ window.addEventListener('storage', function(e) {
 
   // Core: toggle opacity only — NO display changes, NO positioning changes
   function applyToBalances(visible) {
-    const cards = Array.from(document.querySelectorAll(BALANCE_CARD_SELECTOR));
-    cards.forEach(card => {
-      try {
-        const mask = card.querySelector(MASK_SEL);
-        const real = card.querySelector(REAL_SEL);
+  const cards = Array.from(document.querySelectorAll(BALANCE_CARD_SELECTOR));
+  cards.forEach(card => {
+    try {
+      const mask = card.querySelector(MASK_SEL);
+      const real = card.querySelector(REAL_SEL);
 
-        if (real && mask) {
-          // Ensure transitions present (only opacity)
-          real.style.transition = real.style.transition || `opacity ${ANIM_MS}ms ease`;
-          mask.style.transition = mask.style.transition || `opacity ${Math.floor(ANIM_MS * 0.66)}ms ease`;
+      if (real && mask) {
+        // Ensure transitions (but we will not toggle visibility)
+        real.style.transition = real.style.transition || `opacity ${ANIM_MS}ms ease`;
+        mask.style.transition = mask.style.transition || `opacity ${Math.floor(ANIM_MS * 0.66)}ms ease`;
 
-          // Do not change display/layout. Only animate opacity and pointer-events.
-          if (visible) {
-            // Make real visible (opacity), mask hidden (opacity 0)
-            real.style.opacity = '1';
-            mask.style.opacity = '0';
-            // pointer events toggled after a short delay so immediate clicks don't hit hidden element
-            setTimeout(() => { real.style.pointerEvents = ''; mask.style.pointerEvents = 'none'; }, 30);
-          } else {
-            mask.style.opacity = '1';
-            real.style.opacity = '0';
-            setTimeout(() => { mask.style.pointerEvents = ''; real.style.pointerEvents = 'none'; }, 30);
-          }
-        } else {
-          // fallback: toggle visibility property for safety (keeps layout)
-          const valueEl = card.querySelector('[data-balance]') || card.querySelector('.amount') || card.querySelector('p');
-          if (valueEl) {
-            valueEl.style.visibility = visible ? 'visible' : 'hidden';
-          }
-        }
-      } catch (e) {}
-    });
-  }
+        // ⛔️ STOP — disable real visibility control
+        // Allow your own visibility logic to handle showing/hiding
+        // (No opacity, no pointer-events, no swapping)
+      } 
+      else {
+        // fallback: do nothing
+      }
+    } catch (e) {}
+  });
+}
+
 
   // authoritative updater — idempotent
   function updateAll(visible, source = 'program') {
