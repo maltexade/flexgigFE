@@ -208,13 +208,17 @@ function inGraceWindow() {
   }
 
   // --- PUBLIC API ---
-  window.BalanceHelper = {
+window.BalanceHelper = {
     show() { applyVisibility(true); },
     hide() { applyVisibility(false); },
     toggle() { if (!locking) applyVisibility(!visible); },
     setValue(v) { setRawBalance(v); },
-    isVisible() { return visible; }
-  };
+    isVisible() { return visible; },
+
+    // ★ ADD THIS
+    applyVisibility(v = visible) { applyVisibility(v); }
+};
+
 
   // --- TOGGLE WIRING ---
   function wireToggles() {
