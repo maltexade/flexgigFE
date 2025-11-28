@@ -248,6 +248,81 @@ function inGraceWindow() {
 
 })();
 
+/* =======================================================================
+   UNIVERSAL BALANCE INTERCEPTOR
+   Routes ALL balance changes to BalanceHelper
+   ======================================================================= */
+(function() {
+
+  const REAL_SEL = ".balance-real";
+  const MASK_SEL = ".balance-masked";
+
+  // --- INTERCEPT DOM CHANGES (MutationObserver) ---
+  const mo = new MutationObserver(mutations => {
+    for (const m of mutations) {
+
+      // catch opacity/display changes attempts
+      if (m.target.matches?.(REAL_SEL) || m.target.matches?.(MASK_SEL)) {
+        const el = m.target;
+
+        // FORCE our visibility back
+        BalanceHelper.applyVisibility();
+
+        // prevent external "display:none"
+        el.style.display = "inline";
+      }
+
+      // If someone replaced balance text manually → override with our formatted version
+      if (m.type === "childList" && m.target.matches?.(REAL_SEL)) {
+        const current = window.currentDisplayedBalance;
+        BalanceHelper.setValue(current);
+      }
+    }
+  });
+
+  try {
+    mo.observe(document.body, {
+      attributes: true,
+      attributeFilter: ["style", "class"],
+      childList: true,
+      subtree: true,
+    });
+  } catch (e) {
+    console.warn("[BALANCE-INTERCEPTOR] Observer failed:", e);
+  }
+
+  // --- INTERCEPT LEGACY VISIBILITY FUNCTIONS IF THEY EXIST ---
+  const legacyNames = [
+    "applyBalanceVisibility",
+    "toggleBalanceVisibility",
+    "setBalanceVisibility",
+  ];
+
+  legacyNames.forEach(name => {
+    if (window[name]) {
+      console.warn(`[BALANCE-INTERCEPTOR] Neutralizing ${name}`);
+
+      window[name] = function() {
+        BalanceHelper.applyVisibility();
+      };
+    }
+  });
+
+  // --- INTERCEPT LEGACY updateAllBalances ---
+  if (window.updateAllBalances) {
+    const old = window.updateAllBalances;
+
+    window.updateAllBalances = function(amount, skipAnimation) {
+      const result = old(amount, skipAnimation);
+      BalanceHelper.applyVisibility();
+      return result;
+    };
+  }
+
+  console.log("%c[BALANCE INTERCEPTOR] Ready", "color:#e1a500;font-weight:bold");
+
+})(); // END INTERCEPTOR
+
 
 // Call this as early as practical (before container paints) - e.g., in onDashboardLoad() before manageDashboardCards() if possible.
 async function renderDashboardCardsFromState({ preferServer = true } = {}) {
