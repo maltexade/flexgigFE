@@ -114,6 +114,141 @@ function inGraceWindow() {
 }
 
 
+/* =======================================================================
+   FLEXGIG BALANCE HELPER – Unified, race-condition-proof
+   Paste at TOP of dashboard.js BEFORE any other balance-related code.
+   ======================================================================= */
+
+(function() {
+
+  // HTML selectors
+  const REAL = ".balance-real";
+  const MASK = ".balance-masked";
+  const CARD = ".balance";
+  const TOGGLES = [
+    ".balance-eye-toggle",
+    "[data-balance-toggle]",
+    "#balanceSwitch",
+    ".security-balance-toggle"
+  ];
+
+  // LocalStorage key for visibility
+  const KEY = "fg_balance_visible";
+
+  // Internal state
+  let visible = true;
+  let locking = false;
+
+  // --- storage helpers ---
+  function loadState() {
+    try {
+      const v = localStorage.getItem(KEY);
+      return v === null ? true : v === "true";
+    } catch(e) { return true; }
+  }
+
+  function saveState(v) {
+    try { localStorage.setItem(KEY, v ? "true" : "false"); } catch(e) {}
+  }
+
+  // --- APPLY VISIBILITY (no layout changes) ---
+  function applyVisibility(v) {
+    visible = !!v;
+
+    document.querySelectorAll(CARD).forEach(card => {
+      const real = card.querySelector(REAL);
+      const mask = card.querySelector(MASK);
+
+      if (!real || !mask) return;
+
+      real.style.opacity = visible ? "1" : "0";
+      mask.style.opacity = visible ? "0" : "1";
+
+      // remove any display:none that old code tries to force
+      real.style.display = "";
+      mask.style.display = "";
+
+      // optional: pointer clean
+      real.style.pointerEvents = visible ? "auto" : "none";
+      mask.style.pointerEvents = visible ? "none" : "auto";
+    });
+
+    updateToggleUI(v);
+    saveState(v);
+  }
+
+  // --- UPDATE TOGGLE UI ---
+  function updateToggleUI(v) {
+    document.querySelectorAll(TOGGLES.join(",")).forEach(btn => {
+      try {
+        btn.setAttribute("data-balance-visible", v ? "true" : "false");
+        btn.setAttribute("aria-pressed", (!v).toString());
+      } catch(e){}
+    });
+  }
+
+  // --- SET RAW BALANCE (NO VISIBILITY CHANGE) ---
+  function setRawBalance(amount) {
+    const formatted = "₦" + Number(amount).toLocaleString("en-NG", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+
+    // real text
+    document.querySelectorAll(REAL).forEach(el => {
+      el.textContent = formatted;
+    });
+
+    // masked (unchanged)
+    document.querySelectorAll(MASK).forEach(el => {
+      if (el.textContent.trim().length === 0) {
+        el.textContent = "•••••";
+      }
+    });
+  }
+
+  // --- PUBLIC API ---
+  window.BalanceHelper = {
+    show() { applyVisibility(true); },
+    hide() { applyVisibility(false); },
+    toggle() { if (!locking) applyVisibility(!visible); },
+    setValue(v) { setRawBalance(v); },
+    isVisible() { return visible; }
+  };
+
+  // --- TOGGLE WIRING ---
+  function wireToggles() {
+    document.querySelectorAll(TOGGLES.join(",")).forEach(el => {
+      if (el.__balBound) return;
+
+      el.addEventListener("click", e => {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        BalanceHelper.toggle();
+      }, {capture: true});
+
+      el.__balBound = true;
+    });
+  }
+
+  // INIT
+  function init() {
+    visible = loadState();
+    applyVisibility(visible);
+    wireToggles();
+
+    console.log("%c[FLEXGIG BALANCE HELPER] Ready", "color:#27c179;font-weight:bold");
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
+  }
+
+})();
+
+
 // Call this as early as practical (before container paints) - e.g., in onDashboardLoad() before manageDashboardCards() if possible.
 async function renderDashboardCardsFromState({ preferServer = true } = {}) {
   const pinCard = document.getElementById('dashboardPinCard');
@@ -16986,41 +17121,41 @@ window.addEventListener('storage', function(e) {
     });
   }
 
-  // // Core: toggle opacity only — NO display changes, NO positioning changes
-  // function applyToBalances(visible) {
-  //   const cards = Array.from(document.querySelectorAll(BALANCE_CARD_SELECTOR));
-  //   cards.forEach(card => {
-  //     try {
-  //       const mask = card.querySelector(MASK_SEL);
-  //       const real = card.querySelector(REAL_SEL);
+  // Core: toggle opacity only — NO display changes, NO positioning changes
+  function applyToBalances(visible) {
+    const cards = Array.from(document.querySelectorAll(BALANCE_CARD_SELECTOR));
+    cards.forEach(card => {
+      try {
+        const mask = card.querySelector(MASK_SEL);
+        const real = card.querySelector(REAL_SEL);
 
-  //       if (real && mask) {
-  //         // Ensure transitions present (only opacity)
-  //         real.style.transition = real.style.transition || `opacity ${ANIM_MS}ms ease`;
-  //         mask.style.transition = mask.style.transition || `opacity ${Math.floor(ANIM_MS * 0.66)}ms ease`;
+        if (real && mask) {
+          // Ensure transitions present (only opacity)
+          real.style.transition = real.style.transition || `opacity ${ANIM_MS}ms ease`;
+          mask.style.transition = mask.style.transition || `opacity ${Math.floor(ANIM_MS * 0.66)}ms ease`;
 
-  //         // Do not change display/layout. Only animate opacity and pointer-events.
-  //         if (visible) {
-  //           // Make real visible (opacity), mask hidden (opacity 0)
-  //           real.style.opacity = '1';
-  //           mask.style.opacity = '0';
-  //           // pointer events toggled after a short delay so immediate clicks don't hit hidden element
-  //           setTimeout(() => { real.style.pointerEvents = ''; mask.style.pointerEvents = 'none'; }, 30);
-  //         } else {
-  //           mask.style.opacity = '1';
-  //           real.style.opacity = '0';
-  //           setTimeout(() => { mask.style.pointerEvents = ''; real.style.pointerEvents = 'none'; }, 30);
-  //         }
-  //       } else {
-  //         // fallback: toggle visibility property for safety (keeps layout)
-  //         const valueEl = card.querySelector('[data-balance]') || card.querySelector('.amount') || card.querySelector('p');
-  //         if (valueEl) {
-  //           valueEl.style.visibility = visible ? 'visible' : 'hidden';
-  //         }
-  //       }
-  //     } catch (e) {}
-  //   });
-  // }
+          // Do not change display/layout. Only animate opacity and pointer-events.
+          if (visible) {
+            // Make real visible (opacity), mask hidden (opacity 0)
+            real.style.opacity = '1';
+            mask.style.opacity = '0';
+            // pointer events toggled after a short delay so immediate clicks don't hit hidden element
+            setTimeout(() => { real.style.pointerEvents = ''; mask.style.pointerEvents = 'none'; }, 30);
+          } else {
+            mask.style.opacity = '1';
+            real.style.opacity = '0';
+            setTimeout(() => { mask.style.pointerEvents = ''; real.style.pointerEvents = 'none'; }, 30);
+          }
+        } else {
+          // fallback: toggle visibility property for safety (keeps layout)
+          const valueEl = card.querySelector('[data-balance]') || card.querySelector('.amount') || card.querySelector('p');
+          if (valueEl) {
+            valueEl.style.visibility = visible ? 'visible' : 'hidden';
+          }
+        }
+      } catch (e) {}
+    });
+  }
 
   // authoritative updater — idempotent
   function updateAll(visible, source = 'program') {
