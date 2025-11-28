@@ -17046,131 +17046,120 @@ window.addEventListener('storage', function(e) {
 updateContinueState();
 
 
-// --- Strong visibility helper: expose and force-show balances ---
-// Place this after your applyBalanceVisibility() definition (inside the balance IIFE or near other helpers)
-(function installForceShowBalance() {
-  // expose existing helper if present
-  try { if (typeof applyBalanceVisibility === 'function' && !window.applyBalanceVisibility) window.applyBalanceVisibility = applyBalanceVisibility; } catch(e){}
+// ✅ Helper function to apply visibility state (reliable, with dynamic masked creation)
+function applyBalanceVisibility(masked) {
+  if (typeof masked !== 'undefined') window.isBalanceMasked = !!masked;
+  
+  // Normalized formatted balance
+  const formatted = (function(){
+    try { return '₦' + Number(window.currentDisplayedBalance || 0).toLocaleString('en-NG',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+    catch(e){ return ''; }
+  })();
 
-  if (window.forceShowBalance) return; // don't overwrite
-
-  function ensureParentVisibility(el, maxDepth = 8) {
-    let cur = el.parentElement;
-    let depth = 0;
-    while (cur && depth < maxDepth && cur !== document.documentElement) {
-      try {
-        const cs = getComputedStyle(cur);
-        if (cs.display === 'none' || cs.visibility === 'hidden') {
-          // make a minimal, targeted change to reveal the container
-          cur.style.setProperty('display', 'block', 'important');
-          cur.style.setProperty('visibility', 'visible', 'important');
-          cur.style.setProperty('opacity', '1', 'important');
-        }
-      } catch (e) { /* ignore */ }
-      cur = cur.parentElement;
-      depth++;
+  // Setup: Dynamically create paired .balance-masked elements if missing
+  const realSelectors = '.balance-real, [data-balance]';
+  document.querySelectorAll(realSelectors).forEach(realEl => {
+    // Look for existing paired masked as next sibling(s)
+    let potentialMasked = realEl.nextElementSibling;
+    let hasPairedMasked = false;
+    while (potentialMasked && !hasPairedMasked) {
+      if (potentialMasked.classList.contains('balance-masked')) {
+        hasPairedMasked = true;
+      } else {
+        potentialMasked = potentialMasked.nextElementSibling;
+      }
     }
-  }
-
-  function setVisible(el, txt, displayHint) {
-    try {
-      // temporarily remove transitions to avoid race with other code
-      const prevTransition = el.style.transition || '';
-      el.style.setProperty('transition', 'none', 'important');
-
-      if (typeof txt !== 'undefined' && txt !== null) el.textContent = txt;
-      el.style.setProperty('display', displayHint || (el.tagName === 'DIV' ? 'block' : 'inline'), 'important');
-      el.style.setProperty('visibility', 'visible', 'important');
-      el.style.setProperty('opacity', '1', 'important');
-
-      // restore transition asynchronously to avoid flicker
-      setTimeout(() => {
-        try {
-          el.style.removeProperty('transition');
-          if (prevTransition) el.style.transition = prevTransition;
-        } catch (e) {}
-      }, 50);
-    } catch (e) { console.error('setVisible failed', e); }
-  }
-
-  // Exposed function
-  window.forceShowBalance = function forceShowBalance(masked) {
-    try {
-      if (typeof masked !== 'undefined') {
-        window.isBalanceMasked = !!masked;
-        try { localStorage.setItem('balanceMasked', String(window.isBalanceMasked)); } catch(e){}
-      }
-
-      // 1) Call canonical updater if available (skip animation)
-      if (typeof window.updateAllBalances === 'function') {
-        try {
-          // pass some stable number to ensure internal initialization
-          window.updateAllBalances(window.currentDisplayedBalance || 0, true);
-        } catch(e) { console.warn('updateAllBalances threw', e); }
-      }
-
-      // 2) Let canonical applyBalanceVisibility run if present
-      if (typeof window.applyBalanceVisibility === 'function') {
-        try { window.applyBalanceVisibility(); } catch(e) { console.warn('applyBalanceVisibility threw', e); }
-      }
-
-      // 3) Force DOM writes + parent visibility override
-      const reals = Array.from(document.querySelectorAll('.balance-real, [data-balance]'));
-      const masks = Array.from(document.querySelectorAll('.balance-masked'));
-
-      // compute formatted balance text once
-      const fallback = window.currentDisplayedBalance || 9783000;
-      const formatted = (function(n){
-        try { return '₦' + Number(n).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
-        catch(e){ return '₦' + String(n); }
-      })(fallback);
-
-      reals.forEach(el => {
-        // ensure parent containers are visible first (limited depth)
-        ensureParentVisibility(el, 10);
-        setVisible(el, formatted, el.tagName === 'DIV' ? 'block' : 'inline');
-      });
-
-      masks.forEach(el => {
-        ensureParentVisibility(el, 10);
-        const text = window.isBalanceMasked ? '••••••' : formatted;
-        // If masked element should be hidden when unmasked, obey that by setting display accordingly
-        if (window.isBalanceMasked) {
-          setVisible(el, text, el.tagName === 'DIV' ? 'block' : 'inline');
-        } else {
-          // hide masked span but still ensure display toggled correctly
-          try {
-            el.style.setProperty('opacity', '0', 'important');
-            el.style.setProperty('display', 'none', 'important');
-            el.style.setProperty('visibility', 'hidden', 'important');
-          } catch(e){}
-        }
-      });
-
-      // 4) Tidy: update eye aria/state if present
-      try {
-        document.querySelectorAll('.balance-eye-toggle').forEach(eye => {
-          eye.classList.toggle('open', !window.isBalanceMasked);
-          eye.classList.toggle('closed', !!window.isBalanceMasked);
-          try { eye.setAttribute('aria-pressed', String(!window.isBalanceMasked)); } catch(e){}
-        });
-      } catch(e){}
-
-      console.log('[forceShowBalance] applied. isBalanceMasked=', window.isBalanceMasked);
-      return true;
-    } catch (err) {
-      console.error('[forceShowBalance] failed', err);
-      return false;
+    
+    // If no paired masked, create one by cloning the real element
+    if (!hasPairedMasked) {
+      const maskedEl = realEl.cloneNode(true); // Deep clone to preserve structure/styles
+      maskedEl.classList.add('balance-masked');
+      maskedEl.classList.remove('balance-real'); // Remove real-specific class
+      maskedEl.removeAttribute('data-balance'); // Remove data attr to avoid conflicts
+      
+      // Set initial mask text (can be overridden via data-maskText later)
+      const defaultMask = maskedEl.dataset.maskText || '••••••';
+      maskedEl.textContent = defaultMask;
+      
+      // Insert as next sibling for layout replacement
+      realEl.parentNode.insertBefore(maskedEl, realEl.nextSibling);
+      
+      console.debug('applyBalanceVisibility: Created paired .balance-masked for real element');
     }
-  };
+  });
 
-  // Also ensure applyBalanceVisibility is globally callable
-  try { if (typeof applyBalanceVisibility === 'function') window.applyBalanceVisibility = applyBalanceVisibility; } catch(e){}
+  // Update real balance elements
+  document.querySelectorAll(realSelectors).forEach(realEl => {
+    try {
+      // Find paired masked for this real (next sibling scan)
+      let pairedMasked = realEl.nextElementSibling;
+      while (pairedMasked && !pairedMasked.classList.contains('balance-masked')) {
+        pairedMasked = pairedMasked.nextElementSibling;
+      }
+      
+      // If masked, hide the real; otherwise show and set text
+      if (window.isBalanceMasked) {
+        realEl.style.setProperty('opacity', '0', 'important');
+        realEl.style.setProperty('display', 'none', 'important');
+      } else {
+        realEl.style.setProperty('display', realEl.tagName === 'DIV' ? 'block' : 'inline', 'important');
+        realEl.style.setProperty('opacity', '1', 'important');
+        if (formatted) realEl.textContent = formatted;
+      }
+    } catch(e){ console.warn('applyBalanceVisibility: real update failed', e); }
+  });
 
-  console.log('forceShowBalance() installed — call window.forceShowBalance() from console (optionally pass true/false to force masked state).');
-})();
+  // Update masked elements (prioritize paired, fallback to all)
+  const allMaskedSelectors = '.balance-masked';
+  const maskedElements = new Set(); // Avoid duplicates if paired + unpaired
+  
+  // First, add paired masked
+  document.querySelectorAll(realSelectors).forEach(realEl => {
+    let pairedMasked = realEl.nextElementSibling;
+    while (pairedMasked && !pairedMasked.classList.contains('balance-masked')) {
+      pairedMasked = pairedMasked.nextElementSibling;
+    }
+    if (pairedMasked) maskedElements.add(pairedMasked);
+  });
+  
+  // Fallback: Add any unpaired .balance-masked
+  document.querySelectorAll(allMaskedSelectors).forEach(el => {
+    if (!maskedElements.has(el)) maskedElements.add(el);
+  });
+  
+  maskedElements.forEach(maskedEl => {
+    try {
+      // Ensure mask text exists (data-maskText can be set for customization)
+      const maskText = maskedEl.dataset.maskText || '••••••';
 
+      if (window.isBalanceMasked) {
+        // Show mask (force visibility with important)
+        if (maskedEl.textContent.trim() === '' || maskedEl.textContent.indexOf('•') === -1) maskedEl.textContent = maskText;
+        maskedEl.style.setProperty('display', maskedEl.tagName === 'DIV' ? 'block' : 'inline', 'important');
+        maskedEl.style.setProperty('opacity', '1', 'important');
+        maskedEl.style.setProperty('visibility', 'visible', 'important');
+      } else {
+        // Hide mask but DO NOT clear text (keeps layout stable)
+        maskedEl.style.setProperty('opacity', '0', 'important');
+        maskedEl.style.setProperty('display', 'none', 'important');
+        maskedEl.style.setProperty('visibility', 'hidden', 'important');
+      }
+    } catch(e){ console.warn('applyBalanceVisibility: masked update failed', e); }
+  });
 
+  // Update eye UI (aria / classes)
+  try {
+    document.querySelectorAll('.balance-eye-toggle').forEach(eye => {
+      eye.classList.toggle('open', !window.isBalanceMasked);
+      eye.classList.toggle('closed', !!window.isBalanceMasked);
+      eye.setAttribute && eye.setAttribute('aria-pressed', String(!window.isBalanceMasked));
+    });
+  } catch(e){}
+
+  return true;
+}
+// Expose globally (so console and other modules can call it)
+window.applyBalanceVisibility = applyBalanceVisibility;
 
 
 
