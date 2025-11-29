@@ -1441,22 +1441,40 @@ function setupNuclearEyeToggle() {
     });
 
     // FORCE ALL EYES TO SYNC (like twins)
-    document.querySelectorAll('.balance-eye-toggle').forEach(toggle => {
-      toggle.classList.toggle('open', shouldShowBalance);
-      toggle.classList.toggle('closed', !shouldShowBalance);
-      toggle.setAttribute('aria-pressed', shouldShowBalance);
-      toggle.setAttribute('aria-label', shouldShowBalance ? 'Hide balance' : 'Show balance');
+    // Sync ALL eyes + balance switch knob — 100% in sync forever
+document.querySelectorAll('.balance-eye-toggle').forEach(toggle => {
+  toggle.classList.toggle('open', shouldShowBalance);
+  toggle.classList.toggle('closed', !shouldShowBalance);
+  toggle.setAttribute('aria-pressed', shouldShowBalance);
+  toggle.setAttribute('aria-label', shouldShowBalance ? 'Hide balance' : 'Show balance');
 
-      const o = toggle.querySelector('.eye-open-svg');
-      const c = toggle.querySelector('.eye-closed-svg');
-      if (o && c) {
-        o.style.transition = c.style.transition = 'transform 420ms cubic-bezier(.2,.9,.3,1), opacity 320ms ease';
-        o.style.opacity = shouldShowBalance ? '1' : '0';
-        o.style.transform = `translate(-50%,-50%) scaleY(${shouldShowBalance ? 1 : 0.25})`;
-        c.style.opacity = shouldShowBalance ? '0' : '1';
-        c.style.transform = `translate(-50%,-50%) scaleY(${shouldShowBalance ? 0.25 : 1})`;
-      }
-    });
+  const o = toggle.querySelector('.eye-open-svg');
+  const c = toggle.querySelector('.eye-closed-svg');
+  if (o && c) {
+    o.style.transition = c.style.transition = 'transform 420ms cubic-bezier(.2,.9,.3,1), opacity 320ms ease';
+    o.style.opacity = shouldShowBalance ? '1' : '0';
+    o.style.transform = `translate(-50%,-50%) scaleY(${shouldShowBalance ? 1 : 0.25})`;
+    c.style.opacity = shouldShowBalance ? '0' : '1';
+    c.style.transform = `translate(-50%,-50%) scaleY(${shouldShowBalance ? 0.25 : 1})`;
+  }
+});
+
+// FORCE BALANCE SWITCH TO FOLLOW IMMEDIATELY (this was missing!)
+const switchEl = document.getElementById('balanceSwitch');
+if (switchEl) {
+  // 1. Set correct state
+  switchEl.setAttribute('aria-checked', shouldShowBalance ? 'true' : 'false');
+
+  // 2. Force the knob to have the exact same premium animation as the eye
+  const knob = switchEl.querySelector('.knob');
+  if (knob) {
+    knob.style.transition = 'transform 420ms cubic-bezier(0.2, 0.9, 0.3, 1)';
+    // CSS will move it automatically via [aria-checked], but we force repaint so it never gets stuck
+    knob.style.transform = shouldShowBalance 
+      ? (switchEl.classList.contains('small') ? 'translateX(18px)' : 'translateX(26px)') 
+      : 'translateX(0)';
+  }
+}
 
     console.log(`EYE FORCE: Balance is now ${shouldShowBalance ? 'VISIBLE' : 'HIDDEN'} — all eyes in sync`);
   };
@@ -8888,7 +8906,6 @@ document.querySelectorAll('.contact-box').forEach((box) => {
   const __sec_bioTx = __sec_q('#bioTxSwitch');
   const __sec_pinBtn = __sec_q('#pinToggleBtn');
   const __sec_pwdBtn = __sec_q('#changePwdBtn');
-  const __sec_balanceSwitch = __sec_q('#balanceSwitch');
   const __sec_launcherBtn = __sec_q('#securityBtn');
 
   __sec_log.d('Modal elements queried:', {
@@ -9568,11 +9585,7 @@ window.addEventListener('beforeunload', () => {
       localStorage.setItem(__sec_KEYS.bioTx, val);
       __sec_log.d('beforeunload: stored bioTx', val);
     }
-    if (__sec_balanceSwitch) { 
-      const val = __sec_isChecked(__sec_balanceSwitch) ? '1' : '0';
-      localStorage.setItem(__sec_KEYS.balance, val);
-      __sec_log.d('beforeunload: stored balance', val);
-    }
+    
   } catch (e) { 
     __sec_log.e('beforeunload storage error', e);
   }
@@ -10849,32 +10862,7 @@ const __sec_parentHandler = async () => {
       __sec_log.w('no bioTx switch (#bioTxSwitch) found');
     }
 
-    if (__sec_balanceSwitch) {
-      __sec_log.d('wireEvents: Wiring balance (#balanceSwitch)');
-      const __sec_balanceHandler = () => {
-        __sec_log.d('balanceHandler entry');
-        const on = __sec_toggleSwitch(__sec_balanceSwitch);
-        try {
-          localStorage.setItem(__sec_KEYS.balance, on ? '1' : '0');
-          __sec_log.d('balanceHandler: Stored', on ? '1' : '0');
-        } catch (e) {
-          __sec_log.e('balanceHandler: Storage error', e);
-        }
-        window.dispatchEvent(new CustomEvent('security:balance-visibility-changed', { detail: { visible: on } }));
-        __sec_log.i('balanceSwitch ->', on);
-        __sec_log.d('balanceHandler exit');
-      };
-      __sec_balanceSwitch.addEventListener('click', __sec_balanceHandler);
-      __sec_balanceSwitch.addEventListener('keydown', (e) => {
-        __sec_log.d('balance keydown', { key: e.key });
-        if (e.key === ' ' || e.key === 'Enter') {
-          e.preventDefault();
-          __sec_balanceHandler();
-        }
-      });
-    } else {
-      __sec_log.w('no balance switch (#balanceSwitch) found');
-    }
+    
 
     __sec_log.i('events wired (with WebAuthn integration)');
   } catch (err) {
@@ -16846,298 +16834,17 @@ window.addEventListener('storage', function(e) {
 });
 
 
+// MAKE THE SWITCH CLICKABLE — toggles the eye exactly like clicking an eye
+document.getElementById('balanceSwitch')?.addEventListener('click', (e) => {
+  e.preventDefault();
+  e.stopImmediatePropagation();
 
-// /* Balance sync V3 — pinned-position friendly (no layout moves, opacity-only, single-state) */
-// (function () {
-//   const STORAGE_KEY = 'fg_show_balance';
-//   const TOGGLE_SELECTORS = ['#balanceSwitch', '.balance-eye-toggle', '.security-balance-toggle', '[data-balance-toggle]'];
-//   const BALANCE_CARD_SELECTOR = '.balance';
-//   const MASK_SEL = '.balance-masked';
-//   const REAL_SEL = '.balance-real';
-
-//   // internal state
-//   let state = true;       // visible by default
-//   let updating = false;   // lock while applying update
-//   const ANIM_MS = 420;    // animation length (ms)
-
-//   function readStored() {
-//     try {
-//       const v = localStorage.getItem(STORAGE_KEY);
-//       if (v === null) return true;
-//       return v === 'true';
-//     } catch (e) { return true; }
-//   }
-//   function writeStored(v) {
-//     try { localStorage.setItem(STORAGE_KEY, v ? 'true' : 'false'); } catch (e) {}
-//   }
-
-//   function allToggles() {
-//     const els = [];
-//     TOGGLE_SELECTORS.forEach(sel => {
-//       try { document.querySelectorAll(sel).forEach(el => { if (!els.includes(el)) els.push(el); }); } catch (_) {}
-//     });
-//     return els;
-//   }
-
-//   // Reserve min-width for balance wrapper so toggling opacity doesn't change layout
-//   function reserveWidths() {
-//     document.querySelectorAll(BALANCE_CARD_SELECTOR).forEach(card => {
-//       try {
-//         const wrapper = card.querySelector('p') || card;
-//         const real = card.querySelector(REAL_SEL);
-//         if (!wrapper || !real) return;
-//         // ensure wrapper is inline-block so minWidth applies
-//         const prevDisplay = wrapper.style.display;
-//         wrapper.style.display = wrapper.style.display || 'inline-block';
-
-//         // Make sure real is visible to measure accurately (temporarily)
-//         const prevRealOpacity = real.style.opacity;
-//         real.style.opacity = '1';
-//         // measure required width
-//         const needed = wrapper.offsetWidth || real.offsetWidth || 0;
-//         if (needed) wrapper.style.minWidth = wrapper.style.minWidth || `${needed}px`;
-//         // restore
-//         real.style.opacity = prevRealOpacity || (state ? '1' : '0');
-//         // Defensive: ensure mask has initial opacity (if not set)
-//         const mask = card.querySelector(MASK_SEL);
-//         if (mask && (mask.style.opacity === '')) mask.style.opacity = state ? '0' : '1';
-//       } catch (e) { /* ignore measurement failures */ }
-//     });
-//   }
-
-//   function animateEyeBtn(btn, visible) {
-//     if (!btn) return;
-//     const openSvg = btn.querySelector('.eye-open-svg');
-//     const closedSvg = btn.querySelector('.eye-closed-svg');
-//     if (openSvg && closedSvg) {
-//       openSvg.style.transition = openSvg.style.transition || 'transform 420ms cubic-bezier(.2,.9,.3,1), opacity 320ms ease';
-//       closedSvg.style.transition = closedSvg.style.transition || 'transform 420ms cubic-bezier(.2,.9,.3,1), opacity 320ms ease';
-//       requestAnimationFrame(() => {
-//         if (visible) {
-//           openSvg.style.transform = 'translate(-50%,-50%) scaleY(1)'; openSvg.style.opacity = '1';
-//           closedSvg.style.transform = 'translate(-50%,-50%) scaleY(.25)'; closedSvg.style.opacity = '0';
-//         } else {
-//           openSvg.style.transform = 'translate(-50%,-50%) scaleY(.25)'; openSvg.style.opacity = '0';
-//           closedSvg.style.transform = 'translate(-50%,-50%) scaleY(1)'; closedSvg.style.opacity = '1';
-//         }
-//       });
-//     } else {
-//       if (visible) btn.classList.remove('eye-closed'); else btn.classList.add('eye-closed');
-//     }
-//   }
-
-//   function applyToAllToggles(visible) {
-//     const toggles = allToggles();
-//     toggles.forEach(btn => {
-//       try {
-//         if (btn.id === 'balanceSwitch') {
-//           btn.setAttribute('aria-checked', visible ? 'true' : 'false');
-//           if (visible) btn.classList.remove('off'); else btn.classList.add('off');
-//         } else {
-//           btn.setAttribute('aria-pressed', visible ? 'false' : 'true');
-//           btn.setAttribute('data-balance-visible', visible ? 'true' : 'false');
-//         }
-//         animateEyeBtn(btn, visible);
-//       } catch (e) {}
-//     });
-//   }
-
-//   // Core: toggle opacity only — NO display changes, NO positioning changes
-//   function applyToBalances(visible) {
-//     const cards = Array.from(document.querySelectorAll(BALANCE_CARD_SELECTOR));
-//     cards.forEach(card => {
-//       try {
-//         const mask = card.querySelector(MASK_SEL);
-//         const real = card.querySelector(REAL_SEL);
-
-//         if (real && mask) {
-//           // Ensure transitions present (only opacity)
-//           real.style.transition = real.style.transition || `opacity ${ANIM_MS}ms ease`;
-//           mask.style.transition = mask.style.transition || `opacity ${Math.floor(ANIM_MS * 0.66)}ms ease`;
-
-//           // Do not change display/layout. Only animate opacity and pointer-events.
-//           if (visible) {
-//             // Make real visible (opacity), mask hidden (opacity 0)
-//             real.style.opacity = '1';
-//             mask.style.opacity = '0';
-//             // pointer events toggled after a short delay so immediate clicks don't hit hidden element
-//             setTimeout(() => { real.style.pointerEvents = ''; mask.style.pointerEvents = 'none'; }, 30);
-//           } else {
-//             mask.style.opacity = '1';
-//             real.style.opacity = '0';
-//             setTimeout(() => { mask.style.pointerEvents = ''; real.style.pointerEvents = 'none'; }, 30);
-//           }
-//         } else {
-//           // fallback: toggle visibility property for safety (keeps layout)
-//           const valueEl = card.querySelector('[data-balance]') || card.querySelector('.amount') || card.querySelector('p');
-//           if (valueEl) {
-//             valueEl.style.visibility = visible ? 'visible' : 'hidden';
-//           }
-//         }
-//       } catch (e) {}
-//     });
-//   }
-
-//   // authoritative updater — idempotent
-//   function updateAll(visible, source = 'program') {
-//     if (state === !!visible) return;
-//     state = !!visible;
-//     updating = true;
-
-//     // Apply reserved widths only once (helps prevent jumps)
-//     reserveWidths();
-
-//     // optimistically apply UI
-//     applyToAllToggles(state);
-//     applyToBalances(state);
-
-//     // persist new state
-//     writeStored(state);
-
-//     // small reapply to override other handlers
-//     setTimeout(() => { applyToAllToggles(state); applyToBalances(state); }, 40);
-
-//     // unlock after animations expected to complete
-//     setTimeout(() => { updating = false; }, ANIM_MS + 60);
-
-//     // notify others
-//     try { window.dispatchEvent(new CustomEvent('fg:balance-visibility-changed', { detail: { visible: state, source } })); } catch(e) {}
-//   }
-
-//   // capture-phase UI handler to prevent conflicting handlers
-//   function uiHandler(e) {
-//     if (e.button && e.button !== 0) return;
-//     try { e.stopImmediatePropagation(); } catch (err) {}
-//     e.preventDefault();
-
-//     if (updating) return;
-//     const next = !state;
-//     updateAll(next, 'user');
-//   }
-
-//   function wire() {
-//     const toggles = allToggles();
-//     toggles.forEach(el => {
-//       if (el.__balanceSyncBound) return;
-//       el.addEventListener('click', uiHandler, { passive: false, capture: true });
-//       el.addEventListener('keydown', (ev) => {
-//         if (ev.key === ' ' || ev.key === 'Enter') {
-//           try { ev.stopImmediatePropagation(); } catch(_) {}
-//           ev.preventDefault();
-//           if (!updating) updateAll(!state, 'keyboard');
-//         }
-//       }, { passive: false, capture: true });
-//       el.__balanceSyncBound = true;
-//     });
-//   }
-
-//   function init() {
-//     // measure and reserve widths after fonts.ready if available
-//     const start = () => {
-//       reserveWidths();
-//       state = readStored();
-//       applyToAllToggles(state);
-//       applyToBalances(state);
-//       wire();
-
-//       // observe dynamic inserts
-//       const mo = new MutationObserver((mutations) => {
-//         let needsReserve = false, needsWire = false;
-//         for (const m of mutations) {
-//           if (!m.addedNodes) continue;
-//           for (const n of m.addedNodes) {
-//             if (n.nodeType !== 1) continue;
-//             try {
-//               if (n.matches && n.matches(BALANCE_CARD_SELECTOR)) needsReserve = true;
-//               if (n.querySelector && n.querySelector(BALANCE_CARD_SELECTOR)) needsReserve = true;
-//               if (TOGGLE_SELECTORS.some(s => { try { return n.matches && n.matches(s); } catch(_) { return false; } })) needsWire = true;
-//               if (n.querySelector && TOGGLE_SELECTORS.some(s => n.querySelector(s))) needsWire = true;
-//             } catch (_) {}
-//           }
-//         }
-//         if (needsReserve) setTimeout(reserveWidths, 30);
-//         if (needsWire) setTimeout(wire, 30);
-//       });
-//       try { mo.observe(document.body, { subtree: true, childList: true }); } catch (e) {}
-//     };
-
-//     if (document.fonts && document.fonts.ready) {
-//       document.fonts.ready.then(start).catch(start);
-//     } else {
-//       setTimeout(start, 20);
-//     }
-//   }
-
-//   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
-//   else setTimeout(init, 10);
-
-//   // public API
-//   window.__fg_balance_visibility = {
-//     isVisible: () => state,
-//     set: (v) => updateAll(!!v, 'api'),
-//     toggle: () => { if (!updating) updateAll(!state, 'api-toggle'); }
-//   };
-// })();
-
-// BALANCESWITCH → PERFECT TWIN WITH EYE (100% SAFE — NO CONFLICTS)
-(() => {
-  const switchEl = document.getElementById('balanceSwitch');
-  if (!switchEl) return;
-
-  // Read current state from your existing global
-  const isVisible = () => !window.isBalanceMasked;
-
-  // Sync switch to current state (only uses aria-checked — matches your CSS perfectly)
-  const syncSwitch = () => {
-    const visible = isVisible();
-    switchEl.setAttribute('aria-checked', visible ? 'true' : 'false');
-    // No classList, no interference — your CSS reads only aria-checked
-  };
-
-  // Initial sync
-  syncSwitch();
-
-  // When user clicks the switch → act exactly like clicking the eye
-  switchEl.addEventListener('click', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-
-    // Reuse your existing nuclear eye logic by simulating a click on any eye
-    const anyEye = document.querySelector('.balance-eye-toggle');
-    if (anyEye) {
-      anyEye.click(); // This triggers your bulletproof __NUCLEAR_EYE_HANDLER
-    } else {
-      // Fallback if no eye exists yet (very rare)
-      window.isBalanceMasked = !window.isBalanceMasked;
-      localStorage.setItem('balanceMasked', window.isBalanceMasked);
-      applyBalanceVisibility();
-      syncAllEyes();
-    }
-
-    // Always re-sync after the nuclear handler runs
-    setTimeout(syncSwitch, 50);
-  });
-
-  // Keep switch in sync whenever the eye changes state (your nuclear handler runs)
-  const originalHandler = window.__NUCLEAR_EYE_HANDLER;
-  window.__NUCLEAR_EYE_HANDLER = function(e) {
-    // Run your original perfect handler
-    if (originalHandler) originalHandler(e);
-    // Then sync the switch — runs after everything is updated
-    requestAnimationFrame(syncSwitch);
-  };
-
-  // Also sync on storage changes (other tabs, login, etc.)
-  window.addEventListener('storage', (e) => {
-    if (e.key === 'balanceMasked') syncSwitch();
-  });
-
-  // Final safety sync on load/refresh
-  window.addEventListener('load', syncSwitch);
-  setTimeout(syncSwitch, 100);
-
-  console.log('balanceSwitch → now a PERFECT TWIN of the eye toggle (zero conflicts)');
-})();
+  // Just click any eye — your nuclear handler will do ALL the work perfectly
+  const anyEye = document.querySelector('.balance-eye-toggle');
+  if (anyEye) {
+    anyEye.click(); // This triggers __NUCLEAR_EYE_HANDLER → switch auto-updates
+  }
+});
 
 updateContinueState();
 
