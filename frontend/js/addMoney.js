@@ -110,13 +110,6 @@ const addMoneyModal = document.getElementById('addMoneyModal');
       // 2. Show beautiful success toast
       showSuccessToast(`₦${Number(amount).toLocaleString()} received!`, `Wallet updated to ₦${Number(balance).toLocaleString()}`);
 
-      // 3. Play subtle sound (optional)
-      try {
-        const audio = new Audio('frontend/sound/success.mp3');
-        audio.volume = 0.9;
-        audio.play().catch(() => {});
-      } catch (e) {}
-
       // 4. Reset flag after 30s (allow next payment)
       setTimeout(() => { hasShownSuccess = false; }, 30000);
     }
