@@ -1570,15 +1570,65 @@ window.updateAllBalances = function(newBalance, skipAnimation = false) {
 window.applyBalanceVisibility = applyBalanceVisibility;
 
 // REALTIME SYSTEM (unchanged)
-(() => {
+// PRODUCTION-LEVEL REALTIME BALANCE (WebSocket + Polling Fallback)
+(function() {
   const uid = window.__USER_UID || localStorage.getItem('userId');
   if (!uid) return;
 
   let ws = null;
   let pollInterval = null;
 
-  const connectWS = () => { /* ... your existing WS code ... */ };
-  const startPolling = () => { /* ... your existing polling code ... */ };
+  function connectWS() {
+    try {
+      ws = new WebSocket('wss://api.flexgig.com.ng/ws/wallet');
+
+      ws.onopen = () => {
+        console.log('[Balance] WebSocket connected');
+        ws.send(JSON.stringify({ type: 'subscribe', user_uid: uid }));
+        if (pollInterval) clearInterval(pollInterval);
+      };
+
+      ws.onmessage = (e) => {
+        const data = JSON.parse(e.data);
+        if (data.type === 'balance_update') {
+          window.updateAllBalances(data.balance);
+          if (window.notify) window.notify(`₦${data.amount.toLocaleString()} credited!`, 'success');
+        }
+      };
+
+      ws.onclose = () => {
+        console.warn('[Balance] WebSocket closed → starting polling fallback');
+        startPolling();
+      };
+    } catch (e) {
+      console.error('[Balance] WebSocket connection failed:', e);
+      startPolling();
+    }
+  }
+
+  function startPolling() {
+    if (pollInterval) clearInterval(pollInterval);
+    pollInterval = setInterval(async () => {
+      try {
+        const res = await fetch(`${window.__SEC_API_BASE}/api/session?light=true`, {
+          credentials: 'include'
+        });
+        if (res.ok) {
+          const json = await res.json();
+          const newBal = json.user?.wallet_balance;
+          if (newBal !== undefined) {
+            const current = window.currentDisplayedBalance;
+            if (newBal > current) {
+              window.updateAllBalances(newBal);
+              if (window.notify) window.notify('Payment received!', 'success');
+            }
+          }
+        }
+      } catch(e) {
+        console.warn('[Balance] Polling failed:', e);
+      }
+    }, 10000);
+  }
 
   connectWS();
 })();
@@ -16845,6 +16895,28 @@ document.getElementById('balanceSwitch')?.addEventListener('click', (e) => {
     anyEye.click(); // This triggers __NUCLEAR_EYE_HANDLER → switch auto-updates
   }
 });
+// COUNT-UP ON RELOAD WHEN EYE IS OPEN (premium feel)
+function triggerCountUpOnReload() {
+  // Only run once per page load
+  if (window.countUpTriggered) return;
+  window.countUpTriggered = true;
+
+  // Wait until balance is fully loaded and eye is open
+  const startCountUp = () => {
+    if (window.isBalanceMasked || !window.currentDisplayedBalance) return;
+
+    // Force a fake "from 0" update → triggers your existing animation
+    window.updateAllBalances(0);
+    setTimeout(() => {
+      window.updateAllBalances(window.currentDisplayedBalance, true); // true = skipAnimation? NO → we WANT animation
+    }, 80);
+  };
+
+  // Run now + safety delays
+  setTimeout(startCountUp, 100);
+  setTimeout(startCountUp, 300);
+  setTimeout(startCountUp, 600);
+}
 
 updateContinueState();
 

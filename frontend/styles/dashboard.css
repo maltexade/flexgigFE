@@ -4537,3 +4537,29 @@ a[style*="color: #f00"] { color: var(--danger); }
 .copy-btn:hover {
   background: #00aaff;
 }
+
+
+
+/* ELIMINATE FLASH ON LOAD — one is always hidden */
+.balance-masked,
+.balance-real {
+  position: absolute;
+  top: 0; left: 0;
+  opacity: 0;
+  transition: opacity 320ms ease;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Show the correct one based on global state */
+.balance-masked[data-visible="true"],
+.balance-real[data-visible="true"] {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Optional: make parent reserve space so layout doesn’t jump */
+p:has(.balance-real, .balance-masked) {
+  min-width: 110px; /* or measure your longest balance and set it */
+  display: inline-block;
+}
