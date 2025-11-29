@@ -355,56 +355,68 @@ fundBtn.addEventListener('click', async () => {
 
 // --- Show Generated Bank Account ---
 function showGeneratedAccount(data) {
-  if (countdownTimerInterval) clearInterval(countdownTimerInterval);
+  // Clear any existing countdown
+  if (countdownTimerInterval) {
+    clearInterval(countdownTimerInterval);
+    countdownTimerInterval = null;
+  }
 
+  // Calculate initial countdown in seconds
   let countdown;
   if (data.expiresAt) {
     const expiryDate = new Date(data.expiresAt);
-    countdown = Math.floor((expiryDate - new Date()) / 1000);
+    const now = new Date();
+    countdown = Math.floor((expiryDate - now) / 1000);
     if (countdown < 0) countdown = 0;
   } else {
-    countdown = 30 * 60; // default 30 min
+    countdown = 30 * 60; // default 30 minutes
   }
 
   const modalContent = document.createElement('div');
   modalContent.classList.add('addMoney-generated-content');
 
   modalContent.innerHTML = `
-    <div class="addMoney-generated-body" style="padding:14px; background:#111010ff; border-radius:16px; color:#fff; min-height:55vh; max-height:60vh; overflow-y:auto;">
-      <p style="margin:0; font-size:10px; opacity:0.75;">Amount to Pay</p>
+    <div class="addMoney-generated-body" style="padding:14px; background:#111010ff; border-radius:16px; color:#ffffff; min-height:55vh; max-height:60vh; overflow-y:auto; display:block; text-align:left; box-sizing:border-box;">
+      <p style="margin:0; font-size:10px; opacity:0.75; text-transform: uppercase;">Amount to Pay</p>
       <div style="font-size:20px; font-weight:700; margin:6px 0 14px;">₦${Number(data.amount).toLocaleString()}</div>
 
       <div style="margin-bottom:12px;">
-        <p style="margin:0; font-size:10px; opacity:0.75;">Bank</p>
+        <p style="margin:0; font-size:10px; opacity:0.75; text-transform: uppercase;">Bank</p>
         <img src="/frontend/img/opay-logo.png" alt="Bank Logo" onerror="this.style.display='none'" style="width:auto; height:36px; margin-top:6px; object-fit:contain;">
       </div>
 
       <div style="margin-bottom:12px;">
-        <p style="margin:0; font-size:10px; opacity:0.75;">Account Name</p>
+        <p style="margin:0; font-size:10px; opacity:0.75; text-transform: uppercase;">Account Name</p>
         <div style="font-size:15px; font-weight:600; margin-top:4px;">Flexgig Digital Network</div>
       </div>
 
       <div style="margin-bottom:14px;">
-        <p style="margin:0; font-size:10px; opacity:0.75;">Account Number</p>
+        <p style="margin:0; font-size:10px; opacity:0.75; text-transform: uppercase;">Account Number</p>
         <div style="display:flex; align-items:center; gap:10px; margin-top:6px; flex-wrap: wrap;">
           <span style="font-size:18px; font-weight:700; letter-spacing:1px; word-break: break-all;">${data.accountNumber}</span>
-          <button class="copy-btn" data-copy="${data.accountNumber}" style="border:none; background:#3b82f6; padding:8px 10px; border-radius:8px; cursor:pointer;">Copy</button>
+          <button class="copy-btn" data-copy="${data.accountNumber}" style="border:none; background:#3b82f6; padding:8px 10px; border-radius:8px; cursor:pointer;">
+            <svg width="18px" height="18px" viewBox="0 0 24 24" fill="none">
+              <path d="M6 11C6 8.17157 6 6.75736 6.87868 5.87868C7.75736 5 9.17157 5 12 5H15C17.8284 5 19.2426 5 20.1213 5.87868C21 6.75736 21 8.17157 21 11V16C21 18.8284 21 20.2426 20.1213 21.1213C19.2426 22 17.8284 22 15 22H12C9.17157 22 7.75736 22 6.87868 21.1213C6 20.2426 6 18.8284 6 16V11Z" stroke="#ffffff" stroke-width="1.3"></path>
+              <path opacity="0.5" d="M6 19C4.34315 19 3 17.6569 3 16V10C3 6.22876 3 4.34315 4.17157 3.17157C5.34315 2 7.22876 2 11 2H15C16.6569 2 18 3.34315 18 5" stroke="#ffffff" stroke-width="1.3"></path>
+            </svg>
+          </button>
         </div>
       </div>
 
       <div style="margin-bottom:10px;">
-        <p style="margin:0; font-size:10px; opacity:0.75;">Expires In</p>
+        <p style="margin:0; font-size:10px; opacity:0.75; text-transform: uppercase;">Expires In</p>
         <div style="margin-top:6px; background:#10b981; padding:6px 12px; border-radius:10px; font-size:18px; font-weight:700; display:inline-block;">
           <span id="genCountdown">30:00</span>
         </div>
       </div>
 
       <div style="margin-top:18px; display:flex; justify-content:center;">
-        <button id="cancelTransactionBtn" style="background:transparent; border:1px solid rgba(255,255,255,0.12); color:#fff; padding:10px 14px; border-radius:12px; font-weight:700; cursor:pointer; width:100%;">Cancel transaction</button>
+        <button id="cancelTransactionBtn" class="addMoney-cancel-btn" style="background:transparent; border:1px solid rgba(255,255,255,0.12); color:#fff; padding:10px 14px; border-radius:12px; font-weight:700; cursor:pointer; width:100%;">Cancel transaction</button>
       </div>
     </div>
   `;
 
+  // Replace modal content
   const contentContainer = addMoneyModal.querySelector('.addMoney-modal-content');
   contentContainer.innerHTML = '';
   contentContainer.appendChild(modalContent);
@@ -414,9 +426,11 @@ function showGeneratedAccount(data) {
   if (copyBtn) {
     copyBtn.addEventListener('click', e => {
       const accountNum = e.currentTarget.dataset.copy;
-      navigator.clipboard.writeText(accountNum)
-        .then(() => window.notify?.('Account number copied!', 'success') || alert('Account number copied!'))
-        .catch(() => alert('Failed to copy. Please copy manually: ' + accountNum));
+      navigator.clipboard.writeText(accountNum).then(() => {
+        window.notify?.('Account number copied!', 'success') || alert('Account number copied!');
+      }).catch(() => {
+        alert('Failed to copy. Please copy manually: ' + accountNum);
+      });
     });
   }
 
@@ -424,54 +438,75 @@ function showGeneratedAccount(data) {
   const countdownEl = modalContent.querySelector('#genCountdown');
   const updateCountdown = () => {
     if (!countdownEl) return;
+    const minutes = Math.floor(countdown / 60);
+    const seconds = countdown % 60;
     countdownEl.textContent = countdown > 0
-      ? `${String(Math.floor(countdown/60)).padStart(2,'0')}:${String(countdown%60).padStart(2,'0')}`
+      ? `${String(minutes).padStart(2,'0')}:${String(seconds).padStart(2,'0')}`
       : 'EXPIRED';
-    if (countdown <= 0) countdownEl.parentElement.style.background = '#ef4444';
+
+    if (countdown <= 0) {
+      countdownEl.parentElement.style.background = '#ef4444';
+    }
   };
 
+  if (countdownTimerInterval) clearInterval(countdownTimerInterval);
   countdownTimerInterval = setInterval(() => {
     countdown--;
     updateCountdown();
-    if (countdown < 0) handleTransactionCancelOrExpire(data.transactionId);
+    if (countdown < 0) {
+      // FIX: Pass reference instead of transactionId
+      handleTransactionCancelOrExpire(data.reference);
+    }
   }, 1000);
   updateCountdown();
 
   // --- Cancel Button ---
   const cancelBtn = modalContent.querySelector('#cancelTransactionBtn');
-  if (cancelBtn) cancelBtn.addEventListener('click', () => handleTransactionCancelOrExpire(data.transactionId));
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', () => {
+      // FIX: Pass reference instead of transactionId
+      handleTransactionCancelOrExpire(data.reference);
+    });
+  }
 
-  // --- Close Button ---
+  // --- Close Button (optional) ---
   const closeBtn = modalContent.querySelector('.addMoney-modal-close');
-  if (closeBtn) closeBtn.addEventListener('click', () => {
-    if (window.modalManager?.closeModal) window.modalManager.closeModal('addMoneyModal');
-    else addMoneyModal.style.transform = 'translateY(100%)';
-    if (countdownTimerInterval) clearInterval(countdownTimerInterval);
-  });
+  if (closeBtn) {
+    closeBtn.addEventListener('click', () => {
+      if (window.modalManager?.closeModal) window.modalManager.closeModal('addMoneyModal');
+      else addMoneyModal.style.transform = 'translateY(100%)';
+      if (countdownTimerInterval) {
+        clearInterval(countdownTimerInterval);
+        countdownTimerInterval = null;
+      }
+    });
+  }
 }
 
 // --- Cancel / Expire Transaction Helper ---
-async function handleTransactionCancelOrExpire(transactionId) {
+async function handleTransactionCancelOrExpire(reference) {
   if (countdownTimerInterval) {
     clearInterval(countdownTimerInterval);
     countdownTimerInterval = null;
   }
 
-  if (transactionId) {
+  if (reference) {
     try {
-      await apiFetch(`/api/cancel-transaction/${transactionId}`, { method: 'POST' });
-      console.log('Transaction cancelled/expired:', transactionId);
+      // FIX: Use correct endpoint with reference parameter
+      await apiFetch(`/api/fund-wallet/cancel/${reference}`, { method: 'POST' });
+      console.log('Transaction cancelled/expired:', reference);
+      window.notify?.('Transaction cancelled successfully', 'success');
     } catch (err) {
       console.error('Error cancelling transaction:', err);
+      window.notify?.('Failed to cancel transaction', 'error');
     }
   }
 
   if (window.modalManager?.closeModal) window.modalManager.closeModal('addMoneyModal');
   else document.getElementById('addMoneyModal').style.transform = 'translateY(100%)';
 
-  openAddMoneyModalContent(); // reset modal
+  openAddMoneyModalContent(); // reset modal for fresh start
 }
-
 
 
 // --- Initialize when DOM is ready ---
