@@ -1688,6 +1688,8 @@ applyBalanceVisibility();
   }
 }
 
+
+
 // Helper: Update localStorage with user data
 function updateLocalStorageFromUser(user) {
   try {
@@ -16843,6 +16845,8 @@ window.addEventListener('storage', function(e) {
   }
 });
 
+
+
 // /* Balance sync V3 — pinned-position friendly (no layout moves, opacity-only, single-state) */
 // (function () {
 //   const STORAGE_KEY = 'fg_show_balance';
@@ -17074,6 +17078,66 @@ window.addEventListener('storage', function(e) {
 //     toggle: () => { if (!updating) updateAll(!state, 'api-toggle'); }
 //   };
 // })();
+
+// BALANCESWITCH → PERFECT TWIN WITH EYE (100% SAFE — NO CONFLICTS)
+(() => {
+  const switchEl = document.getElementById('balanceSwitch');
+  if (!switchEl) return;
+
+  // Read current state from your existing global
+  const isVisible = () => !window.isBalanceMasked;
+
+  // Sync switch to current state (only uses aria-checked — matches your CSS perfectly)
+  const syncSwitch = () => {
+    const visible = isVisible();
+    switchEl.setAttribute('aria-checked', visible ? 'true' : 'false');
+    // No classList, no interference — your CSS reads only aria-checked
+  };
+
+  // Initial sync
+  syncSwitch();
+
+  // When user clicks the switch → act exactly like clicking the eye
+  switchEl.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    // Reuse your existing nuclear eye logic by simulating a click on any eye
+    const anyEye = document.querySelector('.balance-eye-toggle');
+    if (anyEye) {
+      anyEye.click(); // This triggers your bulletproof __NUCLEAR_EYE_HANDLER
+    } else {
+      // Fallback if no eye exists yet (very rare)
+      window.isBalanceMasked = !window.isBalanceMasked;
+      localStorage.setItem('balanceMasked', window.isBalanceMasked);
+      applyBalanceVisibility();
+      syncAllEyes();
+    }
+
+    // Always re-sync after the nuclear handler runs
+    setTimeout(syncSwitch, 50);
+  });
+
+  // Keep switch in sync whenever the eye changes state (your nuclear handler runs)
+  const originalHandler = window.__NUCLEAR_EYE_HANDLER;
+  window.__NUCLEAR_EYE_HANDLER = function(e) {
+    // Run your original perfect handler
+    if (originalHandler) originalHandler(e);
+    // Then sync the switch — runs after everything is updated
+    requestAnimationFrame(syncSwitch);
+  };
+
+  // Also sync on storage changes (other tabs, login, etc.)
+  window.addEventListener('storage', (e) => {
+    if (e.key === 'balanceMasked') syncSwitch();
+  });
+
+  // Final safety sync on load/refresh
+  window.addEventListener('load', syncSwitch);
+  setTimeout(syncSwitch, 100);
+
+  console.log('balanceSwitch → now a PERFECT TWIN of the eye toggle (zero conflicts)');
+})();
 
 updateContinueState();
 
