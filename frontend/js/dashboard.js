@@ -1569,6 +1569,99 @@ window.updateAllBalances = function(newBalance, skipAnimation = false) {
 
 window.applyBalanceVisibility = applyBalanceVisibility;
 
+// ================================================
+//  MOBILE-SAFE BALANCE + MODAL AUTO-CLOSE RECOVERY
+//  Fixes: No toast/modal close after payment on mobile
+// ================================================
+(function mobileSafeBalanceRecovery() {
+  let hasRecoveredAfterPayment = false;
+  let lastKnownBalance = window.currentDisplayedBalance || 0;
+
+  // Track if addMoneyModal was open before background
+  let wasFundingInProgress = false;
+
+  // Mark when funding modal opens
+  document.addEventListener('modalOpened', (e) => {
+    if (e.detail === 'addMoneyModal') {
+      wasFundingInProgress = true;
+      hasRecoveredAfterPayment = false;
+      console.log('[Recovery] Funding modal opened — arming recovery');
+    }
+  });
+
+  // When page becomes visible again (user returns from bank app)
+  document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState !== 'visible') return;
+    if (!wasFundingInProgress) return;
+    if (hasRecoveredAfterPayment) return;
+
+    console.log('[Recovery] Page visible again — checking for missed payment...');
+
+    try {
+      // Force refresh balance from server
+      const session = await getSession();
+      const newBalance = session?.user?.wallet_balance;
+
+      if (newBalance !== undefined && newBalance > lastKnownBalance) {
+        const amount = newBalance - lastKnownBalance;
+
+        console.log(`[Recovery] Payment detected! +₦${amount}`);
+
+        // Update UI
+        window.updateAllBalances(newBalance);
+
+        // Close modal safely
+        if (window.modalManager?.closeModal) {
+          window.modalManager.closeModal('addMoneyModal');
+        } else {
+          const modal = document.getElementById('addMoneyModal');
+          if (modal) modal.style.transform = 'translateY(100%)';
+        }
+
+        // Show success toast (your beautiful one)
+        if (typeof window.__handleBalanceUpdate === 'function') {
+          window.__handleBalanceUpdate({
+            type: 'balance_update',
+            amount: amount,
+            balance: newBalance
+          });
+        } else {
+          // Fallback toast
+          window.notify?.(`₦${amount.toLocaleString()} received!`, 'success');
+        }
+
+        hasRecoveredAfterPayment = true;
+        wasFundingInProgress = false;
+        lastKnownBalance = newBalance;
+
+        console.log('[Recovery] Success! Modal closed + toast shown');
+      }
+    } catch (err) {
+      console.warn('[Recovery] Failed to recover balance', err);
+    }
+  });
+
+  // Also trigger on resume (some Android devices)
+  window.addEventListener('focus', () => {
+    setTimeout(() => {
+      if (document.visibilityState === 'visible' && wasFundingInProgress && !hasRecoveredAfterPayment) {
+        document.dispatchEvent(new Event('visibilitychange'));
+      }
+    }, 800);
+  });
+
+  // Update last known balance on every successful update
+  window.addEventListener('balance_update', (e) => {
+    const data = e.detail;
+    if (data?.balance !== undefined) {
+      lastKnownBalance = data.balance;
+      wasFundingInProgress = false; // payment completed
+    }
+  });
+
+  console.log('[Recovery] Mobile-safe balance recovery system ACTIVE');
+})();
+
 // ===============================================================
 //  UNIFIED REAL-TIME BALANCE SYSTEM (Mobile-Safe Version)
 //  - Guaranteed to work on iOS, Android, Desktop
