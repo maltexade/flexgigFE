@@ -1571,6 +1571,7 @@ window.applyBalanceVisibility = applyBalanceVisibility;
 
 // REALTIME SYSTEM (unchanged)
 // PRODUCTION-LEVEL REALTIME BALANCE (WebSocket + Polling Fallback)
+// FIXED REAL-TIME BALANCE + MODAL CLOSE + SUCCESS TOAST
 (function() {
   const uid = window.__USER_UID || localStorage.getItem('userId');
   if (!uid) return;
@@ -1589,19 +1590,52 @@ window.applyBalanceVisibility = applyBalanceVisibility;
       };
 
       ws.onmessage = (e) => {
-        const data = JSON.parse(e.data);
-        if (data.type === 'balance_update') {
-          window.updateAllBalances(data.balance);
-          if (window.notify) window.notify(`₦${data.amount.toLocaleString()} credited!`, 'success');
+        try {
+          const data = JSON.parse(e.data);
+          console.log('[Balance] WebSocket message:', data);
+
+          if (data.type === 'balance_update' && data.balance !== undefined) {
+            console.log('[Balance] Balance updated →', data.balance);
+
+            // 1. Update balance with animation
+            window.updateAllBalances(data.balance);
+
+            // 2. Show toast
+            if (window.notify) {
+              window.notify(`₦${Number(data.amount || 0).toLocaleString()} credited!`, 'success');
+            }
+
+            // 3. CLOSE ADD MONEY MODAL (this was missing!)
+            try {
+              if (typeof closeCheckoutModal === 'function') closeCheckoutModal();
+              else if (typeof ModalManager !== 'undefined' && ModalManager.closeModal) {
+                ModalManager.closeModal('addMoneyModal');
+              } else {
+                const modal = document.getElementById('addMoneyModal');
+                if (modal) modal.classList.add('hidden');
+              }
+            } catch (e) { console.warn('Failed to close add money modal', e); }
+
+            // 4. Optional: show success banner
+            if (typeof showBanner === 'function') {
+              showBanner('Funds added successfully!', { persistent: false });
+            }
+          }
+        } catch (err) {
+          console.warn('[Balance] Invalid WS message', err);
         }
       };
 
       ws.onclose = () => {
-        console.warn('[Balance] WebSocket closed → starting polling fallback');
+        console.warn('[Balance] WebSocket closed → starting polling');
         startPolling();
       };
+
+      ws.onerror = (err) => {
+        console.error('[Balance] WebSocket error', err);
+      };
     } catch (e) {
-      console.error('[Balance] WebSocket connection failed:', e);
+      console.error('[Balance] WS setup failed', e);
       startPolling();
     }
   }
@@ -1610,22 +1644,16 @@ window.applyBalanceVisibility = applyBalanceVisibility;
     if (pollInterval) clearInterval(pollInterval);
     pollInterval = setInterval(async () => {
       try {
-        const res = await fetch(`${window.__SEC_API_BASE}/api/session?light=true`, {
-          credentials: 'include'
-        });
+        const res = await fetch(`${window.__SEC_API_BASE}/api/session?light=true`, { credentials: 'include' });
         if (res.ok) {
           const json = await res.json();
           const newBal = json.user?.wallet_balance;
-          if (newBal !== undefined) {
-            const current = window.currentDisplayedBalance;
-            if (newBal > current) {
-              window.updateAllBalances(newBal);
-              if (window.notify) window.notify('Payment received!', 'success');
-            }
+          if (newBal !== undefined && newBal !== window.currentDisplayedBalance) {
+            window.updateAllBalances(newBal);
           }
         }
-      } catch(e) {
-        console.warn('[Balance] Polling failed:', e);
+      } catch (e) {
+        console.warn('[Balance] Polling failed', e);
       }
     }, 10000);
   }
