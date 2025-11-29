@@ -1576,6 +1576,13 @@ window.applyBalanceVisibility = applyBalanceVisibility;
 //  - Global "balance_update" event
 //  - Success Toast + Modal Close
 // ===============================================================
+// ===============================================================
+//  UNIFIED REAL-TIME BALANCE SYSTEM (Mobile-Safe Version)
+//  - Guaranteed to work on iOS, Android, Desktop
+//  - WebSocket + Polling Fallback
+//  - Global "balance_update" event
+//  - Success Toast + Modal Close
+// ===============================================================
 (function () {
   const uid = window.__USER_UID || localStorage.getItem('userId');
   if (!uid) {
@@ -1621,6 +1628,18 @@ window.applyBalanceVisibility = applyBalanceVisibility;
 
           if (newBal !== undefined && newBal !== currentBalance) {
             updateBalanceEverywhere(newBal);
+            
+            // 🔥 ALSO DISPATCH EVENT DURING POLLING (for modal close)
+            const oldBal = currentBalance;
+            if (oldBal !== null && newBal > oldBal) {
+              window.dispatchEvent(new CustomEvent("balance_update", { 
+                detail: { 
+                  type: 'balance_update',
+                  balance: newBal,
+                  amount: newBal - oldBal
+                }
+              }));
+            }
           }
         }
       } catch (err) {
@@ -1638,6 +1657,7 @@ window.applyBalanceVisibility = applyBalanceVisibility;
       ws = new WebSocket('wss://api.flexgig.com.ng/ws/wallet');
 
       ws.onopen = () => {
+        console.log('[Balance] WebSocket connected');
         ws.send(JSON.stringify({ type: 'subscribe', user_uid: uid }));
         if (pollTimer) clearTimeout(pollTimer);
       };
@@ -1645,54 +1665,48 @@ window.applyBalanceVisibility = applyBalanceVisibility;
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-
-          // 🔥 FORWARD TO GLOBAL CUSTOM EVENT (mobile-safe)
-          if (data.type === "balance_update") {
-            window.dispatchEvent(new CustomEvent("balance_update", { detail: data }));
-          }
+          console.log('[Balance] WebSocket message received:', data);
 
           if (data.type === 'balance_update' && data.balance !== undefined) {
             updateBalanceEverywhere(data.balance);
 
+            // 🔥 CRITICAL: Dispatch BEFORE showing notification
+            console.log('[Balance] Dispatching balance_update event:', data);
+            window.dispatchEvent(new CustomEvent("balance_update", { detail: data }));
+
+            // Show notification
             if (data.amount > 0 && typeof window.notify === 'function') {
               window.notify(`₦${Number(data.amount).toLocaleString()} credited!`, 'success');
             }
-
-            try {
-              if (typeof closeCheckoutModal === 'function') {
-                closeCheckoutModal();
-              } else if (typeof ModalManager !== 'undefined' && ModalManager.closeModal) {
-                ModalManager.closeModal('addMoneyModal');
-              } else {
-                const modal = document.getElementById('addMoneyModal');
-                if (modal) modal.classList.add('hidden');
-              }
-            } catch (e) {
-              console.warn('Failed closing add money modal', e);
-            }
           }
         } catch (err) {
-          console.warn('[Balance] Invalid WS message', err);
+          console.error('[Balance] WebSocket message error:', err);
         }
       };
 
-      ws.onclose = () => startPolling();
-      ws.onerror = () => ws.close();
+      ws.onclose = (e) => {
+        console.log('[Balance] WebSocket closed, starting polling fallback', e);
+        startPolling();
+      };
+      
+      ws.onerror = (err) => {
+        console.error('[Balance] WebSocket error:', err);
+        ws.close();
+      };
 
     } catch (err) {
-      console.warn('[Balance] WebSocket failed', err);
+      console.warn('[Balance] WebSocket failed to initialize', err);
       startPolling();
     }
   }
 
-  // 🔥 GLOBAL LISTENER (This finally fixes mobile!)
-  window.addEventListener("balance_update", (e) => {
-    const data = e.detail;
-    console.log("🔥 Global listener received:", data);
-  });
-
   loadInitialBalance();
-  connectWebSocket();
+  
+  // 🔥 MOBILE FIX: Delay WebSocket connection by 500ms
+  // This ensures all event listeners are registered first
+  setTimeout(() => {
+    connectWebSocket();
+  }, 500);
 
   window.addEventListener('fg:reauth-success', loadInitialBalance);
   window.addEventListener('session:restored', loadInitialBalance);

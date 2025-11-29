@@ -310,53 +310,52 @@ function assignAddMoneyEvents() {
   });
 
   // Fund wallet button
- let isFundingInProgress = false; // ← This is the magic line
+  let isFundingInProgress = false;
 
-fundBtn.addEventListener('click', async () => {
-  // PREVENT DOUBLE-CLICK / DOUBLE-EXECUTION
-  if (isFundingInProgress) {
-    console.log('[Fund Wallet] Already processing — ignoring duplicate click');
-    return;
-  }
-
-  const amount = parseInt(amountInput.value.replace(/[^0-9]/g, ""), 10);
-  if (!amount || amount <= 0) {
-    window.notify?.('Please enter a valid amount.', 'error');
-    return;
-  }
-
-  // Mark as in progress + disable button
-  isFundingInProgress = true;
-  fundBtn.disabled = true;
-  fundBtn.textContent = 'Processing...';
-
-  try {
-    // This keeps your loading spinner exactly as before
-    const res = window.withLoader
-      ? await window.withLoader(() => apiFetch('/api/fund-wallet', {
-          method: 'POST',
-          body: { amount }
-        }))
-      : await apiFetch('/api/fund-wallet', {
-          method: 'POST',
-          body: { amount }
-        });
-
-    if (res.ok) {
-      showGeneratedAccount(res.data);
-    } else {
-      showGeneratedError(res.error?.message || 'Failed to generate account.');
+  fundBtn.addEventListener('click', async () => {
+    // PREVENT DOUBLE-CLICK / DOUBLE-EXECUTION
+    if (isFundingInProgress) {
+      console.log('[Fund Wallet] Already processing — ignoring duplicate click');
+      return;
     }
-  } catch (err) {
-    console.error('[Fund Wallet Error]', err);
-    showGeneratedError('Network error. Try again.');
-  } finally {
-    // Always reset — even if error
-    isFundingInProgress = false;
-    fundBtn.disabled = false;
-    fundBtn.textContent = 'Fund Wallet';
-  }
-});
+
+    const amount = parseInt(amountInput.value.replace(/[^0-9]/g, ""), 10);
+    if (!amount || amount <= 0) {
+      window.notify?.('Please enter a valid amount.', 'error');
+      return;
+    }
+
+    // Mark as in progress + disable button
+    isFundingInProgress = true;
+    fundBtn.disabled = true;
+    fundBtn.textContent = 'Processing...';
+
+    try {
+      const res = window.withLoader
+        ? await window.withLoader(() => apiFetch('/api/fund-wallet', {
+            method: 'POST',
+            body: { amount }
+          }))
+        : await apiFetch('/api/fund-wallet', {
+            method: 'POST',
+            body: { amount }
+          });
+
+      if (res.ok) {
+        showGeneratedAccount(res.data);
+      } else {
+        showGeneratedError(res.error?.message || 'Failed to generate account.');
+      }
+    } catch (err) {
+      console.error('[Fund Wallet Error]', err);
+      showGeneratedError('Network error. Try again.');
+    } finally {
+      // Always reset — even if error
+      isFundingInProgress = false;
+      fundBtn.disabled = false;
+      fundBtn.textContent = 'Fund Wallet';
+    }
+  });
 }
 
 // --- Show Generated Bank Account ---
@@ -460,7 +459,6 @@ function showGeneratedAccount(data) {
     countdown--;
     updateCountdown();
     if (countdown < 0) {
-      // FIX: Pass reference instead of transactionId
       handleTransactionCancelOrExpire(data.reference);
     }
   }, 1000);
@@ -470,7 +468,6 @@ function showGeneratedAccount(data) {
   const cancelBtn = modalContent.querySelector('#cancelTransactionBtn');
   if (cancelBtn) {
     cancelBtn.addEventListener('click', () => {
-      // FIX: Pass reference instead of transactionId
       handleTransactionCancelOrExpire(data.reference);
     });
   }
@@ -498,7 +495,6 @@ async function handleTransactionCancelOrExpire(reference) {
 
   if (reference) {
     try {
-      // FIX: Use correct endpoint with reference parameter
       await apiFetch(`/api/fund-wallet/cancel/${reference}`, { method: 'POST' });
       console.log('Transaction cancelled/expired:', reference);
       window.notify?.('Transaction cancelled successfully', 'success');
@@ -511,7 +507,7 @@ async function handleTransactionCancelOrExpire(reference) {
   if (window.modalManager?.closeModal) window.modalManager.closeModal('addMoneyModal');
   else document.getElementById('addMoneyModal').style.transform = 'translateY(100%)';
 
-  openAddMoneyModalContent(); // reset modal for fresh start
+  openAddMoneyModalContent();
 }
 
 
@@ -537,8 +533,8 @@ document.addEventListener("modalOpened", (e) => {
 
   // Step 1: Make it temporarily untouchable + kill keyboard
   input.setAttribute('readonly', 'readonly');
-  input.setAttribute('inputmode', 'none');        // kills keyboard
-  input.style.pointerEvents = 'none';             // prevents accidental focus
+  input.setAttribute('inputmode', 'none');
+  input.style.pointerEvents = 'none';
   input.blur();
 
   // Step 2: After modal is fully visible, re-enable ONLY on real user tap
@@ -557,7 +553,7 @@ document.addEventListener("modalOpened", (e) => {
 
       input.addEventListener('click', enable);
       input.addEventListener('touchstart', enable);
-    }, 300); // 300ms = after slide-up animation finishes
+    }, 300);
   });
 });
 
@@ -568,4 +564,46 @@ window.addEventListener('beforeunload', () => {
   }
 });
 
+// --- MOBILE DEBUG: Test balance update manually ---
+window.testBalanceUpdate = function(amount = 5000, balance = 50000) {
+  console.log('[TEST] Triggering balance update...');
+  
+  // Test via global handler
+  if (window.__handleBalanceUpdate) {
+    window.__handleBalanceUpdate({
+      type: 'balance_update',
+      amount: amount,
+      balance: balance
+    });
+  }
+  
+  // Also dispatch custom event
+  window.dispatchEvent(new CustomEvent('balance_update', {
+    detail: {
+      type: 'balance_update',
+      amount: amount,
+      balance: balance
+    }
+  }));
+  
+  console.log('[TEST] Balance update dispatched');
+  alert('Test balance update sent! Check console for logs.');
+};
 
+// 🔥 MOBILE DEBUG: WebSocket status indicator
+window.getWebSocketStatus = function() {
+  const status = {
+    userID: window.__USER_UID || localStorage.getItem('userId'),
+    wsState: 'Not connected',
+    listenerRegistered: !!window.__handleBalanceUpdate,
+    modalExists: !!document.getElementById('addMoneyModal')
+  };
+  
+  console.table(status);
+  alert(JSON.stringify(status, null, 2));
+  return status;
+};
+
+console.log('[Fund Wallet] Script loaded.');
+console.log('[Fund Wallet] Test balance update: testBalanceUpdate(5000, 50000)');
+console.log('[Fund Wallet] Check WebSocket: getWebSocketStatus()');
