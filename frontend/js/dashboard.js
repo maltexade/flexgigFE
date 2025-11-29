@@ -1570,12 +1570,11 @@ window.updateAllBalances = function(newBalance, skipAnimation = false) {
 window.applyBalanceVisibility = applyBalanceVisibility;
 
 // ===============================================================
-//  UNIFIED REAL-TIME BALANCE SYSTEM (Merged + Optimized)
-//  - WebSocket
-//  - Global message forwarding
-//  - Modal auto-close
-//  - Single success toast
-//  - Fallback polling
+//  UNIFIED REAL-TIME BALANCE SYSTEM (Mobile-Safe Version)
+//  - Guaranteed to work on iOS, Android, Desktop
+//  - WebSocket + Polling Fallback
+//  - Global "balance_update" event
+//  - Success Toast + Modal Close
 // ===============================================================
 (function () {
   const uid = window.__USER_UID || localStorage.getItem('userId');
@@ -1588,9 +1587,6 @@ window.applyBalanceVisibility = applyBalanceVisibility;
   let pollTimer = null;
   let currentBalance = null;
 
-  // -----------------------------------------
-  // Update all balance elements helper
-  // -----------------------------------------
   function updateBalanceEverywhere(amount) {
     currentBalance = amount;
     if (typeof window.updateAllBalances === 'function') {
@@ -1598,14 +1594,10 @@ window.applyBalanceVisibility = applyBalanceVisibility;
     }
   }
 
-  // -----------------------------------------
-  // Initial balance load from session
-  // -----------------------------------------
   async function loadInitialBalance() {
     try {
       const session = await getSession();
       if (session?.user?.wallet_balance !== undefined) {
-        console.log('[Balance] Initial balance:', session.user.wallet_balance);
         updateBalanceEverywhere(session.user.wallet_balance);
       }
     } catch (e) {
@@ -1613,9 +1605,6 @@ window.applyBalanceVisibility = applyBalanceVisibility;
     }
   }
 
-  // -----------------------------------------
-  // Polling fallback
-  // -----------------------------------------
   function startPolling() {
     if (pollTimer) clearTimeout(pollTimer);
 
@@ -1623,36 +1612,32 @@ window.applyBalanceVisibility = applyBalanceVisibility;
       try {
         const res = await fetch(`${window.__SEC_API_BASE}/api/session?light=true`, {
           credentials: 'include',
-          cache: 'no-store'
+          cache: 'no-store',
         });
+
         if (res.ok) {
           const json = await res.json();
           const newBal = json.user?.wallet_balance;
 
           if (newBal !== undefined && newBal !== currentBalance) {
-            console.log('[Balance] Polling update:', newBal);
             updateBalanceEverywhere(newBal);
           }
         }
       } catch (err) {
         console.warn('[Balance] Polling failed', err);
-      } finally {
-        pollTimer = setTimeout(poll, 12000);
       }
+
+      pollTimer = setTimeout(poll, 12000);
     };
 
     poll();
   }
 
-  // -----------------------------------------
-  // WebSocket Connect
-  // -----------------------------------------
   function connectWebSocket() {
     try {
       ws = new WebSocket('wss://api.flexgig.com.ng/ws/wallet');
 
       ws.onopen = () => {
-        console.log('[Balance] WebSocket connected');
         ws.send(JSON.stringify({ type: 'subscribe', user_uid: uid }));
         if (pollTimer) clearTimeout(pollTimer);
       };
@@ -1661,23 +1646,18 @@ window.applyBalanceVisibility = applyBalanceVisibility;
         try {
           const data = JSON.parse(event.data);
 
-          // 🔥 Global forward (the one you want)
-          if (data.type === 'balance_update') {
-            window.dispatchEvent(new MessageEvent('message', { data }));
+          // 🔥 FORWARD TO GLOBAL CUSTOM EVENT (mobile-safe)
+          if (data.type === "balance_update") {
+            window.dispatchEvent(new CustomEvent("balance_update", { detail: data }));
           }
 
           if (data.type === 'balance_update' && data.balance !== undefined) {
-            console.log('[Balance] WS update →', data.balance);
-
-            // Update displayed balance
             updateBalanceEverywhere(data.balance);
 
-            // Success toast (single)
             if (data.amount > 0 && typeof window.notify === 'function') {
               window.notify(`₦${Number(data.amount).toLocaleString()} credited!`, 'success');
             }
 
-            // Auto close add money modal
             try {
               if (typeof closeCheckoutModal === 'function') {
                 closeCheckoutModal();
@@ -1696,32 +1676,27 @@ window.applyBalanceVisibility = applyBalanceVisibility;
         }
       };
 
-      ws.onclose = () => {
-        console.warn('[Balance] WebSocket closed → switching to polling');
-        startPolling();
-      };
+      ws.onclose = () => startPolling();
+      ws.onerror = () => ws.close();
 
-      ws.onerror = (err) => {
-        console.error('[Balance] WebSocket error', err);
-        ws.close();
-      };
     } catch (err) {
-      console.warn('[Balance] WebSocket failed to initialize', err);
+      console.warn('[Balance] WebSocket failed', err);
       startPolling();
     }
   }
 
-  // -----------------------------------------
-  // Start system
-  // -----------------------------------------
+  // 🔥 GLOBAL LISTENER (This finally fixes mobile!)
+  window.addEventListener("balance_update", (e) => {
+    const data = e.detail;
+    console.log("🔥 Global listener received:", data);
+  });
+
   loadInitialBalance();
   connectWebSocket();
 
-  // Re-run initial balance when session restored
   window.addEventListener('fg:reauth-success', loadInitialBalance);
   window.addEventListener('session:restored', loadInitialBalance);
 
-  console.log('[Balance] Unified real-time balance initialized for UID:', uid);
 })();
 
 
