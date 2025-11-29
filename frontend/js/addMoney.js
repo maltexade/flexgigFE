@@ -396,38 +396,38 @@ function showGeneratedAccount(data) {
 ">
 
   <!-- LABEL: Amount to Pay -->
-  <p style="margin:0; font-size:10px; opacity:0.75; text-transform: uppercase;">
+  <p style="margin:0; font-size:13px; opacity:0.75; text-transform: uppercase;">
     Amount to Pay
   </p>
 
   <!-- VALUE -->
-  <div style="font-size:20px; font-weight:700; margin:6px 0 14px;">
+  <div style="font-size:25px; font-weight:700; margin:6px 0 14px;">
     ₦${Number(data.amount).toLocaleString()}
   </div>
 
   <!-- BANK SECTION -->
   <div style="margin-bottom:12px;">
-    <p style="margin:0; font-size:10px; opacity:0.75; text-transform: uppercase;">Bank</p>
-    <div style="font-size:15px; font-weight:600; margin-top:4px;">
+    <p style="margin:0; font-size:13px; opacity:0.75; text-transform: uppercase;">Bank</p>
+    <div style="font-size:20px; font-weight:600; margin-top:4px;">
       ${data.bankName || 'OPay'}
     </div>
     <img src="/frontend/img/opay-image.png"
          alt="Bank Logo"
          onerror="this.style.display='none'"
-         style="width:55px; height:16px; margin-top:6px; object-fit: contain;">
+         style="width:40px; height:26px; margin-top:10px; object-fit: contain;">
   </div>
 
   <!-- ACCOUNT NAME -->
   <div style="margin-bottom:12px;">
-    <p style="margin:0; font-size:10px; opacity:0.75; text-transform: uppercase;">Account Name</p>
-    <div style="font-size:15px; font-weight:600; margin-top:4px;">
+    <p style="margin:0; font-size:13px; opacity:0.75; text-transform: uppercase;">Account Name</p>
+    <div style="font-size:25px; font-weight:600; margin-top:4px;">
       Flexgig Digital Network
     </div>
   </div>
 
   <!-- ACCOUNT NUMBER -->
   <div style="margin-bottom:14px;">
-    <p style="margin:0; font-size:10px; opacity:0.75; text-transform: uppercase;">Account Number</p>
+    <p style="margin:0; font-size:13px; opacity:0.75; text-transform: uppercase;">Account Number</p>
     <div style="display:flex; align-items:center; gap:10px; margin-top:6px; flex-wrap: wrap;">
       <span style="font-size:18px; font-weight:700; letter-spacing:1px; word-break: break-all;">
         ${data.accountNumber}
@@ -538,18 +538,37 @@ if (document.readyState === 'loading') {
   }
 }
 
-// --- Redirect focus away from amount input when Add Money modal opens ---
+// FINAL — ZERO FLASH + USER CAN STILL TYPE PERFECTLY
 document.addEventListener("modalOpened", (e) => {
-  const amountInput = document.getElementById('addMoneyAmountInput');
-  if (amountInput && e.detail === "addMoneyModal") {
+  if (e.detail !== "addMoneyModal") return;
+
+  const input = document.getElementById('addMoneyAmountInput');
+  if (!input) return;
+
+  // Step 1: Make it temporarily untouchable + kill keyboard
+  input.setAttribute('readonly', 'readonly');
+  input.setAttribute('inputmode', 'none');        // kills keyboard
+  input.style.pointerEvents = 'none';             // prevents accidental focus
+  input.blur();
+
+  // Step 2: After modal is fully visible, re-enable ONLY on real user tap
+  requestAnimationFrame(() => {
     setTimeout(() => {
-      amountInput.blur();
-      amountInput.setAttribute("readonly", true);
-      
-      const guard = document.getElementById("addMoneyFocusGuard");
-      if (guard) guard.focus();
-    }, 20);
-  }
+      input.style.pointerEvents = '';
+      input.removeAttribute('readonly');
+      input.removeAttribute('inputmode');
+
+      // Now enable input when user actually taps
+      const enable = () => {
+        input.focus();
+        input.removeEventListener('click', enable);
+        input.removeEventListener('touchstart', enable);
+      };
+
+      input.addEventListener('click', enable);
+      input.addEventListener('touchstart', enable);
+    }, 300); // 300ms = after slide-up animation finishes
+  });
 });
 
 // --- Cleanup countdown on page unload ---

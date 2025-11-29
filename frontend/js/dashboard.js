@@ -1617,8 +1617,8 @@ window.applyBalanceVisibility = applyBalanceVisibility;
             } catch (e) { console.warn('Failed to close add money modal', e); }
 
             // 4. Optional: show success banner
-            if (typeof showBanner === 'function') {
-              showBanner('Funds added successfully!', { persistent: false });
+            if (window.notify) {
+              window.notify(`₦${Number(data.amount || 0).toLocaleString()} credited!`, 'success');
             }
           }
         } catch (err) {
