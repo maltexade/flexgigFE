@@ -1569,56 +1569,126 @@ window.updateAllBalances = function(newBalance, skipAnimation = false) {
 
 window.applyBalanceVisibility = applyBalanceVisibility;
 
-// REALTIME SYSTEM (unchanged)
-// PRODUCTION-LEVEL REALTIME BALANCE (WebSocket + Polling Fallback)
-// FIXED REAL-TIME BALANCE + MODAL CLOSE + SUCCESS TOAST
-(function() {
+// ===============================================================
+//  UNIFIED REAL-TIME BALANCE SYSTEM (Merged + Optimized)
+//  - WebSocket
+//  - Global message forwarding
+//  - Modal auto-close
+//  - Single success toast
+//  - Fallback polling
+// ===============================================================
+(function () {
   const uid = window.__USER_UID || localStorage.getItem('userId');
-  if (!uid) return;
+  if (!uid) {
+    console.warn('[Balance] No user ID found — skipping real-time balance');
+    return;
+  }
 
   let ws = null;
-  let pollInterval = null;
+  let pollTimer = null;
+  let currentBalance = null;
 
-  function connectWS() {
+  // -----------------------------------------
+  // Update all balance elements helper
+  // -----------------------------------------
+  function updateBalanceEverywhere(amount) {
+    currentBalance = amount;
+    if (typeof window.updateAllBalances === 'function') {
+      window.updateAllBalances(amount);
+    }
+  }
+
+  // -----------------------------------------
+  // Initial balance load from session
+  // -----------------------------------------
+  async function loadInitialBalance() {
+    try {
+      const session = await getSession();
+      if (session?.user?.wallet_balance !== undefined) {
+        console.log('[Balance] Initial balance:', session.user.wallet_balance);
+        updateBalanceEverywhere(session.user.wallet_balance);
+      }
+    } catch (e) {
+      console.warn('[Balance] Failed to load initial balance', e);
+    }
+  }
+
+  // -----------------------------------------
+  // Polling fallback
+  // -----------------------------------------
+  function startPolling() {
+    if (pollTimer) clearTimeout(pollTimer);
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`${window.__SEC_API_BASE}/api/session?light=true`, {
+          credentials: 'include',
+          cache: 'no-store'
+        });
+        if (res.ok) {
+          const json = await res.json();
+          const newBal = json.user?.wallet_balance;
+
+          if (newBal !== undefined && newBal !== currentBalance) {
+            console.log('[Balance] Polling update:', newBal);
+            updateBalanceEverywhere(newBal);
+          }
+        }
+      } catch (err) {
+        console.warn('[Balance] Polling failed', err);
+      } finally {
+        pollTimer = setTimeout(poll, 12000);
+      }
+    };
+
+    poll();
+  }
+
+  // -----------------------------------------
+  // WebSocket Connect
+  // -----------------------------------------
+  function connectWebSocket() {
     try {
       ws = new WebSocket('wss://api.flexgig.com.ng/ws/wallet');
 
       ws.onopen = () => {
         console.log('[Balance] WebSocket connected');
         ws.send(JSON.stringify({ type: 'subscribe', user_uid: uid }));
-        if (pollInterval) clearInterval(pollInterval);
+        if (pollTimer) clearTimeout(pollTimer);
       };
 
-      ws.onmessage = (e) => {
+      ws.onmessage = (event) => {
         try {
-          const data = JSON.parse(e.data);
-          console.log('[Balance] WebSocket message:', data);
+          const data = JSON.parse(event.data);
+
+          // 🔥 Global forward (the one you want)
+          if (data.type === 'balance_update') {
+            window.dispatchEvent(new MessageEvent('message', { data }));
+          }
 
           if (data.type === 'balance_update' && data.balance !== undefined) {
-            console.log('[Balance] Balance updated →', data.balance);
+            console.log('[Balance] WS update →', data.balance);
 
-            // 1. Update balance with animation
-            window.updateAllBalances(data.balance);
+            // Update displayed balance
+            updateBalanceEverywhere(data.balance);
 
-            // 2. Show toast
-            if (window.notify) {
-              window.notify(`₦${Number(data.amount || 0).toLocaleString()} credited!`, 'success');
+            // Success toast (single)
+            if (data.amount > 0 && typeof window.notify === 'function') {
+              window.notify(`₦${Number(data.amount).toLocaleString()} credited!`, 'success');
             }
 
-            // 3. CLOSE ADD MONEY MODAL (this was missing!)
+            // Auto close add money modal
             try {
-              if (typeof closeCheckoutModal === 'function') closeCheckoutModal();
-              else if (typeof ModalManager !== 'undefined' && ModalManager.closeModal) {
+              if (typeof closeCheckoutModal === 'function') {
+                closeCheckoutModal();
+              } else if (typeof ModalManager !== 'undefined' && ModalManager.closeModal) {
                 ModalManager.closeModal('addMoneyModal');
               } else {
                 const modal = document.getElementById('addMoneyModal');
                 if (modal) modal.classList.add('hidden');
               }
-            } catch (e) { console.warn('Failed to close add money modal', e); }
-
-            // 4. Optional: show success banner
-            if (window.notify) {
-              window.notify(`₦${Number(data.amount || 0).toLocaleString()} credited!`, 'success');
+            } catch (e) {
+              console.warn('Failed closing add money modal', e);
             }
           }
         } catch (err) {
@@ -1627,39 +1697,33 @@ window.applyBalanceVisibility = applyBalanceVisibility;
       };
 
       ws.onclose = () => {
-        console.warn('[Balance] WebSocket closed → starting polling');
+        console.warn('[Balance] WebSocket closed → switching to polling');
         startPolling();
       };
 
       ws.onerror = (err) => {
         console.error('[Balance] WebSocket error', err);
+        ws.close();
       };
-    } catch (e) {
-      console.error('[Balance] WS setup failed', e);
+    } catch (err) {
+      console.warn('[Balance] WebSocket failed to initialize', err);
       startPolling();
     }
   }
 
-  function startPolling() {
-    if (pollInterval) clearInterval(pollInterval);
-    pollInterval = setInterval(async () => {
-      try {
-        const res = await fetch(`${window.__SEC_API_BASE}/api/session?light=true`, { credentials: 'include' });
-        if (res.ok) {
-          const json = await res.json();
-          const newBal = json.user?.wallet_balance;
-          if (newBal !== undefined && newBal !== window.currentDisplayedBalance) {
-            window.updateAllBalances(newBal);
-          }
-        }
-      } catch (e) {
-        console.warn('[Balance] Polling failed', e);
-      }
-    }, 10000);
-  }
+  // -----------------------------------------
+  // Start system
+  // -----------------------------------------
+  loadInitialBalance();
+  connectWebSocket();
 
-  connectWS();
+  // Re-run initial balance when session restored
+  window.addEventListener('fg:reauth-success', loadInitialBalance);
+  window.addEventListener('session:restored', loadInitialBalance);
+
+  console.log('[Balance] Unified real-time balance initialized for UID:', uid);
 })();
+
 
 // Run observer only on dashboard
 if (window.location.pathname.includes('dashboard.html')) {
@@ -5151,125 +5215,6 @@ payBtn.addEventListener('click', () => {
 
 
 
-/* ===========================================================
-   REAL-TIME BALANCE FROM SUPABASE (WebSocket + Fallback Polling)
-   =========================================================== */
-(function () {
-  const uid = window.__USER_UID || localStorage.getItem('userId');
-  if (!uid) {
-    console.warn('[Balance] No user ID found — skipping real-time balance');
-    return;
-  }
-
-  let currentBalance = null;
-
-  // Format balance consistently everywhere
-  function formatBalance(amount) {
-    if (amount === null || amount === undefined) return '₦–';
-    return '₦' + Number(amount).toLocaleString('en-NG', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    });
-  }
-
-
-
-  // Initial load from session
-  async function loadInitialBalance() {
-    try {
-      const session = await getSession();
-      if (session?.user?.wallet_balance !== undefined) {
-        console.log('[Balance] Initial balance from session:', session.user.wallet_balance);
-        updateAllBalances(session.user.wallet_balance);
-      }
-    } catch (err) {
-      console.warn('[Balance] Failed to load initial balance from session', err);
-    }
-  }
-
-  // WebSocket connection
-  function connectWebSocket() {
-    try {
-      const ws = new WebSocket('wss://api.flexgig.com.ng/ws/wallet');
-
-      ws.onopen = () => {
-        console.log('[Balance] WebSocket connected');
-        ws.send(JSON.stringify({ type: 'subscribe', user_uid: uid }));
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.type === 'balance_update' && data.balance !== undefined) {
-            console.log('[Balance] WebSocket update →', data.balance);
-            updateAllBalances(data.balance);
-
-            // Optional: show toast on credit
-            if (data.amount > 0 && typeof window.notify === 'function') {
-              window.notify(`₦${Number(data.amount).toLocaleString()} credited!`, 'success');
-            }
-          }
-        } catch (e) {
-          console.warn('[Balance] Invalid WS message', e);
-        }
-      };
-
-      ws.onclose = () => {
-        console.warn('[Balance] WebSocket closed → falling back to polling');
-        startPolling();
-      };
-
-      ws.onerror = (err) => {
-        console.error('[Balance] WebSocket error', err);
-        ws.close();
-      };
-
-      return ws;
-    } catch (err) {
-      console.warn('[Balance] WebSocket failed to start', err);
-      startPolling();
-    }
-  }
-
-  // Fallback polling every 12 seconds
-  let pollTimeout = null;
-  function startPolling() {
-    if (pollTimeout) clearTimeout(pollTimeout);
-
-    const poll = async () => {
-      try {
-        const res = await fetch(`${window.__SEC_API_BASE}/api/session?light=true`, {
-          credentials: 'include',
-          cache: 'no-store'
-        });
-        if (res.ok) {
-          const json = await res.json();
-          const newBal = json.user?.wallet_balance;
-          if (newBal !== undefined && newBal !== currentBalance) {
-            console.log('[Balance] Polling update →', newBal);
-            updateAllBalances(newBal);
-          }
-        }
-      } catch (err) {
-        console.warn('[Balance] Polling failed', err);
-      } finally {
-        pollTimeout = setTimeout(poll, 12000);
-      }
-    };
-
-    poll();
-  }
-
-  // Start everything
-  loadInitialBalance();
-  connectWebSocket();
-
-  // Also update on successful login/session restore
-  window.addEventListener('fg:reauth-success', loadInitialBalance);
-  window.addEventListener('session:restored', loadInitialBalance);
-
-  console.log('[Balance] Real-time balance system initialized for UID:', uid);
-})();
 
 
 
