@@ -1569,98 +1569,6 @@ window.updateAllBalances = function(newBalance, skipAnimation = false) {
 
 window.applyBalanceVisibility = applyBalanceVisibility;
 
-// ================================================
-//  MOBILE-SAFE BALANCE + MODAL AUTO-CLOSE RECOVERY
-//  Fixes: No toast/modal close after payment on mobile
-// ================================================
-(function mobileSafeBalanceRecovery() {
-  let hasRecoveredAfterPayment = false;
-  let lastKnownBalance = window.currentDisplayedBalance || 0;
-
-  // Track if addMoneyModal was open before background
-  let wasFundingInProgress = false;
-
-  // Mark when funding modal opens
-  document.addEventListener('modalOpened', (e) => {
-    if (e.detail === 'addMoneyModal') {
-      wasFundingInProgress = true;
-      hasRecoveredAfterPayment = false;
-      console.log('[Recovery] Funding modal opened — arming recovery');
-    }
-  });
-
-  // When page becomes visible again (user returns from bank app)
-  document.addEventListener('visibilitychange', async () => {
-    if (document.visibilityState !== 'visible') return;
-    if (!wasFundingInProgress) return;
-    if (hasRecoveredAfterPayment) return;
-
-    console.log('[Recovery] Page visible again — checking for missed payment...');
-
-    try {
-      // Force refresh balance from server
-      const session = await getSession();
-      const newBalance = session?.user?.wallet_balance;
-
-      if (newBalance !== undefined && newBalance > lastKnownBalance) {
-        const amount = newBalance - lastKnownBalance;
-
-        console.log(`[Recovery] Payment detected! +₦${amount}`);
-
-        // Update UI
-        window.updateAllBalances(newBalance);
-
-        // Close modal safely
-        if (window.modalManager?.closeModal) {
-          window.modalManager.closeModal('addMoneyModal');
-        } else {
-          const modal = document.getElementById('addMoneyModal');
-          if (modal) modal.style.transform = 'translateY(100%)';
-        }
-
-        // Show success toast (your beautiful one)
-        if (typeof window.__handleBalanceUpdate === 'function') {
-          window.__handleBalanceUpdate({
-            type: 'balance_update',
-            amount: amount,
-            balance: newBalance
-          });
-        } else {
-          // Fallback toast
-          window.notify?.(`₦${amount.toLocaleString()} received!`, 'success');
-        }
-
-        hasRecoveredAfterPayment = true;
-        wasFundingInProgress = false;
-        lastKnownBalance = newBalance;
-
-        console.log('[Recovery] Success! Modal closed + toast shown');
-      }
-    } catch (err) {
-      console.warn('[Recovery] Failed to recover balance', err);
-    }
-  });
-
-  // Also trigger on resume (some Android devices)
-  window.addEventListener('focus', () => {
-    setTimeout(() => {
-      if (document.visibilityState === 'visible' && wasFundingInProgress && !hasRecoveredAfterPayment) {
-        document.dispatchEvent(new Event('visibilitychange'));
-      }
-    }, 800);
-  });
-
-  // Update last known balance on every successful update
-  window.addEventListener('balance_update', (e) => {
-    const data = e.detail;
-    if (data?.balance !== undefined) {
-      lastKnownBalance = data.balance;
-      wasFundingInProgress = false; // payment completed
-    }
-  });
-
-  console.log('[Recovery] Mobile-safe balance recovery system ACTIVE');
-})();
 
 // ===============================================================
 //  UNIFIED REAL-TIME BALANCE SYSTEM (Mobile-Safe Version)
@@ -1676,133 +1584,165 @@ window.applyBalanceVisibility = applyBalanceVisibility;
 //  - Global "balance_update" event
 //  - Success Toast + Modal Close
 // ===============================================================
+// ===============================================================
+//  BULLETPROOF REAL-TIME BALANCE + AUTO-CLOSE (MOBILE FIXED)
+// ===============================================================
+
 (function () {
   const uid = window.__USER_UID || localStorage.getItem('userId');
-  if (!uid) {
-    console.warn('[Balance] No user ID found — skipping real-time balance');
-    return;
-  }
+  if (!uid) return;
 
   let ws = null;
   let pollTimer = null;
-  let currentBalance = null;
+  let lastKnownBalance = null;
+  let hasProcessedPayment = false; // prevent double toast/close
 
-  function updateBalanceEverywhere(amount) {
-    currentBalance = amount;
-    if (typeof window.updateAllBalances === 'function') {
-      window.updateAllBalances(amount);
+  // Central handler — called from WS, polling, AND page visibility
+  function handleNewBalance(newBalance, source = 'unknown') {
+    newBalance = Number(newBalance) || 0;
+
+    if (lastKnownBalance === null) {
+      lastKnownBalance = newBalance;
+      window.updateAllBalances(newBalance, true);
+      return;
     }
-  }
 
-  async function loadInitialBalance() {
-    try {
-      const session = await getSession();
-      if (session?.user?.wallet_balance !== undefined) {
-        updateBalanceEverywhere(session.user.wallet_balance);
+    if (newBalance <= lastKnownBalance) {
+      lastKnownBalance = newBalance;
+      window.updateAllBalances(newBalance);
+      return;
+    }
+
+    const amountAdded = newBalance - lastKnownBalance;
+    lastKnownBalance = newBalance;
+
+    console.log(`[Balance] +₦${amountAdded.toLocaleString()} (from ${source}) → ₦${newBalance.toLocaleString()}`);
+
+    // Update UI
+    window.updateAllBalances(newBalance);
+
+    // ONLY if payment just arrived → close modal + toast
+    if (!hasProcessedPayment && amountAdded > 0) {
+      hasProcessedPayment = true;
+
+      // Dispatch event (for any other listeners)
+      window.dispatchEvent(new CustomEvent('balance_update', {
+        detail: { type: 'balance_update', balance: newBalance, amount: amountAdded }
+      }));
+
+      // Close modal SAFELY
+      setTimeout(() => {
+        if (window.ModalManager?.closeTopModal) {
+          window.ModalManager.closeTopModal();
+        } else if (document.getElementById('addMoneyModal')) {
+          document.getElementById('addMoneyModal').style.transform = 'translateY(100%)';
+          document.getElementById('addMoneyModal').classList.add('hidden');
+        }
+      }, 300);
+
+      // Show toast
+      if (typeof window.notify === 'function') {
+        window.notify(`₦${amountAdded.toLocaleString()} received!`, 'success');
+      } else {
+        // Fallback beautiful toast
+        const t = document.createElement('div');
+        t.textContent = `✓ ₦${amountAdded.toLocaleString()} credited!`;
+        Object.assign(t.style, {
+          position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)',
+          background: '#10b981', color: 'white', padding: '16px 24px', borderRadius: '16px',
+          zIndex: 999999, fontWeight: 'bold', boxShadow: '0 10px 30px rgba(0,0,0,0.3)'
+        });
+        document.body.appendChild(t);
+        setTimeout(() => t.remove(), 4000);
       }
-    } catch (e) {
-      console.warn('[Balance] Failed to load initial balance', e);
+
+      // Allow next payment after 30s
+      setTimeout(() => { hasProcessedPayment = false; }, 30000);
     }
   }
 
-  function startPolling() {
+  // Polling fallback (runs always on mobile)
+  async function startPolling() {
     if (pollTimer) clearTimeout(pollTimer);
 
     const poll = async () => {
       try {
-        const res = await fetch(`${window.__SEC_API_BASE}/api/session?light=true`, {
+        const res = await fetch(`${window.__SEC_API_BASE}/api/session?light=true&t=${Date.now()}`, {
           credentials: 'include',
-          cache: 'no-store',
+          cache: 'no-store'
         });
-
         if (res.ok) {
           const json = await res.json();
-          const newBal = json.user?.wallet_balance;
-
-          if (newBal !== undefined && newBal !== currentBalance) {
-            updateBalanceEverywhere(newBal);
-            
-            // 🔥 ALSO DISPATCH EVENT DURING POLLING (for modal close)
-            const oldBal = currentBalance;
-            if (oldBal !== null && newBal > oldBal) {
-              window.dispatchEvent(new CustomEvent("balance_update", { 
-                detail: { 
-                  type: 'balance_update',
-                  balance: newBal,
-                  amount: newBal - oldBal
-                }
-              }));
-            }
+          const bal = json.user?.wallet_balance;
+          if (bal !== undefined && bal !== lastKnownBalance) {
+            handleNewBalance(bal, 'polling');
           }
         }
-      } catch (err) {
-        console.warn('[Balance] Polling failed', err);
-      }
+      } catch (e) { console.warn('[Balance Poll] failed', e); }
 
-      pollTimer = setTimeout(poll, 12000);
+      pollTimer = setTimeout(poll, 8000); // every 8s
     };
-
     poll();
   }
 
-  function connectWebSocket() {
+  // WebSocket (best effort)
+  function connectWS() {
     try {
       ws = new WebSocket('wss://api.flexgig.com.ng/ws/wallet');
 
       ws.onopen = () => {
-        console.log('[Balance] WebSocket connected');
+        console.log('[WS] Connected');
         ws.send(JSON.stringify({ type: 'subscribe', user_uid: uid }));
-        if (pollTimer) clearTimeout(pollTimer);
+        if (pollTimer) clearTimeout(pollTimer); // WS wins
       };
 
-      ws.onmessage = (event) => {
+      ws.onmessage = (e) => {
         try {
-          const data = JSON.parse(event.data);
-          console.log('[Balance] WebSocket message received:', data);
-
+          const data = JSON.parse(e.data);
           if (data.type === 'balance_update' && data.balance !== undefined) {
-            updateBalanceEverywhere(data.balance);
-
-            // 🔥 CRITICAL: Dispatch BEFORE showing notification
-            console.log('[Balance] Dispatching balance_update event:', data);
-            window.dispatchEvent(new CustomEvent("balance_update", { detail: data }));
-
-            // Show notification
-            if (data.amount > 0 && typeof window.notify === 'function') {
-              window.notify(`₦${Number(data.amount).toLocaleString()} credited!`, 'success');
-            }
+            handleNewBalance(data.balance, 'websocket');
           }
-        } catch (err) {
-          console.error('[Balance] WebSocket message error:', err);
-        }
+        } catch (err) {}
       };
 
-      ws.onclose = (e) => {
-        console.log('[Balance] WebSocket closed, starting polling fallback', e);
+      ws.onclose = ws.onerror = () => {
+        console.log('[WS] Disconnected → fallback to polling');
         startPolling();
       };
-      
-      ws.onerror = (err) => {
-        console.error('[Balance] WebSocket error:', err);
-        ws.close();
-      };
-
     } catch (err) {
-      console.warn('[Balance] WebSocket failed to initialize', err);
       startPolling();
     }
   }
 
-  loadInitialBalance();
-  
-  // 🔥 MOBILE FIX: Delay WebSocket connection by 500ms
-  // This ensures all event listeners are registered first
-  setTimeout(() => {
-    connectWebSocket();
-  }, 500);
+  // CRITICAL: Re-check balance when user returns to app (iOS/Android fix)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      console.log('[Visibility] Page visible → force balance check');
+      // Force a poll immediately
+      fetch(`${window.__SEC_API_BASE}/api/session?light=true&t=${Date.now()}`, { credentials: 'include' })
+        .then(r => r.ok ? r.json() : null)
+        .then(j => j?.user?.wallet_balance !== undefined && handleNewBalance(j.user.wallet_balance, 'visibility'));
+    }
+  });
 
-  window.addEventListener('fg:reauth-success', loadInitialBalance);
-  window.addEventListener('session:restored', loadInitialBalance);
+  // Also on resume (mobile)
+  document.addEventListener('resume', () => {
+    console.log('[App Resume] Forcing balance check');
+    setTimeout(() => startPolling(), 1000);
+  });
+
+  // Start everything
+  setTimeout(() => {
+    connectWS();
+    startPolling(); // run polling always on mobile
+  }, 800);
+
+  // Initial load
+  getSession().then(s => {
+    if (s?.user?.wallet_balance !== undefined) {
+      handleNewBalance(s.user.wallet_balance, 'initial');
+    }
+  });
 
 })();
 
