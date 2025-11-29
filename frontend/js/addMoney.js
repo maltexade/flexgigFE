@@ -133,53 +133,55 @@ const addMoneyModal = document.getElementById('addMoneyModal');
 
   // BEAUTIFUL SUCCESS TOAST
   function showSuccessToast(title, subtitle = '') {
-    const toast = document.createElement('div');
-    toast.style.cssText = `
-      position: fixed;
-      top: 20px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: linear-gradient(135deg, #10b981, #059669);
-      color: white;
-      padding: 16px 24px;
-      border-radius: 16px;
-      box-shadow: 0 10px 30px rgba(16, 156, 103, 0.4);
-      z-index: 99999999;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      text-align: center;
-      animation: slideDown 0.5s ease, fadeOut 0.6s 3s forwards;
-      max-width: 90%;
-      backdrop-filter: blur(10px);
-      border: 1px solid rgba(255,255,255,0.2);
-    `;
+  const toast = document.createElement('div');
+  toast.style.cssText = `
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0px) + 14px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: linear-gradient(135deg, #10b981, #059669);
+    color: white;
+    padding: 16px 24px;
+    border-radius: 16px;
+    box-shadow: 0 10px 30px rgba(16, 156, 103, 0.4);
+    z-index: 999999999;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    text-align: center;
+    animation: toastSlideDown 0.45s ease-out, toastFadeOut 0.6s 3s forwards;
+    max-width: min(92%, 380px);
+    width: max-content;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,255,255,0.25);
+    pointer-events: none;
+  `;
 
-    toast.innerHTML = `
-      <div style="font-size: 18px; font-weight: 800; margin-bottom: 4px;">
-        ✓ ${title}
-      </div>
-      ${subtitle ? `<div style="font-size: 14px; opacity: 0.9;">${subtitle}</div>` : ''}
-    `;
+  toast.innerHTML = `
+    <div style="font-size: 18px; font-weight: 800; margin-bottom: 4px;">
+      ✓ ${title}
+    </div>
+    ${subtitle ? `<div style="font-size: 14px; opacity: 0.9;">${subtitle}</div>` : ''}
+  `;
 
-    document.body.appendChild(toast);
+  document.body.appendChild(toast);
 
-    // Auto-remove
-    setTimeout(() => {
-      if (toast.parentNode) toast.parentNode.removeChild(toast);
-    }, 4000);
-  }
+  setTimeout(() => toast.remove(), 4000);
+}
+
 
   // Animations
-  const style = document.createElement('style');
-  style.textContent = `
-    @keyframes slideDown {
-      from { transform: translateX(-50%) translateY(-100px); opacity: 0; }
-      to { transform: translateX(-50%) translateY(0); opacity: 1; }
-    }
-    @keyframes fadeOut {
-      to { opacity: 0; transform: translateX(-50%) translateY(-20px); }
-    }
-  `;
-  document.head.appendChild(style);
+  const style = document.createElement("style");
+style.textContent = `
+  @keyframes toastSlideDown {
+    from { opacity: 0; transform: translate(-50%, -40px); }
+    to   { opacity: 1; transform: translate(-50%, 0); }
+  }
+
+  @keyframes toastFadeOut {
+    to { opacity: 0; transform: translate(-50%, -20px); }
+  }
+`;
+document.head.appendChild(style);
+
 })();
 
 
