@@ -1646,10 +1646,20 @@ window.applyBalanceVisibility = applyBalanceVisibility;
         try {
           const data = JSON.parse(event.data);
 
-          // 🔥 FORWARD TO GLOBAL CUSTOM EVENT (mobile-safe)
-          if (data.type === "balance_update") {
-            window.dispatchEvent(new CustomEvent("balance_update", { detail: data }));
-          }
+          // 🔥 FORWARD: dispatch both a mobile-safe custom event and the legacy MessageEvent
+if (data.type === "balance_update") {
+  // mobile-safe listener (your new global)
+  window.dispatchEvent(new CustomEvent("balance_update", { detail: data }));
+
+  // legacy listener (keeps your old auto-close IIFE working)
+  try {
+    window.dispatchEvent(new MessageEvent("message", { data }));
+  } catch (err) {
+    // some browsers are picky about MessageEvent constructor — ignore if it throws
+    console.warn('[Balance] MessageEvent dispatch failed', err);
+  }
+}
+
 
           if (data.type === 'balance_update' && data.balance !== undefined) {
             updateBalanceEverywhere(data.balance);
