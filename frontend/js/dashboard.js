@@ -1338,103 +1338,27 @@ async function getSession() {
 
 window.getSession = getSession;
 
-// 🔥 MOVE THESE TO GLOBAL SCOPE (before the IIFE)
-// 🔥 MOVE THESE TO GLOBAL SCOPE (before the IIFE)
+// GLOBAL BALANCE STATE (only once!)
 window.currentDisplayedBalance = 0;
 window.isBalanceMasked = true;
 window.animationFrame = null;
 window.balanceInitialized = false;
+let balanceToggleInProgress = false; // prevents WS/polling override during toggle
 
-// Restore preference
+// Restore user preference (only once)
 try {
   const saved = localStorage.getItem('balanceMasked');
-  window.isBalanceMasked = saved === null ? true : saved === 'true';
+  if (saved !== null) window.isBalanceMasked = saved === 'true';
 } catch (e) {
   window.isBalanceMasked = true;
 }
 
-// PRODUCTION-LEVEL REALTIME BALANCE (WebSocket + Polling Fallback)
-(function() {
-  const uid = window.__USER_UID || localStorage.getItem('userId');
-  if (!uid) return;
-
-  let ws = null;
-  let pollInterval = null;
-
-  function connectWS() {
-    try {
-      ws = new WebSocket('wss://api.flexgig.com.ng/ws/wallet');
-
-      ws.onopen = () => {
-        console.log('[Balance] WebSocket connected');
-        ws.send(JSON.stringify({ type: 'subscribe', user_uid: uid }));
-        if (pollInterval) clearInterval(pollInterval);
-      };
-
-      ws.onmessage = (e) => {
-        const data = JSON.parse(e.data);
-        if (data.type === 'balance_update') {
-          window.updateAllBalances(data.balance);
-          if (window.notify) window.notify(`₦${data.amount.toLocaleString()} credited!`, 'success');
-        }
-      };
-
-      ws.onclose = () => {
-        console.warn('[Balance] WebSocket closed → starting polling fallback');
-        startPolling();
-      };
-    } catch (e) {
-      console.error('[Balance] WebSocket connection failed:', e);
-      startPolling();
-    }
-  }
-
-  function startPolling() {
-    if (pollInterval) clearInterval(pollInterval);
-    pollInterval = setInterval(async () => {
-      try {
-        const res = await fetch(`${window.__SEC_API_BASE}/api/session?light=true`, {
-          credentials: 'include'
-        });
-        if (res.ok) {
-          const json = await res.json();
-          const newBal = json.user?.wallet_balance;
-          if (newBal !== undefined) {
-            const current = window.currentDisplayedBalance;
-            if (newBal > current) {
-              window.updateAllBalances(newBal);
-              if (window.notify) window.notify('Payment received!', 'success');
-            }
-          }
-        }
-      } catch(e) {
-        console.warn('[Balance] Polling failed:', e);
-      }
-    }, 10000);
-  }
-
-  function easeOutCubic(t) {
-    return 1 - Math.pow(1 - t, 3);
-  }
-
-/* ========================================
-   FULL PERFECT BALANCE SYSTEM – FINAL FIX
-   Paste this once and forget the bug forever
-   ======================================== */
-
-window.currentDisplayedBalance = 0;
-window.isBalanceMasked = true;
-window.animationFrame = null;
-window.balanceInitialized = false;
-
-// Critical: prevents WebSocket/polling from overriding toggle during/after click
-let balanceToggleInProgress = false;
-
+// Easing function (only once)
 function easeOutCubic(t) {
   return 1 - Math.pow(1 - t, 3);
 }
 
-// Enhanced applyBalanceVisibility – no layout jumps, runs only when needed
+// Apply visibility (masked / unmasked) – no layout jumps
 function applyBalanceVisibility() {
   const cards = document.querySelectorAll('.balance');
   cards.forEach(card => {
@@ -1442,7 +1366,7 @@ function applyBalanceVisibility() {
     const masked = card.querySelector('.balance-masked');
     if (!real || !masked) return;
 
-    // Reserve space once
+    // Reserve width once to prevent jump
     const parent = real.parentElement;
     if (parent && !parent.dataset.balanceWidthReserved) {
       real.style.opacity = '1';
@@ -1472,14 +1396,6 @@ function applyBalanceVisibility() {
   });
 }
 
-// Restore saved state
-try {
-  const saved = localStorage.getItem('balanceMasked');
-  window.isBalanceMasked = saved === null ? true : saved === 'true';
-} catch (e) {
-  window.isBalanceMasked = true;
-}
-
 // Sync eye icons on page load
 document.querySelectorAll('.balance-eye-toggle').forEach(eye => {
   eye.classList.toggle('open', !window.isBalanceMasked);
@@ -1507,7 +1423,7 @@ document.querySelectorAll('.balance-eye-toggle').forEach(eye => {
 // First paint – respect saved state
 applyBalanceVisibility();
 
-// Eye toggle – THIS IS THE ONE THAT WINS EVERY TIME
+// Eye toggle – THIS ONE WINS EVERY TIME
 document.addEventListener('click', e => {
   const eye = e.target.closest('.balance-eye-toggle');
   if (!eye) return;
@@ -1515,13 +1431,13 @@ document.addEventListener('click', e => {
   e.preventDefault();
   e.stopPropagation();
 
-  // Cancel any running balance animation immediately
+  // Cancel any running animation
   if (window.animationFrame) {
     cancelAnimationFrame(window.animationFrame);
     window.animationFrame = null;
   }
 
-  // Lock updates for 800ms (longer than any fade)
+  // Lock updates for 800ms
   balanceToggleInProgress = true;
   setTimeout(() => balanceToggleInProgress = false, 800);
 
@@ -1552,15 +1468,14 @@ document.addEventListener('click', e => {
     }
   }
 
-  // Force apply – this one wins
   applyBalanceVisibility();
 }, { passive: false });
 
-// updateAllBalances – now respects toggle lock
-window.updateAllBalances = function (newBalance, skipAnimation = false) {
+// Master balance updater – respects toggle lock
+window.updateAllBalances = function(newBalance, skipAnimation = false) {
   newBalance = Number(newBalance) || 0;
 
-  // If user is actively toggling, ignore this update completely
+  // Block updates while user is toggling
   if (balanceToggleInProgress) {
     console.debug('[Balance] Update blocked – toggle in progress');
     return;
@@ -1571,18 +1486,17 @@ window.updateAllBalances = function (newBalance, skipAnimation = false) {
     maximumFractionDigits: 2
   });
 
-  // First time or forced skip → instant
+  // First load or forced skip → instant
   if (!window.balanceInitialized || skipAnimation) {
     window.balanceInitialized = true;
     window.currentDisplayedBalance = newBalance;
-
     document.querySelectorAll('[data-balance], .balance-real').forEach(el => el.textContent = formatted);
     document.querySelectorAll('.balance-masked').forEach(el => el.textContent = window.isBalanceMasked ? '••••••' : formatted);
     applyBalanceVisibility();
     return;
   }
 
-  // Cancel any previous animation
+  // Cancel previous animation
   if (window.animationFrame) cancelAnimationFrame(window.animationFrame);
 
   const startBalance = window.currentDisplayedBalance;
@@ -1592,10 +1506,10 @@ window.updateAllBalances = function (newBalance, skipAnimation = false) {
 
   const startFormatted = '₦' + startBalance.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-  // Set starting text once
+  // Set start state
   document.querySelectorAll('[data-balance], .balance-real').forEach(el => el.textContent = startFormatted);
   document.querySelectorAll('.balance-masked').forEach(el => el.textContent = window.isBalanceMasked ? '••••••' : startFormatted);
-  applyBalanceVisibility(); // start state
+  applyBalanceVisibility();
 
   function step(now) {
     const elapsed = now - startTime;
@@ -1612,40 +1526,70 @@ window.updateAllBalances = function (newBalance, skipAnimation = false) {
     } else {
       window.currentDisplayedBalance = newBalance;
       window.animationFrame = null;
-      applyBalanceVisibility(); // final state
+      applyBalanceVisibility();
     }
   }
 
   window.animationFrame = requestAnimationFrame(step);
 };
 
-// Make it global for WS/polling
+// Make visibility function global for WS/polling use
 window.applyBalanceVisibility = applyBalanceVisibility;
 
-  // // Eye toggle handler
-  // document.addEventListener('click', function(e) {
-  //   const eye = e.target.closest('.balance-eye-toggle');
-  //   if (!eye) return;
+// PRODUCTION REALTIME BALANCE (WebSocket + Polling Fallback)
+(function() {
+  const uid = window.__USER_UID || localStorage.getItem('userId');
+  if (!uid) return;
 
-  //   window.isBalanceMasked = !window.isBalanceMasked;
+  let ws = null;
+  let pollInterval = null;
 
-  //   try {
-  //     localStorage.setItem('balanceMasked', window.isBalanceMasked);
-  //   } catch (e) {}
+  function connectWS() {
+    try {
+      ws = new WebSocket('wss://api.flexgig.com.ng/ws/wallet');
+      ws.onopen = () => {
+        console.log('[Balance] WebSocket connected');
+        ws.send(JSON.stringify({ type: 'subscribe', user_uid: uid }));
+        if (pollInterval) clearInterval(pollInterval);
+      };
+      ws.onmessage = e => {
+        const data = JSON.parse(e.data);
+        if (data.type === 'balance_update') {
+          window.updateAllBalances(data.balance);
+          if (window.notify) window.notify(`₦${data.amount.toLocaleString()} credited!`, 'success');
+        }
+      };
+      ws.onclose = () => {
+        console.warn('[Balance] WebSocket closed → starting polling');
+        startPolling();
+      };
+    } catch (e) {
+      console.error('[Balance] WS failed:', e);
+      startPolling();
+    }
+  }
 
-  //   eye.classList.toggle('open', !window.isBalanceMasked);
-  //   eye.classList.toggle('closed', window.isBalanceMasked);
-
-  //   // ✅ Just apply visibility, don't call updateAllBalances
-  //   applyBalanceVisibility();
-  // });
-
-  // // ✅ REMOVED DOMContentLoaded event - it was causing the flash/blank issue
-  // // The visibility state is now applied by updateAllBalances and the eye toggle
+  function startPolling() {
+    if (pollInterval) clearInterval(pollInterval);
+    pollInterval = setInterval(async () => {
+      try {
+        const res = await fetch(`${window.__SEC_API_BASE}/api/session?light=true`, { credentials: 'include' });
+        if (res.ok) {
+          const json = await res.json();
+          const newBal = json.user?.wallet_balance;
+          if (newBal !== undefined && newBal > window.currentDisplayedBalance) {
+            window.updateAllBalances(newBal);
+            if (window.notify) window.notify('Payment received!', 'success');
+          }
+        }
+      } catch (e) {
+        console.warn('[Balance] Polling failed:', e);
+      }
+    }, 10000);
+  }
 
   connectWS();
 })();
-
 
 // Run observer only on dashboard
 if (window.location.pathname.includes('dashboard.html')) {
