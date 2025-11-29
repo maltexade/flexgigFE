@@ -91,99 +91,110 @@ const addMoneyModal = document.getElementById('addMoneyModal');
   const MODAL_ID = 'addMoneyModal';
   let hasShownSuccess = false;
 
-  // Listen for balance update from WebSocket
-  window.addEventListener('message', (e) => {
-    if (e.data && e.data.type === 'balance_update') {
-      const { balance, amount } = e.data;
-
-      // Only trigger once per session
-      if (hasShownSuccess) return;
-      hasShownSuccess = true;
-
-      // 1. Close modal using ModalManager (your system)
-      if (window.modalManager && typeof window.modalManager.closeModal === 'function') {
-        window.modalManager.closeModal(MODAL_ID);
-      } else if (document.getElementById(MODAL_ID)) {
-        document.getElementById(MODAL_ID).style.transform = 'translateY(100%)';
-      }
-
-      // 2. Show beautiful success toast
-      showSuccessToast(`₦${Number(amount).toLocaleString()} received!`, `Wallet updated to ₦${Number(balance).toLocaleString()}`);
-
-      // 4. Reset flag after 30s (allow next payment)
-      setTimeout(() => { hasShownSuccess = false; }, 30000);
+  // UNIFIED handler for balance updates
+  function handleBalanceUpdate(data) {
+    console.log('[Balance Update Received]', data); // Debug log
+    
+    if (!data || data.type !== 'balance_update') return;
+    
+    const { balance, amount } = data;
+    
+    // Only trigger once per session
+    if (hasShownSuccess) {
+      console.log('[Balance Update] Already shown, ignoring');
+      return;
     }
+    hasShownSuccess = true;
+
+    console.log('[Balance Update] Processing...'); // Debug log
+
+    // 1. Close modal using ModalManager (your system)
+    if (window.modalManager && typeof window.modalManager.closeModal === 'function') {
+      window.modalManager.closeModal(MODAL_ID);
+      console.log('[Balance Update] Modal closed via modalManager');
+    } else {
+      const modal = document.getElementById(MODAL_ID);
+      if (modal) {
+        modal.style.transform = 'translateY(100%)';
+        modal.classList.add('hidden'); // Also add hidden class
+        console.log('[Balance Update] Modal closed via style');
+      }
+    }
+
+    // 2. Show beautiful success toast
+    showSuccessToast(`₦${Number(amount).toLocaleString()} received!`, `Wallet updated to ₦${Number(balance).toLocaleString()}`);
+    console.log('[Balance Update] Toast shown');
+
+    // 3. Reset flag after 30s (allow next payment)
+    setTimeout(() => { 
+      hasShownSuccess = false;
+      console.log('[Balance Update] Flag reset');
+    }, 30000);
+  }
+
+  // 🔥 PRIMARY LISTENER: Custom event from WebSocket (works on mobile!)
+  window.addEventListener('balance_update', (e) => {
+    console.log('[Custom Event] balance_update received', e.detail);
+    handleBalanceUpdate(e.detail);
   });
 
-  // Also listen for WebSocket directly (fallback)
-  if (window.WebSocket) {
-    const oldHandler = window.onmessage;
-    window.onmessage = (e) => {
-      if (oldHandler) oldHandler(e);
-      if (e.data && typeof e.data === 'string') {
-        try {
-          const parsed = JSON.parse(e.data);
-          if (parsed.type === 'balance_update') {
-            window.dispatchEvent(new MessageEvent('message', { data: parsed }));
-          }
-        } catch (e) {}
-      }
-    };
-  }
+  // MOBILE FIX: Expose global handler for direct calls
+  window.__handleBalanceUpdate = handleBalanceUpdate;
 
   // BEAUTIFUL SUCCESS TOAST
   function showSuccessToast(title, subtitle = '') {
-  const toast = document.createElement('div');
-  toast.style.cssText = `
-    position: fixed;
-    top: calc(env(safe-area-inset-top, 0px) + 14px);
-    left: 50%;
-    transform: translateX(-50%);
-    background: linear-gradient(135deg, #10b981, #059669);
-    color: white;
-    padding: 16px 24px;
-    border-radius: 16px;
-    box-shadow: 0 10px 30px rgba(16, 156, 103, 0.4);
-    z-index: 999999999;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    text-align: center;
-    animation: toastSlideDown 0.45s ease-out, toastFadeOut 0.6s 3s forwards;
-    max-width: min(92%, 380px);
-    width: max-content;
-    backdrop-filter: blur(10px);
-    border: 1px solid rgba(255,255,255,0.25);
-    pointer-events: none;
-  `;
+    const toast = document.createElement('div');
+    toast.style.cssText = `
+      position: fixed;
+      top: calc(env(safe-area-inset-top, 0px) + 20px);
+      left: 50%;
+      transform: translateX(-50%);
+      background: linear-gradient(135deg, #10b981, #059669);
+      color: white;
+      padding: 16px 24px;
+      border-radius: 16px;
+      box-shadow: 0 10px 30px rgba(16, 156, 103, 0.4);
+      z-index: 999999999;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      text-align: center;
+      animation: toastSlideDown 0.45s ease-out, toastFadeOut 0.6s 3s forwards;
+      max-width: min(92%, 380px);
+      width: max-content;
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,0.25);
+      pointer-events: auto;
+      touch-action: none;
+    `;
 
-  toast.innerHTML = `
-    <div style="font-size: 18px; font-weight: 800; margin-bottom: 4px;">
-      ✓ ${title}
-    </div>
-    ${subtitle ? `<div style="font-size: 14px; opacity: 0.9;">${subtitle}</div>` : ''}
-  `;
+    toast.innerHTML = `
+      <div style="font-size: 18px; font-weight: 800; margin-bottom: 4px;">
+        ✓ ${title}
+      </div>
+      ${subtitle ? `<div style="font-size: 14px; opacity: 0.9;">${subtitle}</div>` : ''}
+    `;
 
-  document.body.appendChild(toast);
+    document.body.appendChild(toast);
 
-  setTimeout(() => toast.remove(), 4000);
-}
-
+    setTimeout(() => toast.remove(), 4000);
+    
+    console.log('[Toast] Displayed successfully');
+  }
 
   // Animations
   const style = document.createElement("style");
-style.textContent = `
-  @keyframes toastSlideDown {
-    from { opacity: 0; transform: translate(-50%, -40px); }
-    to   { opacity: 1; transform: translate(-50%, 0); }
-  }
+  style.textContent = `
+    @keyframes toastSlideDown {
+      from { opacity: 0; transform: translate(-50%, -40px); }
+      to   { opacity: 1; transform: translate(-50%, 0); }
+    }
 
-  @keyframes toastFadeOut {
-    to { opacity: 0; transform: translate(-50%, -20px); }
-  }
-`;
-document.head.appendChild(style);
+    @keyframes toastFadeOut {
+      to { opacity: 0; transform: translate(-50%, -20px); }
+    }
+  `;
+  document.head.appendChild(style);
 
 })();
-
 
 
 // --- Show Error Screen ---
