@@ -3243,7 +3243,7 @@ a[style*="color: #f00"] { color: var(--danger); }
   display: flex; /* hidden by default */
   align-items: center;
   justify-content: center;
-  z-index: 999999;
+  z-index: 99999999999999999999999999999; /* very high z-index */
 }
 #appLoader[hidden] {
   display: none !important; /* hide when [hidden] attribute is set */

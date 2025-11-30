@@ -133,9 +133,13 @@ const addMoneyModal = document.getElementById('addMoneyModal');
       }
     }
 
-    // 2. Show beautiful success toast
-    showSuccessToast(`₦${Number(amount).toLocaleString()} received!`, `Wallet updated to ₦${Number(balance).toLocaleString()}`);
-    console.log('[Balance Update] Toast shown');
+    // 2. Show beautiful success toast + PLAY THE DING!
+showSuccessToast(`₦${Number(amount).toLocaleString()} received!`, 
+                `Wallet updated to ₦${Number(balance).toLocaleString()}`);
+
+if (typeof window.playSuccessSound === 'function') {
+  window.playSuccessSound();   // CHA-CHING!
+}
 
     // 3. Reset flag after 30s (allow next payment)
     setTimeout(() => { 
@@ -305,28 +309,56 @@ async function openAddMoneyModalContent() {
 
   const contentContainer = addMoneyModal.querySelector('.addMoney-modal-content');
 
-    // Try localStorage first
-  const pending = getPendingTxFromStorage();
-  if (pending) {
-    // Show quick "Getting your pending transaction..." UI briefly (optional)
-    contentContainer.innerHTML = `
-      <div style="padding:18px; text-align:center;">
-        <div style="font-weight:700; margin-bottom:6px;">Getting your pending transaction...</div>
-        <div style="opacity:0.85; font-size:13px;">Loading your unpaid account — it hasn't expired yet.</div>
-      </div>
+  // Try localStorage first
+const pending = getPendingTxFromStorage();
+if (pending) {
+  // Show quick "Getting your pending transaction..." UI briefly
+  contentContainer.innerHTML = `
+    <div style="padding:18px; text-align:center;">
+      <div style="font-weight:700; margin-bottom:6px;">Getting your pending transaction...</div>
+      <div style="opacity:0.85; font-size:13px;">Loading your unpaid account — it hasn't expired yet.</div>
+    </div>
+  `;
+
+  // ─────── INLINE TOAST — ALWAYS VISIBLE — NO Z-INDEX CAN STOP IT ───────
+  (function showInlinePendingTxToast() {
+    const existing = contentContainer.querySelector('.inline-pending-tx-toast');
+    if (existing) existing.remove();
+
+    const toast = document.createElement('div');
+    toast.className = 'inline-pending-tx-toast';
+    toast.style.cssText = `
+      position: sticky; top: 12px; left: 50%; transform: translateX(-50%);
+      background: #f59e0b; color: white; padding: 12px 20px; border-radius: 12px;
+      font-weight: 700; font-size: 14px; text-align: center; z-index: 9999;
+      box-shadow: 0 8px 25px rgba(0,0,0,0.25); max-width: 90%; width: max-content;
+      margin: 0 auto 16px auto; pointer-events: none; animation: inlineToastPop 0.4s ease-out;
+      backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.2);
+    `;
+    toast.innerHTML = `
+      Warning: Please complete your pending transaction.
     `;
 
-    // show notification so user knows they must complete pending tx
-    try {
-      showLocalNotify('Please complete your pending transaction.', 'info');
-    } catch (e) {
-      console.warn('[openAddMoneyModalContent] notify failed', e);
-    }
+    contentContainer.insertBefore(toast, contentContainer.firstChild);
 
-    // small delay so user sees the message (0-350ms)
-    setTimeout(() => showGeneratedAccount(pending), 150);
-    return;
-  }
+    setTimeout(() => {
+      toast.style.opacity = '0';
+      toast.style.transform = 'translateX(-50%) translateY(-10px)';
+      setTimeout(() => toast.remove(), 400);
+    }, 4000);
+
+    if (!document.getElementById('inline-toast-anim-styles')) {
+      const style = document.createElement('style');
+      style.id = 'inline-toast-anim-styles';
+      style.textContent = `@keyframes inlineToastPop { from { opacity: 0; transform: translateX(-50%) translateY(-20px) scale(0.9); } to { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); } }`;
+      document.head.appendChild(style);
+    }
+  })();
+
+  // Load the pending account UI after brief delay
+  setTimeout(() => showGeneratedAccount(pending), 150);
+  return;
+}
 
 
   // No local pending -> render normal form
@@ -428,7 +460,7 @@ function assignAddMoneyEvents() {
   let isFundingInProgress = false;
 
   fundBtn.addEventListener('click', async () => {
-  // PREVENT DOUBLE-CLICK / DOUBLE-EXECUTION
+  // Prevent double-clicks
   if (isFundingInProgress) {
     console.log('[Fund Wallet] Already processing — ignoring duplicate click');
     return;
@@ -440,58 +472,129 @@ function assignAddMoneyEvents() {
     return;
   }
 
-  // 1) If localStorage has a pending tx, show it and notify user (ignore input amount)
+  // 1) Check localStorage first — instant
   const localPending = getPendingTxFromStorage();
   if (localPending) {
-    showLocalNotify('Please complete your pending transaction.', 'info');
-    // show the pending transaction (this will reuse your UI and countdown)
+    showPendingTransactionToast(); // Unified toast
     showGeneratedAccount(localPending);
     return;
   }
 
-  // 2) No local pending -> quickly check server for pending (small network hit, only on user intent)
+  // ─────────────────────────────────────────────────────────────
+  // START FULL LOADER + BLOCK INTERACTION IMMEDIATELY
+  // ─────────────────────────────────────────────────────────────
   isFundingInProgress = true;
   fundBtn.disabled = true;
   fundBtn.textContent = 'Checking…';
 
+  let hideLoader = () => {};
   try {
+    // Start the full-screen loader right now
+    if (window.withLoader) {
+      hideLoader = window.withLoader(() => {}); // Shows loader instantly
+    }
+
+    // 2) Check server for hidden pending transaction
     const check = await fetchPendingTransaction();
+
     if (check.ok && check.data) {
-      // server reports a pending tx (user may have cleared cache earlier)
-      showLocalNotify('Please complete your pending transaction.', 'info');
+      hideLoader(); // Hide loader before showing toast + UI
+      showPendingTransactionToast();
       showGeneratedAccount(check.data);
       return;
     }
 
-    // 3) No pending anywhere -> proceed to create a new account
+    // 3) No pending anywhere → create new virtual account
     fundBtn.textContent = 'Processing...';
 
-    const res = window.withLoader
-      ? await window.withLoader(() => apiFetch('/api/fund-wallet', {
-          method: 'POST',
-          body: { amount }
-        }))
-      : await apiFetch('/api/fund-wallet', {
-          method: 'POST',
-          body: { amount }
-        });
+    const res = await apiFetch('/api/fund-wallet', {
+      method: 'POST',
+      body: { amount }
+    });
 
     if (res.ok) {
-      // This will save to localStorage inside showGeneratedAccount (your patched version)
       showGeneratedAccount(res.data);
     } else {
-      showGeneratedError(res.error?.message || 'Failed to generate account.');
+      throw new Error(res.error?.message || 'Failed to generate account');
     }
+
   } catch (err) {
     console.error('[Fund Wallet Error]', err);
-    showGeneratedError('Network error. Try again.');
+    showGeneratedError(err.message || 'Network error. Please try again.');
   } finally {
-    // Always reset button state
+    // Always clean up
+    if (typeof hideLoader === 'function') hideLoader();
+
     isFundingInProgress = false;
     fundBtn.disabled = false;
     fundBtn.textContent = 'Fund Wallet';
   }
 });
+}
+
+// Unified beautiful inline toast for ALL pending transaction warnings
+function showPendingTransactionToast() {
+  // Remove any existing
+  document.querySelectorAll('.pending-tx-warning-toast').forEach(t => t.remove());
+
+  const toast = document.createElement('div');
+  toast.className = 'pending-tx-warning-toast';
+  toast.style.cssText = `
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0px) + 16px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+    color: white;
+    padding: 15px 28px;
+    border-radius: 16px;
+    font-weight: 800;
+    font-size: 15px;
+    text-align: center;
+    box-shadow: 0 12px 35px rgba(217, 119, 6, 0.45);
+    z-index: 2147483647;
+    max-width: min(90%, 420px);
+    width: max-content;
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,0.3);
+    animation: pendingToastPop 0.5s ease-out;
+    pointer-events: none;
+    user-select: none;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  `;
+
+  toast.innerHTML = `
+    <div style="display: flex; align-items: center; justify-content: center; gap: 10px;">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+        <circle cx="12" cy="12" r="10"/>
+        <path d="M12 8v4m0 4h.01"/>
+      </svg>
+      <span>You have a pending transaction — please complete it</span>
+    </div>
+  `;
+
+  const modal = document.getElementById('addMoneyModal') || document.body;
+  modal.appendChild(toast);
+
+  // Auto-remove
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    toast.style.transform = 'translateX(-50%) translateY(-20px) scale(0.95)';
+    setTimeout(() => toast.remove(), 600);
+  }, 5000);
+
+  // Add animation once
+  if (!document.getElementById('pending-toast-anim-style')) {
+    const style = document.createElement('style');
+    style.id = 'pending-toast-anim-style';
+    style.textContent = `
+      @keyframes pendingToastPop {
+        from { opacity: 0; transform: translateX(-50%) translateY(-50px) scale(0.9); }
+        to   { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+      }
+    `;
+    document.head.appendChild(style);
+  }
 }
 
 /* ---------- localStorage helpers ---------- */
@@ -936,4 +1039,44 @@ console.log('[Fund Wallet] Check WebSocket: getWebSocketStatus()');
   //    (so the first click has zero delay), call prepareAddMoneyModal() here — uncomment if desired:
 
 
+})();
+// ─────────────────────────────────────────────────────────────
+// SUCCESS SOUND – “Ding!” when payment is received
+// Just place your file at: /sounds/success-ding.wav (or change the path below)
+// ─────────────────────────────────────────────────────────────
+(function addPaymentSuccessSound() {
+  // Change this path if you put the file somewhere else
+  const SOUND_URL = '/frontend/sound/paymentReceived.wav';
+
+  // Create the audio element once (reuse it forever
+  const successAudio = new Audio(SOUND_URL);
+  successAudio.preload = 'auto';
+  successAudio.volume = 0.65; // feels perfect on mobile & desktop
+
+  // Fix iOS/Android silent-mode issues – we “unlock” audio on first user touch
+  let audioUnlocked = false;
+  function unlockAudio() {
+    if (audioUnlocked) return;
+    successAudio.play().catch(() => {}); // empty play → unlocks audio context
+    successAudio.pause();
+    successAudio.currentTime = 0;
+    audioUnlocked = true;
+
+    // Remove listeners after first real interaction
+    document.body.removeEventListener('touchstart', unlockAudio);
+    document.body.removeEventListener('click', unlockAudio);
+  }
+  document.body.addEventListener('touchstart', unlockAudio, { once: true });
+  document.body.addEventListener('click', unlockAudio, { once: true });
+
+  // Public function you can call anywhere
+  window.playSuccessSound = function () {
+    if (!audioUnlocked) {
+      // If somehow not unlocked yet, try once more
+      successAudio.play().catch(() => {});
+      return;
+    }
+    successAudio.currentTime = 0; // rewind
+    successAudio.play().catch(e => console.warn('Success sound failed:', e));
+  };
 })();
