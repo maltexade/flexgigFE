@@ -254,12 +254,12 @@ window.showPendingTxToast = function(message = "Please complete your pending tra
 
   document.body.appendChild(toast);
 
-  // Stay longer — 1 second
+  // Stay longer — 3 seconds
   setTimeout(() => {
     toast.style.opacity = "0";
     toast.style.transform = "translateX(-50%) translateY(-20px)";
     setTimeout(() => toast.remove(), 600);
-  }, 1000);
+  }, 3000);
 
   // Animations
   if (!document.getElementById('pending-global-style')) {
@@ -524,8 +524,8 @@ function assignAddMoneyEvents() {
       : await fetchPendingTransaction();
 
     if (check.ok && check.data) {
-      window.showPendingTxToast("Please complete your pending transaction.");
       showGeneratedAccount(check.data);
+      window.showPendingTxToast("Please complete your pending transaction.");
       return;
     }
 
