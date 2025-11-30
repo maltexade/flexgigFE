@@ -212,6 +212,70 @@ if (typeof window.playSuccessSound === 'function') {
 
 })();
 
+// --- GLOBAL PENDING TRANSACTION TOAST (always outside modal) ---
+window.showPendingTxToast = function(message = "Please complete your pending transaction") {
+  // Remove old if exists
+  document.querySelectorAll('.global-pending-toast').forEach(el => el.remove());
+
+  const toast = document.createElement('div');
+  toast.className = 'global-pending-toast';
+  toast.style.cssText = `
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0px) + 22px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+    color: white;
+    padding: 18px 26px;
+    border-radius: 18px;
+    font-weight: 800;
+    font-size: 16px;
+    text-align: center;
+    box-shadow: 0 14px 35px rgba(217, 119, 6, 0.45);
+    z-index: 2147483647; /* Always above all modals */
+    max-width: min(92%, 420px);
+    width: max-content;
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.28);
+    animation: pendingGlobalSlide 0.45s ease-out;
+    pointer-events: none;
+    user-select: none;
+  `;
+
+  toast.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:center;gap:10px;">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <circle cx="12" cy="12" r="10"></circle>
+        <path d="M12 8v4m0 4h.01"></path>
+      </svg>
+      ${message}
+    </div>
+  `;
+
+  document.body.appendChild(toast);
+
+  // Stay longer — 7 seconds
+  setTimeout(() => {
+    toast.style.opacity = "0";
+    toast.style.transform = "translateX(-50%) translateY(-20px)";
+    setTimeout(() => toast.remove(), 600);
+  }, 7000);
+
+  // Animations
+  if (!document.getElementById('pending-global-style')) {
+    const style = document.createElement('style');
+    style.id = 'pending-global-style';
+    style.textContent = `
+      @keyframes pendingGlobalSlide {
+        from { opacity: 0; transform: translateX(-50%) translateY(-50px) scale(0.9); }
+        to   { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+      }
+    `;
+    document.head.appendChild(style);
+  }
+};
+
+
 // Global listener to clear pending tx whenever a balance_update event fires
 window.addEventListener('balance_update', (e) => {
   try {
@@ -475,68 +539,7 @@ function assignAddMoneyEvents() {
   // 1) If localStorage has a pending tx
   const localPending = getPendingTxFromStorage();
   if (localPending) {
-    (function showInlinePendingTxWarning() {
-      // Remove any old toast
-      document.querySelectorAll('.pending-tx-inline-toast').forEach(t => t.remove());
-
-      const toast = document.createElement('div');
-      toast.className = 'pending-tx-inline-toast';
-      toast.style.cssText = `
-        position: fixed;
-        top: calc(env(safe-area-inset-top, 0px) + 16px);
-        left: 50%;
-        transform: translateX(-50%);
-        background: linear-gradient(135deg, #f59e0b, #d97706);
-        color: white;
-        padding: 14px 24px;
-        border-radius: 16px;
-        font-weight: 800;
-        font-size: 15px;
-        text-align: center;
-        box-shadow: 0 10px 30px rgba(217, 119, 6, 0.4);
-        z-index: 2147483647;
-        max-width: min(92%, 380px);
-        width: max-content;
-        backdrop-filter: blur(12px);
-        border: 1px solid rgba(255,255,255,0.25);
-        animation: toastSlideDown 0.5s ease-out;
-        pointer-events: none;
-        user-select: none;
-      `;
-
-      toast.innerHTML = `
-        <div style="display:flex; align-items:center; justify-content:center; gap:10px;">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-            <circle cx="12" cy="12" r="10"/>
-            <path d="M12 8v4m0 4h.01"/>
-          </svg>
-          Please complete your pending transaction
-        </div>
-      `;
-
-      const modal = document.getElementById('addMoneyModal');
-      if (modal) modal.appendChild(toast);
-      else document.body.appendChild(toast);
-
-      setTimeout(() => {
-        toast.style.opacity = '0';
-        toast.style.transform = 'translateX(-50%) translateY(-20px)';
-        setTimeout(() => toast.remove(), 500);
-      }, 4500);
-
-      if (!document.getElementById('pending-toast-anim')) {
-        const style = document.createElement('style');
-        style.id = 'pending-toast-anim';
-        style.textContent = `
-          @keyframes toastSlideDown {
-            from { opacity: 0; transform: translateX(-50%) translateY(-40px) scale(0.95); }
-            to   { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
-          }
-        `;
-        document.head.appendChild(style);
-      }
-    })();
-
+    showPendingTxToast("Please complete your pending transaction.");
     showGeneratedAccount(localPending);
     return;
   }
@@ -553,67 +556,7 @@ function assignAddMoneyEvents() {
       : await fetchPendingTransaction();
 
     if (check.ok && check.data) {
-      (function showServerPendingTxToast() {
-        document.querySelectorAll('.server-pending-tx-toast').forEach(t => t.remove());
-
-        const toast = document.createElement('div');
-        toast.className = 'server-pending-tx-toast';
-        toast.style.cssText = `
-          position: fixed;
-          top: calc(env(safe-area-inset-top, 0px) + 16px);
-          left: 50%;
-          transform: translateX(-50%);
-          background: linear-gradient(135deg, #f59e0b, #d97706);
-          color: white;
-          padding: 15px 26px;
-          border-radius: 16px;
-          font-weight: 800;
-          font-size: 15px;
-          text-align: center;
-          box-shadow: 0 12px 35px rgba(217, 119, 6, 0.45);
-          z-index: 2147483647;
-          max-width: min(90%, 400px);
-          width: max-content;
-          backdrop-filter: blur(12px);
-          border: 1px solid rgba(255, 255, 255, 0.3);
-          animation: pendingToastPop 0.5s ease-out;
-          pointer-events: none;
-          user-select: none;
-        `;
-
-        toast.innerHTML = `
-          <div style="display: flex; align-items: center; justify-content: center; gap: 10px;">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
-              <circle cx="12" cy="12" r="10"/>
-              <path d="M12 8v4m0 4h.01"/>
-            </svg>
-            <span>You have a pending transaction — please complete it</span>
-          </div>
-        `;
-
-        const modal = document.getElementById('addMoneyModal');
-        if (modal) modal.appendChild(toast);
-        else document.body.appendChild(toast);
-
-        setTimeout(() => {
-          toast.style.opacity = '0';
-          toast.style.transform = 'translateX(-50%) translateY(-20px) scale(0.95)';
-          setTimeout(() => toast.remove(), 600);
-        }, 5000);
-
-        if (!document.getElementById('pending-toast-anim-style')) {
-          const style = document.createElement('style');
-          style.id = 'pending-toast-anim-style';
-          style.textContent = `
-            @keyframes pendingToastPop {
-              from { opacity: 0; transform: translateX(-50%) translateY(-50px) scale(0.9); }
-              to   { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
-            }
-          `;
-          document.head.appendChild(style);
-        }
-      })();
-
+      showPendingTxToast("Please complete your pending transaction.");
       showGeneratedAccount(check.data);
       return;
     }
