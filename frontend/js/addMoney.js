@@ -254,12 +254,12 @@ window.showPendingTxToast = function(message = "Please complete your pending tra
 
   document.body.appendChild(toast);
 
-  // Stay longer — 7 seconds
+  // Stay longer — 1 second
   setTimeout(() => {
     toast.style.opacity = "0";
     toast.style.transform = "translateX(-50%) translateY(-20px)";
     setTimeout(() => toast.remove(), 600);
-  }, 7000);
+  }, 1000);
 
   // Animations
   if (!document.getElementById('pending-global-style')) {
@@ -385,7 +385,7 @@ if (pending) {
   `;
 
     // Use the REAL global toast instead
-  window.showPendingTxToast("You have a pending transaction. Complete it to continue.");
+  window.showPendingTxToast("Please complete your pending transaction.");
 
   // Load the pending account UI after brief delay
   setTimeout(() => showGeneratedAccount(pending), 150);
@@ -507,7 +507,7 @@ function assignAddMoneyEvents() {
   // 1) If localStorage has a pending tx
   const localPending = getPendingTxFromStorage();
   if (localPending) {
-    showPendingTxToast("Please complete your pending transaction.");
+    window.showPendingTxToast("Please complete your pending transaction.");
     showGeneratedAccount(localPending);
     return;
   }
@@ -524,7 +524,7 @@ function assignAddMoneyEvents() {
       : await fetchPendingTransaction();
 
     if (check.ok && check.data) {
-      showPendingTxToast("Please complete your pending transaction.");
+      window.showPendingTxToast("Please complete your pending transaction.");
       showGeneratedAccount(check.data);
       return;
     }
