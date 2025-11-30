@@ -1588,103 +1588,420 @@ window.applyBalanceVisibility = applyBalanceVisibility;
 //  BULLETPROOF REAL-TIME BALANCE + AUTO-CLOSE (MOBILE FIXED)
 // ===============================================================
 
+// ==========================================
+// ON-SCREEN DEBUG CONSOLE FOR MOBILE
+// Paste this at the TOP of your addmoney.js
+// ==========================================
+
+(function createMobileDebugConsole() {
+  // Create floating debug panel
+  const debugPanel = document.createElement('div');
+  debugPanel.id = 'mobileDebugPanel';
+  debugPanel.style.cssText = `
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    max-height: 35vh;
+    background: rgba(0, 0, 0, 0.95);
+    color: #0f0;
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+    padding: 10px;
+    overflow-y: auto;
+    z-index: 2147483647;
+    border-top: 2px solid #0f0;
+    display: none;
+  `;
+
+  // Create toggle button
+  const toggleBtn = document.createElement('button');
+  toggleBtn.textContent = '🐛';
+  toggleBtn.style.cssText = `
+    position: fixed;
+    bottom: 10px;
+    right: 10px;
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    background: #0f0;
+    color: #000;
+    border: none;
+    font-size: 24px;
+    z-index: 2147483647;
+    box-shadow: 0 4px 12px rgba(0,255,0,0.4);
+    cursor: pointer;
+  `;
+
+  toggleBtn.onclick = () => {
+    const isVisible = debugPanel.style.display !== 'none';
+    debugPanel.style.display = isVisible ? 'none' : 'block';
+    toggleBtn.textContent = isVisible ? '🐛' : '❌';
+  };
+
+  // Create clear button
+  const clearBtn = document.createElement('button');
+  clearBtn.textContent = 'Clear';
+  clearBtn.style.cssText = `
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    padding: 5px 10px;
+    background: #ff0000;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-size: 10px;
+    cursor: pointer;
+  `;
+  clearBtn.onclick = () => { debugPanel.innerHTML = ''; debugPanel.appendChild(clearBtn); };
+
+  debugPanel.appendChild(clearBtn);
+  document.body.appendChild(debugPanel);
+  document.body.appendChild(toggleBtn);
+
+  // Enhanced logging function
+  const logs = [];
+  window.mobileLog = function(message, type = 'info') {
+    const timestamp = new Date().toLocaleTimeString();
+    const colors = {
+      info: '#0f0',
+      warn: '#ff0',
+      error: '#f00',
+      success: '#0ff',
+      ws: '#f0f'
+    };
+
+    const logEntry = document.createElement('div');
+    logEntry.style.cssText = `
+      margin: 4px 0;
+      padding: 4px;
+      border-left: 3px solid ${colors[type] || '#0f0'};
+      background: rgba(255,255,255,0.05);
+    `;
+    logEntry.innerHTML = `<span style="color: #888">[${timestamp}]</span> <span style="color: ${colors[type]}">${message}</span>`;
+
+    debugPanel.appendChild(logEntry);
+    debugPanel.scrollTop = debugPanel.scrollHeight;
+
+    // Keep last 100 logs
+    logs.push({ timestamp, message, type });
+    if (logs.length > 100) logs.shift();
+
+    // Also log to real console
+    console.log(`[Mobile Debug] ${message}`);
+  };
+
+  // Track key events
+  window.mobileLog('🚀 Debug console initialized', 'success');
+
+  // Auto-show on first error
+  window.addEventListener('error', (e) => {
+    debugPanel.style.display = 'block';
+    toggleBtn.textContent = '❌';
+    window.mobileLog(`❌ ERROR: ${e.message} at ${e.filename}:${e.lineno}`, 'error');
+  });
+
+})();
+
+// ==========================================
+// INSTRUMENTED BALANCE UPDATE HANDLER
+// Replace your existing handleBalanceUpdate
+// ==========================================
+
+(function() {
+  const MODAL_ID = 'addMoneyModal';
+  let hasShownSuccess = false;
+
+  function handleBalanceUpdate(data) {
+    window.mobileLog('📥 Balance update received', 'ws');
+    window.mobileLog(`Data: ${JSON.stringify(data)}`, 'info');
+    
+    if (!data) {
+      window.mobileLog('⚠️ No data object', 'warn');
+      return;
+    }
+    
+    if (data.type !== 'balance_update') {
+      window.mobileLog(`⚠️ Wrong type: ${data.type}`, 'warn');
+      return;
+    }
+    
+    window.mobileLog(`Balance: ₦${data.balance}, Amount: ₦${data.amount}`, 'info');
+    
+    if (hasShownSuccess) {
+      window.mobileLog('⚠️ Already shown success (duplicate prevention)', 'warn');
+      return;
+    }
+    
+    hasShownSuccess = true;
+    window.mobileLog('✅ Processing payment...', 'success');
+
+    // Clear pending tx
+    try {
+      if (typeof removePendingTxFromStorage === 'function') {
+        removePendingTxFromStorage();
+        window.mobileLog('🗑️ Cleared pending tx via function', 'success');
+      } else {
+        localStorage.removeItem('flexgig.pending_fund_tx');
+        window.mobileLog('🗑️ Cleared pending tx directly', 'success');
+      }
+    } catch (e) {
+      window.mobileLog(`❌ Failed to clear pending: ${e.message}`, 'error');
+    }
+
+    // Close modal
+    if (window.modalManager && typeof window.modalManager.closeModal === 'function') {
+      window.modalManager.closeModal(MODAL_ID);
+      window.mobileLog('🚪 Modal closed via modalManager', 'success');
+    } else {
+      const modal = document.getElementById(MODAL_ID);
+      if (modal) {
+        modal.style.transform = 'translateY(100%)';
+        modal.classList.add('hidden');
+        window.mobileLog('🚪 Modal closed via style', 'success');
+      } else {
+        window.mobileLog('⚠️ Modal element not found!', 'warn');
+      }
+    }
+
+    // Show toast
+    window.mobileLog('🎉 Attempting to show toast...', 'info');
+    showSuccessToast(`₦${Number(data.amount).toLocaleString()} received!`, 
+                    `Wallet updated to ₦${Number(data.balance).toLocaleString()}`);
+
+    // Play sound
+    if (typeof window.playSuccessSound === 'function') {
+      window.mobileLog('🔊 Playing success sound...', 'info');
+      window.playSuccessSound();
+    } else {
+      window.mobileLog('⚠️ playSuccessSound not found', 'warn');
+    }
+
+    // Reset flag
+    setTimeout(() => { 
+      hasShownSuccess = false;
+      window.mobileLog('🔄 Success flag reset', 'info');
+    }, 30000);
+  }
+
+  // Primary event listener
+  window.addEventListener('balance_update', (e) => {
+    window.mobileLog('📡 Custom event fired', 'ws');
+    handleBalanceUpdate(e.detail);
+  });
+
+  // Global handler
+  window.__handleBalanceUpdate = handleBalanceUpdate;
+
+  function showSuccessToast(title, subtitle = '') {
+    window.mobileLog(`📢 Showing toast: ${title}`, 'success');
+    
+    const toast = document.createElement('div');
+    toast.style.cssText = `
+      position: fixed;
+      top: calc(env(safe-area-inset-top, 0px) + 20px);
+      left: 50%;
+      transform: translateX(-50%);
+      background: linear-gradient(135deg, #10b981, #059669);
+      color: white;
+      padding: 16px 24px;
+      border-radius: 16px;
+      box-shadow: 0 10px 30px rgba(16, 156, 103, 0.4);
+      z-index: 999999999;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      text-align: center;
+      animation: toastSlideDown 0.45s ease-out, toastFadeOut 0.6s 3s forwards;
+      max-width: min(92%, 380px);
+      width: max-content;
+    `;
+
+    toast.innerHTML = `
+      <div style="font-size: 18px; font-weight: 800; margin-bottom: 4px;">
+        ✓ ${title}
+      </div>
+      ${subtitle ? `<div style="font-size: 14px; opacity: 0.9;">${subtitle}</div>` : ''}
+    `;
+
+    document.body.appendChild(toast);
+    window.mobileLog('✅ Toast element added to DOM', 'success');
+
+    setTimeout(() => {
+      toast.remove();
+      window.mobileLog('🗑️ Toast removed from DOM', 'info');
+    }, 6600);
+  }
+
+  window.mobileLog('✅ Balance update handlers registered', 'success');
+})();
+
+// ==========================================
+// DEEP WEBSOCKET DIAGNOSTIC (MOBILE FIX)
+// Replace your ENTIRE dashboard.js WebSocket IIFE with this
+// ==========================================
+
 (function () {
+  window.mobileLog('🚀 Starting WebSocket initialization...', 'ws');
+  
   const uid = window.__USER_UID || localStorage.getItem('userId');
-  if (!uid) return;
+  window.mobileLog(`👤 User ID: ${uid || 'NOT FOUND'}`, uid ? 'success' : 'error');
+  
+  if (!uid) {
+    window.mobileLog('❌ FATAL: No user ID - WebSocket cannot connect', 'error');
+    return;
+  }
 
   let ws = null;
   let pollTimer = null;
   let lastKnownBalance = null;
-  let hasProcessedPayment = false; // prevent double toast/close
+  let hasProcessedPayment = false;
+  let lastSeenSeq = Number(localStorage.getItem('last_balance_seq') || '0');
+  
+  window.mobileLog(`📊 Last seen seq: ${lastSeenSeq}`, 'info');
 
-  // Central handler — called from WS, polling, AND page visibility
-  function handleNewBalance(newBalance, source = 'unknown') {
-    newBalance = Number(newBalance) || 0;
+  // Central handler with DEEP LOGGING
+  function handleNewBalance(data, source = 'unknown') {
+    window.mobileLog(`🎯 handleNewBalance called from: ${source}`, 'ws');
+    window.mobileLog(`📦 Raw data: ${JSON.stringify(data)}`, 'info');
+    
+    const newBalance = Number(data.balance) || 0;
+    const newSeq = Number(data.seq) || 0;
+    
+    window.mobileLog(`💰 Balance: ₦${newBalance.toLocaleString()}, Seq: ${newSeq}`, 'info');
 
+    // Check for missed payments
+    if (newSeq > lastSeenSeq + 1) {
+      window.mobileLog(`⚠️ MISSED ${newSeq - lastSeenSeq - 1} payment(s)!`, 'warn');
+      forceFullBalanceSync();
+      return;
+    }
+    
+    if (newSeq > lastSeenSeq) {
+      lastSeenSeq = newSeq;
+      try { 
+        localStorage.setItem('last_balance_seq', newSeq);
+        window.mobileLog(`✅ Updated seq to ${newSeq}`, 'success');
+      } catch(e) {
+        window.mobileLog(`❌ Failed to save seq: ${e.message}`, 'error');
+      }
+    }
+
+    // First load
     if (lastKnownBalance === null) {
+      window.mobileLog('🆕 First balance load', 'info');
       lastKnownBalance = newBalance;
       window.updateAllBalances(newBalance, true);
       return;
     }
 
+    // No change
     if (newBalance <= lastKnownBalance) {
+      window.mobileLog(`📊 Balance unchanged or decreased`, 'info');
       lastKnownBalance = newBalance;
       window.updateAllBalances(newBalance);
       return;
     }
 
+    // PAYMENT DETECTED!
     const amountAdded = newBalance - lastKnownBalance;
+    window.mobileLog(`💸 PAYMENT DETECTED! Added: ₦${amountAdded.toLocaleString()}`, 'success');
+    
     lastKnownBalance = newBalance;
-
-    console.log(`[Balance] +₦${amountAdded.toLocaleString()} (from ${source}) → ₦${newBalance.toLocaleString()}`);
-
-    // Update UI
     window.updateAllBalances(newBalance);
 
-    // ONLY if payment just arrived → close modal + toast
+    // Process payment notification
     if (!hasProcessedPayment && amountAdded > 0) {
+      window.mobileLog('🎉 Processing payment notification...', 'success');
       hasProcessedPayment = true;
 
-      // ---- NEW: clear local pending tx storage immediately so UI won't resurrect old tx ----
+      // Clear pending tx
       try {
         if (typeof removePendingTxFromStorage === 'function') {
           removePendingTxFromStorage();
-          console.log('[Balance] Cleared local pending tx storage');
+          window.mobileLog('🗑️ Cleared pending tx', 'success');
         } else {
-          // defensive: try to remove directly if helper not present
           localStorage.removeItem('flexgig.pending_fund_tx');
-          console.log('[Balance] Cleared local pending tx storage (direct)');
+          window.mobileLog('🗑️ Cleared pending tx (direct)', 'success');
         }
       } catch (e) {
-        console.warn('[handleNewBalance] failed to clear pending tx storage', e);
+        window.mobileLog(`❌ Clear pending failed: ${e.message}`, 'error');
       }
-      // -------------------------------------------------------------------------------------
 
-      // Dispatch event (for any other listeners)
+      // Dispatch custom event
+      window.mobileLog('📡 Dispatching balance_update event...', 'ws');
       window.dispatchEvent(new CustomEvent('balance_update', {
         detail: { type: 'balance_update', balance: newBalance, amount: amountAdded }
       }));
 
-      // Close modal SAFELY
+      // Close modal
       setTimeout(() => {
+        window.mobileLog('🚪 Attempting to close modal...', 'info');
         if (window.ModalManager?.closeTopModal) {
           window.ModalManager.closeTopModal();
-          
+          window.mobileLog('✅ Modal closed via ModalManager', 'success');
         } else if (document.getElementById('addMoneyModal')) {
-          document.getElementById('addMoneyModal').style.transform = 'translateY(100%)';
-          document.getElementById('addMoneyModal').classList.add('hidden');
+          const modal = document.getElementById('addMoneyModal');
+          modal.style.transform = 'translateY(100%)';
+          modal.classList.add('hidden');
+          window.mobileLog('✅ Modal closed via style', 'success');
+        } else {
+          window.mobileLog('⚠️ Modal not found', 'warn');
         }
       }, 300);
 
-      // Re-open the add-money content (this will now NOT find the old tx in localStorage)
-      window.openAddMoneyModalContent();
+      // Re-open fresh form
+      if (typeof window.openAddMoneyModalContent === 'function') {
+        window.openAddMoneyModalContent();
+        window.mobileLog('✅ Reopened add-money form', 'success');
+      }
 
       // Show toast
       if (typeof window.notify === 'function') {
         window.notify(`₦${amountAdded.toLocaleString()} received!`, 'success');
+        window.mobileLog('✅ Toast shown via window.notify', 'success');
       } else {
-        // Fallback beautiful toast
-        const t = document.createElement('div');
-        t.textContent = `✓ ₦${amountAdded.toLocaleString()} credited!`;
-        Object.assign(t.style, {
-          position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)',
-          background: '#10b981', color: 'white', padding: '16px 24px', borderRadius: '16px',
-          zIndex: 999999, fontWeight: 'bold', boxShadow: '0 10px 30px rgba(0,0,0,0.3)'
-        });
-        document.body.appendChild(t);
-        setTimeout(() => t.remove(), 4000);
+        window.mobileLog('⚠️ window.notify not found - using fallback', 'warn');
       }
 
-      // Allow next payment after 30s
-      setTimeout(() => { hasProcessedPayment = false; }, 30000);
+      // Reset flag
+      setTimeout(() => { 
+        hasProcessedPayment = false;
+        window.mobileLog('🔄 Payment flag reset', 'info');
+      }, 30000);
+    } else if (hasProcessedPayment) {
+      window.mobileLog('⏭️ Skipping - already processed payment', 'warn');
     }
   }
 
-  // Polling fallback (runs always on mobile)
+  // Force sync
+  async function forceFullBalanceSync() {
+    window.mobileLog('🔄 Force syncing balance...', 'ws');
+    try {
+      const res = await fetch('/api/session?light=true&t=' + Date.now());
+      if (res.ok) {
+        const json = await res.json();
+        window.mobileLog(`✅ Sync response: ${JSON.stringify(json)}`, 'success');
+        if (json.wallet_seq !== undefined) {
+          handleNewBalance({
+            balance: json.wallet_balance || 0,
+            seq: json.wallet_seq || 0
+          }, 'force-sync');
+        }
+      } else {
+        window.mobileLog(`❌ Sync failed: ${res.status}`, 'error');
+      }
+    } catch (e) {
+      window.mobileLog(`❌ Sync error: ${e.message}`, 'error');
+    }
+  }
+
+  // Polling fallback
   async function startPolling() {
+    window.mobileLog('⏱️ Starting polling (8s interval)...', 'ws');
     if (pollTimer) clearTimeout(pollTimer);
 
     const poll = async () => {
+      window.mobileLog('📡 Polling for balance...', 'info');
       try {
         const res = await fetch(`${window.__SEC_API_BASE}/api/session?light=true&t=${Date.now()}`, {
           credentials: 'include',
@@ -1692,79 +2009,162 @@ window.applyBalanceVisibility = applyBalanceVisibility;
         });
         if (res.ok) {
           const json = await res.json();
-          const bal = json.user?.wallet_balance;
-          if (bal !== undefined && bal !== lastKnownBalance) {
-            handleNewBalance(bal, 'polling');
+          window.mobileLog(`📊 Poll response: balance=${json.user?.wallet_balance}`, 'info');
+          if (json.user?.wallet_balance !== undefined) {
+            handleNewBalance({ 
+              balance: json.user.wallet_balance,
+              seq: json.wallet_seq || lastSeenSeq + 1
+            }, 'polling');
           }
+        } else {
+          window.mobileLog(`⚠️ Poll failed: ${res.status}`, 'warn');
         }
-      } catch (e) { console.warn('[Balance Poll] failed', e); }
+      } catch (e) { 
+        window.mobileLog(`❌ Poll error: ${e.message}`, 'error');
+      }
 
-      pollTimer = setTimeout(poll, 8000); // every 8s
+      pollTimer = setTimeout(poll, 8000);
     };
     poll();
   }
 
-  // WebSocket (best effort)
+  // WebSocket connection
   function connectWS() {
+    window.mobileLog('🔌 Attempting WebSocket connection...', 'ws');
     try {
       ws = new WebSocket('wss://api.flexgig.com.ng/ws/wallet');
+      window.mobileLog('✅ WebSocket object created', 'success');
 
       ws.onopen = () => {
-        console.log('[WS] Connected');
-        ws.send(JSON.stringify({ type: 'subscribe', user_uid: uid }));
-        if (pollTimer) clearTimeout(pollTimer); // WS wins
+        window.mobileLog('🎉 WebSocket OPENED!', 'success');
+        const subMsg = JSON.stringify({ type: 'subscribe', user_uid: uid });
+        ws.send(subMsg);
+        window.mobileLog(`📤 Sent subscription: ${subMsg}`, 'ws');
+        
+        if (pollTimer) {
+          clearTimeout(pollTimer);
+          window.mobileLog('⏸️ Polling paused (WS active)', 'info');
+        }
       };
 
       ws.onmessage = (e) => {
+        window.mobileLog(`📨 WS RAW MESSAGE: ${e.data}`, 'ws');
         try {
           const data = JSON.parse(e.data);
-          if (data.type === 'balance_update' && data.balance !== undefined) {
-            handleNewBalance(data.balance, 'websocket');
+          window.mobileLog(`📊 Parsed WS: type=${data.type}, bal=${data.balance}, seq=${data.seq}`, 'ws');
+          
+          if (data.type === 'balance_update' && data.balance !== undefined && data.seq !== undefined) {
+            window.mobileLog('✅ Valid balance_update message!', 'success');
+            handleNewBalance(data, 'websocket');
+          } else {
+            window.mobileLog(`⚠️ Invalid message format`, 'warn');
           }
-        } catch (err) {}
+        } catch (err) {
+          window.mobileLog(`❌ Parse error: ${err.message}`, 'error');
+        }
       };
 
-      ws.onclose = ws.onerror = () => {
-        console.log('[WS] Disconnected → fallback to polling');
+      ws.onerror = (e) => {
+        window.mobileLog(`❌ WebSocket ERROR: ${JSON.stringify(e)}`, 'error');
+      };
+
+      ws.onclose = (e) => {
+        window.mobileLog(`🔌 WebSocket CLOSED: code=${e.code}, reason=${e.reason}`, 'warn');
+        window.mobileLog('🔄 Falling back to polling...', 'warn');
         startPolling();
       };
+
     } catch (err) {
+      window.mobileLog(`❌ WS creation failed: ${err.message}`, 'error');
       startPolling();
     }
   }
 
-  // CRITICAL: Re-check balance when user returns to app (iOS/Android fix)
+  // Visibility change handler
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
-      console.log('[Visibility] Page visible → force balance check');
-      // Force a poll immediately
+      window.mobileLog('👁️ Page visible - checking balance...', 'info');
       fetch(`${window.__SEC_API_BASE}/api/session?light=true&t=${Date.now()}`, { credentials: 'include' })
-        .then(r => r.ok ? r.json() : null)
-        .then(j => j?.user?.wallet_balance !== undefined && handleNewBalance(j.user.wallet_balance, 'visibility'));
+        .then(r => {
+          window.mobileLog(`📡 Visibility check: status=${r.status}`, 'info');
+          return r.ok ? r.json() : null;
+        })
+        .then(j => {
+          if (j?.user?.wallet_balance !== undefined) {
+            window.mobileLog(`✅ Visibility balance: ₦${j.user.wallet_balance}`, 'success');
+            handleNewBalance({ 
+              balance: j.user.wallet_balance,
+              seq: j.wallet_seq || lastSeenSeq + 1
+            }, 'visibility');
+          }
+        })
+        .catch(e => window.mobileLog(`❌ Visibility error: ${e.message}`, 'error'));
     }
   });
 
-  // Also on resume (mobile)
+  // Resume handler (mobile)
   document.addEventListener('resume', () => {
-    console.log('[App Resume] Forcing balance check');
+    window.mobileLog('📱 App RESUMED - forcing poll...', 'ws');
     setTimeout(() => startPolling(), 1000);
   });
 
   // Start everything
+  window.mobileLog('⏳ Initializing in 800ms...', 'info');
   setTimeout(() => {
     connectWS();
-    startPolling(); // run polling always on mobile
+    startPolling(); // Always run polling on mobile
+    window.mobileLog('✅ WebSocket + Polling started', 'success');
   }, 800);
 
-  // Initial load
-  getSession().then(s => {
-    if (s?.user?.wallet_balance !== undefined) {
-      handleNewBalance(s.user.wallet_balance, 'initial');
-    }
-  });
+  // Initial session load
+  window.mobileLog('📡 Loading initial session...', 'info');
+  if (typeof getSession === 'function') {
+    getSession().then(s => {
+      if (s?.user?.wallet_balance !== undefined) {
+        window.mobileLog(`✅ Initial balance: ₦${s.user.wallet_balance}`, 'success');
+        handleNewBalance({ 
+          balance: s.user.wallet_balance,
+          seq: s.wallet_seq || 0
+        }, 'initial');
+      } else {
+        window.mobileLog('⚠️ No balance in initial session', 'warn');
+      }
+    }).catch(e => {
+      window.mobileLog(`❌ getSession error: ${e.message}`, 'error');
+    });
+  } else {
+    window.mobileLog('⚠️ getSession function not found', 'warn');
+  }
 
 })();
 
+// ==========================================
+// TEST BUTTON (for manual testing)
+// ==========================================
+window.testMobilePayment = function() {
+  window.mobileLog('🧪 MANUAL TEST: Simulating payment...', 'info');
+  
+  const testData = {
+    type: 'balance_update',
+    balance: 50000,
+    amount: 5000,
+    seq: Date.now()
+  };
+  
+  // Test direct call
+  window.mobileLog('Testing direct handler call...', 'info');
+  if (window.__handleBalanceUpdate) {
+    window.__handleBalanceUpdate(testData);
+  } else {
+    window.mobileLog('❌ __handleBalanceUpdate not found!', 'error');
+  }
+  
+  // Test event dispatch
+  window.mobileLog('Testing event dispatch...', 'info');
+  window.dispatchEvent(new CustomEvent('balance_update', { detail: testData }));
+};
+
+window.mobileLog('🎯 Test function ready: testMobilePayment()', 'success');
 
 
 // Run observer only on dashboard
