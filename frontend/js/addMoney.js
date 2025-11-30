@@ -197,6 +197,39 @@ const addMoneyModal = document.getElementById('addMoneyModal');
 })();
 
 
+
+// --- Helper: check server for pending transaction (read-only) ---
+async function fetchPendingTransaction() {
+  try {
+    const res = await apiFetch('/api/fund-wallet/pending', { method: 'GET' });
+    if (res.ok && res.data && res.data.reference) return { ok: true, data: res.data };
+    return { ok: false };
+  } catch (e) {
+    console.error('[fetchPendingTransaction] error', e);
+    return { ok: false };
+  }
+}
+
+// --- Helper: show notification (uses your window.notify or a fallback) ---
+function showLocalNotify(message, type = 'info') {
+  if (typeof window.notify === 'function') {
+    try { window.notify(message, type); return; } catch (e) { /* fallback below */ }
+  }
+
+  // Minimal toast fallback
+  const bg = type === 'error' ? '#ef4444' : (type === 'success' ? '#10b981' : '#f59e0b');
+  const t = Object.assign(document.createElement('div'), {
+    textContent: message,
+    style: `position:fixed;top:20px;left:50%;transform:translateX(-50%);background:${bg};color:white;padding:12px 20px;border-radius:12px;z-index:999999;font-weight:700;opacity:0;transition:all .3s;`
+  });
+  document.body.appendChild(t);
+  requestAnimationFrame(() => { t.style.opacity = '1'; t.style.transform += ' translateY(6px)'; });
+  setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 320); }, 3000);
+}
+
+
+
+
 // --- Show Error Screen ---
 function showGeneratedError(message = 'Failed to generate account. Try again.') {
   // Clear any existing countdown
@@ -228,7 +261,7 @@ function showGeneratedError(message = 'Failed to generate account. Try again.') 
 }
 
 // --- Open Original Add Money Modal Content ---
-function openAddMoneyModalContent() {
+async function openAddMoneyModalContent() {
   // Clear any existing countdown
   if (countdownTimerInterval) {
     clearInterval(countdownTimerInterval);
@@ -236,6 +269,24 @@ function openAddMoneyModalContent() {
   }
 
   const contentContainer = addMoneyModal.querySelector('.addMoney-modal-content');
+
+  // Try localStorage first
+  const pending = getPendingTxFromStorage();
+  if (pending) {
+    // Show quick "Getting your pending transaction..." UI briefly (optional)
+    contentContainer.innerHTML = `
+      <div style="padding:18px; text-align:center;">
+        <div style="font-weight:700; margin-bottom:6px;">Getting your pending transaction...</div>
+        <div style="opacity:0.85; font-size:13px;">Loading your unpaid account — it hasn't expired yet.</div>
+      </div>
+    `;
+
+    // small delay so user sees the message (0-350ms)
+    setTimeout(() => showGeneratedAccount(pending), 150);
+    return;
+  }
+
+  // No local pending -> render normal form
   contentContainer.innerHTML = `
     <!-- KYC / Bank Card -->
     <div class="addMoney-account-section">
@@ -279,6 +330,26 @@ function openAddMoneyModalContent() {
   // Reassign elements and events after restoring content
   assignAddMoneyEvents();
 }
+
+/* 3) When a balance update arrives (payment completed), clear localStorage so modal won't show old tx */
+(function patchBalanceUpdateClear() {
+  const origHandle = window.__handleBalanceUpdate;
+  window.__handleBalanceUpdate = function(data) {
+    try {
+      if (data && data.type === 'balance_update') {
+        // clear local pending tx on successful payment
+        removePendingTxFromStorage();
+      }
+    } catch (e) { /* ignore */ }
+
+    if (typeof origHandle === 'function') {
+      try { origHandle(data); } catch (e) { console.error('[handleBalanceUpdate] wrapped handler error', e); }
+    } else {
+      // keep existing handler behavior if none existed
+      handleBalanceUpdate(data);
+    }
+  };
+})();
 window.openAddMoneyModalContent = window.openAddMoneyModalContent || openAddMoneyModalContent;
 
 // --- Assign Events to Add Money Modal ---
@@ -314,53 +385,160 @@ function assignAddMoneyEvents() {
   let isFundingInProgress = false;
 
   fundBtn.addEventListener('click', async () => {
-    // PREVENT DOUBLE-CLICK / DOUBLE-EXECUTION
-    if (isFundingInProgress) {
-      console.log('[Fund Wallet] Already processing — ignoring duplicate click');
+  // PREVENT DOUBLE-CLICK / DOUBLE-EXECUTION
+  if (isFundingInProgress) {
+    console.log('[Fund Wallet] Already processing — ignoring duplicate click');
+    return;
+  }
+
+  const amount = parseInt(amountInput.value.replace(/[^0-9]/g, ""), 10);
+  if (!amount || amount <= 0) {
+    window.notify?.('Please enter a valid amount.', 'error');
+    return;
+  }
+
+  // 1) If localStorage has a pending tx, show it and notify user (ignore input amount)
+  const localPending = getPendingTxFromStorage();
+  if (localPending) {
+    showLocalNotify('Please complete your pending transaction.', 'info');
+    // show the pending transaction (this will reuse your UI and countdown)
+    showGeneratedAccount(localPending);
+    return;
+  }
+
+  // 2) No local pending -> quickly check server for pending (small network hit, only on user intent)
+  isFundingInProgress = true;
+  fundBtn.disabled = true;
+  fundBtn.textContent = 'Checking…';
+
+  try {
+    const check = await fetchPendingTransaction();
+    if (check.ok && check.data) {
+      // server reports a pending tx (user may have cleared cache earlier)
+      showLocalNotify('Please complete your pending transaction.', 'info');
+      showGeneratedAccount(check.data);
       return;
     }
 
-    const amount = parseInt(amountInput.value.replace(/[^0-9]/g, ""), 10);
-    if (!amount || amount <= 0) {
-      window.notify?.('Please enter a valid amount.', 'error');
-      return;
-    }
-
-    // Mark as in progress + disable button
-    isFundingInProgress = true;
-    fundBtn.disabled = true;
+    // 3) No pending anywhere -> proceed to create a new account
     fundBtn.textContent = 'Processing...';
 
-    try {
-      const res = window.withLoader
-        ? await window.withLoader(() => apiFetch('/api/fund-wallet', {
-            method: 'POST',
-            body: { amount }
-          }))
-        : await apiFetch('/api/fund-wallet', {
-            method: 'POST',
-            body: { amount }
-          });
+    const res = window.withLoader
+      ? await window.withLoader(() => apiFetch('/api/fund-wallet', {
+          method: 'POST',
+          body: { amount }
+        }))
+      : await apiFetch('/api/fund-wallet', {
+          method: 'POST',
+          body: { amount }
+        });
 
-      if (res.ok) {
-        showGeneratedAccount(res.data);
-      } else {
-        showGeneratedError(res.error?.message || 'Failed to generate account.');
-      }
-    } catch (err) {
-      console.error('[Fund Wallet Error]', err);
-      showGeneratedError('Network error. Try again.');
-    } finally {
-      // Always reset — even if error
-      isFundingInProgress = false;
-      fundBtn.disabled = false;
-      fundBtn.textContent = 'Fund Wallet';
+    if (res.ok) {
+      // This will save to localStorage inside showGeneratedAccount (your patched version)
+      showGeneratedAccount(res.data);
+    } else {
+      showGeneratedError(res.error?.message || 'Failed to generate account.');
     }
-  });
+  } catch (err) {
+    console.error('[Fund Wallet Error]', err);
+    showGeneratedError('Network error. Try again.');
+  } finally {
+    // Always reset button state
+    isFundingInProgress = false;
+    fundBtn.disabled = false;
+    fundBtn.textContent = 'Fund Wallet';
+  }
+});
+}
+
+/* ---------- localStorage helpers ---------- */
+const PENDING_TX_KEY = 'flexgig.pending_fund_tx';
+
+function savePendingTxToStorage(tx) {
+  try {
+    // Normalize stored shape: accountNumber, bankName, reference, orderNo, amount, expiresAt, status
+    const store = {
+      accountNumber: tx.accountNumber,
+      bankName: tx.bankName,
+      reference: tx.reference,
+      orderNo: tx.orderNo,
+      amount: Number(tx.amount),
+      expiresAt: tx.expiresAt, // ISO string expected
+      status: tx.status || 'pending',
+      savedAt: new Date().toISOString()
+    };
+    localStorage.setItem(PENDING_TX_KEY, JSON.stringify(store));
+    console.log('[localStorage] Saved pending tx', store);
+  } catch (e) {
+    console.warn('[localStorage] Save failed', e);
+  }
+}
+
+function removePendingTxFromStorage() {
+  try {
+    localStorage.removeItem(PENDING_TX_KEY);
+    console.log('[localStorage] Removed pending tx');
+  } catch (e) {
+    console.warn('[localStorage] Remove failed', e);
+  }
+}
+
+function getPendingTxFromStorage() {
+  try {
+    const raw = localStorage.getItem(PENDING_TX_KEY);
+    if (!raw) return null;
+    const tx = JSON.parse(raw);
+
+    if (!tx || !tx.expiresAt || !tx.reference) return null;
+
+    // Validate expiry
+    const now = Date.now();
+    const expiry = new Date(tx.expiresAt).getTime();
+    if (Number.isNaN(expiry) || expiry <= now) {
+      // expired -> cleanup
+      removePendingTxFromStorage();
+      return null;
+    }
+
+    // only return when status is pending
+    if ((tx.status || '').toLowerCase() !== 'pending') {
+      removePendingTxFromStorage();
+      return null;
+    }
+
+    return tx;
+  } catch (e) {
+    console.warn('[localStorage] Read failed', e);
+    return null;
+  }
 }
 
 // --- Show Generated Bank Account ---
 function showGeneratedAccount(data) {
+  // Save to localStorage immediately so reloads show it
+  try {
+    // ensure expiresAt is ISO (backend already sends ISO), but normalize if needed
+    if (data.expiresAt && typeof data.expiresAt === 'string') {
+      // ok
+    } else if (data.expiresAt instanceof Date) {
+      data.expiresAt = data.expiresAt.toISOString();
+    } else if (data.expiresAt && typeof data.expiresAt === 'number') {
+      // timestamp ms
+      data.expiresAt = new Date(data.expiresAt).toISOString();
+    }
+    savePendingTxToStorage({
+      accountNumber: data.accountNumber,
+      bankName: data.bankName,
+      reference: data.reference,
+      orderNo: data.orderNo,
+      amount: data.amount,
+      expiresAt: data.expiresAt,
+      status: data.status || 'pending'
+    });
+  } catch (e) {
+    console.warn('[showGeneratedAccount] could not save to localStorage', e);
+  }
+
   // Clear any existing countdown
   if (countdownTimerInterval) {
     clearInterval(countdownTimerInterval);
@@ -462,6 +640,7 @@ function showGeneratedAccount(data) {
     countdown--;
     updateCountdown();
     if (countdown < 0) {
+      removePendingTxFromStorage();
       handleTransactionCancelOrExpire(data.reference);
     }
   }, 1000);
@@ -471,6 +650,7 @@ function showGeneratedAccount(data) {
   const cancelBtn = modalContent.querySelector('#cancelTransactionBtn');
   if (cancelBtn) {
     cancelBtn.addEventListener('click', () => {
+      removePendingTxFromStorage();
       handleTransactionCancelOrExpire(data.reference);
     });
   }
