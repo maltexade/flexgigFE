@@ -279,7 +279,6 @@ function openAddMoneyModalContent() {
   // Reassign elements and events after restoring content
   assignAddMoneyEvents();
 }
-window.openAddMoneyModalContent = window.openAddMoneyModalContent || openAddMoneyModalContent;
 
 // --- Assign Events to Add Money Modal ---
 function assignAddMoneyEvents() {
@@ -428,17 +427,17 @@ function showGeneratedAccount(data) {
   contentContainer.appendChild(modalContent);
 
   // --- Copy Account Number ---
-  copyBtn?.addEventListener('click', async e => {
-  const text = e.currentTarget.dataset.copy;
-  await navigator.clipboard.writeText(text);
-  const t = Object.assign(document.createElement('div'), {
-    textContent: `✓ ${text} copied!`,
-    style: `position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#10b981;color:white;padding:16px 28px;border-radius:16px;font-weight:bold;z-index:999999;box-shadow:0 10px 30px rgba(0,0,0,0.3);opacity:0;transition:opacity .3s,transform .4s`
-  });
-  document.body.appendChild(t);
-  requestAnimationFrame(() => (t.style.opacity = '1', t.style.transform += ' translateY(10px)'));
-  setTimeout(() => (t.style.opacity = '0', setTimeout(() => t.remove(), 400)), 2800);
-});
+  const copyBtn = modalContent.querySelector('.copy-btn');
+  if (copyBtn) {
+    copyBtn.addEventListener('click', e => {
+      const accountNum = e.currentTarget.dataset.copy;
+      navigator.clipboard.writeText(accountNum).then(() => {
+        window.notify?.('Account number copied!', 'success') || alert('Account number copied!');
+      }).catch(() => {
+        alert('Failed to copy. Please copy manually: ' + accountNum);
+      });
+    });
+  }
 
   // --- Countdown + Expire Handling ---
   const countdownEl = modalContent.querySelector('#genCountdown');
@@ -489,34 +488,27 @@ function showGeneratedAccount(data) {
 
 // --- Cancel / Expire Transaction Helper ---
 async function handleTransactionCancelOrExpire(reference) {
-  // 1. Stop timer
-  countdownTimerInterval && clearInterval(countdownTimerInterval);
+  if (countdownTimerInterval) {
+    clearInterval(countdownTimerInterval);
+    countdownTimerInterval = null;
+  }
 
-  // 2. Close modal FIRST (with nice animation)
-  window.ModalManager?.closeModal?.('addMoneyModal') ||
-    (document.getElementById('addMoneyModal').style.transform = 'translateY(100%)');
-
-  // 3. Wait a tiny bit for close animation, then cancel on server
-  setTimeout(async () => {
-    if (reference) {
-      try { await apiFetch(`/api/fund-wallet/cancel/${reference}`, {method:'POST'}); }
-      catch (e) { console.error('Cancel failed:', e); }
+  if (reference) {
+    try {
+      await apiFetch(`/api/fund-wallet/cancel/${reference}`, { method: 'POST' });
+      console.log('Transaction cancelled/expired:', reference);
+      window.notify?.('Transaction cancelled successfully', 'success');
+    } catch (err) {
+      console.error('Error cancelling transaction:', err);
+      window.notify?.('Failed to cancel transaction', 'error');
     }
+  }
 
-    // 4. Show toast
-    const t = Object.assign(document.createElement('div'), {
-      textContent: reference ? 'Transaction cancelled' : 'Session expired',
-      style: 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#f59e0b;color:white;padding:16px 28px;border-radius:16px;font-weight:bold;z-index:999999;box-shadow:0 10px 30px rgba(0,0,0,0.3);opacity:0;transition:all .4s'
-    });
-    document.body.appendChild(t);
-    requestAnimationFrame(() => (t.style.opacity='1', t.style.transform+=' translateY(10px)'));
-    setTimeout(() => (t.style.opacity='0', setTimeout(() => t.remove(), 400)), 2500);
+  if (window.modalManager?.closeModal) window.modalManager.closeModal('addMoneyModal');
+  else document.getElementById('addMoneyModal').style.transform = 'translateY(100%)';
 
-    // 5. Reopen fresh Add Money form
-    openAddMoneyModalContent();
-  }, 400); // matches your modal close animation duration
+  openAddMoneyModalContent();
 }
-window.handleTransactionCancelOrExpire = window.handleTransactionCancelOrExpire || handleTransactionCancelOrExpire; 
 
 
 // --- Initialize when DOM is ready ---
