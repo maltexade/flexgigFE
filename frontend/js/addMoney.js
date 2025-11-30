@@ -428,17 +428,19 @@ function showGeneratedAccount(data) {
   contentContainer.appendChild(modalContent);
 
   // --- Copy Account Number ---
-  const copyBtn = modalContent.querySelector('.copy-btn');
-  if (copyBtn) {
-    copyBtn.addEventListener('click', e => {
-      const accountNum = e.currentTarget.dataset.copy;
-      navigator.clipboard.writeText(accountNum).then(() => {
-        window.notify?.('Account number copied!', 'success');
-      }).catch(() => {
-        alert('Failed to copy. Please copy manually: ' + accountNum);
-      });
-    });
-  }
+    const copyBtn = modalContent.querySelector('.copy-btn');
+
+  copyBtn?.addEventListener('click', async e => {
+  const text = e.currentTarget.dataset.copy;
+  await navigator.clipboard.writeText(text);
+  const t = Object.assign(document.createElement('div'), {
+    textContent: `✓ ${text} copied!`,
+    style: `position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#10b981;color:white;padding:16px 28px;border-radius:16px;font-weight:bold;z-index:999999;box-shadow:0 10px 30px rgba(0,0,0,0.3);opacity:0;transition:opacity .3s,transform .4s`
+  });
+  document.body.appendChild(t);
+  requestAnimationFrame(() => (t.style.opacity = '1', t.style.transform += ' translateY(10px)'));
+  setTimeout(() => (t.style.opacity = '0', setTimeout(() => t.remove(), 400)), 2800);
+});
 
   // --- Countdown + Expire Handling ---
   const countdownEl = modalContent.querySelector('#genCountdown');
