@@ -384,40 +384,8 @@ if (pending) {
     </div>
   `;
 
-  // ─────── INLINE TOAST — ALWAYS VISIBLE — NO Z-INDEX CAN STOP IT ───────
-  (function showInlinePendingTxToast() {
-    const existing = contentContainer.querySelector('.inline-pending-tx-toast');
-    if (existing) existing.remove();
-
-    const toast = document.createElement('div');
-    toast.className = 'inline-pending-tx-toast';
-    toast.style.cssText = `
-      position: sticky; top: 12px; left: 50%; transform: translateX(-50%);
-      background: #f59e0b; color: white; padding: 12px 20px; border-radius: 12px;
-      font-weight: 700; font-size: 14px; text-align: center; z-index: 9999;
-      box-shadow: 0 8px 25px rgba(0,0,0,0.25); max-width: 90%; width: max-content;
-      margin: 0 auto 16px auto; pointer-events: none; animation: inlineToastPop 0.4s ease-out;
-      backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.2);
-    `;
-    toast.innerHTML = `
-      Warning: Please complete your pending transaction.
-    `;
-
-    contentContainer.insertBefore(toast, contentContainer.firstChild);
-
-    setTimeout(() => {
-      toast.style.opacity = '0';
-      toast.style.transform = 'translateX(-50%) translateY(-10px)';
-      setTimeout(() => toast.remove(), 400);
-    }, 4000);
-
-    if (!document.getElementById('inline-toast-anim-styles')) {
-      const style = document.createElement('style');
-      style.id = 'inline-toast-anim-styles';
-      style.textContent = `@keyframes inlineToastPop { from { opacity: 0; transform: translateX(-50%) translateY(-20px) scale(0.9); } to { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); } }`;
-      document.head.appendChild(style);
-    }
-  })();
+    // Use the REAL global toast instead
+  window.showPendingTxToast("You have a pending transaction. Complete it to continue.");
 
   // Load the pending account UI after brief delay
   setTimeout(() => showGeneratedAccount(pending), 150);
