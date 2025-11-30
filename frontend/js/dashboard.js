@@ -1625,6 +1625,21 @@ window.applyBalanceVisibility = applyBalanceVisibility;
     if (!hasProcessedPayment && amountAdded > 0) {
       hasProcessedPayment = true;
 
+      // ---- NEW: clear local pending tx storage immediately so UI won't resurrect old tx ----
+      try {
+        if (typeof removePendingTxFromStorage === 'function') {
+          removePendingTxFromStorage();
+          console.log('[Balance] Cleared local pending tx storage');
+        } else {
+          // defensive: try to remove directly if helper not present
+          localStorage.removeItem('flexgig.pending_fund_tx');
+          console.log('[Balance] Cleared local pending tx storage (direct)');
+        }
+      } catch (e) {
+        console.warn('[handleNewBalance] failed to clear pending tx storage', e);
+      }
+      // -------------------------------------------------------------------------------------
+
       // Dispatch event (for any other listeners)
       window.dispatchEvent(new CustomEvent('balance_update', {
         detail: { type: 'balance_update', balance: newBalance, amount: amountAdded }
@@ -1641,6 +1656,7 @@ window.applyBalanceVisibility = applyBalanceVisibility;
         }
       }, 300);
 
+      // Re-open the add-money content (this will now NOT find the old tx in localStorage)
       window.openAddMoneyModalContent();
 
       // Show toast
@@ -1748,6 +1764,7 @@ window.applyBalanceVisibility = applyBalanceVisibility;
   });
 
 })();
+
 
 
 // Run observer only on dashboard

@@ -106,6 +106,18 @@ const addMoneyModal = document.getElementById('addMoneyModal');
     }
     hasShownSuccess = true;
 
+      try {
+    if (typeof removePendingTxFromStorage === 'function') {
+      removePendingTxFromStorage();
+      console.log('[Balance] Cleared local pending tx storage');
+    } else {
+      localStorage.removeItem('flexgig.pending_fund_tx');
+      console.log('[Balance] Cleared local pending tx storage (direct)');
+    }
+  } catch (e) {
+    console.warn('[handleBalanceUpdate] failed to clear pending tx storage', e);
+  }
+
     console.log('[Balance Update] Processing...'); // Debug log
 
     // 1. Close modal using ModalManager (your system)
@@ -196,6 +208,29 @@ const addMoneyModal = document.getElementById('addMoneyModal');
 
 })();
 
+// Global listener to clear pending tx whenever a balance_update event fires
+window.addEventListener('balance_update', (e) => {
+  try {
+    removePendingTxFromStorage();
+    console.log('[global] balance_update received — cleared pending tx');
+  } catch (err) {
+    console.warn('[global] failed to clear pending tx on balance_update', err);
+  }
+});
+
+
+// Sync UI across tabs: when pending tx is removed elsewhere, reopen fresh add-money form
+window.addEventListener('storage', (ev) => {
+  try {
+    if (ev.key === PENDING_TX_KEY && ev.newValue === null) {
+      console.log('[storage] pending tx removed in another tab — updating UI');
+      // If addMoney modal is open with a generated account, replace it with the fresh form
+      openAddMoneyModalContent();
+    }
+  } catch (e) { /* ignore */ }
+});
+
+
 
 
 // --- Helper: check server for pending transaction (read-only) ---
@@ -270,7 +305,7 @@ async function openAddMoneyModalContent() {
 
   const contentContainer = addMoneyModal.querySelector('.addMoney-modal-content');
 
-  // Try localStorage first
+    // Try localStorage first
   const pending = getPendingTxFromStorage();
   if (pending) {
     // Show quick "Getting your pending transaction..." UI briefly (optional)
@@ -281,10 +316,18 @@ async function openAddMoneyModalContent() {
       </div>
     `;
 
+    // show notification so user knows they must complete pending tx
+    try {
+      showLocalNotify('Please complete your pending transaction.', 'info');
+    } catch (e) {
+      console.warn('[openAddMoneyModalContent] notify failed', e);
+    }
+
     // small delay so user sees the message (0-350ms)
     setTimeout(() => showGeneratedAccount(pending), 150);
     return;
   }
+
 
   // No local pending -> render normal form
   contentContainer.innerHTML = `
@@ -825,3 +868,72 @@ window.getWebSocketStatus = function() {
 console.log('[Fund Wallet] Script loaded.');
 console.log('[Fund Wallet] Test balance update: testBalanceUpdate(5000, 50000)');
 console.log('[Fund Wallet] Check WebSocket: getWebSocketStatus()');
+
+/* ---------- Ensure add-money modal reads localStorage before opening ---------- */
+// Paste this once (e.g. near the bottom of your addmoney.js)
+(function ensureAddMoneyModalPreloads() {
+  // Helper: safe call to prepare modal content
+  function prepareAddMoneyModal() {
+    try {
+      if (typeof openAddMoneyModalContent === 'function') {
+        openAddMoneyModalContent();
+        console.log('[preload] addMoney modal content prepared from localStorage');
+      } else {
+        console.warn('[preload] openAddMoneyModalContent not available');
+      }
+    } catch (e) {
+      console.warn('[preload] failed to prepare addMoney modal', e);
+    }
+  }
+
+  // 1) Intercept clicks on common openers (data attribute, class, id)
+  const clickSelectors = [
+    '[data-open-modal="addMoneyModal"]', // generic data attribute pattern
+    '.open-add-money-btn',               // optional class usage
+    '#openAddMoneyBtn'                   // optional id usage
+  ];
+  clickSelectors.forEach(sel => {
+    document.addEventListener('click', (ev) => {
+      const el = ev.target.closest && ev.target.closest(sel);
+      if (!el) return;
+      // prepare content first (no await needed)
+      prepareAddMoneyModal();
+      // allow other click handlers (and modal open) to run
+    });
+  });
+
+  // 2) If your app uses a ModalManager with openModal(name) — wrap it so it prepares first
+  if (window.ModalManager && typeof window.ModalManager.openModal === 'function') {
+    const origOpen = window.ModalManager.openModal.bind(window.ModalManager);
+    window.ModalManager.openModal = function(name, ...args) {
+      if (name === 'addMoneyModal') {
+        prepareAddMoneyModal();
+      }
+      return origOpen(name, ...args);
+    };
+  }
+
+  // 3) If your app dispatches a custom 'modalOpened' event after open, also prepare on it.
+  //    This is safe: openAddMoneyModalContent is idempotent.
+  document.addEventListener('modalOpened', (e) => {
+    if (e?.detail === 'addMoneyModal') {
+      prepareAddMoneyModal();
+    }
+  });
+
+  // 4) For extra safety, if someone programmatically focuses the add-money button via keyboard,
+  //    handle keydown Enter/Space on those openers (same selectors).
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Enter' && ev.key !== ' ') return;
+    const active = document.activeElement;
+    if (!active) return;
+    if (active.matches && clickSelectors.some(sel => active.matches(sel))) {
+      prepareAddMoneyModal();
+    }
+  });
+
+  // 5) Optional: if you want the modal content prepared immediately on page load
+  //    (so the first click has zero delay), call prepareAddMoneyModal() here — uncomment if desired:
+  prepareAddMoneyModal();
+
+})();
