@@ -1634,6 +1634,7 @@ window.applyBalanceVisibility = applyBalanceVisibility;
       setTimeout(() => {
         if (window.ModalManager?.closeTopModal) {
           window.ModalManager.closeTopModal();
+          openAddMoneyModalContent();
         } else if (document.getElementById('addMoneyModal')) {
           document.getElementById('addMoneyModal').style.transform = 'translateY(100%)';
           document.getElementById('addMoneyModal').classList.add('hidden');
