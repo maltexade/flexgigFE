@@ -1592,6 +1592,22 @@ window.applyBalanceVisibility = applyBalanceVisibility;
   const uid = window.__USER_UID || localStorage.getItem('userId');
   if (!uid) return;
 
+    // MOBILE FIX: Don't start until addmoney.js has loaded toast & sound
+  if (typeof window.showSuccessToast !== 'function' || typeof window.playSuccessSound !== 'function') {
+    console.log('[Balance] Waiting for addmoney.js to load toast/sound...');
+    const checker = setInterval(() => {
+      if (typeof window.showSuccessToast === 'function' && typeof window.playSuccessToast === 'function') {
+        clearInterval(checker);
+        console.log('[Balance] addmoney.js ready → starting system');
+        connectWS();
+        startPolling();
+        setTimeout(forceFullBalanceSync, 1000);
+      }
+    }, 200);
+    setTimeout(() => clearInterval(checker), 8000); // safety
+    return; // ←←← STOP everything until toast is ready
+  }
+
   let ws = null;
   let pollTimer = null;
   let lastKnownBalance = null;
@@ -1715,10 +1731,12 @@ window.applyBalanceVisibility = applyBalanceVisibility;
         });
         if (res.ok) {
           const json = await res.json();
-          const bal = json.user?.wallet_balance;
-          if (bal !== undefined && bal !== lastKnownBalance) {
-            handleNewBalance(bal, 'polling');
-          }
+if (json.wallet_balance !== undefined && json.wallet_seq !== undefined) {
+  handleNewBalance({
+    balance: json.wallet_balance,
+    seq: json.wallet_seq
+  }, 'polling');
+}
         }
       } catch (e) { console.warn('[Balance Poll] failed', e); }
 
@@ -1763,7 +1781,14 @@ window.applyBalanceVisibility = applyBalanceVisibility;
       // Force a poll immediately
       fetch(`${window.__SEC_API_BASE}/api/session?light=true&t=${Date.now()}`, { credentials: 'include' })
         .then(r => r.ok ? r.json() : null)
-        .then(j => j?.user?.wallet_balance !== undefined && handleNewBalance(j.user.wallet_balance, 'visibility'));
+        .then(j => {
+  if (j?.wallet_balance !== undefined && j?.wallet_seq !== undefined) {
+    handleNewBalance({
+      balance: j.wallet_balance,
+      seq: j.wallet_seq
+    }, 'visibility');
+  }
+});
     }
   });
 
