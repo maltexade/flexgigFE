@@ -491,26 +491,34 @@ function showGeneratedAccount(data) {
 
 // --- Cancel / Expire Transaction Helper ---
 async function handleTransactionCancelOrExpire(reference) {
-  if (countdownTimerInterval) {
-    clearInterval(countdownTimerInterval);
-    countdownTimerInterval = null;
-  }
+  // 1. Stop timer
+  countdownTimerInterval && clearInterval(countdownTimerInterval);
 
-  if (reference) {
-    try {
-      await apiFetch(`/api/fund-wallet/cancel/${reference}`, { method: 'POST' });
-      console.log('Transaction cancelled/expired:', reference);
-      window.notify?.('Transaction cancelled successfully', 'success');
-    } catch (err) {
-      console.error('Error cancelling transaction:', err);
-      window.notify?.('Failed to cancel transaction', 'error');
+  // 2. Close modal FIRST (with nice animation)
+  window.ModalManager?.closeModal?.('addMoneyModal') ||
+    (document.getElementById('addMoneyModal').style.transform = 'translateY(100%)');
+
+    // 4. Show toast
+    const t = Object.assign(document.createElement('div'), {
+      textContent: reference ? 'Transaction cancelled' : 'Session expired',
+      style: 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#f59e0b;color:white;padding:16px 28px;border-radius:16px;font-weight:bold;z-index:999999;box-shadow:0 10px 30px rgba(0,0,0,0.3);opacity:0;transition:all .4s'
+    });
+
+  // 3. Wait a tiny bit for close animation, then cancel on server
+  setTimeout(async () => {
+    if (reference) {
+      try { await apiFetch(`/api/fund-wallet/cancel/${reference}`, {method:'POST'}); }
+      catch (e) { console.error('Cancel failed:', e); }
     }
-  }
 
-  if (window.modalManager?.closeModal) window.modalManager.closeModal('addMoneyModal');
-  else document.getElementById('addMoneyModal').style.transform = 'translateY(100%)';
+    
+    document.body.appendChild(t);
+    requestAnimationFrame(() => (t.style.opacity='1', t.style.transform+=' translateY(10px)'));
+    setTimeout(() => (t.style.opacity='0', setTimeout(() => t.remove(), 400)), 2500);
 
-  openAddMoneyModalContent();
+    // 5. Reopen fresh Add Money form
+    openAddMoneyModalContent();
+  }, 400); // matches your modal close animation duration
 }
 window.handleTransactionCancelOrExpire = window.handleTransactionCancelOrExpire || handleTransactionCancelOrExpire; 
 
