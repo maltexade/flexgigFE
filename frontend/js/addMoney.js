@@ -1,6 +1,319 @@
 // --- API helper (put near top of your client script) ---
 window.__SEC_API_BASE = window.__SEC_API_BASE || 'https://api.flexgig.com.ng';
 
+
+// ==========================================
+// ON-SCREEN DEBUG CONSOLE FOR MOBILE
+// Paste this at the TOP of your addmoney.js
+// ==========================================
+
+(function createMobileDebugConsole() {
+  // Create floating debug panel
+  const debugPanel = document.createElement('div');
+  debugPanel.id = 'mobileDebugPanel';
+  debugPanel.style.cssText = `
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    max-height: 35vh;
+    background: rgba(0, 0, 0, 0.95);
+    color: #0f0;
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+    padding: 10px;
+    overflow-y: auto;
+    z-index: 2147483647;
+    border-top: 2px solid #0f0;
+    display: none;
+  `;
+
+  // Create toggle button
+  const toggleBtn = document.createElement('button');
+  toggleBtn.textContent = '🐛';
+  toggleBtn.style.cssText = `
+    position: fixed;
+    bottom: 10px;
+    right: 10px;
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    background: #0f0;
+    color: #000;
+    border: none;
+    font-size: 24px;
+    z-index: 2147483647;
+    box-shadow: 0 4px 12px rgba(0,255,0,0.4);
+    cursor: pointer;
+  `;
+
+  toggleBtn.onclick = () => {
+    const isVisible = debugPanel.style.display !== 'none';
+    debugPanel.style.display = isVisible ? 'none' : 'block';
+    toggleBtn.textContent = isVisible ? '🐛' : '❌';
+  };
+
+  // Create clear button
+  const clearBtn = document.createElement('button');
+  clearBtn.textContent = 'Clear';
+  clearBtn.style.cssText = `
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    padding: 5px 10px;
+    background: #ff0000;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-size: 10px;
+    cursor: pointer;
+  `;
+  clearBtn.onclick = () => { debugPanel.innerHTML = ''; debugPanel.appendChild(clearBtn); };
+
+  debugPanel.appendChild(clearBtn);
+  document.body.appendChild(debugPanel);
+  document.body.appendChild(toggleBtn);
+
+  // Enhanced logging function
+  const logs = [];
+  window.mobileLog = function(message, type = 'info') {
+    const timestamp = new Date().toLocaleTimeString();
+    const colors = {
+      info: '#0f0',
+      warn: '#ff0',
+      error: '#f00',
+      success: '#0ff',
+      ws: '#f0f'
+    };
+
+    const logEntry = document.createElement('div');
+    logEntry.style.cssText = `
+      margin: 4px 0;
+      padding: 4px;
+      border-left: 3px solid ${colors[type] || '#0f0'};
+      background: rgba(255,255,255,0.05);
+    `;
+    logEntry.innerHTML = `<span style="color: #888">[${timestamp}]</span> <span style="color: ${colors[type]}">${message}</span>`;
+
+    debugPanel.appendChild(logEntry);
+    debugPanel.scrollTop = debugPanel.scrollHeight;
+
+    // Keep last 100 logs
+    logs.push({ timestamp, message, type });
+    if (logs.length > 100) logs.shift();
+
+    // Also log to real console
+    console.log(`[Mobile Debug] ${message}`);
+  };
+
+  // Track key events
+  window.mobileLog('🚀 Debug console initialized', 'success');
+
+  // Auto-show on first error
+  window.addEventListener('error', (e) => {
+    debugPanel.style.display = 'block';
+    toggleBtn.textContent = '❌';
+    window.mobileLog(`❌ ERROR: ${e.message} at ${e.filename}:${e.lineno}`, 'error');
+  });
+
+})();
+
+// ==========================================
+// INSTRUMENTED BALANCE UPDATE HANDLER
+// Replace your existing handleBalanceUpdate
+// ==========================================
+
+(function() {
+  const MODAL_ID = 'addMoneyModal';
+  let hasShownSuccess = false;
+
+  function handleBalanceUpdate(data) {
+    window.mobileLog('📥 Balance update received', 'ws');
+    window.mobileLog(`Data: ${JSON.stringify(data)}`, 'info');
+    
+    if (!data) {
+      window.mobileLog('⚠️ No data object', 'warn');
+      return;
+    }
+    
+    if (data.type !== 'balance_update') {
+      window.mobileLog(`⚠️ Wrong type: ${data.type}`, 'warn');
+      return;
+    }
+    
+    window.mobileLog(`Balance: ₦${data.balance}, Amount: ₦${data.amount}`, 'info');
+    
+    if (hasShownSuccess) {
+      window.mobileLog('⚠️ Already shown success (duplicate prevention)', 'warn');
+      return;
+    }
+    
+    hasShownSuccess = true;
+    window.mobileLog('✅ Processing payment...', 'success');
+
+    // Clear pending tx
+    try {
+      if (typeof removePendingTxFromStorage === 'function') {
+        removePendingTxFromStorage();
+        window.mobileLog('🗑️ Cleared pending tx via function', 'success');
+      } else {
+        localStorage.removeItem('flexgig.pending_fund_tx');
+        window.mobileLog('🗑️ Cleared pending tx directly', 'success');
+      }
+    } catch (e) {
+      window.mobileLog(`❌ Failed to clear pending: ${e.message}`, 'error');
+    }
+
+    // Close modal
+    if (window.modalManager && typeof window.modalManager.closeModal === 'function') {
+      window.modalManager.closeModal(MODAL_ID);
+      window.mobileLog('🚪 Modal closed via modalManager', 'success');
+    } else {
+      const modal = document.getElementById(MODAL_ID);
+      if (modal) {
+        modal.style.transform = 'translateY(100%)';
+        modal.classList.add('hidden');
+        window.mobileLog('🚪 Modal closed via style', 'success');
+      } else {
+        window.mobileLog('⚠️ Modal element not found!', 'warn');
+      }
+    }
+
+    // Show toast
+    window.mobileLog('🎉 Attempting to show toast...', 'info');
+    showSuccessToast(`₦${Number(data.amount).toLocaleString()} received!`, 
+                    `Wallet updated to ₦${Number(data.balance).toLocaleString()}`);
+
+    // Play sound
+    if (typeof window.playSuccessSound === 'function') {
+      window.mobileLog('🔊 Playing success sound...', 'info');
+      window.playSuccessSound();
+    } else {
+      window.mobileLog('⚠️ playSuccessSound not found', 'warn');
+    }
+
+    // Reset flag
+    setTimeout(() => { 
+      hasShownSuccess = false;
+      window.mobileLog('🔄 Success flag reset', 'info');
+    }, 30000);
+  }
+
+  // Primary event listener
+  window.addEventListener('balance_update', (e) => {
+    window.mobileLog('📡 Custom event fired', 'ws');
+    handleBalanceUpdate(e.detail);
+  });
+
+  // Global handler
+  window.__handleBalanceUpdate = handleBalanceUpdate;
+
+  function showSuccessToast(title, subtitle = '') {
+    window.mobileLog(`📢 Showing toast: ${title}`, 'success');
+    
+    const toast = document.createElement('div');
+    toast.style.cssText = `
+      position: fixed;
+      top: calc(env(safe-area-inset-top, 0px) + 20px);
+      left: 50%;
+      transform: translateX(-50%);
+      background: linear-gradient(135deg, #10b981, #059669);
+      color: white;
+      padding: 16px 24px;
+      border-radius: 16px;
+      box-shadow: 0 10px 30px rgba(16, 156, 103, 0.4);
+      z-index: 999999999;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      text-align: center;
+      animation: toastSlideDown 0.45s ease-out, toastFadeOut 0.6s 3s forwards;
+      max-width: min(92%, 380px);
+      width: max-content;
+    `;
+
+    toast.innerHTML = `
+      <div style="font-size: 18px; font-weight: 800; margin-bottom: 4px;">
+        ✓ ${title}
+      </div>
+      ${subtitle ? `<div style="font-size: 14px; opacity: 0.9;">${subtitle}</div>` : ''}
+    `;
+
+    document.body.appendChild(toast);
+    window.mobileLog('✅ Toast element added to DOM', 'success');
+
+    setTimeout(() => {
+      toast.remove();
+      window.mobileLog('🗑️ Toast removed from DOM', 'info');
+    }, 6600);
+  }
+
+  window.mobileLog('✅ Balance update handlers registered', 'success');
+})();
+
+// ==========================================
+// WEBSOCKET DIAGNOSTIC INSTRUMENTATION
+// Add this to your dashboard.js WebSocket code
+// ==========================================
+
+// Wrap your WebSocket connection with logging
+const originalWebSocket = window.WebSocket;
+window.WebSocket = function(url, protocols) {
+  window.mobileLog(`🔌 WebSocket connecting to: ${url}`, 'ws');
+  
+  const ws = new originalWebSocket(url, protocols);
+  
+  ws.addEventListener('open', () => {
+    window.mobileLog('✅ WebSocket CONNECTED', 'success');
+  });
+  
+  ws.addEventListener('message', (e) => {
+    window.mobileLog(`📨 WS Message: ${e.data.substring(0, 100)}...`, 'ws');
+    try {
+      const data = JSON.parse(e.data);
+      window.mobileLog(`📊 Parsed: type=${data.type}, balance=${data.balance}, seq=${data.seq}`, 'ws');
+    } catch(err) {
+      window.mobileLog(`⚠️ Failed to parse WS data`, 'warn');
+    }
+  });
+  
+  ws.addEventListener('error', (e) => {
+    window.mobileLog(`❌ WebSocket ERROR: ${e.type}`, 'error');
+  });
+  
+  ws.addEventListener('close', (e) => {
+    window.mobileLog(`🔌 WebSocket CLOSED: code=${e.code}, reason=${e.reason}`, 'warn');
+  });
+  
+  return ws;
+};
+
+// ==========================================
+// TEST BUTTON (for manual testing)
+// ==========================================
+window.testMobilePayment = function() {
+  window.mobileLog('🧪 MANUAL TEST: Simulating payment...', 'info');
+  
+  const testData = {
+    type: 'balance_update',
+    balance: 50000,
+    amount: 5000,
+    seq: Date.now()
+  };
+  
+  // Test direct call
+  window.mobileLog('Testing direct handler call...', 'info');
+  if (window.__handleBalanceUpdate) {
+    window.__handleBalanceUpdate(testData);
+  } else {
+    window.mobileLog('❌ __handleBalanceUpdate not found!', 'error');
+  }
+  
+  // Test event dispatch
+  window.mobileLog('Testing event dispatch...', 'info');
+  window.dispatchEvent(new CustomEvent('balance_update', { detail: testData }));
+};
+
+window.mobileLog('🎯 Test function ready: testMobilePayment()', 'success');
+
 async function apiFetch(path, opts = {}) {
   const base = window.__SEC_API_BASE.replace(/\/+$/, ''); // trim trailing slash
   const url = path.startsWith('http') ? path : `${base}${path.startsWith('/') ? '' : '/'}${path}`;
@@ -147,6 +460,19 @@ if (typeof window.playSuccessSound === 'function') {
       console.log('[Balance Update] Flag reset');
     }, 30000);
   }
+
+  // Add this AFTER your existing balance_update listener
+document.addEventListener('DOMContentLoaded', () => {
+  window.mobileLog('✅ DOM Ready - re-registering listeners', 'success');
+  
+  // Force re-attach listener (mobile safety)
+  window.addEventListener('balance_update', (e) => {
+    window.mobileLog('📡 DOM-ready listener fired', 'ws');
+    if (window.__handleBalanceUpdate) {
+      window.__handleBalanceUpdate(e.detail);
+    }
+  });
+});
 
   // 🔥 PRIMARY LISTENER: Custom event from WebSocket (works on mobile!)
   window.addEventListener('balance_update', (e) => {
