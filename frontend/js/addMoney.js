@@ -472,201 +472,183 @@ function assignAddMoneyEvents() {
     return;
   }
 
-  // 1) If localStorage has a pending tx → show it + inline toast (100% visible)
-const localPending = getPendingTxFromStorage();
-if (localPending) {
-  // ─────── INLINE TOAST: 100% VISIBLE INSIDE MODAL (beats z-index/transform hell) ───────
-  (function showInlinePendingTxWarning() {
-    // Remove any old toast
-    document.querySelectorAll('.pending-tx-inline-toast').forEach(t => t.remove());
+  // 1) If localStorage has a pending tx
+  const localPending = getPendingTxFromStorage();
+  if (localPending) {
+    (function showInlinePendingTxWarning() {
+      // Remove any old toast
+      document.querySelectorAll('.pending-tx-inline-toast').forEach(t => t.remove());
 
-    const toast = document.createElement('div');
-    toast.className = 'pending-tx-inline-toast';
-    toast.style.cssText = `
-      position: fixed;
-      top: calc(env(safe-area-inset-top, 0px) + 16px);
-      left: 50%;
-      transform: translateX(-50%);
-      background: linear-gradient(135deg, #f59e0b, #d97706);
-      color: white;
-      padding: 14px 24px;
-      border-radius: 16px;
-      font-weight: 800;
-      font-size: 15px;
-      text-align: center;
-      box-shadow: 0 10px 30px rgba(217, 119, 6, 0.4);
-      z-index: 2147483647;
-      max-width: min(92%, 380px);
-      width: max-content;
-      backdrop-filter: blur(12px);
-      border: 1px solid rgba(255,255,255,0.25);
-      animation: toastSlideDown 0.5s ease-out;
-      pointer-events: none;
-      user-select: none;
-    `;
-
-    toast.innerHTML = `
-      <div style="display:flex; align-items:center; justify-content:center; gap:10px;">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-          <circle cx="12" cy="12" r="10"/>
-          <path d="M12 8v4m0 4h.01"/>
-        </svg>
-        Please complete your pending transaction
-      </div>
-    `;
-
-    // Append directly to modal (wins every stacking context)
-    const modal = document.getElementById('addMoneyModal');
-    if (modal) {
-      modal.appendChild(toast);
-    } else {
-      document.body.appendChild(toast); // fallback
-    }
-
-    // Auto-remove after 4.5 seconds
-    setTimeout(() => {
-      toast.style.opacity = '0';
-      toast.style.transform = 'translateX(-50%) translateY(-20px)';
-      setTimeout(() => toast.remove(), 500);
-    }, 4500);
-
-    // Add animation keyframes (once)
-    if (!document.getElementById('pending-toast-anim')) {
-      const style = document.createElement('style');
-      style.id = 'pending-toast-anim';
-      style.textContent = `
-        @keyframes toastSlideDown {
-          from { opacity: 0; transform: translateX(-50%) translateY(-40px) scale(0.95); }
-          to   { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
-        }
+      const toast = document.createElement('div');
+      toast.className = 'pending-tx-inline-toast';
+      toast.style.cssText = `
+        position: fixed;
+        top: calc(env(safe-area-inset-top, 0px) + 16px);
+        left: 50%;
+        transform: translateX(-50%);
+        background: linear-gradient(135deg, #f59e0b, #d97706);
+        color: white;
+        padding: 14px 24px;
+        border-radius: 16px;
+        font-weight: 800;
+        font-size: 15px;
+        text-align: center;
+        box-shadow: 0 10px 30px rgba(217, 119, 6, 0.4);
+        z-index: 2147483647;
+        max-width: min(92%, 380px);
+        width: max-content;
+        backdrop-filter: blur(12px);
+        border: 1px solid rgba(255,255,255,0.25);
+        animation: toastSlideDown 0.5s ease-out;
+        pointer-events: none;
+        user-select: none;
       `;
-      document.head.appendChild(style);
-    }
-  })();
 
-  // Now show the pending account UI
-  showGeneratedAccount(localPending);
-  return;
-}
+      toast.innerHTML = `
+        <div style="display:flex; align-items:center; justify-content:center; gap:10px;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <circle cx="12" cy="12" r="10"/>
+            <path d="M12 8v4m0 4h.01"/>
+          </svg>
+          Please complete your pending transaction
+        </div>
+      `;
 
-  // 2) No local pending -> quickly check server for pending (small network hit, only on user intent)
+      const modal = document.getElementById('addMoneyModal');
+      if (modal) modal.appendChild(toast);
+      else document.body.appendChild(toast);
+
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateX(-50%) translateY(-20px)';
+        setTimeout(() => toast.remove(), 500);
+      }, 4500);
+
+      if (!document.getElementById('pending-toast-anim')) {
+        const style = document.createElement('style');
+        style.id = 'pending-toast-anim';
+        style.textContent = `
+          @keyframes toastSlideDown {
+            from { opacity: 0; transform: translateX(-50%) translateY(-40px) scale(0.95); }
+            to   { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+          }
+        `;
+        document.head.appendChild(style);
+      }
+    })();
+
+    showGeneratedAccount(localPending);
+    return;
+  }
+
+  // 2) No local pending → check server
   isFundingInProgress = true;
   fundBtn.disabled = true;
   fundBtn.textContent = 'Checking…';
 
   try {
-    const check = await fetchPendingTransaction();
+    // --- WITHLOADER ADDED HERE ---
+    const check = window.withLoader
+      ? await window.withLoader(() => fetchPendingTransaction())
+      : await fetchPendingTransaction();
+
     if (check.ok && check.data) {
-  // ─────── FINAL INLINE TOAST: 100% VISIBLE — SERVER-DETECTED PENDING TX ───────
-  (function showServerPendingTxToast() {
-    // Clean up any previous similar toast
-    document.querySelectorAll('.server-pending-tx-toast').forEach(t => t.remove());
+      (function showServerPendingTxToast() {
+        document.querySelectorAll('.server-pending-tx-toast').forEach(t => t.remove());
 
-    const toast = document.createElement('div');
-    toast.className = 'server-pending-tx-toast';
-    toast.style.cssText = `
-      position: fixed;
-      top: calc(env(safe-area-inset-top, 0px) + 16px);
-      left: 50%;
-      transform: translateX(-50%);
-      background: linear-gradient(135deg, #f59e0b, #d97706);
-      color: white;
-      padding: 15px 26px;
-      border-radius: 16px;
-      font-weight: 800;
-      font-size: 15px;
-      text-align: center;
-      box-shadow: 0 12px 35px rgba(217, 119, 6, 0.45);
-      z-index: 2147483647;
-      max-width: min(90%, 400px);
-      width: max-content;
-      backdrop-filter: blur(12px);
-      border: 1px solid rgba(255, 255, 255, 0.3);
-      animation: pendingToastPop 0.5s ease-out;
-      pointer-events: none;
-      user-select: none;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    `;
+        const toast = document.createElement('div');
+        toast.className = 'server-pending-tx-toast';
+        toast.style.cssText = `
+          position: fixed;
+          top: calc(env(safe-area-inset-top, 0px) + 16px);
+          left: 50%;
+          transform: translateX(-50%);
+          background: linear-gradient(135deg, #f59e0b, #d97706);
+          color: white;
+          padding: 15px 26px;
+          border-radius: 16px;
+          font-weight: 800;
+          font-size: 15px;
+          text-align: center;
+          box-shadow: 0 12px 35px rgba(217, 119, 6, 0.45);
+          z-index: 2147483647;
+          max-width: min(90%, 400px);
+          width: max-content;
+          backdrop-filter: blur(12px);
+          border: 1px solid rgba(255, 255, 255, 0.3);
+          animation: pendingToastPop 0.5s ease-out;
+          pointer-events: none;
+          user-select: none;
+        `;
 
-    toast.innerHTML = `
-      <div style="display: flex; align-items: center; justify-content: center; gap: 10px;">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
-          <circle cx="12" cy="12" r="10"/>
-          <path d="M12 8v4m0 4h.01"/>
-        </svg>
-        <span>You have a pending transaction — please complete it</span>
-      </div>
-    `;
+        toast.innerHTML = `
+          <div style="display: flex; align-items: center; justify-content: center; gap: 10px;">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="M12 8v4m0 4h.01"/>
+            </svg>
+            <span>You have a pending transaction — please complete it</span>
+          </div>
+        `;
 
-    // Append directly to the modal → beats every stacking context
-    const modal = document.getElementById('addMoneyModal');
-    if (modal) {
-      modal.appendChild(toast);
-    } else {
-      document.body.appendChild(toast); // fallback (should never happen)
-    }
+        const modal = document.getElementById('addMoneyModal');
+        if (modal) modal.appendChild(toast);
+        else document.body.appendChild(toast);
 
-    // Auto-remove after 5 seconds
-    setTimeout(() => {
-      toast.style.opacity = '0';
-      toast.style.transform = 'translateX(-50%) translateY(-20px) scale(0.95)';
-      setTimeout(() => toast.remove(), 600);
-    }, 5000);
+        setTimeout(() => {
+          toast.style.opacity = '0';
+          toast.style.transform = 'translateX(-50%) translateY(-20px) scale(0.95)';
+          setTimeout(() => toast.remove(), 600);
+        }, 5000);
 
-    // Add animation (only once)
-    if (!document.getElementById('pending-toast-anim-style')) {
-      const style = document.createElement('style');
-      style.id = 'pending-toast-anim-style';
-      style.textContent = `
-        @keyframes pendingToastPop {
-          from {
-            opacity: 0;
-            transform: translateX(-50%) translateY(-50px) scale(0.9);
-          }
-          to {
-            opacity: 1;
-            transform: translateX(-50%) translateY(0) scale(1);
-          }
+        if (!document.getElementById('pending-toast-anim-style')) {
+          const style = document.createElement('style');
+          style.id = 'pending-toast-anim-style';
+          style.textContent = `
+            @keyframes pendingToastPop {
+              from { opacity: 0; transform: translateX(-50%) translateY(-50px) scale(0.9); }
+              to   { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+            }
+          `;
+          document.head.appendChild(style);
         }
-      `;
-      document.head.appendChild(style);
+      })();
+
+      showGeneratedAccount(check.data);
+      return;
     }
-  })();
 
-  // Now show the actual pending account details
-  showGeneratedAccount(check.data);
-  return;
-}
-
-    // 3) No pending anywhere -> proceed to create a new account
+    // 3) No pending → create new transaction
     fundBtn.textContent = 'Processing...';
 
     const res = window.withLoader
-      ? await window.withLoader(() => apiFetch('/api/fund-wallet', {
-          method: 'POST',
-          body: { amount }
-        }))
+      ? await window.withLoader(() =>
+          apiFetch('/api/fund-wallet', {
+            method: 'POST',
+            body: { amount }
+          })
+        )
       : await apiFetch('/api/fund-wallet', {
           method: 'POST',
           body: { amount }
         });
 
     if (res.ok) {
-      // This will save to localStorage inside showGeneratedAccount (your patched version)
       showGeneratedAccount(res.data);
     } else {
       showGeneratedError(res.error?.message || 'Failed to generate account.');
     }
+
   } catch (err) {
     console.error('[Fund Wallet Error]', err);
     showGeneratedError('Network error. Try again.');
   } finally {
-    // Always reset button state
     isFundingInProgress = false;
     fundBtn.disabled = false;
     fundBtn.textContent = 'Fund Wallet';
   }
 });
+
 }
 
 /* ---------- localStorage helpers ---------- */
