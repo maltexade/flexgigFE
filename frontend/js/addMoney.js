@@ -282,7 +282,6 @@ function openAddMoneyModalContent() {
 window.openAddMoneyModalContent = window.openAddMoneyModalContent || openAddMoneyModalContent;
 
 // --- Assign Events to Add Money Modal ---
-// --- Assign Events to Add Money Modal ---
 function assignAddMoneyEvents() {
   const amountInput = document.getElementById('addMoneyAmountInput');
   const quickBtns = document.querySelectorAll('.addMoney-quick-btn');
@@ -429,6 +428,7 @@ function showGeneratedAccount(data) {
   contentContainer.appendChild(modalContent);
 
   // --- Copy Account Number ---
+  const copyBtn = modalContent.querySelector('.copy-btn');
   copyBtn?.addEventListener('click', async e => {
   const text = e.currentTarget.dataset.copy;
   await navigator.clipboard.writeText(text);
