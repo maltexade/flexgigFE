@@ -191,7 +191,7 @@ if (typeof window.playSuccessSound === 'function') {
 
     document.body.appendChild(toast);
 
-    setTimeout(() => toast.remove(), 4000);
+    setTimeout(() => toast.remove(), 6600);
     
     console.log('[Toast] Displayed successfully');
   }

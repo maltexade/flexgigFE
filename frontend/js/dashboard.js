@@ -14300,7 +14300,7 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
     console.log('[IDLE] Soft timer started (1 min countdown)');
     
     softIdleTimeout = setTimeout(async () => {
-      console.log('⏰ [SOFT IDLE] 1 minute of inactivity');
+      console.log('⏰ [SOFT IDLE] 2 minute of inactivity');
       
       // Double-check reauth modal isn't open before showing prompt
       if (isReauthModalOpen()) {
