@@ -498,28 +498,54 @@ async function handleTransactionCancelOrExpire(reference) {
   window.ModalManager?.closeModal?.('addMoneyModal') ||
     (document.getElementById('addMoneyModal').style.transform = 'translateY(100%)');
 
-    // 4. Show toast
-    const t = Object.assign(document.createElement('div'), {
-      textContent: reference ? 'Transaction cancelled' : 'Session expired',
-      style: 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#f59e0b;color:white;padding:16px 28px;border-radius:16px;font-weight:bold;z-index:999999;box-shadow:0 10px 30px rgba(0,0,0,0.3);opacity:0;transition:all .4s'
-    });
+  // ⭐ Toast must appear IMMEDIATELY after modal starts closing
+  const t = Object.assign(document.createElement('div'), {
+    textContent: reference ? 'Transaction cancelled' : 'Session expired',
+    style: `
+      position:fixed;
+      top:20px;
+      left:50%;
+      transform:translateX(-50%);
+      background:#f59e0b;
+      color:white;
+      padding:16px 28px;
+      border-radius:16px;
+      font-weight:bold;
+      z-index:999999;
+      box-shadow:0 10px 30px rgba(0,0,0,0.3);
+      opacity:0;
+      transition:all .4s;
+    `
+  });
 
-  // 3. Wait a tiny bit for close animation, then cancel on server
+  // ⭐ Append & animate immediately
+  document.body.appendChild(t);
+  requestAnimationFrame(() => {
+    t.style.opacity = '1';
+    t.style.transform += ' translateY(10px)';
+  });
+
+  // Remove later
+  setTimeout(() => {
+    t.style.opacity = '0';
+    setTimeout(() => t.remove(), 400);
+  }, 2500);
+
+  // 3. Handle backend cancel AFTER modal animation
   setTimeout(async () => {
     if (reference) {
-      try { await apiFetch(`/api/fund-wallet/cancel/${reference}`, {method:'POST'}); }
-      catch (e) { console.error('Cancel failed:', e); }
+      try {
+        await apiFetch(`/api/fund-wallet/cancel/${reference}`, { method:'POST' });
+      } catch (e) {
+        console.error('Cancel failed:', e);
+      }
     }
-
-    
-    document.body.appendChild(t);
-    requestAnimationFrame(() => (t.style.opacity='1', t.style.transform+=' translateY(10px)'));
-    setTimeout(() => (t.style.opacity='0', setTimeout(() => t.remove(), 400)), 2500);
 
     // 5. Reopen fresh Add Money form
     openAddMoneyModalContent();
-  }, 400); // matches your modal close animation duration
+  }, 400); // match close animation
 }
+
 window.handleTransactionCancelOrExpire = window.handleTransactionCancelOrExpire || handleTransactionCancelOrExpire; 
 
 
