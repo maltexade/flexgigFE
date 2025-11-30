@@ -279,6 +279,7 @@ function openAddMoneyModalContent() {
   // Reassign elements and events after restoring content
   assignAddMoneyEvents();
 }
+window.openAddMoneyModalContent = window.openAddMoneyModalContent || openAddMoneyModalContent;
 
 // --- Assign Events to Add Money Modal ---
 function assignAddMoneyEvents() {
@@ -432,7 +433,7 @@ function showGeneratedAccount(data) {
     copyBtn.addEventListener('click', e => {
       const accountNum = e.currentTarget.dataset.copy;
       navigator.clipboard.writeText(accountNum).then(() => {
-        window.notify?.('Account number copied!', 'success') || alert('Account number copied!');
+        window.notify?.('Account number copied!', 'success');
       }).catch(() => {
         alert('Failed to copy. Please copy manually: ' + accountNum);
       });
@@ -509,6 +510,7 @@ async function handleTransactionCancelOrExpire(reference) {
 
   openAddMoneyModalContent();
 }
+window.handleTransactionCancelOrExpire = window.handleTransactionCancelOrExpire || handleTransactionCancelOrExpire; 
 
 
 // --- Initialize when DOM is ready ---
