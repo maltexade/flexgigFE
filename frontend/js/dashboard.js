@@ -1588,35 +1588,32 @@ window.applyBalanceVisibility = applyBalanceVisibility;
 //  BULLETPROOF REAL-TIME BALANCE + AUTO-CLOSE (MOBILE FIXED)
 // ===============================================================
 
-// BULLETPROOF REAL-TIME BALANCE SYSTEM — FINAL VERSION (2025)
-(() => {
+(function () {
   const uid = window.__USER_UID || localStorage.getItem('userId');
   if (!uid) return;
 
   let ws = null;
   let pollTimer = null;
   let lastKnownBalance = null;
+  let hasProcessedPayment = false; // prevent double toast/close
   let lastSeenSeq = Number(localStorage.getItem('last_balance_seq') || '0');
-  let hasProcessedPayment = false;
 
+  // Central handler — called from WS, polling, AND page visibility
   function handleNewBalance(data, source = 'unknown') {
-    const newBalance = Number(data.balance) || 0;
-    const newSeq = Number(data.seq) || 0;
-    const amountAdded = newBalance > (lastKnownBalance || 0) ? newBalance - (lastKnownBalance || 0) : 0;
+  const newBalance = Number(data.balance) || 0;
+  const newSeq     = Number(data.seq) || 0;
 
-    console.log(`[Balance] ${source} → ₦${newBalance.toLocaleString()} | seq: ${newSeq} (last: ${lastSeenSeq})`);
-
-    // DETECT MISSED PAYMENTS
-    if (newSeq > lastSeenSeq + 1) {
-      console.warn(`MISSED ${newSeq - lastSeenSeq - 1} payment(s)! Forcing full sync...`);
-      forceFullBalanceSync();
-      return;
-    }
-
-    if (newSeq > lastSeenSeq) {
-      lastSeenSeq = newSeq;
-      try { localStorage.setItem('last_balance_seq', newSeq); } catch(e) {}
-    }
+    // ←←← ADD THESE 6 LINES EXACTLY HERE
+  if (newSeq > lastSeenSeq + 1) {
+    console.warn(`MISSED ${newSeq - lastSeenSeq - 1} payment(s)! Forcing full sync...`);
+    forceFullBalanceSync();
+    return;
+  }
+  if (newSeq > lastSeenSeq) {
+    lastSeenSeq = newSeq;
+    try { localStorage.setItem('last_balance_seq', newSeq); } catch(e) {}
+  }
+  // ←←← END OF ADDITION
 
     if (lastKnownBalance === null) {
       lastKnownBalance = newBalance;
@@ -1630,88 +1627,134 @@ window.applyBalanceVisibility = applyBalanceVisibility;
       return;
     }
 
+    const amountAdded = newBalance > (lastKnownBalance || 0) ? newBalance - (lastKnownBalance || 0) : 0;
     lastKnownBalance = newBalance;
+
+    console.log(`[Balance] ${source} → ₦${newBalance.toLocaleString()} | seq: ${newSeq} (last: ${lastSeenSeq})`);
+
+    // Update UI
     window.updateAllBalances(newBalance);
 
+    // ONLY if payment just arrived → close modal + toast
     if (!hasProcessedPayment && amountAdded > 0) {
       hasProcessedPayment = true;
 
-      try { removePendingTxFromStorage?.() || localStorage.removeItem('flexgig.pending_fund_tx'); } catch(e) {}
+      // ---- NEW: clear local pending tx storage immediately so UI won't resurrect old tx ----
+      try {
+        if (typeof removePendingTxFromStorage === 'function') {
+          removePendingTxFromStorage();
+          console.log('[Balance] Cleared local pending tx storage');
+        } else {
+          // defensive: try to remove directly if helper not present
+          localStorage.removeItem('flexgig.pending_fund_tx');
+          console.log('[Balance] Cleared local pending tx storage (direct)');
+        }
+      } catch (e) {
+        console.warn('[handleNewBalance] failed to clear pending tx storage', e);
+      }
+      // -------------------------------------------------------------------------------------
 
+      // Dispatch event (for any other listeners)
       window.dispatchEvent(new CustomEvent('balance_update', {
         detail: { type: 'balance_update', balance: newBalance, amount: amountAdded }
       }));
 
+      // Close modal SAFELY
       setTimeout(() => {
-        if (window.ModalManager?.closeTopModal) window.ModalManager.closeTopModal();
-        else if (document.getElementById('addMoneyModal')) {
+        if (window.ModalManager?.closeTopModal) {
+          window.ModalManager.closeTopModal();
+          
+        } else if (document.getElementById('addMoneyModal')) {
           document.getElementById('addMoneyModal').style.transform = 'translateY(100%)';
+          document.getElementById('addMoneyModal').classList.add('hidden');
         }
-        window.openAddMoneyModalContent();
       }, 300);
 
-      window.showSuccessToast(
-        `₦${amountAdded.toLocaleString()} received!`,
-        `Wallet updated to ₦${newBalance.toLocaleString()}`
-      );
-      window.playSuccessSound?.();
+      // Re-open the add-money content (this will now NOT find the old tx in localStorage)
+      window.openAddMoneyModalContent();
 
+      // Show toast
+      if (typeof window.notify === 'function') {
+        window.notify(`₦${amountAdded.toLocaleString()} received!`, 'success');
+      } else {
+        // Fallback beautiful toast
+        const t = document.createElement('div');
+        t.textContent = `✓ ₦${amountAdded.toLocaleString()} credited!`;
+        Object.assign(t.style, {
+          position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)',
+          background: '#10b981', color: 'white', padding: '16px 24px', borderRadius: '16px',
+          zIndex: 999999, fontWeight: 'bold', boxShadow: '0 10px 30px rgba(0,0,0,0.3)'
+        });
+        document.body.appendChild(t);
+        setTimeout(() => t.remove(), 4000);
+      }
+
+      // Allow next payment after 30s
       setTimeout(() => { hasProcessedPayment = false; }, 30000);
     }
   }
 
   async function forceFullBalanceSync() {
-    try {
-      const res = await fetch('/api/session?light=true&t=' + Date.now());
-      if (res.ok) {
-        const json = await res.json();
-        if (json.wallet_seq !== undefined) {
-          handleNewBalance({
-            balance: json.wallet_balance || 0,
-            seq: json.wallet_seq || 0
-          }, 'force-sync');
-        }
+  try {
+    const res = await fetch('/api/session?light=true&t=' + Date.now());
+    if (res.ok) {
+      const json = await res.json();
+      if (json.wallet_seq !== undefined) {
+        handleNewBalance({
+          balance: json.wallet_balance || 0,
+          seq: json.wallet_seq || 0
+        }, 'force-sync');
       }
-    } catch (e) {
-      console.warn('[Force Sync] failed', e);
     }
+  } catch (e) {
+    console.warn('[Force Sync] failed', e);
   }
+}
 
-  function startPolling() {
+  // Polling fallback (runs always on mobile)
+  async function startPolling() {
     if (pollTimer) clearTimeout(pollTimer);
+
     const poll = async () => {
       try {
-        const res = await fetch('/api/session?light=true&t=' + Date.now());
+        const res = await fetch(`${window.__SEC_API_BASE}/api/session?light=true&t=${Date.now()}`, {
+          credentials: 'include',
+          cache: 'no-store'
+        });
         if (res.ok) {
           const json = await res.json();
-          if (json.wallet_seq !== undefined) {
-            handleNewBalance({
-              balance: json.wallet_balance || 0,
-              seq: json.wallet_seq || 0
-            }, 'polling');
+          const bal = json.user?.wallet_balance;
+          if (bal !== undefined && bal !== lastKnownBalance) {
+            handleNewBalance(bal, 'polling');
           }
         }
-      } catch (e) {}
-      pollTimer = setTimeout(poll, 8000);
+      } catch (e) { console.warn('[Balance Poll] failed', e); }
+
+      pollTimer = setTimeout(poll, 8000); // every 8s
     };
     poll();
   }
 
+  // WebSocket (best effort)
   function connectWS() {
     try {
       ws = new WebSocket('wss://api.flexgig.com.ng/ws/wallet');
+
       ws.onopen = () => {
         console.log('[WS] Connected');
         ws.send(JSON.stringify({ type: 'subscribe', user_uid: uid }));
+        if (pollTimer) clearTimeout(pollTimer); // WS wins
       };
-      ws.onmessage = e => {
+
+      ws.onmessage = (e) => {
         try {
           const data = JSON.parse(e.data);
-          if (data.type === 'balance_update' && data.seq !== undefined) {
-            handleNewBalance(data, 'websocket');
-          }
+          if (data.type === 'balance_update' && data.balance !== undefined && data.seq !== undefined) {
+  handleNewBalance(data, 'websocket');
+}
         } catch (err) {}
       };
+
       ws.onclose = ws.onerror = () => {
         console.log('[WS] Disconnected → fallback to polling');
         startPolling();
@@ -1721,22 +1764,36 @@ window.applyBalanceVisibility = applyBalanceVisibility;
     }
   }
 
+  // CRITICAL: Re-check balance when user returns to app (iOS/Android fix)
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') forceFullBalanceSync();
+    if (document.visibilityState === 'visible') {
+      console.log('[Visibility] Page visible → force balance check');
+      // Force a poll immediately
+      fetch(`${window.__SEC_API_BASE}/api/session?light=true&t=${Date.now()}`, { credentials: 'include' })
+        .then(r => r.ok ? r.json() : null)
+        .then(j => j?.user?.wallet_balance !== undefined && handleNewBalance(j.user.wallet_balance, 'visibility'));
+    }
   });
-  document.addEventListener('resume', () => setTimeout(forceFullBalanceSync, 1000));
-  window.addEventListener('focus', forceFullBalanceSync);
 
-  connectWS();
-  startPolling();
-  setTimeout(forceFullBalanceSync, 2000);
+  // Also on resume (mobile)
+  document.addEventListener('resume', () => {
+    console.log('[App Resume] Forcing balance check');
+    setTimeout(() => startPolling(), 1000);
+  });
 
-  if (window.__SERVER_USER_DATA__?.wallet_balance !== undefined) {
-    handleNewBalance({
-      balance: window.__SERVER_USER_DATA__.wallet_balance,
-      seq: window.__SERVER_USER_DATA__.wallet_seq || 0
-    }, 'initial');
-  }
+  // Start everything
+  setTimeout(() => {
+    connectWS();
+    startPolling(); // run polling always on mobile
+  }, 800);
+
+  // Initial load
+  getSession().then(s => {
+    if (s?.user?.wallet_balance !== undefined) {
+      handleNewBalance(s.user.wallet_balance, 'initial');
+    }
+  });
+
 })();
 
 
