@@ -1674,20 +1674,12 @@ window.applyBalanceVisibility = applyBalanceVisibility;
       window.openAddMoneyModalContent();
 
       // Show toast
-      if (typeof window.notify === 'function') {
-        window.notify(`₦${amountAdded.toLocaleString()} received!`, 'success');
-      } else {
-        // Fallback beautiful toast
-        const t = document.createElement('div');
-        t.textContent = `✓ ₦${amountAdded.toLocaleString()} credited!`;
-        Object.assign(t.style, {
-          position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)',
-          background: '#10b981', color: 'white', padding: '16px 24px', borderRadius: '16px',
-          zIndex: 999999, fontWeight: 'bold', boxShadow: '0 10px 30px rgba(0,0,0,0.3)'
-        });
-        document.body.appendChild(t);
-        setTimeout(() => t.remove(), 4000);
-      }
+            // Use the beautiful toast + sound from addmoney.js (works perfectly on mobile!)
+      window.showSuccessToast?.(
+        `₦${amountAdded.toLocaleString()} received!`,
+        `Wallet updated to ₦${newBalance.toLocaleString()}`
+      );
+      window.playSuccessSound?.();
 
       // Allow next payment after 30s
       setTimeout(() => { hasProcessedPayment = false; }, 30000);
