@@ -1592,44 +1592,14 @@ window.applyBalanceVisibility = applyBalanceVisibility;
   const uid = window.__USER_UID || localStorage.getItem('userId');
   if (!uid) return;
 
-    // MOBILE FIX: Don't start until addmoney.js has loaded toast & sound
-  if (typeof window.showSuccessToast !== 'function' || typeof window.playSuccessSound !== 'function') {
-    console.log('[Balance] Waiting for addmoney.js to load toast/sound...');
-    const checker = setInterval(() => {
-      if (typeof window.showSuccessToast === 'function' && typeof window.playSuccessToast === 'function') {
-        clearInterval(checker);
-        console.log('[Balance] addmoney.js ready → starting system');
-        connectWS();
-        startPolling();
-        setTimeout(forceFullBalanceSync, 1000);
-      }
-    }, 200);
-    setTimeout(() => clearInterval(checker), 8000); // safety
-    return; // ←←← STOP everything until toast is ready
-  }
-
   let ws = null;
   let pollTimer = null;
   let lastKnownBalance = null;
   let hasProcessedPayment = false; // prevent double toast/close
-  let lastSeenSeq = Number(localStorage.getItem('last_balance_seq') || '0');
 
   // Central handler — called from WS, polling, AND page visibility
-  function handleNewBalance(data, source = 'unknown') {
-  const newBalance = Number(data.balance) || 0;
-  const newSeq     = Number(data.seq) || 0;
-
-    // ←←← ADD THESE 6 LINES EXACTLY HERE
-  if (newSeq > lastSeenSeq + 1) {
-    console.warn(`MISSED ${newSeq - lastSeenSeq - 1} payment(s)! Forcing full sync...`);
-    forceFullBalanceSync();
-    return;
-  }
-  if (newSeq > lastSeenSeq) {
-    lastSeenSeq = newSeq;
-    try { localStorage.setItem('last_balance_seq', newSeq); } catch(e) {}
-  }
-  // ←←← END OF ADDITION
+  function handleNewBalance(newBalance, source = 'unknown') {
+    newBalance = Number(newBalance) || 0;
 
     if (lastKnownBalance === null) {
       lastKnownBalance = newBalance;
@@ -1643,10 +1613,10 @@ window.applyBalanceVisibility = applyBalanceVisibility;
       return;
     }
 
-    const amountAdded = newBalance > (lastKnownBalance || 0) ? newBalance - (lastKnownBalance || 0) : 0;
+    const amountAdded = newBalance - lastKnownBalance;
     lastKnownBalance = newBalance;
 
-    console.log(`[Balance] ${source} → ₦${newBalance.toLocaleString()} | seq: ${newSeq} (last: ${lastSeenSeq})`);
+    console.log(`[Balance] +₦${amountAdded.toLocaleString()} (from ${source}) → ₦${newBalance.toLocaleString()}`);
 
     // Update UI
     window.updateAllBalances(newBalance);
@@ -1690,34 +1660,25 @@ window.applyBalanceVisibility = applyBalanceVisibility;
       window.openAddMoneyModalContent();
 
       // Show toast
-            // Use the beautiful toast + sound from addmoney.js (works perfectly on mobile!)
-      window.showSuccessToast?.(
-        `₦${amountAdded.toLocaleString()} received!`,
-        `Wallet updated to ₦${newBalance.toLocaleString()}`
-      );
-      window.playSuccessSound?.();
+      if (typeof window.notify === 'function') {
+        window.notify(`₦${amountAdded.toLocaleString()} received!`, 'success');
+      } else {
+        // Fallback beautiful toast
+        const t = document.createElement('div');
+        t.textContent = `✓ ₦${amountAdded.toLocaleString()} credited!`;
+        Object.assign(t.style, {
+          position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)',
+          background: '#10b981', color: 'white', padding: '16px 24px', borderRadius: '16px',
+          zIndex: 999999, fontWeight: 'bold', boxShadow: '0 10px 30px rgba(0,0,0,0.3)'
+        });
+        document.body.appendChild(t);
+        setTimeout(() => t.remove(), 4000);
+      }
 
       // Allow next payment after 30s
       setTimeout(() => { hasProcessedPayment = false; }, 30000);
     }
   }
-
-  async function forceFullBalanceSync() {
-  try {
-    const res = await fetch('/api/session?light=true&t=' + Date.now());
-    if (res.ok) {
-      const json = await res.json();
-      if (json.wallet_seq !== undefined) {
-        handleNewBalance({
-          balance: json.wallet_balance || 0,
-          seq: json.wallet_seq || 0
-        }, 'force-sync');
-      }
-    }
-  } catch (e) {
-    console.warn('[Force Sync] failed', e);
-  }
-}
 
   // Polling fallback (runs always on mobile)
   async function startPolling() {
@@ -1731,12 +1692,10 @@ window.applyBalanceVisibility = applyBalanceVisibility;
         });
         if (res.ok) {
           const json = await res.json();
-if (json.wallet_balance !== undefined && json.wallet_seq !== undefined) {
-  handleNewBalance({
-    balance: json.wallet_balance,
-    seq: json.wallet_seq
-  }, 'polling');
-}
+          const bal = json.user?.wallet_balance;
+          if (bal !== undefined && bal !== lastKnownBalance) {
+            handleNewBalance(bal, 'polling');
+          }
         }
       } catch (e) { console.warn('[Balance Poll] failed', e); }
 
@@ -1759,9 +1718,9 @@ if (json.wallet_balance !== undefined && json.wallet_seq !== undefined) {
       ws.onmessage = (e) => {
         try {
           const data = JSON.parse(e.data);
-          if (data.type === 'balance_update' && data.balance !== undefined && data.seq !== undefined) {
-  handleNewBalance(data, 'websocket');
-}
+          if (data.type === 'balance_update' && data.balance !== undefined) {
+            handleNewBalance(data.balance, 'websocket');
+          }
         } catch (err) {}
       };
 
@@ -1781,14 +1740,7 @@ if (json.wallet_balance !== undefined && json.wallet_seq !== undefined) {
       // Force a poll immediately
       fetch(`${window.__SEC_API_BASE}/api/session?light=true&t=${Date.now()}`, { credentials: 'include' })
         .then(r => r.ok ? r.json() : null)
-        .then(j => {
-  if (j?.wallet_balance !== undefined && j?.wallet_seq !== undefined) {
-    handleNewBalance({
-      balance: j.wallet_balance,
-      seq: j.wallet_seq
-    }, 'visibility');
-  }
-});
+        .then(j => j?.user?.wallet_balance !== undefined && handleNewBalance(j.user.wallet_balance, 'visibility'));
     }
   });
 
