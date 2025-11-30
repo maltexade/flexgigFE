@@ -255,7 +255,7 @@ function showLocalNotify(message, type = 'info') {
   const bg = type === 'error' ? '#ef4444' : (type === 'success' ? '#10b981' : '#f59e0b');
   const t = Object.assign(document.createElement('div'), {
     textContent: message,
-    style: `position:fixed;top:20px;left:50%;transform:translateX(-50%);background:${bg};color:white;padding:12px 20px;border-radius:12px;z-index:999999;font-weight:700;opacity:0;transition:all .3s;`
+    style: `position:fixed;top:calc(env(safe-area-inset-top, 0px) + 20px);left:50%;transform:translateX(-50%);background:${bg};color:white;padding:12px 20px;border-radius:12px;z-index:999999999;font-weight:700;opacity:0;transition:all .3s;max-width:min(92%, 380px);width:max-content;text-align:center;`
   });
   document.body.appendChild(t);
   requestAnimationFrame(() => { t.style.opacity = '1'; t.style.transform += ' translateY(6px)'; });
@@ -316,12 +316,14 @@ async function openAddMoneyModalContent() {
       </div>
     `;
 
-    // show notification so user knows they must complete pending tx
-    try {
-      showLocalNotify('Please complete your pending transaction.', 'info');
-    } catch (e) {
-      console.warn('[openAddMoneyModalContent] notify failed', e);
-    }
+    // show notification so user knows they must complete pending tx - ONLY after modal is visible
+    setTimeout(() => {
+      try {
+        showLocalNotify('Please complete your pending transaction.', 'info');
+      } catch (e) {
+        console.warn('[openAddMoneyModalContent] notify failed', e);
+      }
+    }, 400); // Wait for modal animation to complete
 
     // small delay so user sees the message (0-350ms)
     setTimeout(() => showGeneratedAccount(pending), 150);
@@ -443,7 +445,10 @@ function assignAddMoneyEvents() {
   // 1) If localStorage has a pending tx, show it and notify user (ignore input amount)
   const localPending = getPendingTxFromStorage();
   if (localPending) {
-    showLocalNotify('Please complete your pending transaction.', 'info');
+    // Delay notification until modal transition completes
+    setTimeout(() => {
+      showLocalNotify('Please complete your pending transaction.', 'info');
+    }, 400);
     // show the pending transaction (this will reuse your UI and countdown)
     showGeneratedAccount(localPending);
     return;
@@ -458,7 +463,10 @@ function assignAddMoneyEvents() {
     const check = await fetchPendingTransaction();
     if (check.ok && check.data) {
       // server reports a pending tx (user may have cleared cache earlier)
-      showLocalNotify('Please complete your pending transaction.', 'info');
+      // Delay notification until modal transition completes
+      setTimeout(() => {
+        showLocalNotify('Please complete your pending transaction.', 'info');
+      }, 400);
       showGeneratedAccount(check.data);
       return;
     }
@@ -698,7 +706,7 @@ function showGeneratedAccount(data) {
     });
   }
 
-  // --- Close Button (optional) ---
+// --- Close Button (optional) ---
   const closeBtn = modalContent.querySelector('.addMoney-modal-close');
   if (closeBtn) {
     closeBtn.addEventListener('click', () => {
@@ -932,8 +940,7 @@ console.log('[Fund Wallet] Check WebSocket: getWebSocketStatus()');
     }
   });
 
-  // 5) Optional: if you want the modal content prepared immediately on page load
-  //    (so the first click has zero delay), call prepareAddMoneyModal() here — uncomment if desired:
-  prepareAddMoneyModal();
+  // 5) DON'T prepare on page load - only prepare when user actually clicks
+  //    This prevents the "complete pending transaction" notification from showing on every page load
 
 })();
