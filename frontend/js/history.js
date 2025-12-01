@@ -11,7 +11,7 @@
 
   /* -------------------------- CONFIG -------------------------- */
   const CONFIG = {
-    apiEndpoint: window.TRANSACTIONS_API || window.__SEC_API_BASE || '/api/transactions', // backend endpoint
+    apiEndpoint: 'https://api.flexgig.com.ng', // backend endpoint
     pageSize: 30,                 // items to request per page
     chunkRenderSize: 12,          // items to render per animation chunk for smoothness
     useBackend: true,             // set false for TEST_MODE local data
