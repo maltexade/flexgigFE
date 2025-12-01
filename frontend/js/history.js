@@ -444,10 +444,18 @@ async function preloadHistoryForInstantOpen() {
 
   hide(loadingEl);
   console.log(`PRELOADED ${allTx.length} transactions → History now opens INSTANTLY`);
-  // ← ADD THESE TWO LINES HERE
-if (modal.classList.contains('open')) {
-  applyTransformsAndRender();   // ← THIS IS THE MISSING CALL!
-}
+
+  // RENDER IMMEDIATELY if modal is open OR will be opened soon
+  if (modal.classList.contains('open')) {
+    applyTransformsAndRender();
+  }
+
+  // Also render on next tick in case modal opens right after
+  requestAnimationFrame(() => {
+    if (modal.classList.contains('open') && state.items.length > 0) {
+      applyTransformsAndRender();
+    }
+  });
 }
 
 
@@ -509,12 +517,25 @@ function applyMonthFilterAndRender() {
 }
 
 // Open Month Picker Modal
+// REPLACE THIS ENTIRE BLOCK (from monthSelector.addEventListener...)
 monthSelector.addEventListener('click', () => {
-  if (!monthFilterModal) {
-    createMonthPickerModal();
-  }
-  monthFilterModal.classList.remove('hidden');
+  // Always create fresh modal — fixes null error
+  createMonthPickerModal();
+  const modalEl = document.getElementById('monthFilterModal');
+  modalEl.classList.remove('hidden');
   generateMonthGrid();
+
+  // Confirm button
+  modalEl.querySelector('#confirmMonthBtn').onclick = () => {
+    updateMonthDisplay();
+    applyMonthFilterAndRender();
+    modalEl.classList.add('hidden');
+  };
+
+  // Close on backdrop or X
+  modalEl.querySelectorAll('[data-close-month], .opay-backdrop').forEach(el => {
+    el.onclick = () => modalEl.classList.add('hidden');
+  });
 });
 
 // Create modal dynamically if not in HTML
