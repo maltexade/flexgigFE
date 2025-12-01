@@ -227,11 +227,15 @@
   };
 
   // Modals that should NOT affect nav tab active states (card/button triggered, not nav items)
-  const nonNavModals = ['allPlansModal', 'checkoutModal', 'pinModal', 'updateProfileModal', 'securityPinModal', 'changePwdModal', 'referralModal', 'securityModal', 'helpSupportModal', 'updateProfileModal'];
+  const nonNavModals = ['allPlansModal', 'checkoutModal', 'pinModal', 'updateProfileModal', 'securityPinModal', 'changePwdModal', 'referralModal', 'securityModal', 'helpSupportModal', 'updateProfileModal', 'addMoneyModal'];
   
   // Only these modals should manage nav active states
   const navModals = ['historyModal', 'settingsModal'];
 
+
+  function shouldManageActiveState(modalId) {
+  return !['allPlansModal', ...nonNavModals].includes(modalId);
+}
   // Helper: find all possible trigger elements for a modal id.
   function findTriggerElements(modalId) {
     const found = new Set();
@@ -459,6 +463,35 @@
     addMoneyModal: {id: 'addMoneyModal', element: null, hasPullHandle: true},
   };
 
+  // ─────────────────────────────────────────────────────────────
+// BOTTOM SHEET MODALS — prevent background scroll when open
+// ─────────────────────────────────────────────────────────────
+const bottomSheetModals = [
+  'addMoneyModal',
+  // add any future bottom sheets here
+];
+
+function lockBodyScroll(lock = true) {
+  if (lock) {
+    const scrollY = window.pageYOffset;
+    document.body.style.position = 'fixed';
+    document.body.style.top = `-${scrollY}px`;
+    document.body.style.left = '0';
+    document.body.style.right = '0';
+    document.body.style.width = '100%';
+    document.body.dataset.scrollY = scrollY + '';
+  } else {
+    const scrollY = parseInt(document.body.dataset.scrollY || '0', 10);
+    document.body.style.position = '';
+    document.body.style.top = '';
+    document.body.style.left = '';
+    document.body.style.right = '';
+    document.body.style.width = '';
+    delete document.body.dataset.scrollY;
+    window.scrollTo(0, scrollY);
+  }
+}
+
   // Utility: Check if modal is visible
   function isModalVisible(modal) {
     if (!modal) {
@@ -643,6 +676,10 @@ function applyTransition(modal, show, callback) {
             log('debug', 'forceCloseModal: Keeping current active tab');
           }
         }
+          if (bottomSheetModals.includes(modalId)) {
+    lockBodyScroll(false);
+  }
+
         
         // final focus fallback
         const main = document.getElementById('mainContent') || document.querySelector('main') || document.body;
@@ -720,15 +757,19 @@ if (skipHistory && document.getElementById(modalId)) {
         openModalsStack.push({ modal, id: modalId });
         currentDepth++;
       }
+        // PREVENT BACKGROUND SCROLL FOR BOTTOM SHEETS
+  if (bottomSheetModals.includes(modalId)) {
+    lockBodyScroll(true);
+  }
 
       if (!skipHistory) {
         history.pushState({ modalId }, '', `#${modalId}`);
       }
 
       // Set trigger active - but NOT for allPlansModal (it doesn't have a nav trigger)
-      if (modalId !== 'allPlansModal') {
-        setTriggerActive(modalId, true);
-      }
+      if (shouldManageActiveState(modalId)) {
+  setTriggerActive(modalId, false);
+}
 
       let focusTarget =
         modal.querySelector('input, select, textarea, [tabindex]:not([tabindex="-1"])') ||
@@ -859,6 +900,10 @@ if (modalId === 'addMoneyModal') {
             log('debug', 'closeModal: Keeping current active tab');
           }
         }
+          if (bottomSheetModals.includes(modalId)) {
+    lockBodyScroll(false);
+  }
+
         
         const main = document.getElementById('mainContent') || document.querySelector('main') || document.body;
         try { main.focus(); } catch (e) { document.body.focus(); }
