@@ -60,54 +60,65 @@ openModal: (() => {
   console.log('[StateSaver] UI state saved → openModal:', state.openModal, state);
 }
 
-// == Mobile Dev Console - FIXED API + Toggleable ==
-javascript:(function () {
+// ==========================================
+// 🔧 PRODUCTION-READY MOBILE DEBUG CONSOLE
+// ==========================================
+// ⚙️ SET THIS TO false IN PRODUCTION ⚙️
+const DEBUG_MODE = false; // ← Change to false to hide completely
+// ==========================================
+
+(function () {
+  if (!DEBUG_MODE) {
+    // Completely disable in production - no DOM injection, no performance impact
+    window.mobileLog = () => {}; // No-op function
+    console.log('[Debug] Console disabled (DEBUG_MODE = false)');
+    return;
+  }
+
   if (window.mobileConsoleLoaded) {
     const existing = document.getElementById('mobileConsole');
     const existingBtn = document.getElementById('toggleBtn');
     if (existing && existingBtn) {
-      // Just toggle visibility instead of removing
       const isHidden = existing.style.display === 'none';
       existing.style.display = isHidden ? 'flex' : 'none';
       existingBtn.textContent = isHidden ? '✖️' : '🔧';
       return;
     }
-    // If elements missing, remove and reload
     existing?.remove();
     existingBtn?.remove();
     delete window.mobileConsoleLoaded;
   }
   window.mobileConsoleLoaded = true;
 
-  // === Inject CSS ===
+  // === Enhanced CSS with proper z-index ===
   const style = document.createElement('style');
   style.textContent = `
-    *{margin:0;padding:0;box-sizing:border-box}
-    #mobileConsole{position:fixed;inset:0;display:none;flex-direction:column;background:#000;color:#0f0;z-index:2147483647;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
-    #consoleHeader{background:#1a1a1a;padding:12px;border-bottom:2px solid #0f0;display:flex;justify-content:space-between;align-items:center}
-    #consoleHeader h3{font-size:16px;color:#0f0}
+    #mobileConsole{position:fixed;inset:0;display:none;flex-direction:column;background:#000;color:#0f0;z-index:2147483640;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
+    #consoleHeader{background:#1a1a1a;padding:12px;border-bottom:2px solid #0f0;display:flex;justify-content:space-between;align-items:center;z-index:2147483642}
+    #consoleHeader h3{font-size:16px;color:#0f0;margin:0}
     #clearBtn{background:#ff0000;color:white;border:none;padding:8px 16px;border-radius:6px;font-weight:bold;font-size:12px;cursor:pointer}
-    #logOutput{flex:1;overflow-y:auto;padding:10px;font-family:'Courier New',monospace;font-size:11px;line-height:1.5}
-    .log-entry{margin:4px 0;padding:6px;border-left:3px solid;background:rgba(255,255,255,0.03);word-wrap:break-word;font-size:11px}
+    #logOutput{flex:1;overflow-y:auto;padding:10px;font-family:'Courier New',monospace;font-size:11px;line-height:1.5;z-index:2147483641}
+    .log-entry{margin:4px 0;padding:6px;border-left:3px solid;background:rgba(255,255,255,0.03);word-wrap:break-word;word-break:break-word;font-size:11px}
+    .log-entry pre{margin:4px 0;padding:4px;background:rgba(255,255,255,0.05);border-radius:4px;overflow-x:auto;font-size:10px}
     .log-info{border-color:#0f0;color:#0f0}
     .log-warn{border-color:#ff0;color:#ff0}
     .log-error{border-color:#f00;color:#f00}
     .log-success{border-color:#0ff;color:#0ff}
     .log-ws{border-color:#f0f;color:#f0f}
     .log-timestamp{color:#888;font-size:10px;margin-right:8px}
-    #commandPanel{background:#1a1a1a;border-top:2px solid #0f0;padding:12px}
+    #commandPanel{background:#1a1a1a;border-top:2px solid #0f0;padding:12px;z-index:2147483642}
     #commandInput{width:100%;background:#000;color:#0f0;border:1px solid #0f0;padding:10px;font-family:'Courier New',monospace;font-size:13px;border-radius:6px;margin-bottom:10px}
     #quickCommands{display:grid;grid-template-columns:1fr 1fr;gap:8px}
     .cmd-btn{background:#0f0;color:#000;border:none;padding:10px;border-radius:6px;font-weight:bold;font-size:11px;cursor:pointer;text-align:center}
     .cmd-btn:active{background:#0c0;transform:scale(0.98)}
-    #toggleBtn{position:fixed;bottom:20px;right:20px;width:60px;height:60px;border-radius:50%;background:#0f0;color:#000;border:none;font-size:24px;z-index:2147483646;box-shadow:0 4px 12px rgba(0,255,0,0.5);cursor:pointer;font-weight:bold}
+    #toggleBtn{position:fixed;bottom:20px;right:20px;width:60px;height:60px;border-radius:50%;background:#0f0;color:#000;border:none;font-size:24px;z-index:2147483647;box-shadow:0 4px 12px rgba(0,255,0,0.5);cursor:pointer;font-weight:bold}
     #toggleBtn:active{transform:scale(0.95)}
   `;
   document.head.appendChild(style);
 
   // === Inject HTML ===
   document.body.insertAdjacentHTML('beforeend', `
-    <button id="toggleBtn">🔧</button>
+    <button id="toggleBtn" aria-label="Toggle Debug Console">🔧</button>
     <div id="mobileConsole">
       <div id="consoleHeader">
         <h3>🔧 Dev Console</h3>
@@ -115,7 +126,7 @@ javascript:(function () {
       </div>
       <div id="logOutput"></div>
       <div id="commandPanel">
-        <input type="text" id="commandInput" placeholder="Type command + Enter">
+        <input type="text" id="commandInput" placeholder="Type command + Enter" autocomplete="off" autocorrect="off" autocapitalize="off">
         <div id="quickCommands">
           <button class="cmd-btn" data-cmd="checkPolling()">Polling</button>
           <button class="cmd-btn" data-cmd="checkWebSocket()">WebSocket</button>
@@ -137,23 +148,49 @@ javascript:(function () {
   const commandInput = document.getElementById('commandInput');
   const quickCommands = document.getElementById('quickCommands');
 
+  // === ENHANCED LOG FUNCTION (Chrome-like) ===
   function log(msg, type = 'info') {
-    const ts = new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'});
+    const ts = new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3});
     const div = document.createElement('div');
     div.className = `log-entry log-${type}`;
-    div.innerHTML = `<span class="log-timestamp">[${ts}]</span>${msg}`;
+    
+    // Smart formatting for objects, arrays, errors
+    let formatted = '';
+    if (typeof msg === 'object' && msg !== null) {
+      try {
+        if (msg instanceof Error) {
+          formatted = `❌ ${msg.name}: ${msg.message}\n${msg.stack || ''}`;
+        } else if (Array.isArray(msg)) {
+          formatted = `Array(${msg.length}) ${JSON.stringify(msg, null, 2)}`;
+        } else {
+          formatted = JSON.stringify(msg, null, 2);
+        }
+        formatted = `<pre>${formatted}</pre>`;
+      } catch (e) {
+        formatted = String(msg);
+      }
+    } else {
+      formatted = String(msg);
+    }
+    
+    div.innerHTML = `<span class="log-timestamp">[${ts}]</span>${formatted}`;
     logOutput.appendChild(div);
     logOutput.scrollTop = logOutput.scrollHeight;
-    console.log('[Console]', msg);
+    
+    // Also log to real console
+    console.log(`[MobileConsole ${type.toUpperCase()}]`, msg);
   }
+  
   window.mobileLog = log;
 
-  // Toggle console (allows navigation when closed)
+  // === Toggle console (allows navigation when closed) ===
   toggleBtn.onclick = () => {
     const isVisible = consoleEl.style.display !== 'none';
     consoleEl.style.display = isVisible ? 'none' : 'flex';
     toggleBtn.textContent = isVisible ? '🔧' : '✖️';
-    if (!isVisible) commandInput.focus();
+    if (!isVisible) {
+      setTimeout(() => commandInput.focus(), 100);
+    }
   };
 
   clearBtn.onclick = () => { 
@@ -161,29 +198,34 @@ javascript:(function () {
     log('Console cleared', 'success'); 
   };
 
+  // === Enhanced execute with better error reporting ===
   function execute(cmd) {
     log(`> ${cmd}`, 'info');
     try {
       const result = eval(cmd);
       if (result !== undefined && result !== null) {
         if (result instanceof Promise) {
-          result.then(r => {
-            if (r !== undefined) log(JSON.stringify(r, null, 2), 'success');
-          }).catch(e => log(`Promise error: ${e.message}`, 'error'));
+          result
+            .then(r => {
+              if (r !== undefined) log(r, 'success');
+            })
+            .catch(e => log(e, 'error'));
         } else {
-          log(JSON.stringify(result, null, 2), 'success');
+          log(result, 'success');
         }
       }
     } catch (e) {
-      log(`❌ Error: ${e.message}`, 'error');
+      log(e, 'error');
     }
   }
 
   commandInput.addEventListener('keydown', e => {
     if (e.key === 'Enter') {
       const cmd = commandInput.value.trim();
-      if (cmd) execute(cmd);
-      commandInput.value = '';
+      if (cmd) {
+        execute(cmd);
+        commandInput.value = '';
+      }
     }
   });
 
@@ -194,18 +236,13 @@ javascript:(function () {
 
   // === HELPER: Get API Base ===
   function getApiBase() {
-    // Try multiple sources
-    return window.__SEC_API_BASE || 
-           'https://api.flexgig.com.ng' || 
-           window.location.origin;
+    return window.__SEC_API_BASE || 'https://api.flexgig.com.ng' || window.location.origin;
   }
 
   // === HELPER: Get User ID ===
   function safeGetUserId() {
     try {
-      return window.__USER_UID || 
-             (localStorage && localStorage.getItem('userId')) || 
-             null;
+      return window.__USER_UID || (localStorage && localStorage.getItem('userId')) || null;
     } catch (e) {
       return null;
     }
@@ -232,7 +269,7 @@ javascript:(function () {
         log(`Seq: ${j.wallet_seq || 'N/A'}`, 'info');
         return j;
       })
-      .catch(e => log(`❌ Poll error: ${e.message}`, 'error'));
+      .catch(e => log(e, 'error'));
   };
 
   window.checkWebSocket = () => {
@@ -251,7 +288,7 @@ javascript:(function () {
     try {
       ws = new WebSocket('wss://api.flexgig.com.ng/ws/wallet');
     } catch (e) {
-      log(`❌ WS blocked: ${e.message}`, 'error');
+      log(e, 'error');
       return;
     }
 
@@ -266,7 +303,7 @@ javascript:(function () {
       log(`📨 Message: ${e.data}`, 'ws');
       try {
         const data = JSON.parse(e.data);
-        log(`Type: ${data.type}, Balance: ${data.balance}, Seq: ${data.seq}`, 'success');
+        log(data, 'success');
       } catch {}
     };
     
@@ -276,7 +313,6 @@ javascript:(function () {
       log(`🔌 WS Closed: code=${e.code}, clean=${e.wasClean}`, e.wasClean ? 'warn' : 'error');
     };
     
-    // Auto close after 10 seconds
     setTimeout(() => {
       if (ws.readyState === WebSocket.OPEN) {
         log('Closing test connection...', 'info');
@@ -312,7 +348,7 @@ javascript:(function () {
       
       return j;
     } catch (e) { 
-      log(`❌ Error: ${e.message}`, 'error'); 
+      log(e, 'error'); 
     }
   };
 
@@ -336,7 +372,6 @@ javascript:(function () {
       
       log(`✅ Synced: ₦${bal !== undefined ? bal.toLocaleString() : 'N/A'}`, 'success');
       
-      // Try to call the balance handler
       if (typeof handleNewBalance === 'function') {
         handleNewBalance(bal, 'dev-console');
         log('✅ Called handleNewBalance', 'success');
@@ -349,7 +384,7 @@ javascript:(function () {
       
       return j;
     } catch (e) { 
-      log(`❌ Sync error: ${e.message}`, 'error'); 
+      log(e, 'error'); 
     }
   };
 
@@ -360,12 +395,14 @@ javascript:(function () {
     if (!uid) {
       log('Checking localStorage...', 'info');
       try {
+        const keys = [];
         for (let i = 0; i < localStorage.length; i++) {
           const key = localStorage.key(i);
           if (key.includes('user') || key.includes('id')) {
-            log(`  ${key}: ${localStorage.getItem(key).substring(0, 50)}`, 'info');
+            keys.push(`${key}: ${localStorage.getItem(key).substring(0, 50)}`);
           }
         }
+        if (keys.length) log(keys, 'info');
       } catch (e) {
         log('Cannot access localStorage', 'warn');
       }
@@ -385,16 +422,15 @@ javascript:(function () {
     
     log('✅ Modal exists', 'success');
     const style = getComputedStyle(m);
-    log(`Display: ${style.display}`, 'info');
-    log(`Transform: ${m.style.transform || 'none'}`, 'info');
-    log(`Classes: ${m.className}`, 'info');
-    
-    return {
+    const result = {
       exists: true,
       visible: style.display !== 'none',
-      transform: m.style.transform,
+      display: style.display,
+      transform: m.style.transform || 'none',
       classes: m.className
     };
+    log(result, 'info');
+    return result;
   };
 
   window.testPayment = () => {
@@ -407,9 +443,8 @@ javascript:(function () {
       seq: Date.now()
     };
     
-    log(`Data: ${JSON.stringify(testData)}`, 'info');
+    log(testData, 'info');
     
-    // Try global handler
     if (window.__handleBalanceUpdate) {
       log('Calling __handleBalanceUpdate...', 'info');
       window.__handleBalanceUpdate(testData);
@@ -418,7 +453,6 @@ javascript:(function () {
       log('⚠️ __handleBalanceUpdate not found', 'warn');
     }
     
-    // Try event dispatch
     log('Dispatching event...', 'info');
     window.dispatchEvent(new CustomEvent('balance_update', { detail: testData }));
     log('✅ Event dispatched', 'success');
@@ -426,7 +460,6 @@ javascript:(function () {
 
   window.showStatus = () => {
     log('📊 System Status:', 'ws');
-    log('─────────────────────────', 'info');
     
     const status = {
       userId: safeGetUserId() || 'NOT FOUND',
@@ -439,28 +472,28 @@ javascript:(function () {
       modalManager: typeof window.ModalManager !== 'undefined'
     };
     
-    Object.entries(status).forEach(([key, value]) => {
-      const isGood = value && value !== 'NOT FOUND';
-      log(`${key}: ${value}`, isGood ? 'success' : 'error');
-    });
-    
+    log(status, 'info');
     return status;
   };
 
   // === INITIALIZATION ===
   log('🚀 Mobile Dev Console Ready!', 'success');
   log('Tap 🔧 to toggle console', 'info');
-  log('Console is hidden - you can navigate', 'info');
-  log('─────────────────────────', 'info');
+  log(`Debug Mode: ${DEBUG_MODE ? 'ENABLED' : 'DISABLED'}`, 'info');
 
-  // Auto-show on errors (optional)
+  // Auto-show on errors
   window.addEventListener('error', e => {
     if (consoleEl.style.display === 'none') {
       consoleEl.style.display = 'flex';
       toggleBtn.textContent = '✖️';
     }
-    log(`❌ JS Error: ${e.message}`, 'error');
-    log(`  at ${e.filename}:${e.lineno}:${e.colno}`, 'error');
+    log({
+      message: e.message,
+      filename: e.filename,
+      lineno: e.lineno,
+      colno: e.colno,
+      error: e.error
+    }, 'error');
   });
 
   // Initial checks (delayed)
