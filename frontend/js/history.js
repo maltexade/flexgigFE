@@ -360,6 +360,7 @@ preloadingInProgress: false        // ← ADD THIS LINE
     if (items.length === 0 && !state.fullHistoryLoaded) show(emptyEl);
     else hide(emptyEl);
   }
+  window.applyTransformsAndRender = window.applyTransformsAndRender || applyTransformsAndRender; // expose for console
 
   /* -------------------------- MODAL OPEN — TRIGGER BOTH FULL TOTALS + INFINITE SCROLL -------------------------- */
   function openModal() {
@@ -443,6 +444,10 @@ async function preloadHistoryForInstantOpen() {
 
   hide(loadingEl);
   console.log(`PRELOADED ${allTx.length} transactions → History now opens INSTANTLY`);
+  // ← ADD THESE TWO LINES HERE
+if (modal.classList.contains('open')) {
+  applyTransformsAndRender();   // ← THIS IS THE MISSING CALL!
+}
 }
 
 
