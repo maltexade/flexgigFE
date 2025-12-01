@@ -366,7 +366,6 @@ preloadingInProgress: false        // ← ADD THIS LINE
   modal.classList.add('open');
   modal.classList.remove('hidden');
   modal.style.pointerEvents = 'auto';
-  state.open = true;   // ← Direct assignment (safe & faster)
 
   // Start preloading immediately when page loads (fire and forget)
   preloadHistoryForInstantOpen();
