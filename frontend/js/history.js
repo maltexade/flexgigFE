@@ -46,7 +46,9 @@
     lastRenderIndex: 0,
     cachePages: new Map(),
     fullHistoryLoaded: false,     // ← NEW: have we loaded everything for accurate totals?
-    accurateTotalsCalculated: false // ← NEW: have we updated In/Out with full data?
+    accurateTotalsCalculated: false, // ← NEW: have we updated In/Out with full data?
+    preloaded: false,                  // ← ADD THIS LINE
+preloadingInProgress: false        // ← ADD THIS LINE
   };
 
   /* -------------------------- UTIL -------------------------- */
@@ -361,27 +363,28 @@
 
   /* -------------------------- MODAL OPEN — TRIGGER BOTH FULL TOTALS + INFINITE SCROLL -------------------------- */
   function openModal() {
-    modal.classList.add('open');
-    modal.classList.remove('hidden');
-    modal.style.pointerEvents = 'auto';
-    setState({ open: true });
+  modal.classList.add('open');
+  modal.classList.remove('hidden');
+  modal.style.pointerEvents = 'auto';
+  setState({ open: true });
 
-    // 1. Start loading accurate In/Out totals (fire and forget)
-    loadFullHistoryForAccurateTotals();
+  // Start preloading immediately when page loads (fire and forget)
+  preloadHistoryForInstantOpen();
 
-    // 2. Continue normal infinite scroll experience
-    if (state.items.length === 0) {
-      state.page = 1;
-      state.done = false;
-      state.items = [];
-      state.cachePages.clear();
-      loadMore();
-    } else {
-      applyTransformsAndRender();
-    }
-    trapFocus();
+  // If already preloaded → instant render
+  if (state.preloaded) {
+    hide(loadingEl);
+    hide(emptyEl);
+    applyTransformsAndRender();
+  } else {
+    // First time: show loading briefly while preloading
+    show(loadingEl);
   }
 
+  updateMonthDisplay();
+  if (selectedMonth) applyMonthFilterAndRender();
+  trapFocus();
+}
   function closeModal() {
     modal.classList.remove('open');
     modal.classList.add('hidden');
@@ -389,6 +392,60 @@
     setState({ open: false });
     releaseFocusTrap();
   }
+
+  /* -------------------------- PRELOAD ON PAGE LOAD → INSTANT OPEN -------------------------- */
+async function preloadHistoryForInstantOpen() {
+  if (state.preloaded || state.preloadingInProgress) return;
+  state.preloadingInProgress = true;
+
+  console.log('Preloading full history for instant open...');
+
+  let allTx = [];
+  let page = 1;
+  let hasMore = true;
+
+  while (hasMore) {
+    try {
+      const data = await safeFetch(`${CONFIG.apiEndpoint}?limit=200&page=${page}`);
+      const items = data.items || [];
+      allTx.push(...items);
+      hasMore = page < (data.totalPages || data.total_pages || 1);
+      page++;
+    } catch (err) {
+      console.error('Preload failed:', err);
+      break;
+    }
+  }
+
+  // Normalize once
+  state.items = allTx.map(raw => ({
+    id: raw.id || raw.reference,
+    type: raw.type === 'credit' ? 'credit' : 'debit',
+    amount: raw.amount,
+    description: raw.description || raw.narration || raw.type,
+    time: raw.created_at || raw.time,
+    status: raw.status || 'SUCCESS'
+  }));
+
+  // Calculate accurate totals
+  let totalIn = 0, totalOut = 0;
+  state.items.forEach(tx => {
+    const amt = Math.abs(Number(tx.amount || 0));
+    if (tx.type === 'credit') totalIn += amt;
+    else totalOut += amt;
+  });
+
+  inEl.textContent = `₦${totalIn.toLocaleString()}`;
+  outEl.textContent = `₦${totalOut.toLocaleString()}`;
+
+  state.fullHistoryLoaded = true;
+  state.accurateTotalsCalculated = true;
+  state.preloaded = true;
+  state.done = true;
+
+  hide(loadingEl);
+  console.log(`PRELOADED ${allTx.length} transactions → History now opens INSTANTLY`);
+}
 
 
   /* -------------------------- MONTH FILTER UPGRADE — PRODUCTION READY -------------------------- */
@@ -702,5 +759,8 @@ updateMonthDisplay();
 
   showStateUI();
   console.log('FlexGig Transaction History → FULL & ACCURATE MODE ENABLED (All features preserved)');
+
+  // Start preloading the moment the script loads → instant open later
+preloadHistoryForInstantOpen();
 
 })();
