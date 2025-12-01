@@ -220,7 +220,19 @@
 
   /* -------------------------- PRELOAD ON PAGE LOAD → INSTANT OPEN -------------------------- */
   async function preloadHistoryForInstantOpen() {
-    if (state.preloaded || state.preloadingInProgress) return;
+    if (state.preloaded) return; // Already loaded, just return
+    if (state.preloadingInProgress) {
+      // If already loading, wait for it to complete
+      return new Promise((resolve) => {
+        const checkInterval = setInterval(() => {
+          if (state.preloaded || !state.preloadingInProgress) {
+            clearInterval(checkInterval);
+            resolve();
+          }
+        }, 100);
+      });
+    }
+    
     state.preloadingInProgress = true;
 
     console.log('Preloading full history for instant open...');
@@ -265,19 +277,10 @@
     state.accurateTotalsCalculated = true;
     state.preloaded = true;
     state.done = true;
+    state.preloadingInProgress = false;
 
     hide(loadingEl);
     console.log(`PRELOADED ${allTx.length} transactions → History now opens INSTANTLY`);
-
-    if (modal.classList.contains('open')) {
-      applyTransformsAndRender();
-    }
-
-    requestAnimationFrame(() => {
-      if (modal.classList.contains('open') && state.items.length > 0) {
-        applyTransformsAndRender();
-      }
-    });
   }
 
   /* -------------------------- MONTH FILTER FUNCTIONS -------------------------- */
@@ -474,26 +477,31 @@
   });
 
   /* -------------------------- MODAL OPEN/CLOSE -------------------------- */
-  function openModal() {
+  async function openModal() {
     modal.classList.add('open');
     modal.classList.remove('hidden');
     modal.style.pointerEvents = 'auto';
     state.open = true;
 
     selectedMonth = null;
-    applyTransformsAndRender();
+    updateMonthDisplay();
     
-    preloadHistoryForInstantOpen();
+    // Show loading while preloading
+    show(loadingEl);
+    hide(emptyEl);
+    
+    // Wait for preload to complete
+    await preloadHistoryForInstantOpen();
 
-    if (state.preloaded) {
+    // Now render the transactions
+    if (state.preloaded && state.items.length > 0) {
       hide(loadingEl);
-      hide(emptyEl);
       applyTransformsAndRender();
-    } else {
-      show(loadingEl);
+    } else if (state.items.length === 0) {
+      hide(loadingEl);
+      show(emptyEl);
     }
 
-    updateMonthDisplay();
     trapFocus();
   }
 
