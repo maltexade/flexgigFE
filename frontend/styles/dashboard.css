@@ -4067,7 +4067,7 @@ a[style*="color: #f00"] { color: var(--danger); }
 .opay-history-modal {
   position: fixed;
   inset: 0;
-  z-index: 10000 !important;
+  z-index: 10005 !important;
   -webkit-backdrop-filter: none !important; /* Prevent Safari blur bleed */
   backdrop-filter: none !important;         /* Prevent Chrome blur bleed */
   height: 100vh;
