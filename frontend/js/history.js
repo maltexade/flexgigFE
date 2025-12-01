@@ -552,6 +552,15 @@
     };
   };
 
+  // Listen for real-time transaction updates (from balance_update or dedicated event)
+document.addEventListener('transaction_update', async (e) => {
+  const modal = document.getElementById('historyModal');
+  if (!modal || !modal.classList.contains('open')) return; // only refresh if modal is open
+
+  console.log('New transaction detected → refreshing history');
+  await loadHistory(true); // true = full refresh from page 1
+});
+
   // recommended minimal backend response shape:
   // GET /api/transactions?page=1&limit=30
   // returns {

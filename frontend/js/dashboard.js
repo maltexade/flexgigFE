@@ -2213,6 +2213,7 @@ window.applyBalanceVisibility = applyBalanceVisibility;
           const data = JSON.parse(e.data);
           if (data.type === 'balance_update' && data.balance !== undefined) {
             handleNewBalance(data.balance, 'websocket');
+            document.dispatchEvent(new CustomEvent('transaction_update', { detail: data }));
           }
         } catch (err) {}
       };
