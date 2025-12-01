@@ -4067,7 +4067,7 @@ a[style*="color: #f00"] { color: var(--danger); }
 .opay-history-modal {
   position: fixed;
   inset: 0;
-  z-index: 10020 !important;
+  z-index: 100020 !important;
   -webkit-backdrop-filter: none !important; /* Prevent Safari blur bleed */
   backdrop-filter: none !important;         /* Prevent Chrome blur bleed */
   height: 100vh;
@@ -4106,13 +4106,9 @@ a[style*="color: #f00"] { color: var(--danger); }
   display: flex;
   flex-direction: column;
   pointer-events: auto;
-  transform: translateY(100%);
-  transition: transform 0.35s cubic-bezier(0.25, 0.8, 0.25, 1);
 }
 
-.opay-history-modal.open .opay-panel {
-  transform: translateY(0);
-}
+
 
 /* Header */
 .opay-header {

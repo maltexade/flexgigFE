@@ -469,31 +469,36 @@
 const bottomSheetModals = [
   'addMoneyModal',
   'historyModal',
+  'allPlansModal',
   // add any future bottom sheets here
 ];
 
 function lockBodyScroll(lock = true) {
   if (lock) {
+    // Store the current scroll position
     const scrollY = window.pageYOffset;
-    document.body.style.position = 'fixed';
-    document.body.style.top = `-${scrollY}px`;
-    document.body.style.left = '0';
-    document.body.style.right = '0';
-    document.body.style.width = '100%';
-    document.body.dataset.scrollY = scrollY + '';
+    
+    // Lock scrolling without disturbing the background's position
+    document.body.style.overflow = 'hidden';  // Prevent scrolling
+    document.body.dataset.scrollY = scrollY + '';  // Store scroll position
   } else {
+    // Retrieve the scroll position after unlocking
     const scrollY = parseInt(document.body.dataset.scrollY || '0', 10);
-    document.body.style.position = '';
-    document.body.style.top = '';
-    document.body.style.left = '';
-    document.body.style.right = '';
-    document.body.style.width = '';
-    delete document.body.dataset.scrollY;
-    window.scrollTo(0, scrollY);
+    
+    // Unlock scrolling without disturbing the current scroll position
+    document.body.style.overflow = '';  // Allow scrolling again
+    
+    // Restore the previous scroll position (but do not force scroll to 0)
+    if (scrollY !== 0) {
+      window.scrollTo(0, scrollY);
+    }
+
+    delete document.body.dataset.scrollY;  // Remove the stored scroll position
   }
 }
+
 // Modals that use CSS class-based animation (.open for slide-in)
-const classAnimatedModals = ['historyModal'];  // Add history here; others if needed
+const classAnimatedModals = [];  // Add history here; others if needed
 
   // Utility: Check if modal is visible
   function isModalVisible(modal) {
@@ -580,6 +585,8 @@ function applyTransition(modal, show, callback) {
 
   // Force close modal
   function forceCloseModal(modalId) {
+      const allPlansModalContent = allPlansModal.querySelector('.plan-modal-content');
+
     log('debug', `forceCloseModal: Forcing close of ${modalId}`);
     const modalConfig = modals[modalId];
     if (!modalConfig || !modalConfig.element) {
@@ -608,6 +615,9 @@ function applyTransition(modal, show, callback) {
       setTriggerActive(modalId, false);
       log('debug', `forceCloseModal: Removed active state from ${modalId}`);
     }
+      if (modalId === 'allPlansModal') {
+    allPlansModalContent.scrollTop = 0;  // Optional scroll reset when closing
+  }
     
     applyTransition(modal, false, () => {
       // cleanup focus trap if present
@@ -652,7 +662,6 @@ function applyTransition(modal, show, callback) {
         if (previousModal.id !== 'allPlansModal') {
           setTriggerActive(previousModal.id, true);
         }
-        
         const focusable = previousModal.modal.querySelector(
           'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
         );
@@ -699,6 +708,8 @@ if (classAnimatedModals.includes(modalId)) {
 
   // Open modal
   function openModal(modalId, skipHistory = false) {
+      const allPlansModalContent = allPlansModal.querySelector('.plan-modal-content');
+
     
     log('debug', `openModal: Attempting to open ${modalId}`);
 
@@ -730,6 +741,9 @@ if (classAnimatedModals.includes(modalId)) {
         return;
       }
     }
+      if (modalId === 'allPlansModal') {
+    allPlansModalContent.scrollTop = 0;  // Optional scroll reset when closing
+  }
 
     modal.classList.remove('hidden');
     modal.style.display = modalConfig.hasPullHandle ? 'block' : 'flex';
@@ -750,6 +764,7 @@ if (modalId === 'allPlansModal') {
 } else {
   modal.style.transform = 'translateY(20px)';
   modal.style.opacity = '0';
+
 }
 
 
@@ -761,28 +776,38 @@ if (skipHistory && document.getElementById(modalId)) {
   }
 
 
-    applyTransition(modal, true, () => {
-      if (!openModalsStack.some((item) => item.id === modalId)) {
-        openModalsStack.push({ modal, id: modalId });
-        currentDepth++;
-      }
-        // PREVENT BACKGROUND SCROLL FOR BOTTOM SHEETS
+    // 1. Immediately activate the nav tab — instant feedback!
+if (shouldManageActiveState(modalId)) {
+  setTriggerActive(modalId, true);
+  log('debug', `openModal: Instantly activated nav trigger for ${modalId}`);
+}
+
+// 2. Then start the modal animation
+applyTransition(modal, true, () => {
+  // Push to stack only after animation completes (keeps stack accurate)
+  if (!openModalsStack.some(item => item.id === modalId)) {
+    openModalsStack.push({ modal, id: modalId });
+    currentDepth++;
+  }
+
   if (bottomSheetModals.includes(modalId)) {
     lockBodyScroll(true);
   }
 
-      if (!skipHistory) {
-        history.pushState({ modalId }, '', `#${modalId}`);
-      }
+  if (!skipHistory) {
+    history.pushState({ modalId }, '', `#${modalId}`);
+  }
 
-      // Set trigger active - but NOT for allPlansModal (it doesn't have a nav trigger)
-      if (shouldManageActiveState(modalId)) {
-  setTriggerActive(modalId, false);
+
+
+  
+
+
+// Best minimal fix — just let [data-close] buttons be focusable
+let focusTarget = modal.querySelector('h2, button, input, select, textarea, [tabindex]:not([tabindex="-1"])');
+if (focusTarget) {
+  focusTarget.focus();
 }
-
-      let focusTarget =
-        modal.querySelector('input, select, textarea, [tabindex]:not([tabindex="-1"])') ||
-        modal.querySelector('button:not([data-close])');
 
       if (modalId === 'securityPinModal') {
         const title = modal.querySelector('#pinTitle');
@@ -817,6 +842,7 @@ if (classAnimatedModals.includes(modalId)) {
   modal.classList.add('open');
   log('debug', `openModal: Added .open class for CSS animation on ${modalId}`);
 }
+
       document.dispatchEvent(new CustomEvent("modalOpened", { detail: modalId }));
 
     });
@@ -824,6 +850,8 @@ if (classAnimatedModals.includes(modalId)) {
 
   // Close modal
   function closeModal(modalId) {
+      const allPlansModalContent = allPlansModal.querySelector('.plan-modal-content');
+
     log('debug', `closeModal: Attempting to close ${modalId}`);
     const modalConfig = modals[modalId];
     if (!modalConfig || !modalConfig.element) {
@@ -842,6 +870,9 @@ if (classAnimatedModals.includes(modalId)) {
       try { main.focus(); } catch (e) { document.body.focus(); }
       log('debug', `closeModal: Moved focus from ${modalId} to ${describeElement(main)}`);
     }
+      if (modalId === 'allPlansModal') {
+    allPlansModalContent.scrollTop = 0;  // Optional scroll reset when closing
+  }
 
     applyTransition(modal, false, () => {
       // cleanup focus trap if present
@@ -932,6 +963,8 @@ if (classAnimatedModals.includes(modalId)) {
 
    
   }
+
+  
 
   // Focus trap for accessibility
   function trapFocus(modal) {
@@ -1309,6 +1342,21 @@ log('debug', 'handlePopstate: openModalsStack snapshot', { stack: openModalsStac
 
     window.addEventListener('popstate', handlePopstate);
     log('debug', 'initialize: Popstate listener added');
+
+    // EXTRA SAFETY NET FOR HISTORY BACK BUTTON
+const historyModal = document.getElementById('historyModal');
+if (historyModal) {
+  historyModal.querySelectorAll('[data-close]').forEach(btn => {
+    const handler = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      log('debug', 'History close button clicked (safety net)');
+      closeModal('historyModal');
+    };
+    btn.addEventListener('click', handler);
+    btn.addEventListener('touchend', handler);
+  });
+}
 
     // MutationObserver to detect external modifications to nav active classes (the likely culprit)
     // Observe the whole document for class changes to nav items; ignore ones we did intentionally

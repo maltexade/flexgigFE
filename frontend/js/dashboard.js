@@ -59,6 +59,7 @@ openModal: (() => {
 
   console.log('[StateSaver] UI state saved → openModal:', state.openModal, state);
 }
+window.saveCurrentAppState = saveCurrentAppState;
 
 // ==========================================
 // 🔧 PRODUCTION-READY MOBILE DEBUG CONSOLE
@@ -4259,6 +4260,7 @@ function formatNigeriaNumber(phone, isInitialDigit = false, isPaste = false) {
     number: rawNumber,
   });
 }
+window.saveUserState = window.saveUserState || saveUserState;
 
 
   // --- CUSTOM SMOOTH SCROLL ---
@@ -4453,6 +4455,7 @@ function formatNigeriaNumber(phone, isInitialDigit = false, isPaste = false) {
       plansRow.insertBefore(box, seeAllBtn);
     });
   }
+  window.renderDashboardPlans = window.renderDashboardPlans || renderDashboardPlans;
 
   // --- RENDER MODAL PLANS ---
 function renderModalPlans(activeProvider) {
@@ -4549,7 +4552,7 @@ if (seeAllBtn) {
           setTimeout(() => modalPlan.scrollIntoView({ behavior: 'smooth', block: 'center' }), 150);
         }
       }
-    }, 50);
+    }, 300);
   });
 }
 
@@ -4949,141 +4952,150 @@ function initializeProviderAndPlans() {
 }
 
 function restoreEverything() {
-  let state = null;
+  const saved = JSON.parse(sessionStorage.getItem('__fg_app_state_v2') || '{}');
+  console.log('[DEBUG] restoreEverything: Starting restore', saved);
 
-  console.log('[RestoreEverything] Starting restore process...');
-
-  // 1. Try history.state first
-  if (history.state && history.state.timestamp) {
-    state = history.state;
-    console.log('[RestoreEverything] Found state in history.state:', state);
-  }
-  // 2. Fallback to sessionStorage
-  else if (sessionStorage.getItem('__fg_app_state_v2')) {
-    try {
-      state = JSON.parse(sessionStorage.getItem('__fg_app_state_v2'));
-      console.log('[RestoreEverything] Found state in sessionStorage:', state);
-    } catch(e) {
-      console.error('[RestoreEverything] Failed to parse sessionStorage state', e);
+  // 1. Restore provider first
+  if (saved.selectedProvider) {
+    const providerBox = document.querySelector(`.provider-box.${saved.selectedProvider}`);
+    if (providerBox && !providerBox.classList.contains('active')) {
+      selectProvider(saved.selectedProvider);
     }
   }
 
-  if (!state) {
-    console.log('[RestoreEverything] No saved state found — nothing to restore');
-    return;
-  }
-
-  console.log('[RestoreEverything] Full saved state:', state);
-
-  requestAnimationFrame(() => {
-    console.log('[RestoreEverything] DOM ready — starting restoration...');
-
-    // 1. Phone number
-    const phoneInput = document.getElementById('phone-input');
-    if (phoneInput && state.phoneNumber) {
-      phoneInput.value = state.phoneNumber;
-      updateContactOrCancel();
+  // 2. Wait for provider transition + DOM to settle
+  setTimeout(() => {
+    const activeProvider = saved.selectedProvider || 'mtn';
+    const plansRow = document.querySelector('.plans-row');
+    const seeAllBtn = plansRow?.querySelector('.see-all-plans');
+    if (!plansRow || !seeAllBtn) {
+      // Still restore phone even if plans fail
+      restorePhoneNumber(saved);
       updateContinueState();
-      console.log('[RestoreEverything] ✓ Phone number restored:', state.phoneNumber);
-    } else {
-      console.log('[RestoreEverything] ✗ Phone input not found or no saved number');
+      return;
     }
 
-    // 2. Provider + plan (already handled by initializeProviderAndPlans, but safe double-check)
-    if (state.selectedProvider) {
-      console.log('[RestoreEverything] Provider from state:', state.selectedProvider);
-      selectProvider(state.selectedProvider);
-      if (state.selectedPlanId) {
-        setTimeout(() => {
-          console.log('[RestoreEverything] Restoring plan ID:', state.selectedPlanId);
-          selectPlanById(state.selectedPlanId);
-        }, 400);
+    // Plan restoration (as before)
+    if (saved.selectedPlanId) {
+      // ... (keep the entire plan restoration block from previous version)
+      renderModalPlans(activeProvider);
+
+      const modalPlan = document.querySelector(`#allPlansModal .plan-box[data-id="${saved.selectedPlanId}"]`);
+      if (modalPlan) {
+        // Clear selections...
+        document.querySelectorAll('.plan-box.selected').forEach(p => {
+          p.classList.remove('selected', ...providerClasses);
+        });
+
+        const currentPlans = Array.from(plansRow.children).filter(el =>
+          el.classList.contains('plan-box') && !el.classList.contains('see-all-plans')
+        );
+
+        const originalFirstPlan = currentPlans[0];
+        const originalSecondPlan = currentPlans[1];
+
+        if (originalSecondPlan) {
+          originalSecondPlan.remove();
+        }
+
+        const newFirstPlan = modalPlan.cloneNode(true);
+        newFirstPlan.classList.remove(...providerClasses);
+        newFirstPlan.classList.add(activeProvider, 'selected');
+
+        // Add sub-type tag logic (as before)
+        const planId = saved.selectedPlanId;
+        let subType = '';
+        if (activeProvider === 'mtn') {
+          subType = planId.includes('awoof') ? 'awoof' : planId.includes('gifting') ? 'gifting' : '';
+        } else if (activeProvider === 'airtel') {
+          subType = planId.includes('awoof') ? 'awoof' : planId.includes('cg') ? 'cg' : '';
+        } else if (activeProvider === 'glo') {
+          subType = planId.includes('cg') ? 'cg' : planId.includes('gifting') ? 'gifting' : '';
+        }
+
+        if (subType && activeProvider !== 'ninemobile') {
+          // Remove existing tag if any (modal clone might have it wrong)
+          const existingTag = newFirstPlan.querySelector('.plan-type-tag');
+          if (existingTag) existingTag.remove();
+          
+          const tag = document.createElement('span');
+          tag.className = 'plan-type-tag';
+          tag.textContent = subType.charAt(0).toUpperCase() + subType.slice(1);
+          newFirstPlan.appendChild(tag);
+        }
+
+        // Insert as NEW #1 (before original #1)
+        plansRow.insertBefore(newFirstPlan, originalFirstPlan);
+
+        // Mark modal
+        modalPlan.classList.add('selected', activeProvider);
+
+        // Re-attach
+        attachPlanListeners();
+
+        console.log(`[restoreEverything] Plan restored to #1: ${saved.selectedPlanId}`);
+      } else {
+        console.warn('[restoreEverything] Modal plan not found:', saved.selectedPlanId);
       }
     }
 
-//     // 3. Scroll positions
-//     if (state.scrollPositions) {
-//       window.scrollTo(0, state.scrollPositions.dashboard);
-//       document.querySelector('.plans-row')?.scrollTo(state.scrollPositions.plansRow, 0);
-//       document.getElementById('allPlansModalContent')?.scrollTo(0, state.scrollPositions.allPlansModal || 0);
-//       console.log('[RestoreEverything] ✓ Scroll positions restored');
-//     }
+    // 3. Restore PHONE NUMBER (key fix here)
+    restorePhoneNumber(saved);
 
-//     // 4. MODALS — THE MOST IMPORTANT PART
-//     if (state.openModal) {
-//       console.log('[RestoreEverything] Found open modal to restore:', state.openModal);
+    // 4. Final updates
+    attachPlanListeners(); // Safe to call again
+    updateContactOrCancel(); // Update cancel button based on phone
+    updateContinueState(); // Enable/disable continue
 
-//       setTimeout(() => {
-//         console.log('[RestoreEverything] Attempting to re-open modal:', state.openModal);
+    // 5. Restore scroll/modal if present
+    if (saved.scrollPositions) {
+      window.scrollTo(0, saved.scrollPositions.dashboard || 0);
+      if (plansRow) plansRow.scrollLeft = saved.scrollPositions.plansRow || 0;
+      const modalContent = document.getElementById('allPlansModalContent');
+      if (modalContent) modalContent.scrollTop = saved.scrollPositions.allPlansModal || 0;
+    }
+    if (saved.openModal && window.ModalManager) {
+      setTimeout(() => ModalManager.openModal(saved.openModal), 100);
+    }
 
-//         // CRITICAL: Use ModalManager if it exists (even if in another file)
-//         if (typeof window.ModalManager !== 'undefined' && window.ModalManager?.openModal) {
-//           console.log('[RestoreEverything] ✓ Using ModalManager.openModal()');
-//           window.ModalManager.openModal(state.openModal, true); // skipHistory = true
-//         } 
-//         // Fallback if ModalManager not loaded yet
-//         else if (document.getElementById(state.openModal)) {
-//           console.log('[RestoreEverything] ModalManager not ready — using direct DOM method');
-//           const modal = document.getElementById(state.openModal);
-//           modal.classList.remove('hidden');
-//           modal.classList.add('active');
-//           modal.style.display = 'flex';
-//           modal.removeAttribute('aria-hidden');
-//           modal.removeAttribute('inert');
-//         } else {
-//           console.error('[RestoreEverything] ✗ Modal element not found in DOM:', state.openModal);
-//         }
-//         if (state.openModal) {
-//   console.log('[RestoreEverything] Found open modal to restore:', state.openModal);
-
-//   setTimeout(() => {
-//     const modal = document.getElementById(state.openModal);
-//     if (!modal) {
-//       console.error('[RestoreEverything] Modal element not found:', state.openModal);
-//       return;
-//     }
-
-//     // FORCE EVERYTHING NEEDED FOR ANIMATION
-//     modal.classList.remove('hidden');
-//     modal.style.display = modal.dataset.hasPullHandle === 'true' ? 'block' : 'flex';  // ← CRITICAL
-//     modal.style.opacity = '0';
-//     modal.style.visibility = 'visible';
-//     modal.style.transform = modal.id === 'allPlansModal' ? 'translateY(100%)' : 'translateY(20px)';
-//     modal.style.zIndex = '10010'; // high enough
-//     modal.removeAttribute('aria-hidden');
-//     modal.removeAttribute('inert');
-
-//     console.log('[RestoreEverything] Forced starting state for animation');
-
-//     // Now trigger the real openModal (which has the animation logic)
-//     if (window.ModalManager?.openModal) {
-//       window.ModalManager.openModal(state.openModal, true);
-//       console.log('[RestoreEverything] Called ModalManager.openModal()');
-//     }
-
-//     // Special case for checkout
-//     if (state.openModal === 'checkoutModal') {
-//       renderCheckoutModal();
-//     }
-//   }, 100);
-// }
-
-//         // Special case for checkout modal
-//         if (state.openModal === 'checkoutModal') {
-//           console.log('[RestoreEverything] Rendering checkout modal content');
-//           renderCheckoutModal();
-//         }
-//       }, 200); // Slightly longer delay to ensure ModalManager is ready
-//     } else {
-//       console.log('[RestoreEverything] No modal was open — nothing to re-open');
-//     }
-
-    // Cleanup
-    sessionStorage.removeItem('__fg_app_state_v2');
-    console.log('[RestoreEverything] Restoration complete!');
-  });
+    console.log('[restoreEverything] Full restore complete');
+  }, 650);
 }
 
+// NEW HELPER: Dedicated phone restoration (handles formatting + events)
+function restorePhoneNumber(saved) {
+  if (!saved.phoneNumber) return;
+
+  const phoneInput = document.getElementById('phone-input');
+  if (!phoneInput) {
+    console.warn('[restorePhoneNumber] Input not found');
+    return;
+  }
+
+  // Normalize saved (in case it's raw) and re-format
+  let rawNumber = normalizePhone(saved.phoneNumber); // Assume normalizePhone exists; define if not
+  const formatted = formatNigeriaNumber(rawNumber, false, false).value;
+
+  phoneInput.value = formatted;
+  console.log('[restorePhoneNumber] Set formatted value:', formatted, 'Raw:', rawNumber);
+
+  // Trigger input event to update UI (contact/cancel button, validation)
+  phoneInput.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+
+  // Manual updates as backup
+  updateContactOrCancel();
+  updateContinueState();
+
+  // Validate & log
+  const isValid = isValidPhone(formatted);
+  console.log('[restorePhoneNumber] Validation:', isValid ? 'PASS' : 'FAIL', 'Length:', rawNumber.length);
+}
+
+// If normalizePhone is missing, add this:
+function normalizePhone(formatted) {
+  if (!formatted) return '';
+  return formatted.replace(/\s/g, '').replace(/[^0-9]/g, '').slice(0, 11);
+}
 
 
 initializeProviderAndPlans();
