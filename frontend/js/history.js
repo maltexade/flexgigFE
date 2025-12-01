@@ -220,22 +220,12 @@
 
   /* -------------------------- PRELOAD ON PAGE LOAD → INSTANT OPEN -------------------------- */
   async function preloadHistoryForInstantOpen() {
-    console.log('🟢 preloadHistoryForInstantOpen() called');
-    console.log('🟢 state.preloaded:', state.preloaded);
-    console.log('🟢 state.preloadingInProgress:', state.preloadingInProgress);
-    
-    if (state.preloaded) {
-      console.log('🟢 Already preloaded, returning');
-      return; // Already loaded, just return
-    }
-    
+    if (state.preloaded) return; // Already loaded, just return
     if (state.preloadingInProgress) {
-      console.log('🟢 Preload in progress, waiting...');
       // If already loading, wait for it to complete
       return new Promise((resolve) => {
         const checkInterval = setInterval(() => {
           if (state.preloaded || !state.preloadingInProgress) {
-            console.log('🟢 Wait complete, preloaded:', state.preloaded);
             clearInterval(checkInterval);
             resolve();
           }
@@ -245,7 +235,7 @@
     
     state.preloadingInProgress = true;
 
-    console.log('🟢 Starting full history fetch...');
+    console.log('Preloading full history for instant open...');
 
     let allTx = [];
     let page = 1;
@@ -253,20 +243,16 @@
 
     while (hasMore) {
       try {
-        console.log(`🟢 Fetching page ${page}...`);
         const data = await safeFetch(`${CONFIG.apiEndpoint}?limit=200&page=${page}`);
         const items = data.items || [];
-        console.log(`🟢 Page ${page} returned ${items.length} items`);
         allTx.push(...items);
         hasMore = page < (data.totalPages || data.total_pages || 1);
         page++;
       } catch (err) {
-        console.error('🔴 Preload failed on page', page, ':', err);
+        console.error('Preload failed:', err);
         break;
       }
     }
-
-    console.log('🟢 Total transactions fetched:', allTx.length);
 
     state.items = allTx.map(raw => ({
       id: raw.id || raw.reference,
@@ -277,16 +263,12 @@
       status: raw.status || 'SUCCESS'
     }));
 
-    console.log('🟢 Normalized to', state.items.length, 'items');
-
     let totalIn = 0, totalOut = 0;
     state.items.forEach(tx => {
       const amt = Math.abs(Number(tx.amount || 0));
       if (tx.type === 'credit') totalIn += amt;
       else totalOut += amt;
     });
-
-    console.log('🟢 Totals - IN:', totalIn, 'OUT:', totalOut);
 
     inEl.textContent = `₦${totalIn.toLocaleString()}`;
     outEl.textContent = `₦${totalOut.toLocaleString()}`;
@@ -298,7 +280,7 @@
     state.preloadingInProgress = false;
 
     hide(loadingEl);
-    console.log('🟢 Preload complete! state.preloaded:', state.preloaded);
+    console.log(`PRELOADED ${allTx.length} transactions → History now opens INSTANTLY`);
   }
 
   /* -------------------------- MONTH FILTER FUNCTIONS -------------------------- */
@@ -370,9 +352,6 @@
   }
 
   function applyTransformsAndRender() {
-    console.log('🟡 applyTransformsAndRender() called');
-    console.log('🟡 state.items.length:', state.items.length);
-    
     let items = state.items.slice();
 
     if (state.searchTerm) {
@@ -381,30 +360,23 @@
         (tx.description || '').toLowerCase().includes(s) ||
         (tx.id || '').toLowerCase().includes(s)
       );
-      console.log('🟡 After search filter:', items.length);
     }
 
     if (selectedMonth) {
       items = filterBySelectedMonth(items);
-      console.log('🟡 After month filter:', items.length);
     }
 
     const groupedMonths = groupTransactions(items);
-    console.log('🟡 Grouped into', groupedMonths.length, 'months');
-    
     setState({ grouped: groupedMonths });
     renderChunked(groupedMonths);
-    console.log('🟡 Render complete');
 
     if (selectedMonth || state.searchTerm) {
       computeFilteredSummary(items);
     }
 
     if (items.length === 0) {
-      console.log('🟡 No items, showing empty state');
       show(emptyEl);
     } else {
-      console.log('🟡 Items rendered, hiding empty/loading');
       hide(emptyEl);
       hide(loadingEl);
     }
@@ -506,8 +478,6 @@
 
   /* -------------------------- MODAL OPEN/CLOSE -------------------------- */
   async function openModal() {
-    console.log('🔵 openModal() called');
-    
     modal.classList.add('open');
     modal.classList.remove('hidden');
     modal.style.pointerEvents = 'auto';
@@ -516,42 +486,19 @@
     selectedMonth = null;
     updateMonthDisplay();
     
-    console.log('🔵 state.preloaded:', state.preloaded);
-    console.log('🔵 state.preloadingInProgress:', state.preloadingInProgress);
-    console.log('🔵 state.items.length:', state.items.length);
+    // Show loading while preloading
+    show(loadingEl);
+    hide(emptyEl);
     
-    // ALWAYS ensure data is loaded before rendering
-    if (!state.preloaded || state.items.length === 0) {
-      console.log('🔵 Need to load data - showing spinner...');
-      
-      try {
-        await window.withLoader(async () => {
-          await preloadHistoryForInstantOpen();
-        });
-        
-        console.log('🔵 Data load completed. Items:', state.items.length);
-      } catch (err) {
-        console.error('🔴 Error loading data:', err);
-        show(errorEl);
-        trapFocus();
-        return;
-      }
-    } else {
-      console.log('🔵 Data already loaded, rendering immediately');
-    }
+    // Wait for preload to complete
+    await preloadHistoryForInstantOpen();
 
     // Now render the transactions
-    if (state.items.length > 0) {
-      console.log('🔵 Rendering', state.items.length, 'transactions...');
+    if (state.preloaded && state.items.length > 0) {
       hide(loadingEl);
-      hide(emptyEl);
-      hide(errorEl);
       applyTransformsAndRender();
-      console.log('🔵 Render complete');
-    } else {
-      console.log('🔵 No items to render, showing empty state');
+    } else if (state.items.length === 0) {
       hide(loadingEl);
-      hide(errorEl);
       show(emptyEl);
     }
 
@@ -719,18 +666,8 @@
 
   showStateUI();
   updateMonthDisplay();
-  console.log('✅ FlexGig Transaction History → INITIALIZED');
-  console.log('✅ Modal will load data on first open with spinner');
+  console.log('FlexGig Transaction History → READY WITH ALL-TIME VIEW');
 
-  // Optional: Start silent background preload (won't block opening)
-  // Uncomment if you want to preload in background:
-  // setTimeout(() => {
-  //   console.log('🟣 Starting background preload...');
-  //   preloadHistoryForInstantOpen().then(() => {
-  //     console.log('🟣 Background preload complete - next open will be instant!');
-  //   }).catch(err => {
-  //     console.error('🔴 Background preload error:', err);
-  //   });
-  // }, 2000); // Start 2 seconds after page load
+  preloadHistoryForInstantOpen();
 
 })();
