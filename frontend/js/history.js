@@ -481,6 +481,7 @@
     state.open = true;
 
     selectedMonth = null;
+    applyTransformsAndRender();
     
     preloadHistoryForInstantOpen();
 
