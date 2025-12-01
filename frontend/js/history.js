@@ -1,394 +1,563 @@
-// /frontend/js/history.js — Production-Ready History Modal (ModalManager Integrated)
-import Chart from 'https://cdn.jsdelivr.net/npm/chart.js';  // Add to your HTML: <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+/* transaction-history.js
+   Production-ready JS for transaction history modal.
+   Usage:
+     - Include this script after your HTML/CSS.
+     - Optionally set window.TRANSACTIONS_API = '/api/transactions' (default path used below).
+     - Optionally set window.APP_TOKEN = 'Bearer ...' for authenticated requests.
+*/
 
-const MODAL_ID = 'historyModal';
-const LIST_ID = 'historyList';
-const LOADING_ID = 'historyLoading';
-const EMPTY_ID = 'historyEmpty';
-const ERROR_ID = 'historyError';
-const SUPABASE_URL = 'https://bwmappzvptcjxlukccux.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ3bWFwcHp2cHRjanhsdWtjY3V4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTU0OTMzMjcsImV4cCI6MjA3MTA2OTMyN30.Ra7k6Br6nl1huQQi5DpDuOQSDE-6N1qlhUIvIset0mc';
+(() => {
+  'use strict';
 
-// Init Supabase
-const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  /* -------------------------- CONFIG -------------------------- */
+  const CONFIG = {
+    apiEndpoint: window.TRANSACTIONS_API || window.__SEC_API_BASE || '/api/transactions', // backend endpoint
+    pageSize: 30,                 // items to request per page
+    chunkRenderSize: 12,          // items to render per animation chunk for smoothness
+    useBackend: true,             // set false for TEST_MODE local data
+    authHeader: () => window.APP_TOKEN ? { Authorization: window.APP_TOKEN } : {},
+    dateLocale: 'en-GB',          // use this for month/year formatting
+    currencySymbol: '₦',
+    maxCachedPages: 10
+  };
 
-// Get user ID (fallback chain)
-function getUserId() {
-  return supabase.auth.getUser().data.user?.id || window.__USER_UID || localStorage.getItem('userId') || localStorage.getItem('uid');
-}
+  /* -------------------------- DOM -------------------------- */
+  const modal = document.getElementById('historyModal');
+  const panel = modal.querySelector('.opay-panel');
+  const backdrop = modal.querySelector('.opay-backdrop');
+  const closeButtons = modal.querySelectorAll('[data-close]');
+  const historyList = document.getElementById('historyList');
+  const loadingEl = document.getElementById('historyLoading');
+  const emptyEl = document.getElementById('historyEmpty');
+  const errorEl = document.getElementById('historyError');
+  const downloadBtn = document.getElementById('downloadHistory');
+  const monthSelector = modal.querySelector('.opay-month-selector span');
+  const inEl = modal.querySelector('.opay-in strong');
+  const outEl = modal.querySelector('.opay-out strong');
 
-// Categories mapping for icons/colors (expand as needed)
-const CATEGORIES = {
-  'mtn_data': { icon: '📊', color: '#FFD700' },
-  'airtel_airtime': { icon: '📞', color: '#FF6B35' },
-  'add_money': { icon: '➕', color: '#00AAFF' },
-  // Add more...
-};
+  /* -------------------------- STATE -------------------------- */
+  let state = {
+    open: false,
+    page: 1,
+    isLoading: false,
+    done: false,
+    items: [],          // all loaded items
+    grouped: [],        // grouped by day/month for rendering
+    sort: { by: 'time', dir: 'desc' },
+    filters: {},
+    searchTerm: '',
+    lastRenderIndex: 0, // for chunked rendering
+    cachePages: new Map()
+  };
 
-// IndexedDB for offline cache
-let db;
-const DB_NAME = 'FlexgigDB';
-const STORE_NAME = 'transactions';
-const CACHE_LIMIT = 50;
+  /* -------------------------- UTIL -------------------------- */
 
-async function initDB() {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => {
-      db = request.result;
-      resolve(db);
-    };
-    request.onupgradeneeded = (e) => {
-      const db = e.target.result;
-      db.createObjectStore(STORE_NAME, { keyPath: 'id' });
-    };
-  });
-}
-
-// Fetch transactions (paginated, filtered)
-async function fetchTransactions(page = 1, filters = {}) {
-  const userId = getUserId();
-  if (!userId) {
-    console.warn('No user ID found — skipping fetch');
-    return [];
+  function formatCurrency(amount) {
+    // Always format to two decimals and include thousands separators
+    try {
+      const n = Number(amount) || 0;
+      return CONFIG.currencySymbol + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    } catch (e) {
+      return CONFIG.currencySymbol + amount;
+    }
   }
 
-  try {
-    const { data, error } = await supabase
-      .from('transactions')
-      .select('*')
-      .eq('user_id', userId)
-      .order('date', { ascending: false })
-      .range((page - 1) * 20, page * 20 - 1)
-      .ilike('status', filters.status || '%')
-      .ilike('category', filters.category || '%')
-      .gte('date', filters.date_from || '1970-01-01')
-      .lte('date', filters.date_to || '2100-01-01')
-      .textSearch('phone || reference', filters.search || '', { type: 'websearch' });
-
-    if (error) throw error;
-    return data || [];
-  } catch (err) {
-    console.error('Fetch error:', err);
-    // Fallback to cache
-    return getCachedTransactions();
-  }
-}
-
-// Get summary
-async function getSummary(year, month) {
-  const userId = getUserId();
-  if (!userId) return { in_total: 0, out_total: 0, txn_count: 0 };
-
-  const { data } = await supabase.rpc('get_monthly_summary', { user_uuid: userId, year, month });
-  return data[0] || { in_total: 0, out_total: 0, txn_count: 0 };
-}
-
-// Cache functions
-async function cacheTransactions(txs) {
-  if (!db) return;
-  const tx = db.transaction(STORE_NAME, 'readwrite');
-  const store = tx.objectStore(STORE_NAME);
-  txs.slice(0, CACHE_LIMIT).forEach(t => store.put(t));
-  return new Promise((resolve) => { tx.oncomplete = resolve; });
-}
-
-async function getCachedTransactions() {
-  if (!db) return [];
-  return new Promise((resolve) => {
-    const tx = db.transaction(STORE_NAME, 'readonly');
-    const store = tx.objectStore(STORE_NAME);
-    const request = store.getAll();
-    request.onsuccess = () => resolve(request.result);
-  });
-}
-
-// Render transaction card
-function renderTransaction(txn) {
-  const isOut = txn.amount < 0;
-  const absAmount = Math.abs(txn.amount / 100);  // Assume kobo
-  const cat = CATEGORIES[txn.category] || { icon: '💳', color: '#666' };
-
-  return `
-    <div class="opay-txn-card" data-id="${txn.id}" tabindex="0" role="button">
-      <div class="opay-txn-header">
-        <div class="opay-txn-icon" style="background: ${cat.color};">${cat.icon}</div>
-        <div class="opay-txn-details">
-          <div class="opay-txn-title">${txn.description || txn.type}</div>
-          <div class="opay-txn-meta">
-            <span>${txn.phone ? `To: ${txn.phone}` : txn.reference}</span>
-            <span class="opay-txn-date">${new Date(txn.date).toLocaleDateString('en-NG', { day: 'numeric', month: 'short' })}</span>
-          </div>
-        </div>
-      </div>
-      <div class="opay-txn-amount ${isOut ? 'out' : 'in'}">
-        ${isOut ? '-' : '+'}₦${absAmount.toLocaleString()}
-      </div>
-      <div class="opay-txn-status ${txn.status}">${txn.status.toUpperCase()}</div>
-      <!-- Expandable details -->
-      <div class="opay-txn-expand hidden">
-        <p>Ref: ${txn.reference}</p>
-        <a href="/receipt/${txn.id}" target="_blank">View Receipt</a>
-      </div>
-    </div>
-  `;
-}
-
-// Render list (append for infinite scroll)
-function renderList(txs, append = false) {
-  const container = document.getElementById(LIST_ID);
-  if (append) {
-    container.insertAdjacentHTML('beforeend', txs.map(renderTransaction).join(''));
-  } else {
-    container.innerHTML = txs.map(renderTransaction).join('');
+  function formatTime(iso) {
+    try {
+      const d = new Date(iso);
+      return d.toLocaleString(CONFIG.dateLocale, { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' });
+    } catch (e) {
+      return iso;
+    }
   }
 
-  // Add event listeners for expand on new cards
-  container.querySelectorAll('.opay-txn-card:not([data-listener])').forEach(card => {
-    card.dataset.listener = 'true';
-    card.addEventListener('click', (e) => {
-      if (!e.target.closest('.opay-txn-expand')) {
-        card.querySelector('.opay-txn-expand').classList.toggle('hidden');
+  function groupTransactions(items) {
+    // Group by day (YYYY-MM-DD) so UI displays day headings
+    const map = new Map();
+    for (const tx of items) {
+      const day = new Date(tx.time).toISOString().slice(0, 10);
+      if (!map.has(day)) map.set(day, []);
+      map.get(day).push(tx);
+    }
+    // Convert to array sorted by date desc
+    const arr = Array.from(map.entries()).sort((a, b) => b[0].localeCompare(a[0]));
+    return arr.map(([day, txs]) => ({
+      day,
+      prettyDay: new Date(day).toLocaleDateString(CONFIG.dateLocale, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }),
+      txs
+    }));
+  }
+
+  function setState(newState) {
+    Object.assign(state, newState);
+  }
+
+  function show(el) { el.classList.remove('hidden'); }
+  function hide(el) { el.classList.add('hidden'); }
+
+  function safeFetch(url, opts = {}) {
+    const headers = Object.assign({}, opts.headers || {}, CONFIG.authHeader());
+    const o = Object.assign({}, opts, { headers });
+    return fetch(url, o).then(res => {
+      if (!res.ok) {
+        const err = new Error('Network response was not ok');
+        err.status = res.status;
+        throw err;
+      }
+      return res.json();
+    });
+  }
+
+  /* -------------------------- RENDER -------------------------- */
+
+  function makeTxNode(tx) {
+    // tx expected shape: { id, type: 'credit'|'debit'|'transfer'|'fee'|'interest', amount, description, time, status, target }
+    const item = document.createElement('div');
+    item.className = 'tx-item';
+    item.dataset.id = tx.id;
+
+    const icon = document.createElement('div');
+    icon.className = 'tx-icon ' + (tx.type === 'credit' ? 'incoming' : (tx.type === 'debit' ? 'outgoing' : 'targets'));
+    icon.setAttribute('aria-hidden', 'true');
+    icon.textContent = (tx.type === 'credit' ? '+' : (tx.type === 'debit' ? '−' : '⇄'));
+
+    const content = document.createElement('div');
+    content.className = 'tx-content';
+
+    const desc = document.createElement('div');
+    desc.className = 'tx-desc';
+    desc.title = tx.description || '';
+    desc.textContent = tx.description || (tx.type + ' transaction');
+
+    const time = document.createElement('div');
+    time.className = 'tx-time';
+    time.textContent = formatTime(tx.time);
+
+    const amountWrap = document.createElement('div');
+    amountWrap.style.minWidth = '120px';
+    amountWrap.style.textAlign = 'right';
+
+    const amount = document.createElement('div');
+    amount.className = 'tx-amount ' + (tx.type === 'credit' ? 'credit' : 'debit');
+    amount.textContent = (tx.type === 'credit' ? '+' : '−') + ' ' + formatCurrency(Math.abs(Number(tx.amount) || 0));
+
+    amountWrap.appendChild(amount);
+
+    content.appendChild(desc);
+    content.appendChild(time);
+
+    // optional status badge
+    if (tx.status) {
+      const status = document.createElement('div');
+      status.className = 'tx-status';
+      status.textContent = tx.status.toUpperCase();
+      content.appendChild(status);
+    }
+
+    item.appendChild(icon);
+    item.appendChild(content);
+    item.appendChild(amountWrap);
+
+    // interaction: click to copy JSON or open details
+    item.addEventListener('click', (e) => {
+      // open small details popover (simple: use alert in production replace with nicer UI)
+      const details = {
+        id: tx.id,
+        description: tx.description,
+        amount: tx.amount,
+        type: tx.type,
+        time: tx.time,
+        status: tx.status,
+        target: tx.target || null
+      };
+      // copy to clipboard on long-press or ctrl+click; on normal click open detail overlay (left as integration point)
+      if (e.ctrlKey || e.metaKey) {
+        navigator.clipboard?.writeText(JSON.stringify(details, null, 2)).then(() => {
+          // small unobtrusive toast? using console for now
+          console.log('Transaction details copied to clipboard');
+        }).catch(() => {});
+      } else {
+        // simple modal fallback: you can replace with your details drawer
+        alert(`Transaction\n\n${JSON.stringify(details, null, 2)}`);
       }
     });
-  });
-}
 
-// Render summary + chart
-async function renderSummary(year, month) {
-  const summary = await getSummary(year, month);
-  const inEl = document.querySelector('.opay-in strong');
-  const outEl = document.querySelector('.opay-out strong');
-  if (inEl) inEl.textContent = `₦${(summary.in_total / 100).toLocaleString()}`;
-  if (outEl) outEl.textContent = `₦${(summary.out_total / 100).toLocaleString()}`;
-
-  // Remove existing chart
-  const existingCanvas = document.querySelector('.opay-summary-canvas');
-  if (existingCanvas) existingCanvas.remove();
-
-  // Create & append pie chart
-  const canvas = document.createElement('canvas');
-  canvas.className = 'opay-summary-canvas';
-  canvas.width = 200;
-  canvas.height = 200;
-  const summaryDiv = document.querySelector('.opay-summary');
-  if (summaryDiv) summaryDiv.appendChild(canvas);
-
-  const ctx = canvas.getContext('2d');
-  new Chart(ctx, {
-    type: 'pie',
-    data: {
-      labels: ['Data', 'Airtime', 'Transfers'],
-      datasets: [{ data: [summary.txn_count * 0.4, summary.txn_count * 0.3, summary.txn_count * 0.3], backgroundColor: ['#FFD700', '#FF6B35', '#00AAFF'] }]
-    },
-    options: { 
-      responsive: true, 
-      plugins: { legend: { position: 'bottom', labels: { padding: 20 } } },
-      maintainAspectRatio: false
-    }
-  });
-}
-
-// Filters handler (debounced)
-let filterTimeout;
-function applyFilters() {
-  clearTimeout(filterTimeout);
-  filterTimeout = setTimeout(async () => {
-    const filters = {
-      search: document.querySelector('.opay-search')?.value || '',
-      status: document.querySelector('.opay-select[data-type="status"]')?.value || '',
-      category: document.querySelector('.opay-select[data-type="category"]')?.value || '',
-      date_from: document.querySelector('#dateFrom')?.value || '',
-      date_to: document.querySelector('#dateTo')?.value || ''
-    };
-    currentPage = 1;  // Reset pagination
-    const txs = await fetchTransactions(1, filters);
-    renderList(txs, false);
-    await cacheTransactions(txs);
-  }, 300);
-}
-
-// Infinite scroll
-let currentPage = 1;
-let loadingMore = false;
-let allTxs = [];  // Track loaded txns for filters
-async function loadMore() {
-  if (loadingMore || !document.getElementById(LIST_ID).offsetHeight) return;
-  loadingMore = true;
-  currentPage++;
-  const txs = await fetchTransactions(currentPage);
-  if (txs.length) {
-    allTxs = [...allTxs, ...txs];
-    renderList(txs, true);
-    await cacheTransactions([...allTxs]);
-  } else {
-    currentPage--;
+    return item;
   }
-  loadingMore = false;
-}
 
-const observer = new IntersectionObserver((entries) => {
-  if (entries[0].isIntersecting && document.getElementById(LIST_ID).children.length > 0) {
-    loadMore();
-  }
-}, { threshold: 0.1 });
+  function renderChunked(grouped) {
+    // Clear existing and render in chunks (non-blocking)
+    historyList.innerHTML = '';
+    state.lastRenderIndex = 0;
 
-// Export CSV
-async function exportCSV() {
-  const userId = getUserId();
-  if (!userId) {
-    alert('Please log in to export history.');
-    return;
-  }
-  const { data: txs } = await supabase.from('transactions').select('*').eq('user_id', userId).order('date', { ascending: false });
-  const csv = [
-    ['Date', 'Type', 'Category', 'Amount', 'Status', 'Phone', 'Ref'],
-    ...txs.map(t => [
-      new Date(t.date).toLocaleDateString(),
-      t.type,
-      t.category,
-      `₦${Math.abs(t.amount / 100).toLocaleString()}${t.amount < 0 ? ' (Out)' : ' (In)'}`,
-      t.status,
-      t.phone || '',
-      t.reference || ''
-    ])
-  ].map(row => row.map(field => `"${field}"`).join(',')).join('\n');
-
-  const blob = new Blob([csv], { type: 'text/csv' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `flexgig-history-${new Date().toISOString().slice(0,7)}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
-// PDF Export (stub; implement backend)
-function exportPDF() {
-  const year = new Date().getFullYear();
-  const month = (new Date().getMonth() + 1).toString().padStart(2, '0');
-  window.open(`/generate-statement?month=${month}&year=${year}`, '_blank');
-}
-
-// Close: Reset state (ModalManager handles close)
-function resetHistoryState() {
-  currentPage = 1;
-  allTxs = [];
-  document.getElementById(LIST_ID).innerHTML = '';
-  observer.disconnect();
-  const existingCanvas = document.querySelector('.opay-summary-canvas');
-  if (existingCanvas) existingCanvas.remove();
-}
-
-// Modal Events (React to ModalManager)
-document.addEventListener('DOMContentLoaded', async () => {
-  await initDB();
-
-  // Listen for ModalManager open event — this ensures modal is visible first
-  document.addEventListener('modalOpened', async (e) => {
-    if (e.detail === 'historyModal') {
-      console.log('History modal opened via ModalManager — loading data');
-      await loadHistory();
+    // Build a flattened array with section markers for rendering order: {type:'section',...} or {type:'tx', tx:...}
+    const flat = [];
+    for (const group of grouped) {
+      flat.push({ type: 'section', day: group.prettyDay });
+      for (const tx of group.txs) flat.push({ type: 'tx', tx });
     }
-  });
+    state.flatList = flat;
 
-  // Listen for close (cleanup)
-  document.addEventListener('modalClosed', (e) => {  // Assume ModalManager dispatches this; add if needed
-    if (e.detail === 'historyModal') {
-      console.log('History modal closed — resetting state');
-      resetHistoryState();
+    function renderNextChunk() {
+      const start = state.lastRenderIndex;
+      const end = Math.min(flat.length, start + CONFIG.chunkRenderSize);
+      for (let i = start; i < end; i++) {
+        const nodeData = flat[i];
+        if (nodeData.type === 'section') {
+          const hd = document.createElement('div');
+          hd.style.padding = '8px 16px';
+          hd.style.fontSize = '13px';
+          hd.style.fontWeight = '700';
+          hd.style.color = '#aaa';
+          hd.textContent = nodeData.day;
+          historyList.appendChild(hd);
+        } else {
+          historyList.appendChild(makeTxNode(nodeData.tx));
+        }
+      }
+      state.lastRenderIndex = end;
+      if (end < flat.length) {
+        // schedule next chunk
+        requestAnimationFrame(renderNextChunk);
+      }
     }
-  });
 
-  // Filters (delegate to ModalManager elements)
-  const filterEls = document.querySelectorAll('.opay-select, .opay-search, #dateFrom, #dateTo');
-  filterEls.forEach(el => {
-    el.addEventListener('change', applyFilters);
-    if (el.tagName === 'INPUT') el.addEventListener('input', applyFilters);
-  });
+    renderNextChunk();
+  }
 
-  // Download (CSV for now)
-  const downloadBtn = document.getElementById('downloadHistory');
-  if (downloadBtn) downloadBtn.addEventListener('click', exportCSV);
+  function computeSummary(items) {
+    let totalIn = 0, totalOut = 0;
+    for (const tx of items) {
+      const amt = Number(tx.amount) || 0;
+      if (tx.type === 'credit') totalIn += amt;
+      else totalOut += Math.abs(amt);
+    }
+    inEl.textContent = formatCurrency(totalIn);
+    outEl.textContent = formatCurrency(totalOut);
+  }
 
-  // Month selector (use native date for better UX)
-  const monthSelector = document.querySelector('.opay-month-selector');
-  if (monthSelector) {
-    monthSelector.addEventListener('click', async () => {
-      const datePicker = document.createElement('input');
-      datePicker.type = 'month';
-      datePicker.value = new Date().toISOString().slice(0, 7);
-      datePicker.onchange = async (e) => {
-        const [year, month] = e.target.value.split('-').map(Number);
-        await renderSummary(year, month);
-        applyFilters();  // Refetch with new month filter
+  function showStateUI() {
+    hide(loadingEl); hide(emptyEl); hide(errorEl);
+    if (state.isLoading) show(loadingEl);
+    else if (state.items.length === 0) show(emptyEl);
+  }
+
+  /* -------------------------- DATA -------------------------- */
+
+  async function fetchPage(page = 1) {
+    if (state.cachePages.has(page)) {
+      return state.cachePages.get(page);
+    }
+
+    if (!CONFIG.useBackend) {
+      // TEST MODE fallback (local synthetic data)
+      const synthetic = [];
+      for (let i = 0; i < CONFIG.pageSize; i++) {
+        const id = `local-${page}-${i}`;
+        const when = new Date(Date.now() - ((page - 1) * CONFIG.pageSize + i) * 60 * 60 * 1000).toISOString();
+        synthetic.push({
+          id,
+          type: (i % 3 === 0 ? 'credit' : 'debit'),
+          amount: (Math.random() * 20000).toFixed(2),
+          description: (i % 3 === 0 ? 'Salary/payment' : 'Purchase/transfer'),
+          time: when,
+          status: (i % 4 === 0 ? 'pending' : 'successful'),
+          target: i % 2 === 0 ? 'Merchant A' : 'Wallet B'
+        });
+      }
+      const pageObj = { items: synthetic, page, totalPages: 10 };
+      state.cachePages.set(page, pageObj);
+      return Promise.resolve(pageObj);
+    }
+
+    const url = new URL(CONFIG.apiEndpoint, window.location.origin);
+    url.searchParams.set('page', page);
+    url.searchParams.set('limit', CONFIG.pageSize);
+
+    try {
+      const json = await safeFetch(url.href, { method: 'GET' });
+      // Expect backend to return { items: [...], page, totalPages } or similar
+      const pageObj = {
+        items: Array.isArray(json.items) ? json.items : (Array.isArray(json) ? json : []),
+        page: json.page || page,
+        totalPages: json.totalPages || (json.total_pages || null)
       };
-      datePicker.click();
-    });
+      // cache page
+      state.cachePages.set(page, pageObj);
+      // keep cache map small
+      if (state.cachePages.size > CONFIG.maxCachedPages) {
+        const firstKey = state.cachePages.keys().next().value;
+        state.cachePages.delete(firstKey);
+      }
+      return pageObj;
+    } catch (err) {
+      throw err;
+    }
   }
 
-  // Real-time: Listen for updates (extend your WS)
-  window.addEventListener('transaction_update', () => {
-    if (document.getElementById(MODAL_ID).classList.contains('hidden')) return;
-    console.log('Real-time txn update — refreshing history');
-    loadHistory();
+  async function loadMore() {
+    if (state.isLoading || state.done) return;
+    state.isLoading = true;
+    showStateUI();
+
+    try {
+      const pageObj = await fetchPage(state.page);
+      const newItems = pageObj.items || [];
+      if (newItems.length === 0 || (pageObj.totalPages && state.page >= pageObj.totalPages)) {
+        state.done = true;
+      }
+      state.items = state.items.concat(newItems);
+      state.page += 1;
+      // after fetch, perform sorting/filtering/search in-memory
+      applyTransformsAndRender();
+    } catch (err) {
+      console.error('Failed to fetch transactions', err);
+      show(errorEl);
+    } finally {
+      state.isLoading = false;
+      showStateUI();
+    }
+  }
+
+  function applyTransformsAndRender() {
+    // apply search, filters, sort
+    let items = state.items.slice();
+
+    if (state.searchTerm) {
+      const s = state.searchTerm.toLowerCase();
+      items = items.filter(tx => (tx.description || '').toLowerCase().includes(s) || (tx.id || '').toLowerCase().includes(s) || (tx.target || '').toLowerCase().includes(s));
+    }
+
+    // TODO: apply other filters (status, category) if UI expands
+
+    // sort
+    items.sort((a, b) => {
+      const dir = state.sort.dir === 'asc' ? 1 : -1;
+      if (state.sort.by === 'amount') {
+        return dir * (Number(a.amount || 0) - Number(b.amount || 0));
+      }
+      // default: time
+      return dir * (new Date(a.time).getTime() - new Date(b.time).getTime());
+    });
+
+    const grouped = groupTransactions(items);
+    setState({ grouped });
+    renderChunked(grouped);
+
+    // update summary
+    computeSummary(items);
+
+    // states
+    if (items.length === 0) show(emptyEl); else hide(emptyEl);
+  }
+
+  /* -------------------------- EVENTS -------------------------- */
+
+  // open modal API
+  function openModal() {
+    modal.classList.add('open');
+    modal.classList.remove('hidden');
+    modal.style.pointerEvents = 'auto';
+    setState({ open: true });
+    // reset if first open
+    if (state.items.length === 0) {
+      state.page = 1;
+      state.done = false;
+      state.items = [];
+      state.cachePages.clear();
+      loadMore();
+    } else {
+      applyTransformsAndRender();
+    }
+    trapFocus();
+  }
+
+  function closeModal() {
+    modal.classList.remove('open');
+    modal.classList.add('hidden');
+    modal.style.pointerEvents = 'none';
+    setState({ open: false });
+    releaseFocusTrap();
+  }
+
+  closeButtons.forEach(btn => btn.addEventListener('click', closeModal));
+  backdrop.addEventListener('click', closeModal);
+
+  // keyboard handling
+  function handleKey(e) {
+    if (!state.open) return;
+    if (e.key === 'Escape') closeModal();
+    // arrow keys for scrolling
+    if (e.key === 'ArrowDown') historyList.scrollBy({ top: 120, behavior: 'smooth' });
+    if (e.key === 'ArrowUp') historyList.scrollBy({ top: -120, behavior: 'smooth' });
+  }
+  document.addEventListener('keydown', handleKey);
+
+  // infinite scroll
+  historyList.addEventListener('scroll', () => {
+    const scrollBottom = historyList.scrollTop + historyList.clientHeight;
+    const threshold = historyList.scrollHeight - 300;
+    if (scrollBottom >= threshold && !state.isLoading && !state.done) {
+      loadMore();
+    }
+  }, { passive: true });
+
+  // Download button - CSV & JSON dropdown fallback
+  downloadBtn.addEventListener('click', async (e) => {
+    // simple menu: ask which format (prompt for simplicity). Replace with custom dropdown in production.
+    const fmt = prompt('Download format: "csv" or "json"', 'csv');
+    if (!fmt) return;
+    if (fmt.toLowerCase() === 'json') {
+      const blob = new Blob([JSON.stringify(state.items, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = `transactions-${Date.now()}.json`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    } else {
+      // build CSV
+      const cols = ['id', 'time', 'description', 'type', 'amount', 'status', 'target'];
+      const rows = [cols.join(',')].concat(state.items.map(tx => cols.map(c => {
+        const v = tx[c] === undefined || tx[c] === null ? '' : String(tx[c]).replace(/"/g, '""');
+        return `"${v}"`;
+      }).join(',')));
+      const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = `transactions-${Date.now()}.csv`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    }
   });
 
-  // Error retry
-  const errorEl = document.getElementById(ERROR_ID);
-  if (errorEl) errorEl.addEventListener('click', loadHistory);
-
-  // Haptics on mobile
-  if (navigator.vibrate) {
-    document.addEventListener('click', (e) => {
-      if (e.target.closest('.opay-txn-card')) navigator.vibrate(50);
+  // search - not in your HTML yet, but easy to wire if you add an input with id 'historySearch'
+  const searchInput = document.getElementById('historySearch');
+  if (searchInput) {
+    let t;
+    searchInput.addEventListener('input', (e) => {
+      clearTimeout(t);
+      t = setTimeout(() => {
+        state.searchTerm = e.target.value.trim();
+        applyTransformsAndRender();
+      }, 250);
     });
   }
 
-  console.log('History module initialized — waiting for ModalManager events');
-});
+  /* -------------------------- FOCUS TRAP -------------------------- */
+  let previouslyFocused = null;
+  function trapFocus() {
+    previouslyFocused = document.activeElement;
+    // find focusable elements in panel
+    const focusables = panel.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    if (first) first.focus();
 
-// Load initial history (triggered by modalOpened event)
-async function loadHistory() {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth() + 1;
-
-  // Show loading
-  const loadingEl = document.getElementById(LOADING_ID);
-  const emptyEl = document.getElementById(EMPTY_ID);
-  const errorEl = document.getElementById(ERROR_ID);
-  if (loadingEl) loadingEl.classList.remove('hidden');
-  if (emptyEl) emptyEl.classList.add('hidden');
-  if (errorEl) errorEl.classList.add('hidden');
-
-  try {
-    const txs = await fetchTransactions(1);
-    allTxs = txs;
-    renderList(txs, false);
-    await cacheTransactions(txs);
-    await renderSummary(year, month);
-
-    if (txs.length === 0) {
-      if (emptyEl) emptyEl.classList.remove('hidden');
-    } else {
-      // Re-observe for infinite scroll (in case list cleared)
-      observer.observe(document.getElementById(LIST_ID));
+    function keyListener(e) {
+      if (e.key !== 'Tab') return;
+      if (!first) return;
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
     }
-    
-    // Micro-delay for CSS class animation to settle
-    await new Promise(resolve => setTimeout(resolve, 50));
-  } catch (err) {
-    console.error('Load history error:', err);
-    if (errorEl) errorEl.classList.remove('hidden');
-    const cached = await getCachedTransactions();
-    if (cached.length) {
-      renderList(cached, false);
-    }
-  } finally {
-    if (loadingEl) loadingEl.classList.add('hidden');
+    panel.__focusTrap = keyListener;
+    panel.addEventListener('keydown', keyListener);
   }
-}
+  function releaseFocusTrap() {
+    if (panel && panel.__focusTrap) {
+      panel.removeEventListener('keydown', panel.__focusTrap);
+      delete panel.__focusTrap;
+    }
+    if (previouslyFocused && previouslyFocused.focus) previouslyFocused.focus();
+  }
+
+  /* -------------------------- TOUCH SWIPE TO DISMISS (mobile friendly) -------------------------- */
+  (function addSwipeToClose(el) {
+    let startY = 0, currentY = 0, touching = false;
+    el.addEventListener('touchstart', (ev) => {
+      if (!state.open) return;
+      touching = true;
+      startY = ev.touches[0].clientY;
+      el.style.transition = '';
+    }, { passive: true });
+    el.addEventListener('touchmove', (ev) => {
+      if (!touching) return;
+      currentY = ev.touches[0].clientY - startY;
+      if (currentY > 0) el.style.transform = `translateY(${currentY}px)`;
+    }, { passive: true });
+    el.addEventListener('touchend', (ev) => {
+      touching = false;
+      el.style.transition = 'transform 200ms ease';
+      if (currentY > 120) {
+        el.style.transform = `translateY(100vh)`;
+        setTimeout(closeModal, 180);
+      } else {
+        el.style.transform = '';
+      }
+      startY = currentY = 0;
+    }, { passive: true });
+  })(panel);
+
+  /* -------------------------- INIT / EXPOSE -------------------------- */
+
+  // Public API to open modal with optional options
+  window.TransactionHistory = {
+    open: openModal,
+    close: closeModal,
+    reload: () => {
+      state.page = 1; state.items = []; state.done = false; state.cachePages.clear();
+      loadMore();
+    },
+    setApi: (url) => { CONFIG.apiEndpoint = url; },
+    setAuthToken: (token) => { window.APP_TOKEN = token; },
+    setUseBackend: (v) => { CONFIG.useBackend = !!v; },
+    addItems: (items) => { // manually add items (useful for initial hydration)
+      state.items = state.items.concat(items);
+      applyTransformsAndRender();
+    },
+    getAll: () => state.items.slice()
+  };
+
+  // auto-wires to any element with data-open-history attribute
+  document.addEventListener('click', (e) => {
+    const target = e.target.closest && e.target.closest('[data-open-history]');
+    if (target) {
+      openModal();
+    }
+  });
+
+  // initial render for TEST_MODE
+  const TEST_MODE = !CONFIG.useBackend;
+  if (TEST_MODE) {
+    // allow immediate testing by calling open
+    console.info('TransactionHistory: running in TEST_MODE (no backend). Call TransactionHistory.open() to view.');
+  }
+
+  // ensure state UI initially reflects empty
+  showStateUI();
+
+  // Expose small helper to format server response (if backend returns different keys) — replace as needed
+  window.TransactionHistory.normalizeBackendTx = function(raw) {
+    // default normalization; adapt to your backend fields
+    return {
+      id: raw.id || raw.tx_id || raw.reference,
+      type: (raw.type || raw.direction || '').toLowerCase() === 'in' ? 'credit' : (raw.type || raw.direction || '').toLowerCase() === 'out' ? 'debit' : (raw.type || raw.direction || 'transfer'),
+      amount: (raw.amount !== undefined ? raw.amount : raw.value) || 0,
+      description: raw.description || raw.narration || raw.notes || '',
+      time: raw.time || raw.timestamp || raw.created_at || new Date().toISOString(),
+      status: raw.status || raw.state || 'successful',
+      target: raw.target || raw.counterparty || ''
+    };
+  };
+
+  // recommended minimal backend response shape:
+  // GET /api/transactions?page=1&limit=30
+  // returns {
+  //   items: [ { id, type, amount, description, time, status, target }, ... ],
+  //   page: 1,
+  //   totalPages: 12
+  // }
+
+})();

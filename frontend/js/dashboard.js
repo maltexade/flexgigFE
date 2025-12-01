@@ -5,6 +5,16 @@ import {
   onPayClicked
 } from '/frontend/js/checkout.js';
 
+window.__SEC_API_BASE = 'https://api.flexgig.com.ng'
+
+// Your project URL and anon key (get them from Supabase dashboard → Project Settings → API)
+const SUPABASE_URL = 'https://bwmappzvptcjxlukccux.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ3bWFwcHp2cHRjanhsdWtjY3V4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTU0OTMzMjcsImV4cCI6MjA3MTA2OTMyN30.Ra7k6Br6nl1huQQi5DpDuOQSDE-6N1qlhUIvIset0mc';
+
+const { createClient } = supabase;
+const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+
     // NUCLEAR OPTION: Total scroll control - disables restore, forces top, blocks jumps
     (function() {
       // 1. EARLY: Disable browser's scroll memory globally (before anything else)
@@ -551,14 +561,6 @@ const DEBUG_MODE = false; // ← Change to false to hide completely
 
 })();
 
-window.__SEC_API_BASE = 'https://api.flexgig.com.ng'
-
-// Your project URL and anon key (get them from Supabase dashboard → Project Settings → API)
-const SUPABASE_URL = 'https://bwmappzvptcjxlukccux.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ3bWFwcHp2cHRjanhsdWtjY3V4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTU0OTMzMjcsImV4cCI6MjA3MTA2OTMyN30.Ra7k6Br6nl1huQQi5DpDuOQSDE-6N1qlhUIvIset0mc';
-
-const { createClient } = supabase;
-const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let __backHandler = null;
 // Ensure shared UI refs / flags are declared before any functions use them
