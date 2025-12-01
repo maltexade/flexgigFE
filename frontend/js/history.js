@@ -220,12 +220,22 @@
 
   /* -------------------------- PRELOAD ON PAGE LOAD → INSTANT OPEN -------------------------- */
   async function preloadHistoryForInstantOpen() {
-    if (state.preloaded) return; // Already loaded, just return
+    console.log('🟢 preloadHistoryForInstantOpen() called');
+    console.log('🟢 state.preloaded:', state.preloaded);
+    console.log('🟢 state.preloadingInProgress:', state.preloadingInProgress);
+    
+    if (state.preloaded) {
+      console.log('🟢 Already preloaded, returning');
+      return; // Already loaded, just return
+    }
+    
     if (state.preloadingInProgress) {
+      console.log('🟢 Preload in progress, waiting...');
       // If already loading, wait for it to complete
       return new Promise((resolve) => {
         const checkInterval = setInterval(() => {
           if (state.preloaded || !state.preloadingInProgress) {
+            console.log('🟢 Wait complete, preloaded:', state.preloaded);
             clearInterval(checkInterval);
             resolve();
           }
@@ -235,7 +245,7 @@
     
     state.preloadingInProgress = true;
 
-    console.log('Preloading full history for instant open...');
+    console.log('🟢 Starting full history fetch...');
 
     let allTx = [];
     let page = 1;
@@ -243,16 +253,20 @@
 
     while (hasMore) {
       try {
+        console.log(`🟢 Fetching page ${page}...`);
         const data = await safeFetch(`${CONFIG.apiEndpoint}?limit=200&page=${page}`);
         const items = data.items || [];
+        console.log(`🟢 Page ${page} returned ${items.length} items`);
         allTx.push(...items);
         hasMore = page < (data.totalPages || data.total_pages || 1);
         page++;
       } catch (err) {
-        console.error('Preload failed:', err);
+        console.error('🔴 Preload failed on page', page, ':', err);
         break;
       }
     }
+
+    console.log('🟢 Total transactions fetched:', allTx.length);
 
     state.items = allTx.map(raw => ({
       id: raw.id || raw.reference,
@@ -263,12 +277,16 @@
       status: raw.status || 'SUCCESS'
     }));
 
+    console.log('🟢 Normalized to', state.items.length, 'items');
+
     let totalIn = 0, totalOut = 0;
     state.items.forEach(tx => {
       const amt = Math.abs(Number(tx.amount || 0));
       if (tx.type === 'credit') totalIn += amt;
       else totalOut += amt;
     });
+
+    console.log('🟢 Totals - IN:', totalIn, 'OUT:', totalOut);
 
     inEl.textContent = `₦${totalIn.toLocaleString()}`;
     outEl.textContent = `₦${totalOut.toLocaleString()}`;
@@ -280,7 +298,7 @@
     state.preloadingInProgress = false;
 
     hide(loadingEl);
-    console.log(`PRELOADED ${allTx.length} transactions → History now opens INSTANTLY`);
+    console.log('🟢 Preload complete! state.preloaded:', state.preloaded);
   }
 
   /* -------------------------- MONTH FILTER FUNCTIONS -------------------------- */
@@ -352,6 +370,9 @@
   }
 
   function applyTransformsAndRender() {
+    console.log('🟡 applyTransformsAndRender() called');
+    console.log('🟡 state.items.length:', state.items.length);
+    
     let items = state.items.slice();
 
     if (state.searchTerm) {
@@ -360,23 +381,30 @@
         (tx.description || '').toLowerCase().includes(s) ||
         (tx.id || '').toLowerCase().includes(s)
       );
+      console.log('🟡 After search filter:', items.length);
     }
 
     if (selectedMonth) {
       items = filterBySelectedMonth(items);
+      console.log('🟡 After month filter:', items.length);
     }
 
     const groupedMonths = groupTransactions(items);
+    console.log('🟡 Grouped into', groupedMonths.length, 'months');
+    
     setState({ grouped: groupedMonths });
     renderChunked(groupedMonths);
+    console.log('🟡 Render complete');
 
     if (selectedMonth || state.searchTerm) {
       computeFilteredSummary(items);
     }
 
     if (items.length === 0) {
+      console.log('🟡 No items, showing empty state');
       show(emptyEl);
     } else {
+      console.log('🟡 Items rendered, hiding empty/loading');
       hide(emptyEl);
       hide(loadingEl);
     }
@@ -478,6 +506,8 @@
 
   /* -------------------------- MODAL OPEN/CLOSE -------------------------- */
   async function openModal() {
+    console.log('🔵 openModal() called');
+    
     modal.classList.add('open');
     modal.classList.remove('hidden');
     modal.style.pointerEvents = 'auto';
@@ -486,18 +516,31 @@
     selectedMonth = null;
     updateMonthDisplay();
     
-    // Show loading while preloading
-    show(loadingEl);
-    hide(emptyEl);
+    console.log('🔵 state.preloaded:', state.preloaded);
+    console.log('🔵 state.items.length:', state.items.length);
     
-    // Wait for preload to complete
-    await preloadHistoryForInstantOpen();
+    // Use window.withLoader for server requests
+    if (!state.preloaded) {
+      console.log('🔵 Starting preload with spinner...');
+      
+      await window.withLoader(async () => {
+        await preloadHistoryForInstantOpen();
+      });
+      
+      console.log('🔵 Preload completed. Items:', state.items.length);
+    } else {
+      console.log('🔵 Already preloaded, skipping fetch');
+    }
 
     // Now render the transactions
-    if (state.preloaded && state.items.length > 0) {
+    if (state.items.length > 0) {
+      console.log('🔵 Rendering', state.items.length, 'transactions...');
       hide(loadingEl);
+      hide(emptyEl);
       applyTransformsAndRender();
-    } else if (state.items.length === 0) {
+      console.log('🔵 Render complete');
+    } else {
+      console.log('🔵 No items to render, showing empty state');
       hide(loadingEl);
       show(emptyEl);
     }
@@ -668,6 +711,12 @@
   updateMonthDisplay();
   console.log('FlexGig Transaction History → READY WITH ALL-TIME VIEW');
 
-  preloadHistoryForInstantOpen();
+  // Start background preload on page load (silent, no spinner)
+  console.log('🟣 Starting background preload on page load...');
+  preloadHistoryForInstantOpen().then(() => {
+    console.log('🟣 Background preload complete');
+  }).catch(err => {
+    console.error('🔴 Background preload error:', err);
+  });
 
 })();
