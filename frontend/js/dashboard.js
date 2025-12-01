@@ -5,61 +5,50 @@ import {
   onPayClicked
 } from '/frontend/js/checkout.js';
 
-function saveCurrentAppState() {
-  const state = {
-    // ==================== MODALS – FIXED & BULLETPROOF ====================
-    
+    // NUCLEAR OPTION: Total scroll control - disables restore, forces top, blocks jumps
+    (function() {
+      // 1. EARLY: Disable browser's scroll memory globally (before anything else)
+      if ('scrollRestoration' in history) {
+        history.scrollRestoration = 'manual';
+      }
+      
+      // 2. PRE-SAVE: On unload/reload, wipe scroll position (prevents Chrome/Safari from remembering)
+      window.addEventListener('beforeunload', function() {
+        window.scrollTo(0, 0);
+        // Clear any history state that might carry scroll
+        if (history.state && history.state.scrollY) {
+          history.replaceState({ ...history.state, scrollY: 0 }, '');
+        }
+      });
+      
+      // 3. POST-LOAD ENFORCEMENT: Force top after full render (images/JS done)
+      window.addEventListener('load', function() {
+        window.scrollTo(0, 0);
+        // Trap the first unwanted scroll (common Chrome jump after load)
+        let hasJumped = false;
+        window.addEventListener('scroll', function handler() {
+          if (!hasJumped && window.scrollY > 0) {
+            hasJumped = true;
+            window.scrollTo(0, 0);
+            // Remove listener after fix (no perf hit)
+            window.removeEventListener('scroll', handler);
+          }
+        }, { once: true, passive: true });
+      }, { once: true });
+      
+      // 4. DOM READY SAFETY: Immediate top if already loaded (edge case)
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function() {
+          setTimeout(() => window.scrollTo(0, 0), 0); // Micro-delay for reflow
+        });
+      } else {
+        window.scrollTo(0, 0);
+      }
+      
+      console.log('[NUCLEAR SCROLL FIX] Activated - top enforced on reload');
+    })();
 
-openModal: (() => {
-  // This will NOW work perfectly
-  if (window.ModalManager && typeof window.ModalManager.getTopModal === 'function') {
-    const top = window.ModalManager.getTopModal();
-    if (top) {
-      console.log('[StateSaver] Detected open modal via ModalManager:', top);
-      return top;
-    }
-  }
 
-  // Fallback (should never trigger now)
-  const visible = document.querySelector('.modal.active, .modal[style*="flex"], .modal[style*="block"]');
-  if (visible?.id) return visible.id;
-
-  return null;
-})(),
-
-
-
-    // Form inputs
-    phoneNumber: document.getElementById('phone-input')?.value || '',
-    pinInputs: {
-      current: document.getElementById('currentPin')?.value || '',
-      new: document.getElementById('newPin')?.value || '',
-      confirm: document.getElementById('confirmPin')?.value || '',
-    },
-
-    // Selection state
-    selectedProvider: document.querySelector('.provider-box.active')?.className.match(/mtn|airtel|glo|ninemobile/)?.[0] || 'mtn',
-    selectedPlanId: document.querySelector('.plan-box.selected')?.getAttribute('data-id') || '',
-
-    // Scroll positions
-    scrollPositions: {
-      dashboard: window.scrollY,
-      plansRow: document.querySelector('.plans-row')?.scrollLeft || 0,
-      allPlansModal: document.getElementById('allPlansModalContent')?.scrollTop || 0,
-    },
-
-    // Extra
-    timestamp: Date.now(),
-    version: APP_VERSION || '1.0.0'
-  };
-
-  // Save in two places
-  sessionStorage.setItem('__fg_app_state_v2', JSON.stringify(state));
-  history.replaceState(state, '', location.href);
-
-  console.log('[StateSaver] UI state saved → openModal:', state.openModal, state);
-}
-window.saveCurrentAppState = saveCurrentAppState;
 
 // ==========================================
 // 🔧 PRODUCTION-READY MOBILE DEBUG CONSOLE
