@@ -517,19 +517,27 @@
     updateMonthDisplay();
     
     console.log('🔵 state.preloaded:', state.preloaded);
+    console.log('🔵 state.preloadingInProgress:', state.preloadingInProgress);
     console.log('🔵 state.items.length:', state.items.length);
     
-    // Use window.withLoader for server requests
-    if (!state.preloaded) {
-      console.log('🔵 Starting preload with spinner...');
+    // ALWAYS ensure data is loaded before rendering
+    if (!state.preloaded || state.items.length === 0) {
+      console.log('🔵 Need to load data - showing spinner...');
       
-      await window.withLoader(async () => {
-        await preloadHistoryForInstantOpen();
-      });
-      
-      console.log('🔵 Preload completed. Items:', state.items.length);
+      try {
+        await window.withLoader(async () => {
+          await preloadHistoryForInstantOpen();
+        });
+        
+        console.log('🔵 Data load completed. Items:', state.items.length);
+      } catch (err) {
+        console.error('🔴 Error loading data:', err);
+        show(errorEl);
+        trapFocus();
+        return;
+      }
     } else {
-      console.log('🔵 Already preloaded, skipping fetch');
+      console.log('🔵 Data already loaded, rendering immediately');
     }
 
     // Now render the transactions
@@ -537,11 +545,13 @@
       console.log('🔵 Rendering', state.items.length, 'transactions...');
       hide(loadingEl);
       hide(emptyEl);
+      hide(errorEl);
       applyTransformsAndRender();
       console.log('🔵 Render complete');
     } else {
       console.log('🔵 No items to render, showing empty state');
       hide(loadingEl);
+      hide(errorEl);
       show(emptyEl);
     }
 
@@ -709,14 +719,18 @@
 
   showStateUI();
   updateMonthDisplay();
-  console.log('FlexGig Transaction History → READY WITH ALL-TIME VIEW');
+  console.log('✅ FlexGig Transaction History → INITIALIZED');
+  console.log('✅ Modal will load data on first open with spinner');
 
-  // Start background preload on page load (silent, no spinner)
-  console.log('🟣 Starting background preload on page load...');
-  preloadHistoryForInstantOpen().then(() => {
-    console.log('🟣 Background preload complete');
-  }).catch(err => {
-    console.error('🔴 Background preload error:', err);
-  });
+  // Optional: Start silent background preload (won't block opening)
+  // Uncomment if you want to preload in background:
+  // setTimeout(() => {
+  //   console.log('🟣 Starting background preload...');
+  //   preloadHistoryForInstantOpen().then(() => {
+  //     console.log('🟣 Background preload complete - next open will be instant!');
+  //   }).catch(err => {
+  //     console.error('🔴 Background preload error:', err);
+  //   });
+  // }, 2000); // Start 2 seconds after page load
 
 })();
