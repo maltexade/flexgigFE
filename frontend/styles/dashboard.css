@@ -4086,7 +4086,6 @@ a[style*="color: #f00"] { color: var(--danger); }
 .opay-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(0,0,0,0.8);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   z-index: 0;  

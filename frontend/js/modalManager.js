@@ -468,6 +468,7 @@
 // ─────────────────────────────────────────────────────────────
 const bottomSheetModals = [
   'addMoneyModal',
+  'historyModal',
   // add any future bottom sheets here
 ];
 
@@ -491,6 +492,8 @@ function lockBodyScroll(lock = true) {
     window.scrollTo(0, scrollY);
   }
 }
+// Modals that use CSS class-based animation (.open for slide-in)
+const classAnimatedModals = ['historyModal'];  // Add history here; others if needed
 
   // Utility: Check if modal is visible
   function isModalVisible(modal) {
@@ -680,6 +683,12 @@ function applyTransition(modal, show, callback) {
     lockBodyScroll(false);
   }
 
+  // ADD THIS: Remove CSS animation class
+if (classAnimatedModals.includes(modalId)) {
+  modal.classList.remove('open');
+  log('debug', `closeModal: Removed .open class for ${modalId}`);
+}
+
         
         // final focus fallback
         const main = document.getElementById('mainContent') || document.querySelector('main') || document.body;
@@ -803,6 +812,11 @@ if (modalId === 'addMoneyModal') {
       }
 
       trapFocus(modal);
+      // ADD THIS: Trigger CSS animation for class-based modals
+if (classAnimatedModals.includes(modalId)) {
+  modal.classList.add('open');
+  log('debug', `openModal: Added .open class for CSS animation on ${modalId}`);
+}
       document.dispatchEvent(new CustomEvent("modalOpened", { detail: modalId }));
 
     });
@@ -903,6 +917,12 @@ if (modalId === 'addMoneyModal') {
           if (bottomSheetModals.includes(modalId)) {
     lockBodyScroll(false);
   }
+
+  // ADD THIS: Remove CSS animation class
+if (classAnimatedModals.includes(modalId)) {
+  modal.classList.remove('open');
+  log('debug', `closeModal: Removed .open class for ${modalId}`);
+}
 
         
         const main = document.getElementById('mainContent') || document.querySelector('main') || document.body;
