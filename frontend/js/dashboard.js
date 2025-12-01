@@ -49,6 +49,62 @@ import {
     })();
 
 
+    function saveCurrentAppState() {
+  const state = {
+    // ==================== MODALS – FIXED & BULLETPROOF ====================
+    
+
+openModal: (() => {
+  // This will NOW work perfectly
+  if (window.ModalManager && typeof window.ModalManager.getTopModal === 'function') {
+    const top = window.ModalManager.getTopModal();
+    if (top) {
+      console.log('[StateSaver] Detected open modal via ModalManager:', top);
+      return top;
+    }
+  }
+
+  // Fallback (should never trigger now)
+  const visible = document.querySelector('.modal.active, .modal[style*="flex"], .modal[style*="block"]');
+  if (visible?.id) return visible.id;
+
+  return null;
+})(),
+
+
+
+    // Form inputs
+    phoneNumber: document.getElementById('phone-input')?.value || '',
+    pinInputs: {
+      current: document.getElementById('currentPin')?.value || '',
+      new: document.getElementById('newPin')?.value || '',
+      confirm: document.getElementById('confirmPin')?.value || '',
+    },
+
+    // Selection state
+    selectedProvider: document.querySelector('.provider-box.active')?.className.match(/mtn|airtel|glo|ninemobile/)?.[0] || 'mtn',
+    selectedPlanId: document.querySelector('.plan-box.selected')?.getAttribute('data-id') || '',
+
+    // Scroll positions
+    scrollPositions: {
+      dashboard: window.scrollY,
+      plansRow: document.querySelector('.plans-row')?.scrollLeft || 0,
+      allPlansModal: document.getElementById('allPlansModalContent')?.scrollTop || 0,
+    },
+
+    // Extra
+    timestamp: Date.now(),
+    version: APP_VERSION || '1.0.0'
+  };
+
+  // Save in two places
+  sessionStorage.setItem('__fg_app_state_v2', JSON.stringify(state));
+  history.replaceState(state, '', location.href);
+
+  console.log('[StateSaver] UI state saved → openModal:', state.openModal, state);
+}
+window.saveCurrentAppState = saveCurrentAppState;
+
 
 // ==========================================
 // 🔧 PRODUCTION-READY MOBILE DEBUG CONSOLE
