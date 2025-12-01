@@ -366,22 +366,21 @@ preloadingInProgress: false        // ← ADD THIS LINE
   modal.classList.add('open');
   modal.classList.remove('hidden');
   modal.style.pointerEvents = 'auto';
+  state.open = true;                    // ← Fixed
 
-  // Start preloading immediately when page loads (fire and forget)
   preloadHistoryForInstantOpen();
 
-  // If already preloaded → instant render
   if (state.preloaded) {
     hide(loadingEl);
     hide(emptyEl);
     applyTransformsAndRender();
   } else {
-    // First time: show loading briefly while preloading
     show(loadingEl);
   }
 
-  updateMonthDisplay();
-  if (selectedMonth) applyMonthFilterAndRender();
+  updateMonthDisplay();                 // ← Keep
+  if (selectedMonth) applyMonthFilterAndRender(); // ← Keep
+
   trapFocus();
 }
   function closeModal() {
@@ -602,15 +601,7 @@ document.addEventListener('click', e => {
 // });
 
 // On modal open → refresh display
-const originalOpenModal = openModal;
-function openModal() {
-  originalOpenModal();
-  updateMonthDisplay();
-  if (selectedMonth) {
-    applyMonthFilterAndRender(); // re-apply filter if one exists
-  }
-}
-window.TransactionHistory.open = openModal; // override
+
 
 // Initialize
 updateMonthDisplay();
