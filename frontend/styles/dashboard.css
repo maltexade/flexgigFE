@@ -4300,6 +4300,24 @@ a[style*="color: #f00"] { color: var(--danger); }
   .opay-history-modal { align-items: center; }
 }
 
+#monthFilterModal {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#monthFilterModal .opay-backdrop {
+  background: rgba(0,0,0,0.5);
+}
+#monthFilterModal button:hover {
+  opacity: 0.9;
+}
+#monthFilterModal button:active {
+  transform: scale(0.98);
+}
+
 
 
 .nav-item.active,
