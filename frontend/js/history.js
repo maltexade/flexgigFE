@@ -8,10 +8,10 @@
 
   /* -------------------------- CONFIG -------------------------- */
   const CONFIG = {
-    apiEndpoint: 'https://api.flexgig.com.ng/api/transactions', // ← your real endpoint
-    pageSize: 30,                 // items to request per page (infinite scroll)
-    chunkRenderSize: 12,          // items to render per animation chunk for smoothness
-    useBackend: true,             // set false for TEST_MODE local data
+    apiEndpoint: 'https://api.flexgig.com.ng/api/transactions',
+    pageSize: 30,
+    chunkRenderSize: 12,
+    useBackend: true,
     authHeader: () => window.APP_TOKEN ? { Authorization: window.APP_TOKEN } : {},
     dateLocale: 'en-GB',
     currencySymbol: '₦',
@@ -38,18 +38,21 @@
     page: 1,
     isLoading: false,
     done: false,
-    items: [],          // all loaded items
-    grouped: [],        // grouped by day/month for rendering
+    items: [],
+    grouped: [],
     sort: { by: 'time', dir: 'desc' },
     filters: {},
     searchTerm: '',
     lastRenderIndex: 0,
     cachePages: new Map(),
-    fullHistoryLoaded: false,     // ← NEW: have we loaded everything for accurate totals?
-    accurateTotalsCalculated: false, // ← NEW: have we updated In/Out with full data?
-    preloaded: false,                  // ← ADD THIS LINE
-preloadingInProgress: false        // ← ADD THIS LINE
+    fullHistoryLoaded: false,
+    accurateTotalsCalculated: false,
+    preloaded: false,
+    preloadingInProgress: false
   };
+
+  /* -------------------------- MONTH FILTER STATE -------------------------- */
+  let selectedMonth = null; // null = show all months
 
   /* -------------------------- UTIL -------------------------- */
   function formatCurrency(amount) {
@@ -71,39 +74,38 @@ preloadingInProgress: false        // ← ADD THIS LINE
   }
 
   function groupTransactions(items) {
-  const monthMap = new Map(); // key: "2025-11", value: { txs: [], totalIn: 0, totalOut: 0 }
+    const monthMap = new Map();
 
-  items.forEach(tx => {
-    const date = new Date(tx.time || tx.created_at);
-    const key = `${date.getFullYear()}-${date.getMonth()}`; // e.g. "2025-11"
+    items.forEach(tx => {
+      const date = new Date(tx.time || tx.created_at);
+      const key = `${date.getFullYear()}-${date.getMonth()}`;
 
-    if (!monthMap.has(key)) {
-      monthMap.set(key, { txs: [], totalIn: 0, totalOut: 0 });
-    }
+      if (!monthMap.has(key)) {
+        monthMap.set(key, { txs: [], totalIn: 0, totalOut: 0 });
+      }
 
-    const group = monthMap.get(key);
-    group.txs.push(tx);
+      const group = monthMap.get(key);
+      group.txs.push(tx);
 
-    const amt = Math.abs(Number(tx.amount || 0));
-    if (tx.type === 'credit') group.totalIn += amt;
-    else group.totalOut += amt;
-  });
+      const amt = Math.abs(Number(tx.amount || 0));
+      if (tx.type === 'credit') group.totalIn += amt;
+      else group.totalOut += amt;
+    });
 
-  // Sort months descending
-  const sorted = Array.from(monthMap.entries()).sort((a, b) => b[0].localeCompare(a[0]));
+    const sorted = Array.from(monthMap.entries()).sort((a, b) => b[0].localeCompare(a[0]));
 
-  return sorted.map(([key, data]) => {
-    const [year, month] = key.split('-');
-    const date = new Date(year, month);
-    return {
-      monthKey: key,
-      prettyMonth: date.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }),
-      totalIn: data.totalIn,
-      totalOut: data.totalOut,
-      txs: data.txs.sort((a, b) => new Date(b.time || b.created_at) - new Date(a.time || a.created_at))
-    };
-  });
-}
+    return sorted.map(([key, data]) => {
+      const [year, month] = key.split('-');
+      const date = new Date(year, month);
+      return {
+        monthKey: key,
+        prettyMonth: date.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }),
+        totalIn: data.totalIn,
+        totalOut: data.totalOut,
+        txs: data.txs.sort((a, b) => new Date(b.time || b.created_at) - new Date(a.time || a.created_at))
+      };
+    });
+  }
 
   function setState(newState) {
     Object.assign(state, newState);
@@ -125,55 +127,7 @@ preloadingInProgress: false        // ← ADD THIS LINE
       });
   }
 
-  /* -------------------------- FULL HISTORY + ACCURATE IN/OUT (YOUR CONSOLE CODE — INTEGRATED) -------------------------- */
-  async function loadFullHistoryForAccurateTotals() {
-    if (state.fullHistoryLoaded || state.accurateTotalsCalculated) return;
-
-    console.log('Loading FULL transaction history + updating In/Out...');
-
-    let allTx = [];
-    let page = 1;
-    let hasMore = true;
-
-    while (hasMore) {
-      try {
-        const data = await safeFetch(`${CONFIG.apiEndpoint}?limit=200&page=${page}`);
-        const items = data.items || [];
-        allTx.push(...items);
-
-        hasMore = page < (data.totalPages || data.total_pages || 1);
-        page++;
-      } catch (err) {
-        console.error('Failed to fetch page during full load:', err);
-        break;
-      }
-    }
-
-    console.log(`Loaded ${allTx.length} transactions for accurate totals`);
-
-    // Calculate TRUE In/Out
-    let totalIn = 0, totalOut = 0;
-    allTx.forEach(tx => {
-      const amount = Math.abs(Number(tx.amount || 0));
-      if (tx.type === 'credit') totalIn += amount;
-      else totalOut += amount;
-    });
-
-    // UPDATE IN/OUT TOTALS — ONCE AND FOREVER
-    inEl.textContent = `₦${totalIn.toLocaleString()}`;
-    outEl.textContent = `₦${totalOut.toLocaleString()}`;
-
-    state.fullHistoryLoaded = true;
-    state.accurateTotalsCalculated = true;
-
-    // Hide loading if visible
-    hide(loadingEl);
-
-    console.log(`IN: ₦${totalIn.toLocaleString()} | OUT: ₦${totalOut.toLocaleString()}`);
-    console.log('HISTORY TAB IS NOW 100% PERFECT');
-  }
-
-  /* -------------------------- RENDER (UNCHANGED) -------------------------- */
+  /* -------------------------- RENDER -------------------------- */
   function makeTxNode(tx) {
     const item = document.createElement('div');
     item.className = 'tx-item';
@@ -219,57 +173,43 @@ preloadingInProgress: false        // ← ADD THIS LINE
   }
 
   function renderChunked(groupedMonths) {
-  historyList.innerHTML = '';
-  state.lastRenderIndex = 0;
+    historyList.innerHTML = '';
+    state.lastRenderIndex = 0;
 
-  const flat = [];
+    const flat = [];
 
-  groupedMonths.forEach(month => {
-    flat.push({ type: 'month-header', month });
-    month.txs.forEach(tx => flat.push({ type: 'tx', tx }));
-  });
+    groupedMonths.forEach(month => {
+      flat.push({ type: 'month-header', month });
+      month.txs.forEach(tx => flat.push({ type: 'tx', tx }));
+    });
 
-  function renderNextChunk() {
-    const start = state.lastRenderIndex;
-    const end = Math.min(flat.length, start + CONFIG.chunkRenderSize);
+    function renderNextChunk() {
+      const start = state.lastRenderIndex;
+      const end = Math.min(flat.length, start + CONFIG.chunkRenderSize);
 
-    for (let i = start; i < end; i++) {
-      const item = flat[i];
+      for (let i = start; i < end; i++) {
+        const item = flat[i];
 
-      if (item.type === 'month-header') {
-        const header = document.createElement('div');
-        header.style.cssText = 'padding: 16px; background: rgba(0,212,170,0.08); border-radius: 12px; margin: 16px 12px 8px;';
-        header.innerHTML = `
-          <div style="font-weight: 700; font-size: 16px; color: white;">${item.month.prettyMonth}</div>
-          <div style="font-size: 13px; color: #00d4aa; margin-top: 4px;">
-            In: ₦${item.month.totalIn.toLocaleString()} &nbsp;&nbsp;&nbsp; Out: ₦${item.month.totalOut.toLocaleString()}
-          </div>
-        `;
-        historyList.appendChild(header);
-      } else {
-        historyList.appendChild(makeTxNode(item.tx));
+        if (item.type === 'month-header') {
+          const header = document.createElement('div');
+          header.style.cssText = 'padding: 16px; background: rgba(0,212,170,0.08); border-radius: 12px; margin: 16px 12px 8px;';
+          header.innerHTML = `
+            <div style="font-weight: 700; font-size: 16px; color: white;">${item.month.prettyMonth}</div>
+            <div style="font-size: 13px; color: #00d4aa; margin-top: 4px;">
+              In: ₦${item.month.totalIn.toLocaleString()} &nbsp;&nbsp;&nbsp; Out: ₦${item.month.totalOut.toLocaleString()}
+            </div>
+          `;
+          historyList.appendChild(header);
+        } else {
+          historyList.appendChild(makeTxNode(item.tx));
+        }
       }
+
+      state.lastRenderIndex = end;
+      if (end < flat.length) requestAnimationFrame(renderNextChunk);
     }
 
-    state.lastRenderIndex = end;
-    if (end < flat.length) requestAnimationFrame(renderNextChunk);
-  }
-
-  renderNextChunk();
-}
-
-  function computeSummary(items) {
-    // Only used as fallback before full load completes
-    if (state.accurateTotalsCalculated) return;
-
-    let totalIn = 0, totalOut = 0;
-    for (const tx of items) {
-      const amt = Number(tx.amount) || 0;
-      if (tx.type === 'credit') totalIn += amt;
-      else totalOut += Math.abs(amt);
-    }
-    inEl.textContent = formatCurrency(totalIn);
-    outEl.textContent = formatcCurrency(totalOut);
+    renderNextChunk();
   }
 
   function showStateUI() {
@@ -278,136 +218,284 @@ preloadingInProgress: false        // ← ADD THIS LINE
     else if (state.items.length === 0 && !state.fullHistoryLoaded) show(emptyEl);
   }
 
-  /* -------------------------- DATA (ORIGINAL INFINITE SCROLL PRESERVED) -------------------------- */
-  async function fetchPage(page = 1) {
-    if (state.cachePages.has(page)) {
-      return state.cachePages.get(page);
-    }
+  /* -------------------------- PRELOAD ON PAGE LOAD → INSTANT OPEN -------------------------- */
+  async function preloadHistoryForInstantOpen() {
+    if (state.preloaded || state.preloadingInProgress) return;
+    state.preloadingInProgress = true;
 
-    if (!CONFIG.useBackend) {
-      // TEST MODE — unchanged
-      const synthetic = [];
-      for (let i  = 0; i < CONFIG.pageSize; i++) {
-        const id = `local-${page}-${i}`;
-        const when = new Date(Date.now() - ((page - 1) * CONFIG.pageSize + i) * 60 * 60 * 1000).toISOString();
-        synthetic.push({
-          id, type: i % 3 === 0 ? 'credit' : 'debit', amount: (Math.random() * 20000).toFixed(2),
-          description: i % 3 === 0 ? 'Salary/payment' : 'Purchase/transfer',
-          time: when, status: 'successful'
-        });
+    console.log('Preloading full history for instant open...');
+
+    let allTx = [];
+    let page = 1;
+    let hasMore = true;
+
+    while (hasMore) {
+      try {
+        const data = await safeFetch(`${CONFIG.apiEndpoint}?limit=200&page=${page}`);
+        const items = data.items || [];
+        allTx.push(...items);
+        hasMore = page < (data.totalPages || data.total_pages || 1);
+        page++;
+      } catch (err) {
+        console.error('Preload failed:', err);
+        break;
       }
-      const pageObj = { items: synthetic, page, totalPages: 10 };
-      state.cachePages.set(page, pageObj);
-      return pageObj;
     }
 
-    try {
-      const json = await safeFetch(`${CONFIG.apiEndpoint}?page=${page}&limit=${CONFIG.pageSize}`);
-      const normalized = (json.items || []).map(raw => ({
-        id: raw.id || raw.reference,
-        type: raw.type === 'credit' ? 'credit' : 'debit',
-        amount: raw.amount,
-        description: raw.description || raw.narration || raw.type,
-        time: raw.created_at || raw.time,
-        status: raw.status || 'SUCCESS'
-      }));
+    state.items = allTx.map(raw => ({
+      id: raw.id || raw.reference,
+      type: raw.type === 'credit' ? 'credit' : 'debit',
+      amount: raw.amount,
+      description: raw.description || raw.narration || raw.type,
+      time: raw.created_at || raw.time,
+      status: raw.status || 'SUCCESS'
+    }));
 
-      const pageObj = {
-        items: normalized,
-        page: json.page || page,
-        totalPages: json.totalPages || json.total_pages || 999
-      };
+    let totalIn = 0, totalOut = 0;
+    state.items.forEach(tx => {
+      const amt = Math.abs(Number(tx.amount || 0));
+      if (tx.type === 'credit') totalIn += amt;
+      else totalOut += amt;
+    });
 
-      state.cachePages.set(page, pageObj);
-      if (state.cachePages.size > CONFIG.maxCachedPages) {
-        const firstKey = state.cachePages.keys().next().value;
-        state.cachePages.delete(firstKey);
-      }
-      return pageObj;
-    } catch (err) {
-      throw err;
-    }
-  }
+    inEl.textContent = `₦${totalIn.toLocaleString()}`;
+    outEl.textContent = `₦${totalOut.toLocaleString()}`;
 
- async function loadMore() {
-  if (state.isLoading || state.done) return;
-  state.isLoading = true;
-  showStateUI();
+    state.fullHistoryLoaded = true;
+    state.accurateTotalsCalculated = true;
+    state.preloaded = true;
+    state.done = true;
 
-  try {
-    const pageObj = await fetchPage(state.page);
-    const newItems = pageObj.items || [];
-
-    // If we get new items AND we already did full load → something changed → refresh totals
-    if (newItems.length > 0 && state.accurateTotalsCalculated) {
-      console.log('New transactions detected during scroll → updating In/Out totals...');
-      state.accurateTotalsCalculated = false;  // Force re-calculation
-      loadFullHistoryForAccurateTotals();      // ← This will run again silently & update totals
-    }
-
-    state.items = state.items.concat(newItems);
-    state.page += 1;
-
-    if (state.page > pageObj.totalPages || newItems.length === 0) {
-      state.done = true;
-    }
-
-    applyTransformsAndRender();
-  } catch (err) {
-    console.error('Failed to fetch transactions', err);
-    show(errorEl);
-  } finally {
-    state.isLoading = false;
-    showStateUI();
-  }
-}
-
- function applyTransformsAndRender() {
-  let items = state.items.slice();
-
-  if (state.searchTerm) {
-    const s = state.searchTerm.toLowerCase();
-    items = items.filter(tx =>
-      (tx.description || '').toLowerCase().includes(s) ||
-      (tx.id || '').toLowerCase().includes(s)
-    );
-  }
-
-  const groupedMonths = groupTransactions(items);
-  setState({ grouped: groupedMonths }); // optional
-  renderChunked(groupedMonths);
-
-  // Show empty only if no transactions at all
-  if (items.length === 0) {
-    show(emptyEl);
-  } else {
-    hide(emptyEl);
     hide(loadingEl);
-  }
-}
-  window.applyTransformsAndRender = window.applyTransformsAndRender || applyTransformsAndRender; // expose for console
+    console.log(`PRELOADED ${allTx.length} transactions → History now opens INSTANTLY`);
 
-  /* -------------------------- MODAL OPEN — TRIGGER BOTH FULL TOTALS + INFINITE SCROLL -------------------------- */
+    if (modal.classList.contains('open')) {
+      applyTransformsAndRender();
+    }
+
+    requestAnimationFrame(() => {
+      if (modal.classList.contains('open') && state.items.length > 0) {
+        applyTransformsAndRender();
+      }
+    });
+  }
+
+  /* -------------------------- MONTH FILTER FUNCTIONS -------------------------- */
+  function formatMonthYear(date) {
+    return date.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
+  }
+
+  function updateMonthDisplay() {
+    if (selectedMonth) {
+      const date = new Date(selectedMonth.year, selectedMonth.month);
+      monthSelector.textContent = formatMonthYear(date);
+    } else {
+      monthSelector.textContent = 'All Time';
+    }
+  }
+
+  function filterBySelectedMonth(items) {
+    if (!selectedMonth) return items;
+
+    const { year, month } = selectedMonth;
+    return items.filter(tx => {
+      const txDate = new Date(tx.time || tx.created_at);
+      return txDate.getFullYear() === year && txDate.getMonth() === month;
+    });
+  }
+
+  function computeFilteredSummary(filteredItems) {
+    let totalIn = 0, totalOut = 0;
+    filteredItems.forEach(tx => {
+      const amt = Math.abs(Number(tx.amount || 0));
+      if (tx.type === 'credit') totalIn += amt;
+      else totalOut += amt;
+    });
+
+    inEl.textContent = `₦${totalIn.toLocaleString()}`;
+    outEl.textContent = `₦${totalOut.toLocaleString()}`;
+  }
+
+  function applyMonthFilterAndRender() {
+    if (!selectedMonth) {
+      const grouped = groupTransactions(state.items);
+      setState({ grouped });
+      renderChunked(grouped);
+      
+      let totalIn = 0, totalOut = 0;
+      state.items.forEach(tx => {
+        const amt = Math.abs(Number(tx.amount || 0));
+        if (tx.type === 'credit') totalIn += amt;
+        else totalOut += amt;
+      });
+      inEl.textContent = `₦${totalIn.toLocaleString()}`;
+      outEl.textContent = `₦${totalOut.toLocaleString()}`;
+      
+      hide(emptyEl);
+      return;
+    }
+
+    const filtered = filterBySelectedMonth(state.items);
+    const grouped = groupTransactions(filtered);
+    setState({ grouped });
+    renderChunked(grouped);
+    computeFilteredSummary(filtered);
+
+    if (filtered.length === 0) {
+      show(emptyEl);
+    } else {
+      hide(emptyEl);
+    }
+  }
+
+  function applyTransformsAndRender() {
+    let items = state.items.slice();
+
+    if (state.searchTerm) {
+      const s = state.searchTerm.toLowerCase();
+      items = items.filter(tx =>
+        (tx.description || '').toLowerCase().includes(s) ||
+        (tx.id || '').toLowerCase().includes(s)
+      );
+    }
+
+    if (selectedMonth) {
+      items = filterBySelectedMonth(items);
+    }
+
+    const groupedMonths = groupTransactions(items);
+    setState({ grouped: groupedMonths });
+    renderChunked(groupedMonths);
+
+    if (selectedMonth || state.searchTerm) {
+      computeFilteredSummary(items);
+    }
+
+    if (items.length === 0) {
+      show(emptyEl);
+    } else {
+      hide(emptyEl);
+      hide(loadingEl);
+    }
+  }
+
+  window.applyTransformsAndRender = applyTransformsAndRender;
+
+  /* -------------------------- MONTH PICKER MODAL -------------------------- */
+  function createMonthPickerModal() {
+    const existing = document.getElementById('monthFilterModal');
+    if (existing) existing.remove();
+
+    const modalHTML = `
+      <div id="monthFilterModal" class="opay-modal hidden">
+        <div class="opay-backdrop" data-close-month></div>
+        <div class="opay-panel" style="max-width: 380px; width: 90%; padding: 0;">
+          <div class="opay-header" style="padding: 16px; border-bottom: 1px solid #eee; font-weight: 600; text-align: center; position: relative;">
+            <button data-close-month style="position: absolute; left: 16px; background: transparent; border: none; font-size: 24px; cursor: pointer; color: #999;">×</button>
+            Select Month
+          </div>
+          <div id="monthGrid" style="padding: 20px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;"></div>
+          <div style="padding: 16px; border-top: 1px solid #eee; display: flex; gap: 12px; justify-content: center;">
+            <button id="allTimeBtn" style="background: #6c757d; color: white; border: none; padding: 12px 24px; border-radius: 8px; font-weight: 600; cursor: pointer;">All Time</button>
+            <button id="confirmMonthBtn" style="background: #00d4aa; color: white; border: none; padding: 12px 32px; border-radius: 8px; font-weight: 600; cursor: pointer;">Confirm</button>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+  }
+
+  function generateMonthGrid() {
+    const grid = document.getElementById('monthGrid');
+    if (!grid) return;
+    grid.innerHTML = '';
+
+    const today = new Date();
+    const currentYear = today.getFullYear();
+    const currentMonth = today.getMonth();
+
+    for (let i = 11; i >= 0; i--) {
+      const date = new Date(currentYear, currentMonth - i, 1);
+      const year = date.getFullYear();
+      const month = date.getMonth();
+
+      const btn = document.createElement('button');
+      btn.textContent = formatMonthYear(date);
+      btn.style.cssText = `
+        padding: 14px 8px; border: 1px solid #ddd; border-radius: 8px; background: white;
+        font-size: 14px; cursor: pointer; transition: all 0.2s;
+      `;
+
+      if (selectedMonth && selectedMonth.year === year && selectedMonth.month === month) {
+        btn.style.background = '#00d4aa';
+        btn.style.color = 'white';
+        btn.style.borderColor = '#00d4aa';
+      }
+
+      if (i === 0) {
+        btn.style.fontWeight = '600';
+        if (!selectedMonth) {
+          btn.style.background = '#e6f7f7';
+          btn.style.borderColor = '#00d4aa';
+        }
+      }
+
+      btn.addEventListener('click', () => {
+        selectedMonth = { year, month };
+        generateMonthGrid();
+      });
+
+      grid.appendChild(btn);
+    }
+  }
+
+  monthSelector.addEventListener('click', () => {
+    createMonthPickerModal();
+    const modalEl = document.getElementById('monthFilterModal');
+    modalEl.classList.remove('hidden');
+    generateMonthGrid();
+
+    modalEl.querySelector('#confirmMonthBtn').onclick = () => {
+      updateMonthDisplay();
+      applyMonthFilterAndRender();
+      modalEl.classList.add('hidden');
+    };
+
+    modalEl.querySelector('#allTimeBtn').onclick = () => {
+      selectedMonth = null;
+      updateMonthDisplay();
+      applyMonthFilterAndRender();
+      modalEl.classList.add('hidden');
+    };
+
+    modalEl.querySelectorAll('[data-close-month], .opay-backdrop').forEach(el => {
+      el.onclick = () => modalEl.classList.add('hidden');
+    });
+  });
+
+  /* -------------------------- MODAL OPEN/CLOSE -------------------------- */
   function openModal() {
-  modal.classList.add('open');
-  modal.classList.remove('hidden');
-  modal.style.pointerEvents = 'auto';
-  state.open = true;                    // ← Fixed
+    modal.classList.add('open');
+    modal.classList.remove('hidden');
+    modal.style.pointerEvents = 'auto';
+    state.open = true;
 
-  preloadHistoryForInstantOpen();
+    selectedMonth = null;
+    
+    preloadHistoryForInstantOpen();
 
-  if (state.preloaded) {
-    hide(loadingEl);
-    hide(emptyEl);
-    applyTransformsAndRender();
-  } else {
-    show(loadingEl);
+    if (state.preloaded) {
+      hide(loadingEl);
+      hide(emptyEl);
+      applyTransformsAndRender();
+    } else {
+      show(loadingEl);
+    }
+
+    updateMonthDisplay();
+    trapFocus();
   }
 
-
-
-  trapFocus();
-}
   function closeModal() {
     modal.classList.remove('open');
     modal.classList.add('hidden');
@@ -416,73 +504,7 @@ preloadingInProgress: false        // ← ADD THIS LINE
     releaseFocusTrap();
   }
 
-  /* -------------------------- PRELOAD ON PAGE LOAD → INSTANT OPEN -------------------------- */
-async function preloadHistoryForInstantOpen() {
-  if (state.preloaded || state.preloadingInProgress) return;
-  state.preloadingInProgress = true;
-
-  console.log('Preloading full history for instant open...');
-
-  let allTx = [];
-  let page = 1;
-  let hasMore = true;
-
-  while (hasMore) {
-    try {
-      const data = await safeFetch(`${CONFIG.apiEndpoint}?limit=200&page=${page}`);
-      const items = data.items || [];
-      allTx.push(...items);
-      hasMore = page < (data.totalPages || data.total_pages || 1);
-      page++;
-    } catch (err) {
-      console.error('Preload failed:', err);
-      break;
-    }
-  }
-
-  // Normalize once
-  state.items = allTx.map(raw => ({
-    id: raw.id || raw.reference,
-    type: raw.type === 'credit' ? 'credit' : 'debit',
-    amount: raw.amount,
-    description: raw.description || raw.narration || raw.type,
-    time: raw.created_at || raw.time,
-    status: raw.status || 'SUCCESS'
-  }));
-
-  // Calculate accurate totals
-  let totalIn = 0, totalOut = 0;
-  state.items.forEach(tx => {
-    const amt = Math.abs(Number(tx.amount || 0));
-    if (tx.type === 'credit') totalIn += amt;
-    else totalOut += amt;
-  });
-
-  inEl.textContent = `₦${totalIn.toLocaleString()}`;
-  outEl.textContent = `₦${totalOut.toLocaleString()}`;
-
-  state.fullHistoryLoaded = true;
-  state.accurateTotalsCalculated = true;
-  state.preloaded = true;
-  state.done = true;
-
-  hide(loadingEl);
-  console.log(`PRELOADED ${allTx.length} transactions → History now opens INSTANTLY`);
-
-  // RENDER IMMEDIATELY if modal is open OR will be opened soon
-  if (modal.classList.contains('open')) {
-    applyTransformsAndRender();
-  }
-
-  // Also render on next tick in case modal opens right after
-  requestAnimationFrame(() => {
-    if (modal.classList.contains('open') && state.items.length > 0) {
-      applyTransformsAndRender();
-    }
-  });
-}
-
-  /* -------------------------- ALL YOUR ORIGINAL FEATURES (UNTOUCHED) -------------------------- */
+  /* -------------------------- EVENT LISTENERS -------------------------- */
   closeButtons.forEach(btn => btn.addEventListener('click', closeModal));
   backdrop.addEventListener('click', closeModal);
 
@@ -493,14 +515,6 @@ async function preloadHistoryForInstantOpen() {
     if (e.key === 'ArrowUp') historyList.scrollBy({ top: -120, behavior: 'smooth' });
   });
 
-  historyList.addEventListener('scroll', () => {
-    const scrollBottom = historyList.scrollTop + historyList.clientHeight;
-    const threshold = historyList.scrollHeight - 300;
-    if (scrollBottom >= threshold && !state.isLoading && !state.done) {
-      loadMore();
-    }
-  }, { passive: true });
-
   downloadBtn?.addEventListener('click', async () => {
     const fmt = prompt('Download format: "csv" or "json"', 'csv');
     if (!fmt) return;
@@ -508,7 +522,10 @@ async function preloadHistoryForInstantOpen() {
     if (fmt.toLowerCase() === 'json') {
       const blob = new Blob([JSON.stringify(state.items, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = `transactions-${Date.now()}.json`; a.click();
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `transactions-${Date.now()}.json`;
+      a.click();
       URL.revokeObjectURL(url);
     } else {
       const cols = ['Date', 'Description', 'Reference', 'Type', 'Amount', 'Status'];
@@ -525,7 +542,10 @@ async function preloadHistoryForInstantOpen() {
       });
       const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = `flexgig-transactions-${new Date().toISOString().slice(0,10)}.csv`; a.click();
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `flexgig-transactions-${new Date().toISOString().slice(0,10)}.csv`;
+      a.click();
       URL.revokeObjectURL(url);
     }
   });
@@ -542,7 +562,7 @@ async function preloadHistoryForInstantOpen() {
     });
   }
 
-  /* -------------------------- FOCUS TRAP & SWIPE (UNTOUCHED) -------------------------- */
+  /* -------------------------- FOCUS TRAP & SWIPE -------------------------- */
   let previouslyFocused = null;
   function trapFocus() {
     previouslyFocused = document.activeElement;
@@ -554,14 +574,17 @@ async function preloadHistoryForInstantOpen() {
     function keyListener(e) {
       if (e.key !== 'Tab') return;
       if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault(); last.focus();
+        e.preventDefault();
+        last.focus();
       } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault(); first.focus();
+        e.preventDefault();
+        first.focus();
       }
     }
     panel.__focusTrap = keyListener;
     panel.addEventListener('keydown', keyListener);
   }
+
   function releaseFocusTrap() {
     if (panel && panel.__focusTrap) {
       panel.removeEventListener('keydown', panel.__focusTrap);
@@ -596,19 +619,28 @@ async function preloadHistoryForInstantOpen() {
     }, { passive: true });
   })(panel);
 
-  /* -------------------------- PUBLIC API (ENHANCED) -------------------------- */
+  /* -------------------------- PUBLIC API -------------------------- */
   window.TransactionHistory = {
     open: openModal,
     close: closeModal,
     reload: () => {
-      state.items = []; state.page = 1; state.done = false; state.cachePages.clear();
-      state.fullHistoryLoaded = false; state.accurateTotalsCalculated = false;
+      state.items = [];
+      state.page = 1;
+      state.done = false;
+      state.cachePages.clear();
+      state.fullHistoryLoaded = false;
+      state.accurateTotalsCalculated = false;
+      state.preloaded = false;
+      state.preloadingInProgress = false;
       if (modal.classList.contains('open')) openModal();
     },
     setApi: (url) => { CONFIG.apiEndpoint = url; },
     setAuthToken: (token) => { window.APP_TOKEN = token; },
     setUseBackend: (v) => { CONFIG.useBackend = !!v; },
-    addItems: (items) => { state.items = state.items.concat(items); applyTransformsAndRender(); },
+    addItems: (items) => {
+      state.items = state.items.concat(items);
+      applyTransformsAndRender();
+    },
     getAll: () => state.items.slice()
   };
 
@@ -624,9 +656,9 @@ async function preloadHistoryForInstantOpen() {
   });
 
   showStateUI();
-  console.log('FlexGig Transaction History → FULL & ACCURATE MODE ENABLED (All features preserved)');
+  updateMonthDisplay();
+  console.log('FlexGig Transaction History → READY WITH ALL-TIME VIEW');
 
-  // Start preloading the moment the script loads → instant open later
-preloadHistoryForInstantOpen();
+  preloadHistoryForInstantOpen();
 
 })();
