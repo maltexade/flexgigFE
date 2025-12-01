@@ -4067,7 +4067,7 @@ a[style*="color: #f00"] { color: var(--danger); }
 .opay-history-modal {
   position: fixed;
   inset: 0;
-  z-index: 100020 !important;
+  z-index: 10000 !important;
   -webkit-backdrop-filter: none !important; /* Prevent Safari blur bleed */
   backdrop-filter: none !important;         /* Prevent Chrome blur bleed */
   height: 100vh;
@@ -4303,7 +4303,7 @@ a[style*="color: #f00"] { color: var(--danger); }
 #monthFilterModal {
   position: fixed;
   inset: 0;
-  z-index: 9999;
+  z-index: 99999;
   display: flex;
   align-items: center;
   justify-content: center;

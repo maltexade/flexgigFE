@@ -71,19 +71,39 @@ preloadingInProgress: false        // ← ADD THIS LINE
   }
 
   function groupTransactions(items) {
-    const map = new Map();
-    for (const tx of items) {
-      const day = new Date(tx.time || tx.created_at).toISOString().slice(0, 10);
-      if (!map.has(day)) map.set(day, []);
-      map.get(day).push(tx);
+  const monthMap = new Map(); // key: "2025-11", value: { txs: [], totalIn: 0, totalOut: 0 }
+
+  items.forEach(tx => {
+    const date = new Date(tx.time || tx.created_at);
+    const key = `${date.getFullYear()}-${date.getMonth()}`; // e.g. "2025-11"
+
+    if (!monthMap.has(key)) {
+      monthMap.set(key, { txs: [], totalIn: 0, totalOut: 0 });
     }
-    const arr = Array.from(map.entries()).sort((a, b) => b[0].localeCompare(a[0]));
-    return arr.map(([day, txs]) => ({
-      day,
-      prettyDay: new Date(day).toLocaleDateString(CONFIG.dateLocale, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }),
-      txs
-    }));
-  }
+
+    const group = monthMap.get(key);
+    group.txs.push(tx);
+
+    const amt = Math.abs(Number(tx.amount || 0));
+    if (tx.type === 'credit') group.totalIn += amt;
+    else group.totalOut += amt;
+  });
+
+  // Sort months descending
+  const sorted = Array.from(monthMap.entries()).sort((a, b) => b[0].localeCompare(a[0]));
+
+  return sorted.map(([key, data]) => {
+    const [year, month] = key.split('-');
+    const date = new Date(year, month);
+    return {
+      monthKey: key,
+      prettyMonth: date.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }),
+      totalIn: data.totalIn,
+      totalOut: data.totalOut,
+      txs: data.txs.sort((a, b) => new Date(b.time || b.created_at) - new Date(a.time || a.created_at))
+    };
+  });
+}
 
   function setState(newState) {
     Object.assign(state, newState);
@@ -198,42 +218,45 @@ preloadingInProgress: false        // ← ADD THIS LINE
     return item;
   }
 
-  function renderChunked(grouped) {
-    historyList.innerHTML = '';
-    state.lastRenderIndex = 0;
+  function renderChunked(groupedMonths) {
+  historyList.innerHTML = '';
+  state.lastRenderIndex = 0;
 
-    const flat = [];
-    for (const group of grouped) {
-      flat.push({ type: 'section', day: group.prettyDay });
-      for (const tx of group.txs) flat.push({ type: 'tx', tx });
-    }
-    state.flatList = flat;
+  const flat = [];
 
-    function renderNextChunk() {
-      const start = state.lastRenderIndex;
-      const end = Math.min(flat.length, start + CONFIG.chunkRenderSize);
-      for (let i = start; i < end; i++) {
-        const nodeData = flat[i];
-        if (nodeData.type === 'section') {
-          const hd = document.createElement('div');
-          hd.style.padding = '8px 16px';
-          hd.style.fontSize = '13px';
-          hd.style.fontWeight = '700';
-          hd.style.color = '#aaa';
-          hd.textContent = nodeData.day;
-          historyList.appendChild(hd);
-        } else {
-          historyList.appendChild(makeTxNode(nodeData.tx));
-        }
+  groupedMonths.forEach(month => {
+    flat.push({ type: 'month-header', month });
+    month.txs.forEach(tx => flat.push({ type: 'tx', tx }));
+  });
+
+  function renderNextChunk() {
+    const start = state.lastRenderIndex;
+    const end = Math.min(flat.length, start + CONFIG.chunkRenderSize);
+
+    for (let i = start; i < end; i++) {
+      const item = flat[i];
+
+      if (item.type === 'month-header') {
+        const header = document.createElement('div');
+        header.style.cssText = 'padding: 16px; background: rgba(0,212,170,0.08); border-radius: 12px; margin: 16px 12px 8px;';
+        header.innerHTML = `
+          <div style="font-weight: 700; font-size: 16px; color: white;">${item.month.prettyMonth}</div>
+          <div style="font-size: 13px; color: #00d4aa; margin-top: 4px;">
+            In: ₦${item.month.totalIn.toLocaleString()} &nbsp;&nbsp;&nbsp; Out: ₦${item.month.totalOut.toLocaleString()}
+          </div>
+        `;
+        historyList.appendChild(header);
+      } else {
+        historyList.appendChild(makeTxNode(item.tx));
       }
-      state.lastRenderIndex = end;
-      if (end < flat.length) {
-        requestAnimationFrame(renderNextChunk);
-      }
     }
 
-    renderNextChunk();
+    state.lastRenderIndex = end;
+    if (end < flat.length) requestAnimationFrame(renderNextChunk);
   }
+
+  renderNextChunk();
+}
 
   function computeSummary(items) {
     // Only used as fallback before full load completes
@@ -339,27 +362,29 @@ preloadingInProgress: false        // ← ADD THIS LINE
   }
 }
 
-  function applyTransformsAndRender() {
-    let items = state.items.slice();
+ function applyTransformsAndRender() {
+  let items = state.items.slice();
 
-    if (state.searchTerm) {
-      const s = state.searchTerm.toLowerCase();
-      items = items.filter(tx =>
-        (tx.description || '').toLowerCase().includes(s) ||
-        (tx.id || '').toLowerCase().includes(s)
-      );
-    }
-
-    items.sort((a, b) => new Date(b.time || b.created_at).getTime() - new Date(a.time || a.created_at).getTime());
-
-    const grouped = groupTransactions(items);
-    setState({ grouped });
-    renderChunked(grouped);
-    computeSummary(items);
-
-    if (items.length === 0 && !state.fullHistoryLoaded) show(emptyEl);
-    else hide(emptyEl);
+  if (state.searchTerm) {
+    const s = state.searchTerm.toLowerCase();
+    items = items.filter(tx =>
+      (tx.description || '').toLowerCase().includes(s) ||
+      (tx.id || '').toLowerCase().includes(s)
+    );
   }
+
+  const groupedMonths = groupTransactions(items);
+  setState({ grouped: groupedMonths }); // optional
+  renderChunked(groupedMonths);
+
+  // Show empty only if no transactions at all
+  if (items.length === 0) {
+    show(emptyEl);
+  } else {
+    hide(emptyEl);
+    hide(loadingEl);
+  }
+}
   window.applyTransformsAndRender = window.applyTransformsAndRender || applyTransformsAndRender; // expose for console
 
   /* -------------------------- MODAL OPEN — TRIGGER BOTH FULL TOTALS + INFINITE SCROLL -------------------------- */
