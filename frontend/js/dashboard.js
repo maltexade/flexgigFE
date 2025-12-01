@@ -64,7 +64,7 @@ openModal: (() => {
 // 🔧 PRODUCTION-READY MOBILE DEBUG CONSOLE
 // ==========================================
 // ⚙️ SET THIS TO false IN PRODUCTION ⚙️
-const DEBUG_MODE = true; // ← Change to false to hide completely
+const DEBUG_MODE = false; // ← Change to false to hide completely
 // ==========================================
 
 (function () {
@@ -2122,6 +2122,8 @@ window.applyBalanceVisibility = applyBalanceVisibility;
       setTimeout(() => { hasProcessedPayment = false; }, 30000);
     }
   }
+
+  window.handleNewBalance = window.handleNewBalance || handleNewBalance;
 
   // Polling fallback (runs always on mobile)
   async function startPolling() {
