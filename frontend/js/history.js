@@ -159,260 +159,46 @@
 }
 
 
-/* ---------------------- RENDER (DEBUG VERSION) ---------------------- */
 function makeTxNode(tx) {
-  console.group('%cmakeTxNode START', 'color: #0f0; font-weight: bold;');
-  console.log('➡️ Raw TX Received:', tx);
-
-  try {
-    /* ---------------------------------------------------------------
-       Helper: Safe truncation (with debug)
-    ----------------------------------------------------------------*/
-    function safeTruncate(text) {
-      console.log('⤵️ Truncating description:', text);
-
-      if (typeof truncateDescription === 'function') {
-        console.log('✔️ Using custom truncateDescription()');
-        try {
-          const t = truncateDescription(text);
-          console.log('📌 Truncated (custom):', t);
-          return t;
-        } catch (e) {
-          console.warn('⚠️ truncateDescription() failed, using fallback:', e);
-        }
-      }
-
-      console.log('❗ Using fallback truncator');
-      if (!text) return '';
-
-      const w = window.innerWidth;
-      let max = 25;
-      if (w >= 640 && w < 1024) max = 30;
-      else if (w >= 1024) max = 40;
-
-      console.log('📏 Max length:', max, 'Screen width:', w);
-
-      const t = text.length > max ? text.slice(0, max) + '…' : text;
-      console.log('📌 Truncated (fallback):', t);
-      return t;
-    }
-
-    /* ---------------------------------------------------------------
-       Helper: Icon detection (with debug)
-    ----------------------------------------------------------------*/
-    function safeGetIcon(txLocal) {
-      console.log('🔍 Detecting icon from description:', txLocal.description || txLocal.narration);
-
-      if (typeof getTxIcon === 'function') {
-        try {
-          const icon = getTxIcon(txLocal);
-          console.log('✔️ Using custom getTxIcon():', icon);
-          return icon;
-        } catch (e) {
-          console.warn('⚠️ getTxIcon() failed, using fallback logic:', e);
-        }
-      }
-
-      console.log('❗ Using fallback icon detection');
-      const desc = (txLocal.description || txLocal.narration || '').toLowerCase();
-
-      if (desc.includes('opay')) return { cls: 'incoming', img: '/frontend/svg/bank.svg', alt: 'Opay' };
-      if (desc.includes('mtn')) return { cls: 'mtn targets', img: '/frontend/img/mtn.svg', alt: 'MTN' };
-      if (desc.includes('airtel')) return { cls: 'airtel targets', img: '/frontend/svg/airtel-icon.svg', alt: 'Airtel' };
-      if (desc.includes('glo')) return { cls: 'glo targets', img: '/frontend/svg/GLO-icon.svg', alt: 'GLO' };
-      if (desc.includes('9mobile') || desc.includes('nine-mobile'))
-        return { cls: 'nine-mobile targets', img: '/frontend/svg/9mobile-icon.svg', alt: '9Mobile' };
-      if (desc.includes('refund'))
-        return { cls: 'refund incoming', img: '/frontend/svg/refund.svg', alt: 'Refund' };
-
-      return { cls: (txLocal.type === 'credit' ? 'incoming' : 'outgoing'), img: '', alt: '' };
-    }
-
-    /* ---------------------------------------------------------------
-       Helper: Amount formatting (with debug)
-    ----------------------------------------------------------------*/
-    function formatAmountDisplay(v) {
-      console.log('💰 Formatting amount:', v);
-
-      const sym =
-        (typeof CONFIG !== 'undefined' && CONFIG.currencySymbol)
-          ? CONFIG.currencySymbol
-          : '₦';
-
-      const n = Number(v) || 0;
-      const full = sym + n.toLocaleString(undefined, {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
-      });
-
-      console.log('📌 Full formatted amount:', full);
-
-      if (full.length > 12) {
-        console.log('⚠️ Amount too long, switching to compact format');
-        try {
-          const compact =
-            sym +
-            new Intl.NumberFormat(undefined, {
-              notation: 'compact',
-              maximumFractionDigits: 1
-            }).format(n);
-
-          console.log('📌 Compact:', compact);
-          return { display: compact, full };
-        } catch (e) {
-          console.warn('⚠️ Compact formatting failed, using full:', e);
-          return { display: full, full };
-        }
-      }
-
-      console.log('✔️ Full format fits, using full');
-      return { display: full, full };
-    }
-
-    /* ---------------------------------------------------------------
-       Helper: Date formatting (with debug)
-    ----------------------------------------------------------------*/
-    function fmtDateTime(iso) {
-      console.log('🕒 Input date:', iso);
-      const d = new Date(iso || Date.now());
-      const dateStr = d.toLocaleDateString('en-GB', {
-        day: 'numeric',
-        month: 'short',
-        year: 'numeric'
-      });
-      const timeStr = d.toLocaleTimeString(undefined, {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: true
-      });
-      const out = `${dateStr} · ${timeStr}`;
-      console.log('📌 Final formatted date:', out);
-      return out;
-    }
-
-    /* ---------------------------------------------------------------
-       Build DOM node
-    ----------------------------------------------------------------*/
-    console.log('📦 Building transaction node...');
-
-    const item = document.createElement('article');
-    item.className = 'tx-item';
-    item.dataset.txId = tx.id || tx.reference || '';
-    item.setAttribute('role', 'listitem');
-
-    const isCredit = tx.type === 'credit';
-    const icon = safeGetIcon(tx);
-
-    const rawDesc = tx.description || tx.narration || tx.type || 'Transaction';
-    const truncatedDesc = safeTruncate(rawDesc);
-
-    const amountObj = formatAmountDisplay(tx.amount);
-    const formattedDateTime = fmtDateTime(tx.time || tx.created_at);
-
-    console.log('🧩 Final components:', {
-      rawDesc,
-      truncatedDesc,
-      icon,
-      amountObj,
-      formattedDateTime
-    });
-
-    const refPart = tx.reference ? `${tx.reference} • ` : '';
-
-    item.innerHTML = `
-      <div class="tx-icon ${icon.cls}" aria-hidden="true">
-        ${
-          icon.img
-            ? `<div class="tx-svg"><img class="tx-img" src="${icon.img}" alt="${icon.alt || ''}" /></div>`
-            : (isCredit ? '↓' : '↑')
-        }
-      </div>
-
-      <div class="tx-content">
-        <div class="tx-row">
-          <div class="tx-desc" title="${rawDesc}">
-            ${truncatedDesc}
-          </div>
-
-          <div class="tx-amount ${isCredit ? 'credit' : 'debit'}"
-               title="${amountObj.full}">
-            ${isCredit ? '+' : '-'} ${amountObj.display}
-          </div>
-        </div>
-
-        <div class="tx-row meta">
-          <div class="tx-time" title="${tx.reference || ''}">
-            ${refPart}${formattedDateTime}
-          </div>
-          <div class="tx-status" title="${tx.status || 'SUCCESS'}">
-            ${tx.status || 'SUCCESS'}
-          </div>
-        </div>
-      </div>
-    `;
-
-    function makeTxNode(tx) {
   console.group('%cmakeTxNode START', 'color: #0f0; font-weight: bold;');
   console.log('Raw TX Received:', tx);
 
   try {
-    /* ---------------------------------------------------------------
-       Helper: Safe truncation
-    ----------------------------------------------------------------*/
-    function safeTruncate(text) {
-      if (typeof truncateDescription === 'function') {
-        return truncateDescription(text);
-      }
+    const safeTruncate = (text) => {
+      if (typeof truncateDescription === 'function') return truncateDescription(text);
       const w = window.innerWidth;
       const max = w >= 1024 ? 40 : w >= 640 ? 30 : 25;
-      return text && text.length > max ? text.slice(0, max) + '…' : text;
-    }
+      return text && text.length > max ? text.slice(0, max) + '…' : text || '';
+    };
 
-    /* ---------------------------------------------------------------
-       Helper: Icon detection
-    ----------------------------------------------------------------*/
-    function safeGetIcon(txLocal) {
-      return getTxIcon(txLocal); // We trust your global getTxIcon now
-    }
-
-    /* ---------------------------------------------------------------
-       Helper: Amount formatting
-    ----------------------------------------------------------------*/
-    function formatAmountDisplay(v) {
+    const formatAmountDisplay = (v) => {
       const n = Math.abs(Number(v) || 0);
       const full = '₦' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       return { display: full, full };
-    }
+    };
 
-    /* ---------------------------------------------------------------
-       Helper: Date formatting
-    ----------------------------------------------------------------*/
-    function fmtDateTime(iso) {
+    const fmtDateTime = (iso) => {
       const d = new Date(iso || Date.now());
       const dateStr = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
       const timeStr = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
       return `${dateStr} · ${timeStr}`;
-    }
+    };
 
-    /* ---------------------------------------------------------------
-       Build DOM node
-    ----------------------------------------------------------------*/
     const item = document.createElement('article');
     item.className = 'tx-item';
     item.dataset.txId = tx.id || tx.reference || '';
     item.setAttribute('role', 'listitem');
 
     const isCredit = tx.type === 'credit';
-    const icon = safeGetIcon(tx);
+    const icon = getTxIcon(tx);
 
     const rawDesc = tx.description || tx.narration || tx.type || 'Transaction';
     const truncatedDesc = safeTruncate(rawDesc);
-
     const amountObj = formatAmountDisplay(tx.amount);
     const formattedDateTime = fmtDateTime(tx.time || tx.created_at);
     const refPart = tx.reference ? `${tx.reference} • ` : '';
 
-    // ———— FINAL STATUS BADGE LOGIC (This is the fix) ————
+    // STATUS BADGE — FINAL WORKING LOGIC
     const statusRaw = (tx.status || 'success').toString().toLowerCase();
     const statusText = (tx.status || 'success').toUpperCase();
     let statusClass = 'success';
@@ -427,7 +213,6 @@ function makeTxNode(tx) {
           : (isCredit ? 'Down Arrow' : 'Up Arrow')
         }
       </div>
-
       <div class="tx-content">
         <div class="tx-row">
           <div class="tx-desc" title="${rawDesc}">${truncatedDesc}</div>
@@ -435,11 +220,8 @@ function makeTxNode(tx) {
             ${isCredit ? '+' : '-'} ${amountObj.display}
           </div>
         </div>
-
         <div class="tx-row meta">
-          <div class="tx-time" title="${tx.reference || ''}">
-            ${refPart}${formattedDateTime}
-          </div>
+          <div class="tx-time" title="${tx.reference || ''}">${refPart}${formattedDateTime}</div>
           <div class="tx-status" data-status="${statusClass}" title="${tx.status || 'SUCCESS'}">
             ${statusText}
           </div>
@@ -447,24 +229,18 @@ function makeTxNode(tx) {
       </div>
     `;
 
-    /* ---------------------------------------------------------------
-       Click handler (exactly as you had it)
-    ----------------------------------------------------------------*/
     item.addEventListener('click', (e) => {
       console.log('Clicked TX:', tx);
-
       const details = {
         id: tx.id || tx.reference,
         reference: tx.reference,
-        description: tx.description || tx.narration,
+        description: rawDesc,
         amount: tx.amount,
         type: tx.type,
         time: tx.time || tx.created_at,
         status: tx.status || 'SUCCESS'
       };
-
       if (e.ctrlKey || e.metaKey) {
-        console.log('Copying details to clipboard:', details);
         navigator.clipboard?.writeText(JSON.stringify(details, null, 2));
       } else {
         alert(`Transaction\n\n${JSON.stringify(details, null, 2)}`);
@@ -477,7 +253,6 @@ function makeTxNode(tx) {
   } catch (err) {
     console.error('FATAL RENDER ERROR in makeTxNode:', err, tx);
     console.groupEnd();
-
     const fallback = document.createElement('div');
     fallback.className = 'tx-item';
     fallback.textContent = 'Could not render transaction';
