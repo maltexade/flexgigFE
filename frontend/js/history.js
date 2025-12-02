@@ -160,58 +160,38 @@
 
 
   /* -------------------------- RENDER -------------------------- */
-function makeTxNode(tx) {
-  const item = document.createElement('article');
+  function makeTxNode(tx) {
+  const item = document.createElement('div');
   item.className = 'tx-item';
-  item.dataset.txId = tx.id || tx.reference || '';
-  item.setAttribute('role', 'listitem');
+  item.dataset.id = tx.id || tx.reference || '';
 
-  // Determine if credit or debit
   const isCredit = tx.type === 'credit';
-  const amount = Math.abs(Number(tx.amount || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const amount = Math.abs(Number(tx.amount || 0)).toLocaleString();
 
-  // Determine icon class and image based on description
-  function getTxIcon(tx) {
-    const desc = (tx.description || tx.narration || '').toLowerCase();
-    if (desc.includes('opay')) return { cls: 'incoming', img: '/frontend/svg/bank.svg', alt: 'Opay' };
-    if (desc.includes('mtn')) return { cls: 'mtn targets', img: '/frontend/img/mtn.svg', alt: 'MTN' };
-    if (desc.includes('airtel')) return { cls: 'airtel targets', img: '/frontend/svg/airtel-icon.svg', alt: 'Airtel' };
-    if (desc.includes('glo')) return { cls: 'glo targets', img: '/frontend/svg/glo-icon.svg', alt: 'GLO' };
-    if (desc.includes('9mobile') || desc.includes('nine-mobile')) return { cls: 'nine-mobile targets', img: '/frontend/svg/9mobile-icon.svg', alt: '9Mobile' };
-    if (desc.includes('refund')) return { cls: 'refund incoming', img: '/frontend/svg/refund.svg', alt: 'Refund' };
-    return { cls: isCredit ? 'incoming' : 'outgoing', img: '', alt: '' };
-  }
-  const icon = getTxIcon(tx);
-
-  // Truncate description for display
+  // Get raw description and truncate
   const rawDesc = tx.description || tx.narration || tx.type || 'Transaction';
   const truncatedDesc = truncateDescription(rawDesc);
 
-  // Format time like hardcoded: Nov 26, 2025 · 03:05 PM
-  const d = new Date(tx.time || tx.created_at);
-  const dateStr = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-  const timeStr = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-  const formattedDateTime = `${dateStr} · ${timeStr}`;
-
   item.innerHTML = `
-    <div class="tx-icon ${icon.cls}" aria-hidden="true">
-      ${icon.img ? `<div class="tx-svg" aria-hidden="true"><img class="tx-img" src="${icon.img}" alt="${icon.alt}" /></div>` : (isCredit ? '↓' : '↑')}
+    <div class="tx-icon ${isCredit ? 'incoming' : 'outgoing'}">
+      ${isCredit ? '↓' : '↑'}
     </div>
     <div class="tx-content">
       <div class="tx-row">
         <div class="tx-desc" title="${rawDesc}">${truncatedDesc}</div>
-        <div class="tx-amount ${isCredit ? 'credit' : 'debit'}">
-          ${isCredit ? '+' : '-'} ₦${amount}
-        </div>
       </div>
       <div class="tx-row meta">
-        <div class="tx-time">${tx.reference || 'FlexGig'} • ${formattedDateTime}</div>
-        <div class="tx-status" title="${tx.status || 'SUCCESS'}">${tx.status || 'SUCCESS'}</div>
+        <div class="tx-time">
+          ${tx.reference || 'FlexGig'} • ${new Date(tx.time || tx.created_at).toLocaleDateString('en-NG', { day: 'numeric', month: 'short' })} ${new Date(tx.time || tx.created_at).toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' })}
+        </div>
       </div>
+    </div>
+    <div class="tx-amount ${isCredit ? 'credit' : 'debit'}">
+      ${isCredit ? '+' : '-'}₦${amount}
+      <div class="tx-status">SUCCESS</div>
     </div>
   `;
 
-  // Click to view details or copy
   item.addEventListener('click', (e) => {
     const details = {
       id: tx.id || tx.reference,
