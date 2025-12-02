@@ -4232,14 +4232,26 @@ a[style*="color: #f00"] { color: var(--danger); }
       margin-left: 4px;
     }
 
-    /* Body */
-    .opay-body { 
-      flex: 1; 
-      overflow-y: auto; 
-      overflow-x: hidden;
-      padding: 8px 0; 
-      background: #121212;
-    }
+/* Body */
+.opay-body { 
+  flex: 1; 
+  overflow-y: auto; 
+  overflow-x: hidden;
+  padding: 8px 0; 
+  background: #121212;
+  border-radius: 8px;
+  border: 1px solid #2a2a2a;
+    max-width: 100%;        /* Prevent the container from expanding */
+  overflow-x: hidden;     /* Hide any accidental overflow */
+
+  /* Hide scrollbar */
+  scrollbar-width: none;              /* Firefox */
+}
+
+.opay-body::-webkit-scrollbar { 
+  display: none;                      /* Chrome/Safari/Edge */
+}
+
 
     /* Transaction Item */
     .tx-item {
@@ -4336,7 +4348,7 @@ a[style*="color: #f00"] { color: var(--danger); }
       overflow: hidden;
       text-overflow: ellipsis;
       min-width: 0;
-      flex: 1;
+      flex: 1 1 auto;
       max-width: 100%;
     }
 

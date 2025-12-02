@@ -159,19 +159,41 @@
 }
 
 
-  /* -------------------------- RENDER -------------------------- */
+/* -------------------------- RENDER (improved makeTxNode) -------------------------- */
 function makeTxNode(tx) {
+  // small helpers
+  function escapeHtml(str = '') {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  // compact amount formatter (keep full amount in title)
+  function formatAmount(amountRaw) {
+    const n = Number(amountRaw) || 0;
+    const full = CONFIG.currencySymbol + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    // if very long, use compact notation (e.g. 1.2K)
+    if (full.length > 12) {
+      const compact = CONFIG.currencySymbol + new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(n);
+      return { display: compact, full };
+    }
+    return { display: full, full };
+  }
+
   const item = document.createElement('article');
   item.className = 'tx-item';
   item.dataset.txId = tx.id || tx.reference || '';
   item.setAttribute('role', 'listitem');
 
-  // Determine if credit or debit
-  const isCredit = tx.type === 'credit';
-  const amount = Math.abs(Number(tx.amount || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // credit / debit
+  const isCredit = (tx.type === 'credit');
+  const amt = formatAmount(tx.amount);
 
-  // Determine icon class and image based on description
-  function getTxIcon(tx) {
+  // choose icon (prefer top-level getTxIcon if available)
+  const icon = (typeof getTxIcon === 'function') ? getTxIcon(tx) : (function () {
     const desc = (tx.description || tx.narration || '').toLowerCase();
     if (desc.includes('opay')) return { cls: 'incoming', img: '/frontend/svg/bank.svg', alt: 'Opay' };
     if (desc.includes('mtn')) return { cls: 'mtn targets', img: '/frontend/img/mtn.svg', alt: 'MTN' };
@@ -180,41 +202,45 @@ function makeTxNode(tx) {
     if (desc.includes('9mobile') || desc.includes('nine-mobile')) return { cls: 'nine-mobile targets', img: '/frontend/svg/9mobile-icon.svg', alt: '9Mobile' };
     if (desc.includes('refund')) return { cls: 'refund incoming', img: '/frontend/svg/refund.svg', alt: 'Refund' };
     return { cls: isCredit ? 'incoming' : 'outgoing', img: '', alt: '' };
-  }
-  const icon = getTxIcon(tx);
+  })();
 
-  // Truncate description for display
+  // description (raw + truncated)
   const rawDesc = tx.description || tx.narration || tx.type || 'Transaction';
-  const truncatedDesc = truncateDescription(rawDesc);
+  const truncatedDesc = typeof truncateDescription === 'function' ? truncateDescription(rawDesc) : rawDesc;
 
-  // Format time like hardcoded: Nov 26, 2025 · 03:05 PM
-  const d = new Date(tx.time || tx.created_at);
+  // date & 12-hour time w/ AM/PM (e.g. Nov 26, 2025 · 03:05 PM)
+  const d = new Date(tx.time || tx.created_at || Date.now());
   const dateStr = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-  const timeStr = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  const timeStr = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: true });
   const formattedDateTime = `${dateStr} · ${timeStr}`;
 
+  // build innerHTML using your exact structure and classes, with safe escaping
   item.innerHTML = `
-    <div class="tx-icon ${icon.cls}" aria-hidden="true">
-      ${icon.img ? `<div class="tx-svg" aria-hidden="true"><img class="tx-img" src="${icon.img}" alt="${icon.alt}" /></div>` : (isCredit ? '↓' : '↑')}
+    <div class="tx-icon ${escapeHtml(icon.cls)}" aria-hidden="true">
+      ${icon.img ? `<div class="tx-svg" aria-hidden="true"><img class="tx-img" src="${escapeHtml(icon.img)}" alt="${escapeHtml(icon.alt)}" /></div>` : (isCredit ? '↓' : '↑')}
     </div>
+
     <div class="tx-content">
       <div class="tx-row">
-        <div class="tx-desc" title="${rawDesc}">${truncatedDesc}</div>
-        <div class="tx-amount ${isCredit ? 'credit' : 'debit'}">
-          ${isCredit ? '+' : '-'} ₦${amount}
+        <div class="tx-desc" title="${escapeHtml(rawDesc)}">${escapeHtml(truncatedDesc)}</div>
+
+        <div class="tx-amount ${isCredit ? 'credit' : 'debit'}" title="${escapeHtml(amt.full)}" aria-label="Amount ${escapeHtml(amt.full)}">
+          ${isCredit ? '+' : '-'} ${escapeHtml(amt.display)}
         </div>
       </div>
+
       <div class="tx-row meta">
-        <div class="tx-time">${tx.reference || 'FlexGig'} • ${formattedDateTime}</div>
-        <div class="tx-status" title="${tx.status || 'SUCCESS'}">${tx.status || 'SUCCESS'}</div>
+        <div class="tx-time">${tx.reference ? escapeHtml(tx.reference) + ' • ' : ''}${escapeHtml(formattedDateTime)}</div>
+        <div class="tx-status" title="${escapeHtml(tx.status || 'SUCCESS')}">${escapeHtml(tx.status || 'SUCCESS')}</div>
       </div>
     </div>
   `;
 
-  // Click to view details or copy
+  // click handler: full details (copy on ctrl/meta)
   item.addEventListener('click', (e) => {
     const details = {
       id: tx.id || tx.reference,
+      reference: tx.reference,
       description: tx.description || tx.narration,
       amount: tx.amount,
       type: tx.type,
@@ -225,12 +251,14 @@ function makeTxNode(tx) {
     if (e.ctrlKey || e.metaKey) {
       navigator.clipboard?.writeText(JSON.stringify(details, null, 2));
     } else {
+      // non-blocking nicer modal would be ideal; keeping existing alert behavior for parity
       alert(`Transaction\n\n${JSON.stringify(details, null, 2)}`);
     }
   });
 
   return item;
 }
+
 
 window.addEventListener('resize', () => {
   document.querySelectorAll('.tx-desc').forEach(descEl => {
