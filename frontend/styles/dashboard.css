@@ -4363,34 +4363,53 @@ a[style*="color: #f00"] { color: var(--danger); }
       min-width: 0;
     }
     
-    .tx-status {
-      color: black;
-      font-size: 10px;
-      font-weight: 700;
-      padding: 3px 8px;
-      border-radius: 12px;
-      white-space: nowrap;
-      flex-shrink: 0;
-    }
-    /* Successful status */
-.tx-status[title="Successful"] {
-  background: #e4f8e8;   /* light green */
-  background: #00d4a0;    /* dark green text */
+/* BASE STATUS BADGE */
+.tx-status {
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 4px 8px;
+  border-radius: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+  min-width: fit-content;
 }
 
-/* Failed status */
-.tx-status[title="Failed"] {
-  background: #fde7e7;   /* light red */
-  color: #c62828;        /* dark red text */
+/* SUCCESS VARIATIONS */
+.tx-status[data-status="success"],
+.tx-status[data-status="successful"],
+.tx-status[data-status="completed"],
+.tx-status:where([title*="success" i], [title*="complete" i]) {
+  background: #00d4aa;  /* Opay Green */
 }
-.tx-status[title="Completed"] {
-  background: #00d4a0;   /* light green */ 
-}
-.tx-status[title="Refund"] {
-  background: #f97316;   /* orange */
+
+/* FAILED */
+.tx-status[data-status="failed"],
+.tx-status[data-status="fail"],
+.tx-status[title*="fail" i] {
+  background: #ef4444;
   color: white;
 }
 
+/* REFUND */
+.tx-status[data-status="refund"],
+.tx-status[title*="refund" i] {
+  background: #fb923c;
+  color: white;
+}
+
+/* PENDING */
+.tx-status[data-status="pending"],
+.tx-status[title*="pending" i] {
+  background: #f59e0b;
+  color: black;
+}
+.tx-icon.mtn.targets          { background: #ffcb05; }  /* MTN Yellow */
+.tx-icon.airtel.targets       { background: #e30613; color: white; }
+.tx-icon.glo.targets          { background: #00a650; color: white; }
+.tx-icon.nine-mobile.targets  { background: #8cc63e; color: black; }
+.tx-icon.refund.incoming      { background: #fb923c; color: white; }
 
     /* Amount - KEY FIX: prevent overflow */
     .tx-amount { 

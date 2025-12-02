@@ -351,11 +351,107 @@ function makeTxNode(tx) {
       </div>
     `;
 
+    function makeTxNode(tx) {
+  console.group('%cmakeTxNode START', 'color: #0f0; font-weight: bold;');
+  console.log('Raw TX Received:', tx);
+
+  try {
     /* ---------------------------------------------------------------
-       Click handler (same as before)
+       Helper: Safe truncation
+    ----------------------------------------------------------------*/
+    function safeTruncate(text) {
+      if (typeof truncateDescription === 'function') {
+        return truncateDescription(text);
+      }
+      const w = window.innerWidth;
+      const max = w >= 1024 ? 40 : w >= 640 ? 30 : 25;
+      return text && text.length > max ? text.slice(0, max) + '…' : text;
+    }
+
+    /* ---------------------------------------------------------------
+       Helper: Icon detection
+    ----------------------------------------------------------------*/
+    function safeGetIcon(txLocal) {
+      return getTxIcon(txLocal); // We trust your global getTxIcon now
+    }
+
+    /* ---------------------------------------------------------------
+       Helper: Amount formatting
+    ----------------------------------------------------------------*/
+    function formatAmountDisplay(v) {
+      const n = Math.abs(Number(v) || 0);
+      const full = '₦' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      return { display: full, full };
+    }
+
+    /* ---------------------------------------------------------------
+       Helper: Date formatting
+    ----------------------------------------------------------------*/
+    function fmtDateTime(iso) {
+      const d = new Date(iso || Date.now());
+      const dateStr = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+      const timeStr = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+      return `${dateStr} · ${timeStr}`;
+    }
+
+    /* ---------------------------------------------------------------
+       Build DOM node
+    ----------------------------------------------------------------*/
+    const item = document.createElement('article');
+    item.className = 'tx-item';
+    item.dataset.txId = tx.id || tx.reference || '';
+    item.setAttribute('role', 'listitem');
+
+    const isCredit = tx.type === 'credit';
+    const icon = safeGetIcon(tx);
+
+    const rawDesc = tx.description || tx.narration || tx.type || 'Transaction';
+    const truncatedDesc = safeTruncate(rawDesc);
+
+    const amountObj = formatAmountDisplay(tx.amount);
+    const formattedDateTime = fmtDateTime(tx.time || tx.created_at);
+    const refPart = tx.reference ? `${tx.reference} • ` : '';
+
+    // ———— FINAL STATUS BADGE LOGIC (This is the fix) ————
+    const statusRaw = (tx.status || 'success').toString().toLowerCase();
+    const statusText = (tx.status || 'success').toUpperCase();
+    let statusClass = 'success';
+    if (statusRaw.includes('fail') || statusRaw.includes('failed')) statusClass = 'failed';
+    else if (statusRaw.includes('refund')) statusClass = 'refund';
+    else if (statusRaw.includes('pending')) statusClass = 'pending';
+
+    item.innerHTML = `
+      <div class="tx-icon ${icon.cls}" aria-hidden="true">
+        ${icon.img 
+          ? `<div class="tx-svg"><img class="tx-img" src="${icon.img}" alt="${icon.alt}" /></div>`
+          : (isCredit ? 'Down Arrow' : 'Up Arrow')
+        }
+      </div>
+
+      <div class="tx-content">
+        <div class="tx-row">
+          <div class="tx-desc" title="${rawDesc}">${truncatedDesc}</div>
+          <div class="tx-amount ${isCredit ? 'credit' : 'debit'}" title="${amountObj.full}">
+            ${isCredit ? '+' : '-'} ${amountObj.display}
+          </div>
+        </div>
+
+        <div class="tx-row meta">
+          <div class="tx-time" title="${tx.reference || ''}">
+            ${refPart}${formattedDateTime}
+          </div>
+          <div class="tx-status" data-status="${statusClass}" title="${tx.status || 'SUCCESS'}">
+            ${statusText}
+          </div>
+        </div>
+      </div>
+    `;
+
+    /* ---------------------------------------------------------------
+       Click handler (exactly as you had it)
     ----------------------------------------------------------------*/
     item.addEventListener('click', (e) => {
-      console.log('🔍 Clicked TX:', tx);
+      console.log('Clicked TX:', tx);
 
       const details = {
         id: tx.id || tx.reference,
@@ -368,7 +464,7 @@ function makeTxNode(tx) {
       };
 
       if (e.ctrlKey || e.metaKey) {
-        console.log('📋 Copying details to clipboard:', details);
+        console.log('Copying details to clipboard:', details);
         navigator.clipboard?.writeText(JSON.stringify(details, null, 2));
       } else {
         alert(`Transaction\n\n${JSON.stringify(details, null, 2)}`);
@@ -377,8 +473,9 @@ function makeTxNode(tx) {
 
     console.groupEnd();
     return item;
+
   } catch (err) {
-    console.error('❌ FATAL RENDER ERROR in makeTxNode:', err, tx);
+    console.error('FATAL RENDER ERROR in makeTxNode:', err, tx);
     console.groupEnd();
 
     const fallback = document.createElement('div');
@@ -388,7 +485,6 @@ function makeTxNode(tx) {
   }
 }
 
-
 window.addEventListener('resize', () => {
   document.querySelectorAll('.tx-desc').forEach(descEl => {
     const fullText = descEl.getAttribute('title') || descEl.textContent;
@@ -397,47 +493,63 @@ window.addEventListener('resize', () => {
 });
 
 
-  function renderChunked(groupedMonths) {
-    historyList.innerHTML = '';
-    state.lastRenderIndex = 0;
+  /* ============================================================= */
+/* 2. renderChunked(groupedMonths) — FULLY FIXED + SELF-CONTAINED */
+/* ============================================================= */
+function renderChunked(groupedMonths) {
+  historyList.innerHTML = '';
+  state.lastRenderIndex = 0;
 
-    const flat = [];
+  const flat = [];
+  groupedMonths.forEach(month => {
+    flat.push({ type: 'month-header', month });
+    month.txs.forEach(tx => flat.push({ type: 'tx', tx }));
+  });
 
-    groupedMonths.forEach(month => {
-      flat.push({ type: 'month-header', month });
-      month.txs.forEach(tx => flat.push({ type: 'tx', tx }));
-    });
+  function renderNextChunk() {
+    const start = state.lastRenderIndex;
+    const end = Math.min(flat.length, start + CONFIG.chunkRenderSize);
+    const fragment = document.createDocumentFragment();
 
-    function renderNextChunk() {
-      const start = state.lastRenderIndex;
-      const end = Math.min(flat.length, start + CONFIG.chunkRenderSize);
+    for (let i = start; i < end; i++) {
+      const entry = flat[i];
 
-      for (let i = start; i < end; i++) {
-        const item = flat[i];
+      if (entry.type === 'month-header') {
+        const header = document.createElement('div');
+        header.className = 'month-header';
 
-        if (item.type === 'month-header') {
-          const header = document.createElement('div');
-          header.style.cssText = 'padding: 16px; background: rgba(0,212,170,0.08); border-radius: 12px; margin: 16px 12px 8px;';
-          header.innerHTML = `
-            <div style="font-weight: 700; font-size: 16px; color: white;">${item.month.prettyMonth}</div>
-            <div style="font-size: 13px; color: #00d4aa; margin-top: 4px;">
-              In: ₦${item.month.totalIn.toLocaleString()} &nbsp;&nbsp;&nbsp; Out: ₦${item.month.totalOut.toLocaleString()}
-            </div>
-          `;
-          historyList.appendChild(header);
-        } else {
-          historyList.appendChild(makeTxNode(item.tx));
-        }
+        const today = new Date();
+        const isCurrentMonth = 
+          today.getFullYear() === new Date(entry.month.monthKey + '-01').getFullYear() &&
+          today.getMonth() === new Date(entry.month.monthKey + '-01').getMonth();
+
+        if (isCurrentMonth) header.classList.add('current');
+
+        header.innerHTML = `
+          <div class="month-title">${entry.month.prettyMonth}</div>
+          <div class="month-summary">
+            <span>In: ₦${Number(entry.month.totalIn).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+            <span>Out: ₦${Number(entry.month.totalOut).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+          </div>
+        `;
+        fragment.appendChild(header);
+      } else {
+        fragment.appendChild(makeTxNode(entry.tx));
       }
-
-      state.lastRenderIndex = end;
-      if (end < flat.length) requestAnimationFrame(renderNextChunk);
     }
 
-    window.trunTx();
+    historyList.appendChild(fragment);
+    state.lastRenderIndex = end;
 
-    renderNextChunk();
+    if (end < flat.length) {
+      requestAnimationFrame(renderNextChunk);
+    } else {
+      window.trunTx?.();
+    }
   }
+
+  renderNextChunk();
+}
 
 
 
