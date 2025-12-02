@@ -219,7 +219,7 @@ function makeTxNode(tx) {
       if (desc.includes('opay')) return { cls: 'incoming', img: '/frontend/svg/bank.svg', alt: 'Opay' };
       if (desc.includes('mtn')) return { cls: 'mtn targets', img: '/frontend/img/mtn.svg', alt: 'MTN' };
       if (desc.includes('airtel')) return { cls: 'airtel targets', img: '/frontend/svg/airtel-icon.svg', alt: 'Airtel' };
-      if (desc.includes('glo')) return { cls: 'glo targets', img: '/frontend/svg/glo-icon.svg', alt: 'GLO' };
+      if (desc.includes('glo')) return { cls: 'glo targets', img: '/frontend/svg/GLO-icon.svg', alt: 'GLO' };
       if (desc.includes('9mobile') || desc.includes('nine-mobile'))
         return { cls: 'nine-mobile targets', img: '/frontend/svg/9mobile-icon.svg', alt: '9Mobile' };
       if (desc.includes('refund'))
