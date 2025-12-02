@@ -1,6 +1,5 @@
-/* transaction-history.js
-   Production-ready JS for transaction history modal — NOW WITH 100% ACCURATE IN/OUT TOTALS + FULL HISTORY
-   All original features preserved + your console code fully integrated
+/* transaction-history.js - INTEGRATED WITH MODAL MANAGER
+   Now fully controlled by ModalManager for open/close/navigation
 */
 
 (() => {
@@ -20,17 +19,21 @@
 
   /* -------------------------- DOM -------------------------- */
   const modal = document.getElementById('historyModal');
-  const panel = modal.querySelector('.opay-panel');
-  const backdrop = modal.querySelector('.opay-backdrop');
-  const closeButtons = modal.querySelectorAll('[data-close]');
+  const panel = modal?.querySelector('.opay-panel');
+  const backdrop = modal?.querySelector('.opay-backdrop');
   const historyList = document.getElementById('historyList');
   const loadingEl = document.getElementById('historyLoading');
   const emptyEl = document.getElementById('historyEmpty');
   const errorEl = document.getElementById('historyError');
   const downloadBtn = document.getElementById('downloadHistory');
-  const monthSelector = modal.querySelector('.opay-month-selector span');
-  const inEl = modal.querySelector('.opay-in strong');
-  const outEl = modal.querySelector('.opay-out strong');
+  const monthSelector = modal?.querySelector('.opay-month-selector span');
+  const inEl = modal?.querySelector('.opay-in strong');
+  const outEl = modal?.querySelector('.opay-out strong');
+
+  if (!modal || !panel) {
+    console.error('[TransactionHistory] Modal elements not found - check your HTML');
+    return;
+  }
 
   /* -------------------------- STATE -------------------------- */
   let state = {
@@ -72,6 +75,22 @@
       return iso;
     }
   }
+
+
+  function getTxIcon(tx) {
+  const desc = (tx.description || tx.narration || '').toLowerCase();
+  
+  if (desc.includes('opay')) return { cls: 'incoming', img: '/frontend/svg/bank.svg', alt: 'Opay' };
+  if (desc.includes('mtn')) return { cls: 'mtn targets', img: '/frontend/img/mtn.svg', alt: 'MTN' };
+  if (desc.includes('airtel')) return { cls: 'airtel targets', img: '/frontend/svg/airtel-icon.svg', alt: 'Airtel' };
+  if (desc.includes('glo')) return { cls: 'glo targets', img: '/frontend/svg/glo-icon.svg', alt: 'GLO' };
+  if (desc.includes('9mobile') || desc.includes('nine-mobile')) return { cls: 'nine-mobile targets', img: '/frontend/svg/9mobile-icon.svg', alt: '9Mobile' };
+  if (desc.includes('refund')) return { cls: 'refund incoming', img: '/frontend/svg/refund.svg', alt: 'Refund' };
+
+  // default
+  return { cls: tx.type === 'credit' ? 'incoming' : 'outgoing', img: '', alt: '' };
+}
+
 
   function groupTransactions(items) {
     const monthMap = new Map();
@@ -127,50 +146,99 @@
       });
   }
 
+    function truncateDescription(text) {
+  if (!text) return '';
+  
+  let maxChars = 25; // default for mobile
+  const width = window.innerWidth;
+
+  if (width >= 640 && width < 1024) maxChars = 30; // tablet
+  else if (width >= 1024) maxChars = 40; // desktop
+
+  return text.length > maxChars ? text.slice(0, maxChars) + '…' : text;
+}
+
+
   /* -------------------------- RENDER -------------------------- */
-  function makeTxNode(tx) {
-    const item = document.createElement('div');
-    item.className = 'tx-item';
-    item.dataset.id = tx.id || tx.reference || '';
+function makeTxNode(tx) {
+  const item = document.createElement('article');
+  item.className = 'tx-item';
+  item.dataset.txId = tx.id || tx.reference || '';
+  item.setAttribute('role', 'listitem');
 
-    const isCredit = tx.type === 'credit';
-    const amount = Math.abs(Number(tx.amount || 0)).toLocaleString();
+  // Determine if credit or debit
+  const isCredit = tx.type === 'credit';
+  const amount = Math.abs(Number(tx.amount || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-    item.innerHTML = `
-      <div class="tx-icon ${isCredit ? 'incoming' : 'outgoing'}">
-        ${isCredit ? 'Plus' : 'Minus'}
-      </div>
-      <div class="tx-content">
-        <div class="tx-desc">${tx.description || tx.narration || tx.type || 'Transaction'}</div>
-        <div class="tx-time">
-          ${tx.reference || 'FlexGig'} • ${new Date(tx.time || tx.created_at).toLocaleDateString('en-NG', { day: 'numeric', month: 'short' })} ${new Date(tx.time || tx.created_at).toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' })}
+  // Determine icon class and image based on description
+  function getTxIcon(tx) {
+    const desc = (tx.description || tx.narration || '').toLowerCase();
+    if (desc.includes('opay')) return { cls: 'incoming', img: '/frontend/svg/bank.svg', alt: 'Opay' };
+    if (desc.includes('mtn')) return { cls: 'mtn targets', img: '/frontend/img/mtn.svg', alt: 'MTN' };
+    if (desc.includes('airtel')) return { cls: 'airtel targets', img: '/frontend/svg/airtel-icon.svg', alt: 'Airtel' };
+    if (desc.includes('glo')) return { cls: 'glo targets', img: '/frontend/svg/glo-icon.svg', alt: 'GLO' };
+    if (desc.includes('9mobile') || desc.includes('nine-mobile')) return { cls: 'nine-mobile targets', img: '/frontend/svg/9mobile-icon.svg', alt: '9Mobile' };
+    if (desc.includes('refund')) return { cls: 'refund incoming', img: '/frontend/svg/refund.svg', alt: 'Refund' };
+    return { cls: isCredit ? 'incoming' : 'outgoing', img: '', alt: '' };
+  }
+  const icon = getTxIcon(tx);
+
+  // Truncate description for display
+  const rawDesc = tx.description || tx.narration || tx.type || 'Transaction';
+  const truncatedDesc = truncateDescription(rawDesc);
+
+  // Format time like hardcoded: Nov 26, 2025 · 03:05 PM
+  const d = new Date(tx.time || tx.created_at);
+  const dateStr = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  const timeStr = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  const formattedDateTime = `${dateStr} · ${timeStr}`;
+
+  item.innerHTML = `
+    <div class="tx-icon ${icon.cls}" aria-hidden="true">
+      ${icon.img ? `<div class="tx-svg" aria-hidden="true"><img class="tx-img" src="${icon.img}" alt="${icon.alt}" /></div>` : (isCredit ? '↓' : '↑')}
+    </div>
+    <div class="tx-content">
+      <div class="tx-row">
+        <div class="tx-desc" title="${rawDesc}">${truncatedDesc}</div>
+        <div class="tx-amount ${isCredit ? 'credit' : 'debit'}">
+          ${isCredit ? '+' : '-'} ₦${amount}
         </div>
       </div>
-      <div class="tx-amount ${isCredit ? 'credit' : 'debit'}">
-        ${isCredit ? '+' : '-'}₦${amount}
-        <div class="tx-status">SUCCESS</div>
+      <div class="tx-row meta">
+        <div class="tx-time">${tx.reference || 'FlexGig'} • ${formattedDateTime}</div>
+        <div class="tx-status" title="${tx.status || 'SUCCESS'}">${tx.status || 'SUCCESS'}</div>
       </div>
-    `;
+    </div>
+  `;
 
-    item.addEventListener('click', (e) => {
-      const details = {
-        id: tx.id || tx.reference,
-        description: tx.description || tx.narration,
-        amount: tx.amount,
-        type: tx.type,
-        time: tx.time || tx.created_at,
-        status: tx.status || 'SUCCESS'
-      };
+  // Click to view details or copy
+  item.addEventListener('click', (e) => {
+    const details = {
+      id: tx.id || tx.reference,
+      description: tx.description || tx.narration,
+      amount: tx.amount,
+      type: tx.type,
+      time: tx.time || tx.created_at,
+      status: tx.status || 'SUCCESS'
+    };
 
-      if (e.ctrlKey || e.metaKey) {
-        navigator.clipboard?.writeText(JSON.stringify(details, null, 2));
-      } else {
-        alert(`Transaction\n\n${JSON.stringify(details, null, 2)}`);
-      }
-    });
+    if (e.ctrlKey || e.metaKey) {
+      navigator.clipboard?.writeText(JSON.stringify(details, null, 2));
+    } else {
+      alert(`Transaction\n\n${JSON.stringify(details, null, 2)}`);
+    }
+  });
 
-    return item;
-  }
+  return item;
+}
+
+window.addEventListener('resize', () => {
+  document.querySelectorAll('.tx-desc').forEach(descEl => {
+    const fullText = descEl.getAttribute('title') || descEl.textContent;
+    descEl.textContent = truncateDescription(fullText);
+  });
+});
+
 
   function renderChunked(groupedMonths) {
     historyList.innerHTML = '';
@@ -209,8 +277,12 @@
       if (end < flat.length) requestAnimationFrame(renderNextChunk);
     }
 
+    window.trunTx();
+
     renderNextChunk();
   }
+
+
 
   function showStateUI() {
     hide(loadingEl); hide(emptyEl); hide(errorEl);
@@ -220,9 +292,8 @@
 
   /* -------------------------- PRELOAD ON PAGE LOAD → INSTANT OPEN -------------------------- */
   async function preloadHistoryForInstantOpen() {
-    if (state.preloaded) return; // Already loaded, just return
+    if (state.preloaded) return;
     if (state.preloadingInProgress) {
-      // If already loading, wait for it to complete
       return new Promise((resolve) => {
         const checkInterval = setInterval(() => {
           if (state.preloaded || !state.preloadingInProgress) {
@@ -234,8 +305,7 @@
     }
     
     state.preloadingInProgress = true;
-
-    console.log('Preloading full history for instant open...');
+    console.log('[TransactionHistory] Preloading full history for instant open...');
 
     let allTx = [];
     let page = 1;
@@ -249,7 +319,7 @@
         hasMore = page < (data.totalPages || data.total_pages || 1);
         page++;
       } catch (err) {
-        console.error('Preload failed:', err);
+        console.error('[TransactionHistory] Preload failed:', err);
         break;
       }
     }
@@ -270,8 +340,8 @@
       else totalOut += amt;
     });
 
-    inEl.textContent = `₦${totalIn.toLocaleString()}`;
-    outEl.textContent = `₦${totalOut.toLocaleString()}`;
+    if (inEl) inEl.textContent = `₦${totalIn.toLocaleString()}`;
+    if (outEl) outEl.textContent = `₦${totalOut.toLocaleString()}`;
 
     state.fullHistoryLoaded = true;
     state.accurateTotalsCalculated = true;
@@ -280,7 +350,7 @@
     state.preloadingInProgress = false;
 
     hide(loadingEl);
-    console.log(`PRELOADED ${allTx.length} transactions → History now opens INSTANTLY`);
+    console.log(`[TransactionHistory] PRELOADED ${allTx.length} transactions → History now opens INSTANTLY`);
   }
 
   /* -------------------------- MONTH FILTER FUNCTIONS -------------------------- */
@@ -289,6 +359,7 @@
   }
 
   function updateMonthDisplay() {
+    if (!monthSelector) return;
     if (selectedMonth) {
       const date = new Date(selectedMonth.year, selectedMonth.month);
       monthSelector.textContent = formatMonthYear(date);
@@ -315,8 +386,8 @@
       else totalOut += amt;
     });
 
-    inEl.textContent = `₦${totalIn.toLocaleString()}`;
-    outEl.textContent = `₦${totalOut.toLocaleString()}`;
+    if (inEl) inEl.textContent = `₦${totalIn.toLocaleString()}`;
+    if (outEl) outEl.textContent = `₦${totalOut.toLocaleString()}`;
   }
 
   function applyMonthFilterAndRender() {
@@ -331,8 +402,8 @@
         if (tx.type === 'credit') totalIn += amt;
         else totalOut += amt;
       });
-      inEl.textContent = `₦${totalIn.toLocaleString()}`;
-      outEl.textContent = `₦${totalOut.toLocaleString()}`;
+      if (inEl) inEl.textContent = `₦${totalIn.toLocaleString()}`;
+      if (outEl) outEl.textContent = `₦${totalOut.toLocaleString()}`;
       
       hide(emptyEl);
       return;
@@ -390,10 +461,10 @@
     if (existing) existing.remove();
 
     const modalHTML = `
-      <div id="monthFilterModal" class="opay-modal hidden">
-        <div class="opay-backdrop" data-close-month></div>
-        <div class="opay-panel" style="max-width: 380px; width: 90%; padding: 0;">
-          <div class="opay-header" style="padding: 16px; border-bottom: 1px solid #eee; font-weight: 600; text-align: center; position: relative;">
+      <div id="monthFilterModal" class="opay-modal hidden" style="position: fixed; inset: 0; z-index: 10000000; display: flex; align-items: center; justify-content: center;">
+        <div class="opay-backdrop" data-close-month style="position: absolute; inset: 0; background: rgba(0,0,0,0.5);"></div>
+        <div class="opay-panel" style="position: relative; max-width: 380px; width: 90%; padding: 0; background: white; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.3);">
+          <div class="opay-header" style="padding: 16px; border-bottom: 1px solid #eee; font-weight: 600; text-align: center; position: relative; color: #333;">
             <button data-close-month style="position: absolute; left: 16px; background: transparent; border: none; font-size: 24px; cursor: pointer; color: #999;">×</button>
             Select Month
           </div>
@@ -452,37 +523,43 @@
     }
   }
 
-  monthSelector.addEventListener('click', () => {
-    createMonthPickerModal();
-    const modalEl = document.getElementById('monthFilterModal');
-    modalEl.classList.remove('hidden');
-    generateMonthGrid();
+  if (monthSelector) {
+    monthSelector.addEventListener('click', () => {
+      createMonthPickerModal();
+      const modalEl = document.getElementById('monthFilterModal');
+      modalEl.classList.remove('hidden');
+      generateMonthGrid();
 
-    modalEl.querySelector('#confirmMonthBtn').onclick = () => {
-      updateMonthDisplay();
-      applyMonthFilterAndRender();
-      modalEl.classList.add('hidden');
-    };
+      modalEl.querySelector('#confirmMonthBtn').onclick = () => {
+        updateMonthDisplay();
+        applyMonthFilterAndRender();
+        modalEl.classList.add('hidden');
+      };
 
-    modalEl.querySelector('#allTimeBtn').onclick = () => {
-      selectedMonth = null;
-      updateMonthDisplay();
-      applyMonthFilterAndRender();
-      modalEl.classList.add('hidden');
-    };
+      modalEl.querySelector('#allTimeBtn').onclick = () => {
+        selectedMonth = null;
+        updateMonthDisplay();
+        applyMonthFilterAndRender();
+        modalEl.classList.add('hidden');
+      };
 
-    modalEl.querySelectorAll('[data-close-month], .opay-backdrop').forEach(el => {
-      el.onclick = () => modalEl.classList.add('hidden');
+      modalEl.querySelectorAll('[data-close-month], .opay-backdrop').forEach(el => {
+        el.onclick = () => modalEl.classList.add('hidden');
+      });
     });
+  }
+
+  /* -------------------------- MODAL OPEN/CLOSE (MANAGED BY MODAL MANAGER) -------------------------- */
+  // Listen for Modal Manager events
+  document.addEventListener('modalOpened', (e) => {
+    if (e.detail === 'historyModal') {
+      console.log('[TransactionHistory] Modal opened by ModalManager');
+      handleModalOpened();
+    }
   });
 
-  /* -------------------------- MODAL OPEN/CLOSE -------------------------- */
-  async function openModal() {
-    modal.classList.add('open');
-    modal.classList.remove('hidden');
-    modal.style.pointerEvents = 'auto';
+  async function handleModalOpened() {
     state.open = true;
-
     selectedMonth = null;
     updateMonthDisplay();
     
@@ -501,25 +578,15 @@
       hide(loadingEl);
       show(emptyEl);
     }
-
-    trapFocus();
-  }
-
-  function closeModal() {
-    modal.classList.remove('open');
-    modal.classList.add('hidden');
-    modal.style.pointerEvents = 'none';
-    setState({ open: false });
-    releaseFocusTrap();
   }
 
   /* -------------------------- EVENT LISTENERS -------------------------- */
-  closeButtons.forEach(btn => btn.addEventListener('click', closeModal));
-  backdrop.addEventListener('click', closeModal);
+  // NOTE: Close buttons are now handled by Modal Manager
+  // Remove manual close button handlers to avoid conflicts
 
   document.addEventListener('keydown', e => {
     if (!state.open) return;
-    if (e.key === 'Escape') closeModal();
+    // Let Modal Manager handle Escape key
     if (e.key === 'ArrowDown') historyList.scrollBy({ top: 120, behavior: 'smooth' });
     if (e.key === 'ArrowUp') historyList.scrollBy({ top: -120, behavior: 'smooth' });
   });
@@ -571,67 +638,8 @@
     });
   }
 
-  /* -------------------------- FOCUS TRAP & SWIPE -------------------------- */
-  let previouslyFocused = null;
-  function trapFocus() {
-    previouslyFocused = document.activeElement;
-    const focusables = panel.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
-    const first = focusables[0];
-    const last = focusables[focusables.length - 1];
-    if (first) first.focus();
-
-    function keyListener(e) {
-      if (e.key !== 'Tab') return;
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    }
-    panel.__focusTrap = keyListener;
-    panel.addEventListener('keydown', keyListener);
-  }
-
-  function releaseFocusTrap() {
-    if (panel && panel.__focusTrap) {
-      panel.removeEventListener('keydown', panel.__focusTrap);
-      delete panel.__focusTrap;
-    }
-    if (previouslyFocused?.focus) previouslyFocused.focus();
-  }
-
-  (function addSwipeToClose(el) {
-    let startY = 0, currentY = 0, touching = false;
-    el.addEventListener('touchstart', ev => {
-      if (!state.open) return;
-      touching = true;
-      startY = ev.touches[0].clientY;
-      el.style.transition = '';
-    }, { passive: true });
-    el.addEventListener('touchmove', ev => {
-      if (!touching) return;
-      currentY = ev.touches[0].clientY - startY;
-      if (currentY > 0) el.style.transform = `translateY(${currentY}px)`;
-    }, { passive: true });
-    el.addEventListener('touchend', () => {
-      touching = false;
-      el.style.transition = 'transform 200ms ease';
-      if (currentY > 120) {
-        el.style.transform = `translateY(100vh)`;
-        setTimeout(closeModal, 180);
-      } else {
-        el.style.transform = '';
-      }
-      startY = currentY = 0;
-    }, { passive: true });
-  })(panel);
-
   /* -------------------------- PUBLIC API -------------------------- */
   window.TransactionHistory = {
-    open: openModal,
-    close: closeModal,
     reload: () => {
       state.items = [];
       state.page = 1;
@@ -641,7 +649,7 @@
       state.accurateTotalsCalculated = false;
       state.preloaded = false;
       state.preloadingInProgress = false;
-      if (modal.classList.contains('open')) openModal();
+      if (state.open) handleModalOpened();
     },
     setApi: (url) => { CONFIG.apiEndpoint = url; },
     setAuthToken: (token) => { window.APP_TOKEN = token; },
@@ -653,21 +661,58 @@
     getAll: () => state.items.slice()
   };
 
-  document.addEventListener('click', e => {
-    if (e.target.closest('[data-open-history]')) openModal();
-  });
-
   document.addEventListener('transaction_update', () => {
-    if (modal.classList.contains('open')) {
-      console.log('New transaction → refreshing history');
+    if (state.open) {
+      console.log('[TransactionHistory] New transaction → refreshing history');
       window.TransactionHistory.reload();
     }
   });
 
   showStateUI();
   updateMonthDisplay();
-  console.log('FlexGig Transaction History → READY WITH ALL-TIME VIEW');
+  console.log('[TransactionHistory] READY - Controlled by ModalManager');
 
+  // Preload on page load
   preloadHistoryForInstantOpen();
+
+    function trunTx() {
+  const rows = document.querySelectorAll('.tx-row');
+
+  rows.forEach(row => {
+    const desc = row.querySelector('.tx-desc');
+    if (!desc) return;
+
+    // store full text
+    if (!desc.dataset.fullText) {
+      desc.dataset.fullText = desc.textContent;
+    }
+
+    let fullText = desc.dataset.fullText;
+    let maxChars = 25; // default for small devices
+
+    const width = window.innerWidth;
+
+    if (width >= 640 && width < 1024) {
+      maxChars = 30; // tablets
+    } else if (width >= 1024) {
+      maxChars = 40; // desktop
+    }
+
+    if (fullText.length > maxChars) {
+      desc.textContent = fullText.slice(0, maxChars) + '…';
+    } else {
+      desc.textContent = fullText;
+    }
+  }); 
+}
+window.trunTx = window.trunTx || trunTx;
+
+// Run initially
+window.trunTx();
+
+// Run on resize
+window.addEventListener('resize', window.trunTx);
+
+  
 
 })();
