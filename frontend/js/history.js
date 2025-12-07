@@ -290,24 +290,23 @@ function renderChunked(groupedMonths) {
       const entry = flat[i];
 
       if (entry.type === 'month-header') {
-        const header = document.createElement('div');
-        header.className = 'month-header';
+  const header = document.createElement('div');
+  header.className = 'month-header';
 
-        const today = new Date();
-        const isCurrentMonth = 
-          today.getFullYear() === new Date(entry.month.monthKey + '-01').getFullYear() &&
-          today.getMonth() === new Date(entry.month.monthKey + '-01').getMonth();
+  const today = new Date();
+  const isCurrentMonth = 
+    today.getFullYear() === new Date(entry.month.monthKey + '-01').getFullYear() &&
+    today.getMonth() === new Date(entry.month.monthKey + '-01').getMonth();
 
-        if (isCurrentMonth) header.classList.add('current');
+  if (isCurrentMonth) header.classList.add('current');
 
-        header.innerHTML = `
-          <div class="month-title">${entry.month.prettyMonth}</div>
-          <div class="month-summary">
-            <span>In: ₦${Number(entry.month.totalIn).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
-            <span>Out: ₦${Number(entry.month.totalOut).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
-          </div>
-        `;
-        fragment.appendChild(header);
+  // Only display the month title, remove totals
+  header.innerHTML = `
+    <div class="month-title">${entry.month.prettyMonth}</div>
+  `;
+  fragment.appendChild(header);
+
+
       } else {
         fragment.appendChild(makeTxNode(entry.tx));
       }

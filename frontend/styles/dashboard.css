@@ -4526,13 +4526,67 @@ a[style*="color: #f00"] { color: var(--danger); }
   display: flex;
   align-items: center;
   justify-content: center;
+  font-family: 'Inter', sans-serif;
 }
+
 #monthFilterModal .opay-backdrop {
   background: rgba(0,0,0,0.5);
+  backdrop-filter: blur(2px);
 }
+
+#monthFilterModal .opay-panel {
+  position: relative;
+  max-width: 380px;
+  width: 90%;
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+  overflow: hidden;
+  transform: scale(0.9);
+  opacity: 0;
+  transition: all 0.25s ease-in-out;
+}
+
+#monthFilterModal.show .opay-panel {
+  transform: scale(1);
+  opacity: 1;
+}
+
+#monthGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: 12px;
+  padding: 20px;
+}
+
+#monthGrid .month-btn {
+  padding: 12px 16px;
+  border: 1px solid #ddd;
+  border-radius: 12px;
+  background: #fff;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+}
+
+#monthGrid .month-btn:hover {
+  background: #f0fdfa;
+  border-color: #00d4aa;
+  transform: translateY(-2px);
+}
+
+#monthGrid .month-btn.selected {
+  background: #00d4aa;
+  color: #fff;
+  border-color: #00d4aa;
+  box-shadow: 0 4px 12px rgba(0,212,170,0.3);
+}
+
 #monthFilterModal button:hover {
   opacity: 0.9;
 }
+
 #monthFilterModal button:active {
   transform: scale(0.98);
 }
