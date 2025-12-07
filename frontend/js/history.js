@@ -1,7 +1,8 @@
 /* transaction-history.js - FULLY FIXED VERSION
    - Clear hardcoded HTML on init
    - Default to current month
-   - Sticky month headers with scroll replacement
+   - Uses existing HTML month header structure
+   - Sticky month headers that push each other
    - Accurate month filtering from server data
 */
 
@@ -192,7 +193,6 @@
 
       const item = document.createElement('article');
       item.className = 'tx-item';
-      item.dataset.txId = tx.id || tx.reference || '';
       item.setAttribute('role', 'listitem');
 
       const isCredit = tx.type === 'credit';
@@ -214,7 +214,7 @@
       item.innerHTML = `
         <div class="tx-icon ${icon.cls}" aria-hidden="true">
           ${icon.img 
-            ? `<div class="tx-svg"><img class="tx-img" src="${icon.img}" alt="${icon.alt}" /></div>`
+            ? `<div class="tx-svg" aria-hidden="true"><img class="tx-img" src="${icon.img}" alt="${icon.alt}" /></div>`
             : (isCredit ? 'Down Arrow' : 'Up Arrow')
           }
         </div>
@@ -269,43 +269,43 @@
     });
   });
 
-  /* -------------------------- STICKY MONTH HEADERS -------------------------- */
-  function makeMonthHeader(month) {
-    const header = document.createElement('div');
-    header.className = 'month-header';
-    header.dataset.monthKey = month.monthKey;
-    header.style.cssText = `
+  /* -------------------------- STICKY MONTH DIVIDERS (matching HTML structure) -------------------------- */
+  function makeMonthDivider(month) {
+    const divider = document.createElement('div');
+    divider.className = 'month-divider';
+    divider.dataset.monthKey = month.monthKey;
+    divider.style.cssText = `
       position: sticky;
       top: 0;
-      z-index: 10;
-      background: linear-gradient(135deg, #00d4aa 0%, #00bfa5 100%);
-      color: white;
-      padding: 12px 16px;
+      z-index: 5;
+      background: #1e1e1e;
+      padding: 10px 12px;
+      margin: 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      font-size: 14px;
       font-weight: 600;
-      font-size: 15px;
-      border-radius: 8px;
-      margin: 16px 0 8px 0;
-      box-shadow: 0 2px 8px rgba(0,212,170,0.2);
+      color: #999;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
     `;
-    header.innerHTML = `
-      <div style="display: flex; justify-content: space-between; align-items: center;">
-        <span>${month.prettyMonth}</span>
-        <span style="font-size: 13px; opacity: 0.9;">
-          ↓ ${formatCurrency(month.totalIn)} | ↑ ${formatCurrency(month.totalOut)}
-        </span>
-      </div>
+    divider.innerHTML = `
+      <span>${month.prettyMonth}</span>
+      <span style="font-size: 12px; opacity: 0.8;">
+        ↓ ${formatCurrency(month.totalIn)} | ↑ ${formatCurrency(month.totalOut)}
+      </span>
     `;
-    return header;
+    return divider;
   }
 
-  /* -------------------------- RENDER WITH STICKY HEADERS -------------------------- */
+  /* -------------------------- RENDER WITH MONTH DIVIDERS -------------------------- */
   function renderChunked(groupedMonths) {
     historyList.innerHTML = '';
     state.lastRenderIndex = 0;
 
     const flat = [];
     groupedMonths.forEach(month => {
-      flat.push({ type: 'month-header', month });
+      flat.push({ type: 'month-divider', month });
       month.txs.forEach(tx => flat.push({ type: 'tx', tx }));
     });
 
@@ -316,8 +316,8 @@
 
       for (let i = start; i < end; i++) {
         const entry = flat[i];
-        if (entry.type === 'month-header') {
-          fragment.appendChild(makeMonthHeader(entry.month));
+        if (entry.type === 'month-divider') {
+          fragment.appendChild(makeMonthDivider(entry.month));
         } else {
           fragment.appendChild(makeTxNode(entry.tx));
         }
