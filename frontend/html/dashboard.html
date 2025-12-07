@@ -1492,7 +1492,11 @@
       <select class="opay-select"><option>All Status</option></select>
     </div>
 
-    <!-- Month Summary -->
+
+
+    <!-- Transaction List -->
+    <div class="main-month">
+          <!-- Month Summary -->
     <div class="opay-month-header">
       <div class="opay-month-selector" role="button" tabindex="0" aria-label="Select month">
         <span>Nov 2025</span>
@@ -1508,7 +1512,6 @@
       <div class="opay-out">Out: <strong>₦00.00</strong></div>
     </div>
 
-    <!-- Transaction List -->
     <main class="opay-body" id="historyList" aria-label="Transaction list">
       <!-- HARD-CODED TRANSACTION: Payment Received (Opay/bank image slot) -->
       <article class="tx-item" data-tx-id="txn-001" aria-labelledby="tx-desc-001" role="listitem">
@@ -1655,6 +1658,7 @@
 
       <!-- Additional items would be injected here by your JS -->
     </main>
+    </div>
 
     <!-- States -->
     <div class="opay-loading hidden" id="historyLoading">Loading transactions…</div>

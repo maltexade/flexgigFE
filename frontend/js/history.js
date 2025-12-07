@@ -505,20 +505,38 @@ function renderChunked(groupedMonths) {
     if (existing) existing.remove();
 
     const modalHTML = `
-      <div id="monthFilterModal" class="opay-modal hidden" style="position: fixed; inset: 0; z-index: 10000000; display: flex; align-items: center; justify-content: center;">
-        <div class="opay-backdrop" data-close-month style="position: absolute; inset: 0; background: rgba(0,0,0,0.5);"></div>
-        <div class="opay-panel" style="position: relative; max-width: 380px; width: 90%; padding: 0; background: white; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.3);">
-          <div class="opay-header" style="padding: 16px; border-bottom: 1px solid #eee; font-weight: 600; text-align: center; position: relative; color: #333;">
-            <button data-close-month style="position: absolute; left: 16px; background: transparent; border: none; font-size: 24px; cursor: pointer; color: #999;">×</button>
-            Select Month
-          </div>
-          <div id="monthGrid" style="padding: 20px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;"></div>
-          <div style="padding: 16px; border-top: 1px solid #eee; display: flex; gap: 12px; justify-content: center;">
-            <button id="allTimeBtn" style="background: #6c757d; color: white; border: none; padding: 12px 24px; border-radius: 8px; font-weight: 600; cursor: pointer;">All Time</button>
-            <button id="confirmMonthBtn" style="background: #00d4aa; color: white; border: none; padding: 12px 32px; border-radius: 8px; font-weight: 600; cursor: pointer;">Confirm</button>
-          </div>
-        </div>
-      </div>
+  <div id="monthFilterModal" class="opay-modal hidden" style="position: fixed; inset: 0; z-index: 10000000; display: flex; align-items: center; justify-content: center; font-family: 'Inter', sans-serif;">
+  <div class="opay-backdrop" data-close-month style="position: absolute; inset: 0; background: rgba(0,0,0,0.5); backdrop-filter: blur(2px);"></div>
+  
+  <div class="opay-panel" style="position: relative; max-width: 380px; width: 90%; background: #fff; border-radius: 16px; box-shadow: 0 20px 40px rgba(0,0,0,0.2); overflow: hidden; transform: scale(0.9); opacity: 0; transition: all 0.3s ease-in-out;">
+    
+    <div class="opay-header" style="padding: 18px 16px; border-bottom: 1px solid #eee; font-weight: 600; text-align: center; position: relative; color: #222; font-size: 18px;">
+      <button data-close-month style="position: absolute; left: 16px; background: transparent; border: none; font-size: 24px; cursor: pointer; color: #999; transition: color 0.2s;">×</button>
+      Select Month
+    </div>
+    
+    <div id="monthGrid" style="padding: 24px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;">
+      <!-- Example months -->
+      <button class="month-btn">Jan</button>
+      <button class="month-btn">Feb</button>
+      <button class="month-btn">Mar</button>
+      <button class="month-btn">Apr</button>
+      <button class="month-btn">May</button>
+      <button class="month-btn">Jun</button>
+      <button class="month-btn">Jul</button>
+      <button class="month-btn">Aug</button>
+      <button class="month-btn">Sep</button>
+      <button class="month-btn">Oct</button>
+      <button class="month-btn">Nov</button>
+      <button class="month-btn">Dec</button>
+    </div>
+    
+    <div style="padding: 16px; border-top: 1px solid #eee; display: flex; gap: 12px; justify-content: center;">
+      <button id="allTimeBtn" style="background: #6c757d; color: white; border: none; padding: 12px 24px; border-radius: 10px; font-weight: 600; cursor: pointer; transition: background 0.2s;">All Time</button>
+      <button id="confirmMonthBtn" style="background: linear-gradient(90deg,#00d4aa,#00bfa5); color: white; border: none; padding: 12px 32px; border-radius: 10px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 10px rgba(0,212,170,0.3); transition: all 0.2s;">Confirm</button>
+    </div>
+  </div>
+</div>
     `;
     document.body.insertAdjacentHTML('beforeend', modalHTML);
   }

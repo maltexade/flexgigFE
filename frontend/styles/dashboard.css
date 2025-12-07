@@ -4119,6 +4119,8 @@ a[style*="color: #f00"] { color: var(--danger); }
       flex-shrink: 0;
       gap: 8px;
       min-height: 56px;
+      margin-bottom: 0;
+      margin-bottom: 10px !important;
     }
 
     .opay-back-btn { 
@@ -4158,6 +4160,13 @@ a[style*="color: #f00"] { color: var(--danger); }
       white-space: nowrap;
       flex-shrink: 0;
     }
+    .main-month {
+      margin-left: 15px;
+      margin-right: 15px;
+      margin-bottom: 80px;
+      margin-top: 10px;
+      border: 1px solid rgba(255,255,255,0.05);
+    }
 
     /* Filters */
     .opay-filters { 
@@ -4187,6 +4196,7 @@ a[style*="color: #f00"] { color: var(--danger); }
       background: #1e1e1e; 
       gap: 12px;
       flex-wrap: wrap;
+      overflow: hidden;
     }
     
     .opay-month-selector { 
@@ -4237,10 +4247,8 @@ a[style*="color: #f00"] { color: var(--danger); }
   flex: 1; 
   overflow-y: auto; 
   overflow-x: hidden;
-  padding: 8px 0; 
+  padding: 0 0; 
   background: #121212;
-  border-radius: 8px;
-  border: 1px solid #2a2a2a;
     max-width: 100%;        /* Prevent the container from expanding */
   overflow-x: hidden;     /* Hide any accidental overflow */
 
@@ -4251,6 +4259,20 @@ a[style*="color: #f00"] { color: var(--danger); }
 .opay-body::-webkit-scrollbar { 
   display: none;                      /* Chrome/Safari/Edge */
 }
+.month-container {
+  position: sticky;
+  top: 0;
+  z-index: 111115 !important;
+  background: #121212;
+  margin: 0;
+  overflow: hidden;
+  
+  /* Add these */
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
 
 
     /* Transaction Item */
@@ -4259,18 +4281,17 @@ a[style*="color: #f00"] { color: var(--danger); }
       gap: 10px;
       align-items: flex-start;
       padding: 12px 12px;
-      border-bottom: 1px solid #2a2a2a;
       background: transparent;
-      min-width: 0;
+      min-width: 0;    
     }
 
     .tx-item:focus-within { background: rgba(255,255,255,0.02); }
 
     /* Icon */
     .tx-icon {
-      width: 44px;
-      height: 44px;
-      min-width: 44px;
+      width: 40px;
+      height: 40px;
+      min-width: 40px;
       border-radius: 10px;
       display: flex;
       align-items: center;
@@ -4320,7 +4341,7 @@ a[style*="color: #f00"] { color: var(--danger); }
       min-width: 0;
       display: flex; 
       flex-direction: column; 
-      gap: 6px;
+      gap: 3px;
       overflow: hidden;
     }
 
@@ -4342,8 +4363,8 @@ a[style*="color: #f00"] { color: var(--danger); }
     /* Description - KEY FIX: proper text truncation */
     .tx-desc {
       color: white;
-      font-weight: 600;
-      font-size: 14px;
+      font-weight: 400;
+      font-size: 13.3px;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -4366,7 +4387,7 @@ a[style*="color: #f00"] { color: var(--danger); }
 /* BASE STATUS BADGE */
 .tx-status {
   color: white;
-  font-size: 10px;
+  font-size: 7.9px;
   font-weight: 700;
   padding: 4px 8px;
   border-radius: 12px;
@@ -4382,6 +4403,8 @@ a[style*="color: #f00"] { color: var(--danger); }
 .tx-status[data-status="completed"],
 .tx-status:where([title*="success" i], [title*="complete" i]) {
   background: #00d4aa;  /* Opay Green */
+  color: rgb(15, 100, 15);
+  font-weight: 700;
 }
 
 /* FAILED */
@@ -4414,7 +4437,7 @@ a[style*="color: #f00"] { color: var(--danger); }
     /* Amount - KEY FIX: prevent overflow */
     .tx-amount { 
       text-align: right; 
-      font-weight: 700; 
+      font-weight: 600; 
       font-size: 14px; 
       white-space: nowrap;
       flex-shrink: 0;
