@@ -4161,11 +4161,14 @@ a[style*="color: #f00"] { color: var(--danger); }
       flex-shrink: 0;
     }
     .main-month {
-      margin-left: 15px;
-      margin-right: 15px;
-      margin-bottom: 80px;
-      margin-top: 10px;
-    }
+  margin-left: 15px;
+  margin-right: 15px;
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
 .month-container {
   position: relative;
   border-top-right-radius: 20px;
@@ -4281,6 +4284,7 @@ a[style*="color: #f00"] { color: var(--danger); }
   background: #121212;
   margin: 0;
   overflow: hidden;
+  flex-shrink: 0;
   
   /* Add these */
   transform: translateZ(0);

@@ -55,7 +55,9 @@
   };
 
   /* -------------------------- MONTH FILTER STATE -------------------------- */
-  let selectedMonth = null; // null = show all months
+  // Initialize with current month
+  const now = new Date();
+  let selectedMonth = { year: now.getFullYear(), month: now.getMonth() };
 
   /* -------------------------- UTIL -------------------------- */
   function formatCurrency(amount) {
@@ -78,18 +80,18 @@
 
 
   function getTxIcon(tx) {
-  const desc = (tx.description || tx.narration || '').toLowerCase();
-  
-  if (desc.includes('opay')) return { cls: 'incoming', img: '/frontend/svg/bank.svg', alt: 'Opay' };
-  if (desc.includes('mtn')) return { cls: 'mtn targets', img: '/frontend/img/mtn.svg', alt: 'MTN' };
-  if (desc.includes('airtel')) return { cls: 'airtel targets', img: '/frontend/svg/airtel-icon.svg', alt: 'Airtel' };
-  if (desc.includes('glo')) return { cls: 'glo targets', img: '/frontend/svg/glo-icon.svg', alt: 'GLO' };
-  if (desc.includes('9mobile') || desc.includes('nine-mobile')) return { cls: 'nine-mobile targets', img: '/frontend/svg/9mobile-icon.svg', alt: '9Mobile' };
-  if (desc.includes('refund')) return { cls: 'refund incoming', img: '/frontend/svg/refund.svg', alt: 'Refund' };
+    const desc = (tx.description || tx.narration || '').toLowerCase();
+    
+    if (desc.includes('opay')) return { cls: 'incoming', img: '/frontend/svg/bank.svg', alt: 'Opay' };
+    if (desc.includes('mtn')) return { cls: 'mtn targets', img: '/frontend/img/mtn.svg', alt: 'MTN' };
+    if (desc.includes('airtel')) return { cls: 'airtel targets', img: '/frontend/svg/airtel-icon.svg', alt: 'Airtel' };
+    if (desc.includes('glo')) return { cls: 'glo targets', img: '/frontend/svg/glo-icon.svg', alt: 'GLO' };
+    if (desc.includes('9mobile') || desc.includes('nine-mobile')) return { cls: 'nine-mobile targets', img: '/frontend/svg/9mobile-icon.svg', alt: '9Mobile' };
+    if (desc.includes('refund')) return { cls: 'refund incoming', img: '/frontend/svg/refund.svg', alt: 'Refund' };
 
-  // default
-  return { cls: tx.type === 'credit' ? 'incoming' : 'outgoing', img: '', alt: '' };
-}
+    // default
+    return { cls: tx.type === 'credit' ? 'incoming' : 'outgoing', img: '', alt: '' };
+  }
 
 
   function groupTransactions(items) {
@@ -146,165 +148,186 @@
       });
   }
 
-    function truncateDescription(text) {
-  if (!text) return '';
-  
-  let maxChars = 25; // default for mobile
-  const width = window.innerWidth;
+  function truncateDescription(text) {
+    if (!text) return '';
+    
+    let maxChars = 25; // default for mobile
+    const width = window.innerWidth;
 
-  if (width >= 640 && width < 1024) maxChars = 30; // tablet
-  else if (width >= 1024) maxChars = 40; // desktop
+    if (width >= 640 && width < 1024) maxChars = 30; // tablet
+    else if (width >= 1024) maxChars = 40; // desktop
 
-  return text.length > maxChars ? text.slice(0, maxChars) + '…' : text;
-}
-
-
-function makeTxNode(tx) {
-  console.group('%cmakeTxNode START', 'color: #0f0; font-weight: bold;');
-  console.log('Raw TX Received:', tx);
-
-  try {
-    const safeTruncate = (text) => {
-      if (typeof truncateDescription === 'function') return truncateDescription(text);
-      const w = window.innerWidth;
-      const max = w >= 1024 ? 40 : w >= 640 ? 30 : 25;
-      return text && text.length > max ? text.slice(0, max) + '…' : text || '';
-    };
-
-    const formatAmountDisplay = (v) => {
-      const n = Math.abs(Number(v) || 0);
-      const full = '₦' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      return { display: full, full };
-    };
-
-    const fmtDateTime = (iso) => {
-      const d = new Date(iso || Date.now());
-      const dateStr = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-      const timeStr = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
-      return `${dateStr} · ${timeStr}`;
-    };
-
-    const item = document.createElement('article');
-    item.className = 'tx-item';
-    item.dataset.txId = tx.id || tx.reference || '';
-    item.setAttribute('role', 'listitem');
-
-    const isCredit = tx.type === 'credit';
-    const icon = getTxIcon(tx);
-
-    const rawDesc = tx.description || tx.narration || tx.type || 'Transaction';
-    const truncatedDesc = safeTruncate(rawDesc);
-    const amountObj = formatAmountDisplay(tx.amount);
-    const formattedDateTime = fmtDateTime(tx.time || tx.created_at);
-    const refPart = tx.reference ? `${tx.reference} • ` : '';
-
-    // STATUS BADGE — FINAL WORKING LOGIC
-    const statusRaw = (tx.status || 'success').toString().toLowerCase();
-    const statusText = (tx.status || 'success').toUpperCase();
-    let statusClass = 'success';
-    if (statusRaw.includes('fail') || statusRaw.includes('failed')) statusClass = 'failed';
-    else if (statusRaw.includes('refund')) statusClass = 'refund';
-    else if (statusRaw.includes('pending')) statusClass = 'pending';
-
-    item.innerHTML = `
-      <div class="tx-icon ${icon.cls}" aria-hidden="true">
-        ${icon.img 
-          ? `<div class="tx-svg"><img class="tx-img" src="${icon.img}" alt="${icon.alt}" /></div>`
-          : (isCredit ? 'Down Arrow' : 'Up Arrow')
-        }
-      </div>
-      <div class="tx-content">
-        <div class="tx-row">
-          <div class="tx-desc" title="${rawDesc}">${truncatedDesc}</div>
-          <div class="tx-amount ${isCredit ? 'credit' : 'debit'}" title="${amountObj.full}">
-            ${isCredit ? '+' : '-'} ${amountObj.display}
-          </div>
-        </div>
-        <div class="tx-row meta">
-          <div class="tx-time" title="${tx.reference || ''}">${refPart}${formattedDateTime}</div>
-          <div class="tx-status" data-status="${statusClass}" title="${tx.status || 'SUCCESS'}">
-            ${statusText}
-          </div>
-        </div>
-      </div>
-    `;
-
-    item.addEventListener('click', (e) => {
-      console.log('Clicked TX:', tx);
-      const details = {
-        id: tx.id || tx.reference,
-        reference: tx.reference,
-        description: rawDesc,
-        amount: tx.amount,
-        type: tx.type,
-        time: tx.time || tx.created_at,
-        status: tx.status || 'SUCCESS'
-      };
-      if (e.ctrlKey || e.metaKey) {
-        navigator.clipboard?.writeText(JSON.stringify(details, null, 2));
-      } else {
-        alert(`Transaction\n\n${JSON.stringify(details, null, 2)}`);
-      }
-    });
-
-    console.groupEnd();
-    return item;
-
-  } catch (err) {
-    console.error('FATAL RENDER ERROR in makeTxNode:', err, tx);
-    console.groupEnd();
-    const fallback = document.createElement('div');
-    fallback.className = 'tx-item';
-    fallback.textContent = 'Could not render transaction';
-    return fallback;
+    return text.length > maxChars ? text.slice(0, maxChars) + '…' : text;
   }
-}
 
-window.addEventListener('resize', () => {
-  document.querySelectorAll('.tx-desc').forEach(descEl => {
-    const fullText = descEl.getAttribute('title') || descEl.textContent;
-    descEl.textContent = truncateDescription(fullText);
+
+  function makeTxNode(tx) {
+    console.group('%cmakeTxNode START', 'color: #0f0; font-weight: bold;');
+    console.log('Raw TX Received:', tx);
+
+    try {
+      const safeTruncate = (text) => {
+        if (typeof truncateDescription === 'function') return truncateDescription(text);
+        const w = window.innerWidth;
+        const max = w >= 1024 ? 40 : w >= 640 ? 30 : 25;
+        return text && text.length > max ? text.slice(0, max) + '…' : text || '';
+      };
+
+      const formatAmountDisplay = (v) => {
+        const n = Math.abs(Number(v) || 0);
+        const full = '₦' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        return { display: full, full };
+      };
+
+      const fmtDateTime = (iso) => {
+        const d = new Date(iso || Date.now());
+        const dateStr = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+        const timeStr = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+        return `${dateStr} · ${timeStr}`;
+      };
+
+      const item = document.createElement('article');
+      item.className = 'tx-item';
+      item.dataset.txId = tx.id || tx.reference || '';
+      item.setAttribute('role', 'listitem');
+
+      const isCredit = tx.type === 'credit';
+      const icon = getTxIcon(tx);
+
+      const rawDesc = tx.description || tx.narration || tx.type || 'Transaction';
+      const truncatedDesc = safeTruncate(rawDesc);
+      const amountObj = formatAmountDisplay(tx.amount);
+      const formattedDateTime = fmtDateTime(tx.time || tx.created_at);
+      const refPart = tx.reference ? `${tx.reference} • ` : '';
+
+      // STATUS BADGE — FINAL WORKING LOGIC
+      const statusRaw = (tx.status || 'success').toString().toLowerCase();
+      const statusText = (tx.status || 'success').toUpperCase();
+      let statusClass = 'success';
+      if (statusRaw.includes('fail') || statusRaw.includes('failed')) statusClass = 'failed';
+      else if (statusRaw.includes('refund')) statusClass = 'refund';
+      else if (statusRaw.includes('pending')) statusClass = 'pending';
+
+      item.innerHTML = `
+        <div class="tx-icon ${icon.cls}" aria-hidden="true">
+          ${icon.img 
+            ? `<div class="tx-svg"><img class="tx-img" src="${icon.img}" alt="${icon.alt}" /></div>`
+            : (isCredit ? 'Down Arrow' : 'Up Arrow')
+          }
+        </div>
+        <div class="tx-content">
+          <div class="tx-row">
+            <div class="tx-desc" title="${rawDesc}">${truncatedDesc}</div>
+            <div class="tx-amount ${isCredit ? 'credit' : 'debit'}" title="${amountObj.full}">
+              ${isCredit ? '+' : '-'} ${amountObj.display}
+            </div>
+          </div>
+          <div class="tx-row meta">
+            <div class="tx-time" title="${tx.reference || ''}">${refPart}${formattedDateTime}</div>
+            <div class="tx-status" data-status="${statusClass}" title="${tx.status || 'SUCCESS'}">
+              ${statusText}
+            </div>
+          </div>
+        </div>
+      `;
+
+      item.addEventListener('click', (e) => {
+        console.log('Clicked TX:', tx);
+        const details = {
+          id: tx.id || tx.reference,
+          reference: tx.reference,
+          description: rawDesc,
+          amount: tx.amount,
+          type: tx.type,
+          time: tx.time || tx.created_at,
+          status: tx.status || 'SUCCESS'
+        };
+        if (e.ctrlKey || e.metaKey) {
+          navigator.clipboard?.writeText(JSON.stringify(details, null, 2));
+        } else {
+          alert(`Transaction\n\n${JSON.stringify(details, null, 2)}`);
+        }
+      });
+
+      console.groupEnd();
+      return item;
+
+    } catch (err) {
+      console.error('FATAL RENDER ERROR in makeTxNode:', err, tx);
+      console.groupEnd();
+      const fallback = document.createElement('div');
+      fallback.className = 'tx-item';
+      fallback.textContent = 'Could not render transaction';
+      return fallback;
+    }
+  }
+
+  window.addEventListener('resize', () => {
+    document.querySelectorAll('.tx-desc').forEach(descEl => {
+      const fullText = descEl.getAttribute('title') || descEl.textContent;
+      descEl.textContent = truncateDescription(fullText);
+    });
   });
-});
 
 
   /* ============================================================= */
-/* 2. renderChunked(groupedMonths) — FULLY FIXED + SELF-CONTAINED */
-/* ============================================================= */
-function renderChunked(groupedMonths) {
-  historyList.innerHTML = '';
-  state.lastRenderIndex = 0;
+  /* renderChunked with month headers */
+  /* ============================================================= */
+  function renderChunked(groupedMonths) {
+    // CLEAR HARDCODED TRANSACTIONS
+    historyList.innerHTML = '';
+    state.lastRenderIndex = 0;
 
-  const flat = [];
-groupedMonths.forEach(month => {
-  // Remove this line:
-  // flat.push({ type: 'month-header', month });
-  month.txs.forEach(tx => flat.push({ type: 'tx', tx }));
-});
+    const flat = [];
+    groupedMonths.forEach(month => {
+      flat.push({ type: 'month-header', month });
+      month.txs.forEach(tx => flat.push({ type: 'tx', tx }));
+    });
 
+    function renderNextChunk() {
+      const start = state.lastRenderIndex;
+      const end = Math.min(flat.length, start + CONFIG.chunkRenderSize);
+      const fragment = document.createDocumentFragment();
 
-function renderNextChunk() {
-  const start = state.lastRenderIndex;
-  const end = Math.min(flat.length, start + CONFIG.chunkRenderSize);
-  const fragment = document.createDocumentFragment();
+      for (let i = start; i < end; i++) {
+        const entry = flat[i];
+        
+        if (entry.type === 'month-header') {
+          const monthContainer = document.createElement('div');
+          monthContainer.className = 'month-container';
+          monthContainer.innerHTML = `
+            <div class="opay-month-header">
+              <div class="opay-month-selector" role="button" tabindex="0" aria-label="Select month">
+                <span>${entry.month.prettyMonth}</span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path d="M6 9l6 6 6-6"/>
+                </svg>
+              </div>
+              <button class="opay-analysis-btn" aria-label="Open analysis">Analysis</button>
+            </div>
+            <div class="opay-summary" role="status" aria-live="polite">
+              <div class="opay-in">In: <strong>₦${entry.month.totalIn.toLocaleString()}</strong></div>
+              <div class="opay-out">Out: <strong>₦${entry.month.totalOut.toLocaleString()}</strong></div>
+            </div>
+          `;
+          fragment.appendChild(monthContainer);
+        } else {
+          fragment.appendChild(makeTxNode(entry.tx));
+        }
+      }
 
-  for (let i = start; i < end; i++) {
-    const entry = flat[i];
-    fragment.appendChild(makeTxNode(entry.tx));
+      historyList.appendChild(fragment);
+      state.lastRenderIndex = end;
+
+      if (end < flat.length) {
+        requestAnimationFrame(renderNextChunk);
+      } else {
+        window.trunTx?.();
+      }
+    }
+    
+    renderNextChunk();
   }
-
-  historyList.appendChild(fragment);
-  state.lastRenderIndex = end;
-
-  if (end < flat.length) {
-    requestAnimationFrame(renderNextChunk);
-  } else {
-    window.trunTx?.();
-  }
-}
-  renderNextChunk();
-}
-
 
 
   function showStateUI() {
@@ -353,18 +376,9 @@ function renderNextChunk() {
       amount: raw.amount,
       description: raw.description || raw.narration || raw.type,
       time: raw.created_at || raw.time,
-      status: raw.status || 'SUCCESS'
+      status: raw.status || 'SUCCESS',
+      reference: raw.reference
     }));
-
-    let totalIn = 0, totalOut = 0;
-    state.items.forEach(tx => {
-      const amt = Math.abs(Number(tx.amount || 0));
-      if (tx.type === 'credit') totalIn += amt;
-      else totalOut += amt;
-    });
-
-    if (inEl) inEl.textContent = `₦${totalIn.toLocaleString()}`;
-    if (outEl) outEl.textContent = `₦${totalOut.toLocaleString()}`;
 
     state.fullHistoryLoaded = true;
     state.accurateTotalsCalculated = true;
@@ -409,8 +423,14 @@ function renderNextChunk() {
       else totalOut += amt;
     });
 
-    if (inEl) inEl.textContent = `₦${totalIn.toLocaleString()}`;
-    if (outEl) outEl.textContent = `₦${totalOut.toLocaleString()}`;
+    // Update the first visible month header's summary
+    const firstMonthHeader = document.querySelector('.month-container');
+    if (firstMonthHeader) {
+      const inStrong = firstMonthHeader.querySelector('.opay-in strong');
+      const outStrong = firstMonthHeader.querySelector('.opay-out strong');
+      if (inStrong) inStrong.textContent = `₦${totalIn.toLocaleString()}`;
+      if (outStrong) outStrong.textContent = `₦${totalOut.toLocaleString()}`;
+    }
   }
 
   function applyMonthFilterAndRender() {
@@ -418,29 +438,23 @@ function renderNextChunk() {
       const grouped = groupTransactions(state.items);
       setState({ grouped });
       renderChunked(grouped);
-      
-      let totalIn = 0, totalOut = 0;
-      state.items.forEach(tx => {
-        const amt = Math.abs(Number(tx.amount || 0));
-        if (tx.type === 'credit') totalIn += amt;
-        else totalOut += amt;
-      });
-      if (inEl) inEl.textContent = `₦${totalIn.toLocaleString()}`;
-      if (outEl) outEl.textContent = `₦${totalOut.toLocaleString()}`;
-      
       hide(emptyEl);
       return;
     }
 
     const filtered = filterBySelectedMonth(state.items);
-    const grouped = groupTransactions(filtered);
-    setState({ grouped });
-    renderChunked(grouped);
-    computeFilteredSummary(filtered);
-
+    
     if (filtered.length === 0) {
+      // No transactions for selected month - show all months but keep filter selected
+      const grouped = groupTransactions(state.items);
+      setState({ grouped });
+      renderChunked(grouped);
       show(emptyEl);
     } else {
+      const grouped = groupTransactions(filtered);
+      setState({ grouped });
+      renderChunked(grouped);
+      computeFilteredSummary(filtered);
       hide(emptyEl);
     }
   }
@@ -464,7 +478,7 @@ function renderNextChunk() {
     setState({ grouped: groupedMonths });
     renderChunked(groupedMonths);
 
-    if (selectedMonth || state.searchTerm) {
+    if (selectedMonth && items.length > 0) {
       computeFilteredSummary(items);
     }
 
@@ -484,40 +498,36 @@ function renderNextChunk() {
     if (existing) existing.remove();
 
     const modalHTML = `
-  <div id="monthFilterModal" class="opay-modal hidden" style="position: fixed; inset: 0; z-index: 10000000; display: flex; align-items: center; justify-content: center; font-family: 'Inter', sans-serif;">
-  <div class="opay-backdrop" data-close-month style="position: absolute; inset: 0; background: rgba(0,0,0,0.5); backdrop-filter: blur(2px);"></div>
-  
-  <div class="opay-panel" style="position: relative; max-width: 380px; width: 90%; background: #fff; border-radius: 16px; box-shadow: 0 20px 40px rgba(0,0,0,0.2); overflow: hidden; transform: scale(0.9); opacity: 0; transition: all 0.3s ease-in-out;">
-    
-    <div class="opay-header" style="padding: 18px 16px; border-bottom: 1px solid #eee; font-weight: 600; text-align: center; position: relative; color: #222; font-size: 18px;">
-      <button data-close-month style="position: absolute; left: 16px; background: transparent; border: none; font-size: 24px; cursor: pointer; color: #999; transition: color 0.2s;">×</button>
-      Select Month
-    </div>
-    
-    <div id="monthGrid" style="padding: 24px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;">
-      <!-- Example months -->
-      <button class="month-btn">Jan</button>
-      <button class="month-btn">Feb</button>
-      <button class="month-btn">Mar</button>
-      <button class="month-btn">Apr</button>
-      <button class="month-btn">May</button>
-      <button class="month-btn">Jun</button>
-      <button class="month-btn">Jul</button>
-      <button class="month-btn">Aug</button>
-      <button class="month-btn">Sep</button>
-      <button class="month-btn">Oct</button>
-      <button class="month-btn">Nov</button>
-      <button class="month-btn">Dec</button>
-    </div>
-    
-    <div style="padding: 16px; border-top: 1px solid #eee; display: flex; gap: 12px; justify-content: center;">
-      <button id="allTimeBtn" style="background: #6c757d; color: white; border: none; padding: 12px 24px; border-radius: 10px; font-weight: 600; cursor: pointer; transition: background 0.2s;">All Time</button>
-      <button id="confirmMonthBtn" style="background: linear-gradient(90deg,#00d4aa,#00bfa5); color: white; border: none; padding: 12px 32px; border-radius: 10px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 10px rgba(0,212,170,0.3); transition: all 0.2s;">Confirm</button>
-    </div>
-  </div>
-</div>
+      <div id="monthFilterModal" class="opay-modal hidden" style="position: fixed; inset: 0; z-index: 10000000; display: flex; align-items: center; justify-content: center; font-family: 'Inter', sans-serif;">
+        <div class="opay-backdrop" data-close-month style="position: absolute; inset: 0; background: rgba(0,0,0,0.5); backdrop-filter: blur(2px);"></div>
+        
+        <div class="opay-panel" style="position: relative; max-width: 380px; width: 90%; background: #fff; border-radius: 16px; box-shadow: 0 20px 40px rgba(0,0,0,0.2); overflow: hidden; transform: scale(0.9); opacity: 0; transition: all 0.3s ease-in-out;">
+          
+          <div class="opay-header" style="padding: 18px 16px; border-bottom: 1px solid #eee; font-weight: 600; text-align: center; position: relative; color: #222; font-size: 18px;">
+            <button data-close-month style="position: absolute; left: 16px; background: transparent; border: none; font-size: 24px; cursor: pointer; color: #999; transition: color 0.2s;">×</button>
+            Select Month
+          </div>
+          
+          <div id="monthGrid" style="padding: 24px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; max-height: 400px; overflow-y: auto;">
+          </div>
+          
+          <div style="padding: 16px; border-top: 1px solid #eee; display: flex; gap: 12px; justify-content: center;">
+            <button id="allTimeBtn" style="background: #6c757d; color: white; border: none; padding: 12px 24px; border-radius: 10px; font-weight: 600; cursor: pointer; transition: background 0.2s;">All Time</button>
+            <button id="confirmMonthBtn" style="background: linear-gradient(90deg,#00d4aa,#00bfa5); color: white; border: none; padding: 12px 32px; border-radius: 10px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 10px rgba(0,212,170,0.3); transition: all 0.2s;">Confirm</button>
+          </div>
+        </div>
+      </div>
     `;
     document.body.insertAdjacentHTML('beforeend', modalHTML);
+    
+    // Animate in
+    setTimeout(() => {
+      const panelEl = document.querySelector('#monthFilterModal .opay-panel');
+      if (panelEl) {
+        panelEl.style.transform = 'scale(1)';
+        panelEl.style.opacity = '1';
+      }
+    }, 10);
   }
 
   function generateMonthGrid() {
@@ -529,6 +539,7 @@ function renderNextChunk() {
     const currentYear = today.getFullYear();
     const currentMonth = today.getMonth();
 
+    // Generate last 12 months
     for (let i = 11; i >= 0; i--) {
       const date = new Date(currentYear, currentMonth - i, 1);
       const year = date.getFullYear();
@@ -547,12 +558,8 @@ function renderNextChunk() {
         btn.style.borderColor = '#00d4aa';
       }
 
-      if (i === 0) {
+      if (i === 0) { // Current month
         btn.style.fontWeight = '600';
-        if (!selectedMonth) {
-          btn.style.background = '#e6f7f7';
-          btn.style.borderColor = '#00d4aa';
-        }
       }
 
       btn.addEventListener('click', () => {
@@ -564,8 +571,10 @@ function renderNextChunk() {
     }
   }
 
-  if (monthSelector) {
-    monthSelector.addEventListener('click', () => {
+  // Month selector click handler - open month picker
+  document.addEventListener('click', (e) => {
+    const selector = e.target.closest('.opay-month-selector');
+    if (selector && state.open) {
       createMonthPickerModal();
       const modalEl = document.getElementById('monthFilterModal');
       modalEl.classList.remove('hidden');
@@ -587,11 +596,10 @@ function renderNextChunk() {
       modalEl.querySelectorAll('[data-close-month], .opay-backdrop').forEach(el => {
         el.onclick = () => modalEl.classList.add('hidden');
       });
-    });
-  }
+    }
+  });
 
   /* -------------------------- MODAL OPEN/CLOSE (MANAGED BY MODAL MANAGER) -------------------------- */
-  // Listen for Modal Manager events
   document.addEventListener('modalOpened', (e) => {
     if (e.detail === 'historyModal') {
       console.log('[TransactionHistory] Modal opened by ModalManager');
@@ -601,7 +609,10 @@ function renderNextChunk() {
 
   async function handleModalOpened() {
     state.open = true;
-    selectedMonth = null;
+    
+    // Set to current month by default
+    const now = new Date();
+    selectedMonth = { year: now.getFullYear(), month: now.getMonth() };
     updateMonthDisplay();
     
     // Show loading while preloading
@@ -614,7 +625,7 @@ function renderNextChunk() {
     // Now render the transactions
     if (state.preloaded && state.items.length > 0) {
       hide(loadingEl);
-      applyTransformsAndRender();
+      applyMonthFilterAndRender();
     } else if (state.items.length === 0) {
       hide(loadingEl);
       show(emptyEl);
@@ -622,12 +633,8 @@ function renderNextChunk() {
   }
 
   /* -------------------------- EVENT LISTENERS -------------------------- */
-  // NOTE: Close buttons are now handled by Modal Manager
-  // Remove manual close button handlers to avoid conflicts
-
   document.addEventListener('keydown', e => {
     if (!state.open) return;
-    // Let Modal Manager handle Escape key
     if (e.key === 'ArrowDown') historyList.scrollBy({ top: 120, behavior: 'smooth' });
     if (e.key === 'ArrowUp') historyList.scrollBy({ top: -120, behavior: 'smooth' });
   });
@@ -654,7 +661,7 @@ function renderNextChunk() {
           tx.id || '',
           tx.type,
           tx.amount,
-          'SUCCESS'
+          tx.status || 'SUCCESS'
         ].join(','));
       });
       const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
@@ -716,44 +723,39 @@ function renderNextChunk() {
   // Preload on page load
   preloadHistoryForInstantOpen();
 
-    function trunTx() {
-  const rows = document.querySelectorAll('.tx-row');
+  function trunTx() {
+    const rows = document.querySelectorAll('.tx-row');
 
-  rows.forEach(row => {
-    const desc = row.querySelector('.tx-desc');
-    if (!desc) return;
+    rows.forEach(row => {
+      const desc = row.querySelector('.tx-desc');
+      if (!desc) return;
 
-    // store full text
-    if (!desc.dataset.fullText) {
-      desc.dataset.fullText = desc.textContent;
-    }
+      // store full text
+      if (!desc.dataset.fullText) {
+        desc.dataset.fullText = desc.textContent;
+      }
 
-    let fullText = desc.dataset.fullText;
-    let maxChars = 25; // default for small devices
+      let fullText = desc.dataset.fullText;
+      let maxChars = 25; // default for small devices
 
-    const width = window.innerWidth;
+      const width = window.innerWidth;
 
-    if (width >= 640 && width < 1024) {
-      maxChars = 30; // tablets
-    } else if (width >= 1024) {
-      maxChars = 40; // desktop
-    }
+      if (width >= 640 && width < 1024) {
+        maxChars = 30; // tablets
+      } else if (width >= 1024) {
+        maxChars = 40; // desktop
+      }
 
-    if (fullText.length > maxChars) {
-      desc.textContent = fullText.slice(0, maxChars) + '…';
-    } else {
-      desc.textContent = fullText;
-    }
-  }); 
+      if (fullText.length > maxChars) {
+        desc.textContent = fullText.slice(0, maxChars) + '…';
+} else {
+desc.textContent = fullText;
+}
+});
 }
 window.trunTx = window.trunTx || trunTx;
-
 // Run initially
 window.trunTx();
-
 // Run on resize
 window.addEventListener('resize', window.trunTx);
-
-  
-
 })();
