@@ -4165,8 +4165,23 @@ a[style*="color: #f00"] { color: var(--danger); }
       margin-right: 15px;
       margin-bottom: 80px;
       margin-top: 10px;
-      border: 1px solid rgba(255,255,255,0.05);
     }
+.month-container {
+  position: relative;
+  border-top-right-radius: 20px;
+  border-top-left-radius: 20px;
+}
+
+.month-container::before {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 16px;  /* distance from left */
+  right: 16px; /* distance from right */
+  height: 1px;
+  background: rgba(255, 255, 255, 0.123);
+}
+
 
     /* Filters */
     .opay-filters { 
@@ -4248,7 +4263,7 @@ a[style*="color: #f00"] { color: var(--danger); }
   overflow-y: auto; 
   overflow-x: hidden;
   padding: 0 0; 
-  background: #121212;
+  background: #1e1e1e;
     max-width: 100%;        /* Prevent the container from expanding */
   overflow-x: hidden;     /* Hide any accidental overflow */
 
