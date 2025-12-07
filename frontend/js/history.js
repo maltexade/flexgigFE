@@ -282,47 +282,32 @@ function renderChunked(groupedMonths) {
   });
 
   function renderNextChunk() {
-    const start = state.lastRenderIndex;
-    const end = Math.min(flat.length, start + CONFIG.chunkRenderSize);
-    const fragment = document.createDocumentFragment();
+  const start = state.lastRenderIndex;
+  const end = Math.min(flat.length, start + CONFIG.chunkRenderSize);
+  const fragment = document.createDocumentFragment();
 
-    for (let i = start; i < end; i++) {
-      const entry = flat[i];
+  for (let i = start; i < end; i++) {
+    const entry = flat[i];
 
-      if (entry.type === 'month-header') {
-  const header = document.createElement('div');
-  header.className = 'month-header';
-
-  const today = new Date();
-  const isCurrentMonth = 
-    today.getFullYear() === new Date(entry.month.monthKey + '-01').getFullYear() &&
-    today.getMonth() === new Date(entry.month.monthKey + '-01').getMonth();
-
-  if (isCurrentMonth) header.classList.add('current');
-
-  // Only display the month title, remove totals
-  header.innerHTML = `
-    <div class="month-title">${entry.month.prettyMonth}</div>
-  `;
-  fragment.appendChild(header);
-
-
-      } else {
-        fragment.appendChild(makeTxNode(entry.tx));
-      }
-    }
-
-    historyList.appendChild(fragment);
-    state.lastRenderIndex = end;
-
-    if (end < flat.length) {
-      requestAnimationFrame(renderNextChunk);
+    if (entry.type === 'month-header') {
+      // Skip month headers completely
+      continue;
     } else {
-      window.trunTx?.();
+      fragment.appendChild(makeTxNode(entry.tx));
     }
   }
 
-  renderNextChunk();
+  historyList.appendChild(fragment);
+  state.lastRenderIndex = end;
+
+  if (end < flat.length) {
+    requestAnimationFrame(renderNextChunk);
+  } else {
+    window.trunTx?.();
+  }
+}
+
+renderNextChunk();
 }
 
 
