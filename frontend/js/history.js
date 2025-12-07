@@ -276,25 +276,21 @@ function renderChunked(groupedMonths) {
   state.lastRenderIndex = 0;
 
   const flat = [];
-  groupedMonths.forEach(month => {
-    flat.push({ type: 'month-header', month });
-    month.txs.forEach(tx => flat.push({ type: 'tx', tx }));
-  });
+groupedMonths.forEach(month => {
+  // Remove this line:
+  // flat.push({ type: 'month-header', month });
+  month.txs.forEach(tx => flat.push({ type: 'tx', tx }));
+});
 
-  function renderNextChunk() {
+
+function renderNextChunk() {
   const start = state.lastRenderIndex;
   const end = Math.min(flat.length, start + CONFIG.chunkRenderSize);
   const fragment = document.createDocumentFragment();
 
   for (let i = start; i < end; i++) {
     const entry = flat[i];
-
-    if (entry.type === 'month-header') {
-      // Skip month headers completely
-      continue;
-    } else {
-      fragment.appendChild(makeTxNode(entry.tx));
-    }
+    fragment.appendChild(makeTxNode(entry.tx));
   }
 
   historyList.appendChild(fragment);
@@ -306,8 +302,7 @@ function renderChunked(groupedMonths) {
     window.trunTx?.();
   }
 }
-
-renderNextChunk();
+  renderNextChunk();
 }
 
 
