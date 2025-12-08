@@ -124,7 +124,7 @@
       const date = new Date(year, month);
       return {
         monthKey: key,
-        prettyMonth: date.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }),
+        prettyMonth: date.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }),
         totalIn: data.totalIn,
         totalOut: data.totalOut,
         txs: data.txs.sort((a, b) => new Date(b.time || b.created_at) - new Date(a.time || a.created_at))
@@ -286,17 +286,14 @@ function makeMonthDivider(month) {
   
   // Create the full Opay-style header with month selector and totals
   container.innerHTML = `
-    <div class="opay-month-header" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 12px; background: #1e1e1e; gap: 12px;">
-      <div class="opay-month-selector" style="display: inline-flex; align-items: center; gap: 6px; font-size: 16px; font-weight: 600; color: white; cursor: pointer;">
-        <span>${month.prettyMonth}</span>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M6 9l6 6 6-6"/>
-        </svg>
-      </div>
-      <button class="opay-analysis-btn" style="background: #60a5fa; color: black; border: none; padding: 7px 14px; border-radius: 20px; font-weight: 600; font-size: 13px; cursor: pointer;">
-        Analysis
-      </button>
+  <div class="opay-month-header" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 12px; background: #1e1e1e; gap: 12px;">
+    <div class="opay-month-selector" style="display: inline-flex; align-items: center; gap: 6px; font-size: 16px; font-weight: 600; color: white; cursor: pointer; flex: 1;">
+      <span>${month.prettyMonth}</span>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M6 9l6 6 6-6"/>
+      </svg>
     </div>
+  </div>
     
     <div class="opay-summary" style="display: flex; justify-content: space-between; padding: 12px 12px; background: #1e1e1e; font-size: 14px; color: #999; gap: 16px; border-bottom: 1px solid rgba(255, 255, 255, 0.123);">
       <div>In: <strong style="color: white; font-weight: 600; margin-left: 4px;">${formatCurrency(month.totalIn)}</strong></div>
