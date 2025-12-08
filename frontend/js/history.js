@@ -202,7 +202,6 @@
       const truncatedDesc = safeTruncate(rawDesc);
       const amountObj = formatAmountDisplay(tx.amount);
       const formattedDateTime = fmtDateTime(tx.time || tx.created_at);
-      const refPart = tx.reference ? `${tx.reference} • ` : '';
 
       const statusRaw = (tx.status || 'success').toString().toLowerCase();
       const statusText = (tx.status || 'success').toUpperCase();
@@ -226,11 +225,11 @@
             </div>
           </div>
           <div class="tx-row meta">
-            <div class="tx-time" title="${tx.reference || ''}">${refPart}${formattedDateTime}</div>
-            <div class="tx-status" data-status="${statusClass}" title="${tx.status || 'SUCCESS'}">
-              ${statusText}
-            </div>
-          </div>
+  <div class="tx-time">${formattedDateTime}</div>
+  <div class="tx-status" data-status="${statusClass}" title="${tx.status || 'SUCCESS'}">
+    ${statusText}
+  </div>
+</div>
         </div>
       `;
 
@@ -303,11 +302,12 @@
     historyList.innerHTML = '';
     state.lastRenderIndex = 0;
 
-    const flat = [];
-    groupedMonths.forEach(month => {
-      flat.push({ type: 'month-divider', month });
-      month.txs.forEach(tx => flat.push({ type: 'tx', tx }));
-    });
+      const flat = [];
+groupedMonths.forEach(month => {
+  // Remove this line:
+  // flat.push({ type: 'month-header', month });
+  month.txs.forEach(tx => flat.push({ type: 'tx', tx }));
+});
 
     function renderNextChunk() {
       const start = state.lastRenderIndex;
