@@ -64,10 +64,7 @@
 
   /* -------------------------- MONTH FILTER STATE - DEFAULT TO CURRENT MONTH -------------------------- */
   const today = new Date();
-  let selectedMonth = {
-    year: today.getFullYear(),
-    month: today.getMonth()
-  };
+  let selectedMonth = null; // No filter by default
 
   /* -------------------------- UTIL -------------------------- */
   function formatCurrency(amount) {
@@ -608,40 +605,6 @@ function createMonthPickerModal() {
     }
   }
 
-  // if (monthSelector) {
-  //   monthSelector.addEventListener('click', () => {
-  //     createMonthPickerModal();
-  //     const modalEl = document.getElementById('monthFilterModal');
-  //     modalEl.classList.remove('hidden');
-  //     generateMonthGrid();
-
-  //     setTimeout(() => {
-  //       const panel = modalEl.querySelector('.opay-panel');
-  //       if (panel) {
-  //         panel.style.transform = 'scale(1)';
-  //         panel.style.opacity = '1';
-  //       }
-  //     }, 10);
-
-  //     modalEl.querySelector('#confirmMonthBtn').onclick = () => {
-  //       updateMonthDisplay();
-  //       applyMonthFilterAndRender();
-  //       modalEl.classList.add('hidden');
-  //     };
-
-  //     modalEl.querySelector('#allTimeBtn').onclick = () => {
-  //       selectedMonth = null;
-  //       updateMonthDisplay();
-  //       applyMonthFilterAndRender();
-  //       modalEl.classList.add('hidden');
-  //     };
-
-  //     modalEl.querySelectorAll('[data-close-month], .opay-backdrop').forEach(el => {
-  //       el.onclick = () => modalEl.classList.add('hidden');
-  //     });
-  //   });
-  // }
-
   /* -------------------------- MODAL OPEN/CLOSE -------------------------- */
   document.addEventListener('modalOpened', (e) => {
     if (e.detail === 'historyModal') {
@@ -651,27 +614,24 @@ function createMonthPickerModal() {
   });
 
   async function handleModalOpened() {
-    state.open = true;
-    
-    selectedMonth = {
-      year: today.getFullYear(),
-      month: today.getMonth()
-    };
-    updateMonthDisplay();
-    
-    show(loadingEl);
-    hide(emptyEl);
-    
-    await preloadHistoryForInstantOpen();
+  state.open = true;
+  
+  // Set to All Time by default
+  selectedMonth = null;  // Changed from specific current month
+  
+  show(loadingEl);
+  hide(emptyEl);
+  
+  await preloadHistoryForInstantOpen();
 
-    if (state.preloaded && state.items.length > 0) {
-      hide(loadingEl);
-      applyMonthFilterAndRender();
-    } else if (state.items.length === 0) {
-      hide(loadingEl);
-      show(emptyEl);
-    }
+  if (state.preloaded && state.items.length > 0) {
+    hide(loadingEl);
+    applyMonthFilterAndRender();
+  } else if (state.items.length === 0) {
+    hide(loadingEl);
+    show(emptyEl);
   }
+}
 
   /* -------------------------- EVENT LISTENERS -------------------------- */
   document.addEventListener('keydown', e => {
