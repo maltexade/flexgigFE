@@ -21,6 +21,67 @@
     maxCachedPages: 10
   };
 
+  /* -------------------------- FAKE DATA GENERATOR (FOR TESTING) -------------------------- */
+const USE_FAKE_DATA = false;  // Set to false to use real API
+
+function generateFakeTransactions() {
+  const transactions = [];
+  const now = new Date();
+  
+  // Network options for variety
+  const networks = ['MTN', 'Airtel', 'GLO', '9Mobile'];
+  const types = ['credit', 'debit'];
+  const statuses = ['success', 'failed', 'pending', 'refund'];
+  
+  const descriptions = [
+    'MTN 2.0GB Data',
+    'Airtel 1.5GB Data',
+    'GLO 3.0GB Data',
+    '9Mobile 5.0GB Data',
+    'Received From Opay',
+    'Bank Transfer',
+    'Wallet Funding',
+    'SafeBox Interest',
+    'OWealth Interest Earned',
+    'Failed Transaction Refund',
+    'Mobile Data Purchase',
+    'Airtime Purchase',
+    'Cable TV Subscription',
+    'Electricity Bill Payment'
+  ];
+  
+  // Generate 3 months of data
+  for (let monthOffset = 0; monthOffset < 3; monthOffset++) {
+    // Generate 10 transactions per month
+    for (let i = 0; i < 10; i++) {
+      const date = new Date(now.getFullYear(), now.getMonth() - monthOffset, Math.floor(Math.random() * 28) + 1);
+      date.setHours(Math.floor(Math.random() * 24), Math.floor(Math.random() * 60), 0);
+      
+      const isCredit = Math.random() > 0.6; // 40% credit, 60% debit
+      const amount = isCredit 
+        ? (Math.random() * 10000 + 100).toFixed(2)  // Credits: 100 - 10,100
+        : (Math.random() * 5000 + 500).toFixed(2);   // Debits: 500 - 5,500
+      
+      const desc = descriptions[Math.floor(Math.random() * descriptions.length)];
+      const status = statuses[Math.floor(Math.random() * (i === 0 ? 1 : 4))]; // First tx always success
+      
+      transactions.push({
+        id: `fake-tx-${monthOffset}-${i}-${Date.now()}`,
+        reference: `REF${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
+        type: isCredit ? 'credit' : 'debit',
+        amount: amount,
+        description: desc + (isCredit ? '' : ` - 0${Math.floor(Math.random() * 90000000 + 8010000000)}`),
+        time: date.toISOString(),
+        created_at: date.toISOString(),
+        status: status.toUpperCase()
+      });
+    }
+  }
+  
+  // Sort by date (newest first)
+  return transactions.sort((a, b) => new Date(b.time) - new Date(a.time));
+}
+
   /* -------------------------- DOM -------------------------- */
   const modal = document.getElementById('historyModal');
   const panel = modal?.querySelector('.opay-panel');
@@ -279,8 +340,8 @@ function makeMonthDivider(month) {
     padding: 0;
     transform: translateZ(0);
     backface-visibility: hidden;
-    border-top-left-radius: 20px;
-    border-top-right-radius: 20px;
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
     overflow: hidden;
   `;
   
@@ -295,7 +356,7 @@ function makeMonthDivider(month) {
     </div>
   </div>
     
-    <div class="opay-summary" style="display: flex; justify-content: space-between; padding: 12px 12px; background: #1e1e1e; font-size: 14px; color: #999; gap: 16px; border-bottom: 1px solid rgba(255, 255, 255, 0.123);">
+    <div class="opay-summary" style="display: flex; justify-content: space-between; padding: 12px 12px; background: #1e1e1e; font-size: 14px; color: #999; gap: 16px; border-bottom: none;">
       <div>In: <strong style="color: white; font-weight: 600; margin-left: 4px;">${formatCurrency(month.totalIn)}</strong></div>
       <div>Out: <strong style="color: white; font-weight: 600; margin-left: 4px;">${formatCurrency(month.totalOut)}</strong></div>
     </div>
@@ -358,14 +419,35 @@ function renderChunked(groupedMonths) {
     historyList.appendChild(fragment);
     state.lastRenderIndex = end;
 
+    // Apply margin-bottom to last tx-item of each month
+const monthSections = document.querySelectorAll('.month-section-header');
+monthSections.forEach(section => {
+  let lastTx = null;
+  let next = section.nextElementSibling;
+
+  while (next && !next.classList.contains('month-section-header')) {
+    if (next.classList.contains('tx-item')) {
+      // reset margin for all txs in this month
+      next.style.marginBottom = '0';
+      lastTx = next;
+    }
+    next = next.nextElementSibling;
+  }
+
+  if (lastTx) lastTx.style.marginBottom = '20px'; // add margin only to the last tx of the month
+});
+
+
     if (end < flat.length) {
       requestAnimationFrame(renderNextChunk);
     } else {
       window.trunTx?.();
     }
   }
+
   renderNextChunk();
 }
+
 
   function showStateUI() {
     hide(loadingEl); hide(emptyEl); hide(errorEl);
@@ -375,22 +457,32 @@ function renderChunked(groupedMonths) {
 
   /* -------------------------- PRELOAD FULL HISTORY -------------------------- */
   async function preloadHistoryForInstantOpen() {
-    if (state.preloaded) return;
-    if (state.preloadingInProgress) {
-      return new Promise((resolve) => {
-        const checkInterval = setInterval(() => {
-          if (state.preloaded || !state.preloadingInProgress) {
-            clearInterval(checkInterval);
-            resolve();
-          }
-        }, 100);
-      });
-    }
-    
-    state.preloadingInProgress = true;
-    console.log('[TransactionHistory] Preloading full history...');
+  if (state.preloaded) return;
+  if (state.preloadingInProgress) {
+    return new Promise((resolve) => {
+      const checkInterval = setInterval(() => {
+        if (state.preloaded || !state.preloadingInProgress) {
+          clearInterval(checkInterval);
+          resolve();
+        }
+      }, 100);
+    });
+  }
+  
+  state.preloadingInProgress = true;
+  console.log('[TransactionHistory] Preloading full history...');
 
-    let allTx = [];
+  let allTx = [];
+  
+  // USE FAKE DATA FOR TESTING
+  if (USE_FAKE_DATA) {
+    console.log('[TransactionHistory] Using FAKE data for testing');
+    allTx = generateFakeTransactions();
+    
+    // Simulate network delay for realism
+    await new Promise(resolve => setTimeout(resolve, 500));
+  } else {
+    // Real API call
     let page = 1;
     let hasMore = true;
 
@@ -406,26 +498,27 @@ function renderChunked(groupedMonths) {
         break;
       }
     }
-
-    state.items = allTx.map(raw => ({
-      id: raw.id || raw.reference,
-      reference: raw.reference,
-      type: raw.type === 'credit' ? 'credit' : 'debit',
-      amount: raw.amount,
-      description: raw.description || raw.narration || raw.type,
-      time: raw.created_at || raw.time,
-      status: raw.status || 'SUCCESS'
-    }));
-
-    state.fullHistoryLoaded = true;
-    state.accurateTotalsCalculated = true;
-    state.preloaded = true;
-    state.done = true;
-    state.preloadingInProgress = false;
-
-    hide(loadingEl);
-    console.log(`[TransactionHistory] PRELOADED ${allTx.length} transactions`);
   }
+
+  state.items = USE_FAKE_DATA ? allTx : allTx.map(raw => ({
+    id: raw.id || raw.reference,
+    reference: raw.reference,
+    type: raw.type === 'credit' ? 'credit' : 'debit',
+    amount: raw.amount,
+    description: raw.description || raw.narration || raw.type,
+    time: raw.created_at || raw.time,
+    status: raw.status || 'SUCCESS'
+  }));
+
+  state.fullHistoryLoaded = true;
+  state.accurateTotalsCalculated = true;
+  state.preloaded = true;
+  state.done = true;
+  state.preloadingInProgress = false;
+
+  hide(loadingEl);
+  console.log(`[TransactionHistory] PRELOADED ${allTx.length} transactions`);
+}
 
   /* -------------------------- MONTH FILTER FUNCTIONS -------------------------- */
   function formatMonthYear(date) {
@@ -520,7 +613,7 @@ function createMonthPickerModal() {
     <div id="monthFilterModal" class="opay-modal hidden" style="position: fixed; inset: 0; z-index: 10000000; display: flex; align-items: center; justify-content: center; font-family: 'Inter', sans-serif;">
       <div class="opay-backdrop" data-close-month style="position: absolute; inset: 0; background: rgba(0,0,0,0.5); backdrop-filter: blur(2px);"></div>
       
-      <div class="opay-panel" style="position: relative; max-width: 380px; width: 90%; background: #fff; border-radius: 16px; box-shadow: 0 20px 40px rgba(0,0,0,0.2); overflow: hidden; transform: scale(0.9); opacity: 0; transition: all 0.3s ease-in-out;">
+      <div class="opay-panel" style="position: relative; max-width: 380px; width: 90%; background: #fff; border-radius: 10px; box-shadow: 0 20px 40px rgba(0,0,0,0.2); overflow: hidden; transform: scale(0.9); opacity: 0; transition: all 0.3s ease-in-out;">
         
         <div class="opay-header" style="padding: 18px 16px; border-bottom: 1px solid #eee; font-weight: 600; text-align: center; position: relative; color: #222; font-size: 18px;">
           <button data-close-month style="position: absolute; left: 16px; background: transparent; border: none; font-size: 24px; cursor: pointer; color: #999; transition: color 0.2s;">×</button>
@@ -629,6 +722,29 @@ function createMonthPickerModal() {
     show(emptyEl);
   }
 }
+const container = document.getElementById('historyList');
+
+function updateHeaders() {
+  const headers = container.querySelectorAll('.month-section-header');
+  
+  headers.forEach((header, i) => {
+    const nextHeader = headers[i + 1];
+    const headerRect = header.getBoundingClientRect();
+    const containerRect = container.getBoundingClientRect();
+
+    if (nextHeader) {
+      const nextRect = nextHeader.getBoundingClientRect();
+      let offset = 0;
+
+      if (nextRect.top - containerRect.top <= header.offsetHeight) {
+        offset = nextRect.top - containerRect.top - header.offsetHeight;
+      }
+
+      header.style.transform = `translateY(${offset}px)`;
+    }
+  });
+}
+
 
   /* -------------------------- EVENT LISTENERS -------------------------- */
   document.addEventListener('keydown', e => {
