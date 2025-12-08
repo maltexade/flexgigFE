@@ -1468,7 +1468,7 @@
     </a>
   </nav>
 
-<!-- --------------- HTML: Opay-Style Transaction History Modal (with image slots for multiple networks) --------------- -->
+<!-- --------------- HTML: Opay-Style Transaction History Modal --------------- -->
 <div id="historyModal" class="opay-history-modal hidden" role="dialog" aria-modal="true" aria-labelledby="historyModalTitle">
   <div class="opay-backdrop" data-close></div>
 
@@ -1492,269 +1492,30 @@
       <select class="opay-select"><option>All Status</option></select>
     </div>
 
-
-
     <!-- Transaction List -->
     <div class="main-month">
       <div class="month-container">
-          <!-- Month Summary -->
-    <div class="opay-month-header">
-      <div class="opay-month-selector" role="button" tabindex="0" aria-label="Select month">
-        <span>Nov 2025</span>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-          <path d="M6 9l6 6 6-6"/>
-        </svg>
+        <!-- Month Summary (kept for month selector UI) -->
+        <div class="opay-month-header">
+          <div class="opay-month-selector" role="button" tabindex="0" aria-label="Select month">
+            <span>Dec 2025</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M6 9l6 6 6-6"/>
+            </svg>
+          </div>
+          <button class="opay-analysis-btn" aria-label="Open analysis">Analysis</button>
+        </div>
+
+        <div class="opay-summary" role="status" aria-live="polite">
+          <div class="opay-in">In: <strong>₦0.00</strong></div>
+          <div class="opay-out">Out: <strong>₦0.00</strong></div>
+        </div>
       </div>
-      <button class="opay-analysis-btn" aria-label="Open analysis">Analysis</button>
-    </div>
 
-    <div class="opay-summary" role="status" aria-live="polite">
-      <div class="opay-in">In: <strong>₦00.00</strong></div>
-      <div class="opay-out">Out: <strong>₦00.00</strong></div>
-    </div>
-  </div>
-
-    <main class="opay-body" id="historyList" aria-label="Transaction list">
-      <!-- HARD-CODED TRANSACTION: Payment Received (Opay/bank image slot) -->
-      <article class="tx-item" data-tx-id="txn-001" aria-labelledby="tx-desc-001" role="listitem">
-        <div class="tx-icon incoming" aria-hidden="true">
-          <!-- Image placeholder: put your icon path in the img src -->
-          <div class="tx-svg" aria-hidden="true">
-            <img class="bank-icon" src="/frontend/svg/bank.svg" alt="bank" />
-          </div>
-        </div>
-
-        <div class="tx-content">
-          <div class="tx-row">
-            <div class="tx-desc" id="tx-desc-001">Received From Opay</div>
-            <div class="tx-amount credit">+ ₦120,000.00</div>
-          </div>
-          <div class="tx-row meta">
-            <div class="tx-time">Nov 28, 2025 · 10:24 AM</div>
-            <div class="tx-status" title="Completed">COMPLETED</div>
-          </div>
-        </div>
-      </article>
-
-      <!-- HARD-CODED TRANSACTION: Data Sold (MTN image slot) -->
-      <article class="tx-item" data-tx-id="txn-002" aria-labelledby="tx-desc-002" role="listitem">
-        <div class="tx-icon mtn targets" aria-hidden="true">
-          <div class="tx-svg" aria-hidden="true">
-            <!-- MTN image -->
-            <img class="tx-img mtn" src="/frontend/img/mtn.svg" alt="MTN" />
-          </div>
-        </div>
-
-        <div class="tx-content">
-          <div class="tx-row">
-            <div class="tx-desc" id="tx-desc-002">MTN 2.0GB - 08012345678</div>
-            <div class="tx-amount debit">- ₦1,500.00</div>
-          </div>
-          <div class="tx-row meta">
-            <div class="tx-time">Nov 27, 2025 · 08:11 PM</div>
-            <div class="tx-status" title="Successful">SUCCESS</div>
-          </div>
-        </div>
-      </article>
-
-      <!-- HARD-CODED TRANSACTION: Data Sold (Airtel image slot example) -->
-      <article class="tx-item" data-tx-id="txn-003" aria-labelledby="tx-desc-003" role="listitem">
-        <div class="tx-icon airtel targets" aria-hidden="true">
-          <div class="tx-svg" aria-hidden="true">
-            <!-- Airtel image -->
-            <img class="tx-img airtel" src="/frontend/svg/airtel-icon.svg" alt="Airtel" />
-          </div>
-        </div>
-
-        <div class="tx-content">
-          <div class="tx-row">
-            <div class="tx-desc" id="tx-desc-003">Airtel 750MB - 08076543210</div>
-            <div class="tx-amount debit">- ₦700.00</div>
-          </div>
-          <div class="tx-row meta">
-            <div class="tx-time">Nov 26, 2025 · 03:05 PM</div>
-            <div class="tx-status" title="Successful">SUCCESS</div>
-          </div>
-        </div>
-      </article>
-            <!-- HARD-CODED TRANSACTION: Data Sold (GLO image slot example) -->
-      <article class="tx-item" data-tx-id="txn-003" aria-labelledby="tx-desc-003" role="listitem">
-        <div class="tx-icon glo targets" aria-hidden="true">
-          <div class="tx-svg" aria-hidden="true">
-            <!-- GLO image -->
-            <img class="tx-img glo" src="/frontend/svg/GLO-icon.svg" alt="GLO" />
-          </div>
-        </div>
-
-        <div class="tx-content">
-          <div class="tx-row">
-            <div class="tx-desc" id="tx-desc-003">GLO 500MB - 08055543210</div>
-            <div class="tx-amount debit">- ₦500.00</div>
-          </div>
-          <div class="tx-row meta">
-            <div class="tx-time">Nov 26, 2025 · 03:05 PM</div>
-            <div class="tx-status" title="Successful">SUCCESS</div>
-          </div>
-        </div>
-      </article>
-            <!-- HARD-CODED TRANSACTION: Data Sold (nine-mobile image slot example) -->
-      <article class="tx-item" data-tx-id="txn-003" aria-labelledby="tx-desc-003" role="listitem">
-        <div class="tx-icon nine-mobile targets" aria-hidden="true">
-          <div class="tx-svg" aria-hidden="true">
-            <!-- Nine Mobile image -->
-            <img class="tx-img nine-mobile" src="/frontend/svg/9mobile-icon.svg" alt="Nine Mobile" />
-          </div>
-        </div>
-
-        <div class="tx-content">
-          <div class="tx-row">
-            <div class="tx-desc" id="tx-desc-003">9Mobile 50.0GB - 08076543210</div>
-            <div class="tx-amount debit">- ₦700.00</div>
-          </div>
-          <div class="tx-row meta">
-            <div class="tx-time">Nov 26, 2025 · 03:05 PM</div>
-            <div class="tx-status" title="Failed">FAILED</div>
-          </div>
-        </div>
-      </article>
-                  <!-- HARD-CODED TRANSACTION: Data Sold (GLO image slot example) -->
-      <article class="tx-item" data-tx-id="txn-003" aria-labelledby="tx-desc-003" role="listitem">
-        <div class="tx-icon glo targets" aria-hidden="true">
-          <div class="tx-svg" aria-hidden="true">
-            <!-- GLO image -->
-            <img class="tx-img glo" src="/frontend/svg/GLO-icon.svg" alt="GLO" />
-          </div>
-        </div>
-
-        <div class="tx-content">
-          <div class="tx-row">
-            <div class="tx-desc" id="tx-desc-003">GLO 500MB - 08055543210</div>
-            <div class="tx-amount debit">- ₦500.00</div>
-          </div>
-          <div class="tx-row meta">
-            <div class="tx-time">Nov 26, 2025 · 03:05 PM</div>
-            <div class="tx-status" title="Successful">SUCCESS</div>
-          </div>
-        </div>
-      </article>
-            <!-- HARD-CODED TRANSACTION: Data Sold (nine-mobile image slot example) -->
-      <article class="tx-item" data-tx-id="txn-003" aria-labelledby="tx-desc-003" role="listitem">
-        <div class="tx-icon refund incoming" aria-hidden="true">
-          <div class="tx-svg" aria-hidden="true">
-            <!-- Nine Mobile image -->
-            <img class="tx-img refund" src="/frontend/svg/refund.svg" alt="refund" />
-          </div>
-        </div>
-
-        <div class="tx-content">
-          <div class="tx-row">
-            <div class="tx-desc" id="tx-desc-003">Failed Transaction Refund</div>
-            <div class="tx-amount credit">+ ₦700.00</div>
-          </div>
-          <div class="tx-row meta">
-            <div class="tx-time">Nov 26, 2025 · 03:05 PM</div>
-            <div class="tx-status" title="Refund">REFUND</div>
-          </div>
-        </div>
-      </article>
-            <article class="tx-item" data-tx-id="txn-003" aria-labelledby="tx-desc-003" role="listitem">
-        <div class="tx-icon refund incoming" aria-hidden="true">
-          <div class="tx-svg" aria-hidden="true">
-            <!-- Nine Mobile image -->
-            <img class="tx-img refund" src="/frontend/svg/refund.svg" alt="refund" />
-          </div>
-        </div>
-
-        <div class="tx-content">
-          <div class="tx-row">
-            <div class="tx-desc" id="tx-desc-003">Failed Transaction Refund</div>
-            <div class="tx-amount credit">+ ₦700.00</div>
-          </div>
-          <div class="tx-row meta">
-            <div class="tx-time">Nov 26, 2025 · 03:05 PM</div>
-            <div class="tx-status" title="Refund">REFUND</div>
-          </div>
-        </div>
-      </article>
-            <article class="tx-item" data-tx-id="txn-003" aria-labelledby="tx-desc-003" role="listitem">
-        <div class="tx-icon refund incoming" aria-hidden="true">
-          <div class="tx-svg" aria-hidden="true">
-            <!-- Nine Mobile image -->
-            <img class="tx-img refund" src="/frontend/svg/refund.svg" alt="refund" />
-          </div>
-        </div>
-
-        <div class="tx-content">
-          <div class="tx-row">
-            <div class="tx-desc" id="tx-desc-003">Failed Transaction Refund</div>
-            <div class="tx-amount credit">+ ₦700.00</div>
-          </div>
-          <div class="tx-row meta">
-            <div class="tx-time">Nov 26, 2025 · 03:05 PM</div>
-            <div class="tx-status" title="Refund">REFUND</div>
-          </div>
-        </div>
-      </article>
-            <article class="tx-item" data-tx-id="txn-003" aria-labelledby="tx-desc-003" role="listitem">
-        <div class="tx-icon refund incoming" aria-hidden="true">
-          <div class="tx-svg" aria-hidden="true">
-            <!-- Nine Mobile image -->
-            <img class="tx-img refund" src="/frontend/svg/refund.svg" alt="refund" />
-          </div>
-        </div>
-
-        <div class="tx-content">
-          <div class="tx-row">
-            <div class="tx-desc" id="tx-desc-003">Failed Transaction Refund</div>
-            <div class="tx-amount credit">+ ₦700.00</div>
-          </div>
-          <div class="tx-row meta">
-            <div class="tx-time">Nov 26, 2025 · 03:05 PM</div>
-            <div class="tx-status" title="Refund">REFUND</div>
-          </div>
-        </div>
-      </article>
-            <article class="tx-item" data-tx-id="txn-003" aria-labelledby="tx-desc-003" role="listitem">
-        <div class="tx-icon refund incoming" aria-hidden="true">
-          <div class="tx-svg" aria-hidden="true">
-            <!-- Nine Mobile image -->
-            <img class="tx-img refund" src="/frontend/svg/refund.svg" alt="refund" />
-          </div>
-        </div>
-
-        <div class="tx-content">
-          <div class="tx-row">
-            <div class="tx-desc" id="tx-desc-003">Failed Transaction Refund</div>
-            <div class="tx-amount credit">+ ₦700.00</div>
-          </div>
-          <div class="tx-row meta">
-            <div class="tx-time">Nov 26, 2025 · 03:05 PM</div>
-            <div class="tx-status" title="Refund">REFUND</div>
-          </div>
-        </div>
-      </article>
-            <article class="tx-item" data-tx-id="txn-003" aria-labelledby="tx-desc-003" role="listitem">
-        <div class="tx-icon refund incoming" aria-hidden="true">
-          <div class="tx-svg" aria-hidden="true">
-            <!-- Nine Mobile image -->
-            <img class="tx-img refund" src="/frontend/svg/refund.svg" alt="refund" />
-          </div>
-        </div>
-
-        <div class="tx-content">
-          <div class="tx-row">
-            <div class="tx-desc" id="tx-desc-003">Failed Transaction Refund</div>
-            <div class="tx-amount credit">+ ₦700.00</div>
-          </div>
-          <div class="tx-row meta">
-            <div class="tx-time">Nov 26, 2025 · 03:05 PM</div>
-            <div class="tx-status" title="Refund">REFUND</div>
-          </div>
-        </div>
-      </article>
-
-      <!-- Additional items would be injected here by your JS -->
-    </main>
+      <!-- Transaction list - month dividers and transactions injected by JS -->
+      <main class="opay-body" id="historyList" aria-label="Transaction list">
+        <!-- Transactions and month dividers will be dynamically inserted here -->
+      </main>
     </div>
 
     <!-- States -->
@@ -1763,7 +1524,6 @@
     <div class="opay-error hidden" id="historyError">Could not load history. Try again later.</div>
   </div>
 </div>
-
 
 
   <div id="appLoader" class="loader-overlay" hidden>

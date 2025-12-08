@@ -297,17 +297,16 @@
     return divider;
   }
 
-  /* -------------------------- RENDER WITH MONTH DIVIDERS -------------------------- */
+/* -------------------------- RENDER WITH MONTH DIVIDERS -------------------------- */
   function renderChunked(groupedMonths) {
     historyList.innerHTML = '';
     state.lastRenderIndex = 0;
 
-      const flat = [];
-groupedMonths.forEach(month => {
-  // Remove this line:
-  // flat.push({ type: 'month-header', month });
-  month.txs.forEach(tx => flat.push({ type: 'tx', tx }));
-});
+    const flat = [];
+    groupedMonths.forEach(month => {
+      flat.push({ type: 'month-divider', month });
+      month.txs.forEach(tx => flat.push({ type: 'tx', tx }));
+    });
 
     function renderNextChunk() {
       const start = state.lastRenderIndex;

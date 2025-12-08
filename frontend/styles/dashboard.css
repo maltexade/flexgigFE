@@ -4280,13 +4280,11 @@ a[style*="color: #f00"] { color: var(--danger); }
 .month-container {
   position: sticky;
   top: 0;
-  z-index: 111115 !important;
+  z-index: 10;
   background: #121212;
   margin: 0;
   overflow: hidden;
   flex-shrink: 0;
-  
-  /* Add these */
   transform: translateZ(0);
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
