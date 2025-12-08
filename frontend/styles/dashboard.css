@@ -4066,101 +4066,106 @@ a[style*="color: #f00"] { color: var(--danger); }
 /* ============= OPAY-STYLE TRANSACTION MODAL ============= */
 /* ============= OPAY-STYLE TRANSACTION MODAL (refined) ============= */
 
+/* ============= OPAY-STYLE TRANSACTION MODAL (Complete) ============= */
+
 .opay-history-modal {
-      box-sizing: border-box;
-      margin: 0; background: #0a0a0a;
-      position: fixed;
-      inset: 0;
-      z-index: 10000;
-      height: 100vh;
-      display: flex;
-      align-items: flex-end;
-      justify-content: center;
-      pointer-events: none;
-      isolation: isolate;
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
-    }
+  box-sizing: border-box;
+  margin: 0;
+  background: #0a0a0a;
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  height: 100vh;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  pointer-events: none;
+  isolation: isolate;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
 
-    .opay-history-modal.open { pointer-events: auto; }
+.opay-history-modal.open { 
+  pointer-events: auto; 
+}
 
-    .opay-backdrop {
-      position: absolute;
-      inset: 0;
-      backdrop-filter: blur(10px);
-      -webkit-backdrop-filter: blur(10px);
-      background: rgba(0,0,0,0.45);
-      z-index: 0;
-    }
+.opay-backdrop {
+  position: absolute;
+  inset: 0;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  background: rgba(0,0,0,0.45);
+  z-index: 0;
+}
 
-    /* panel */
-    .opay-panel {
-      position: relative;
-      width: 100%;
-      height: 100vh;
-      max-width: 100%;
-      background: #121212;
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
-      pointer-events: auto;
-      z-index: 10;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.6);
-    }
+/* Panel */
+.opay-panel {
+  position: relative;
+  width: 100%;
+  height: 100vh;
+  max-width: 100%;
+  background: #121212;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  pointer-events: auto;
+  z-index: 10;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+}
 
-    /* Header */
-    .opay-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 12px 12px;
-      background: #1e1e1e;
-      color: white;
-      flex-shrink: 0;
-      gap: 8px;
-      min-height: 56px;
-      margin-bottom: 0;
-      margin-bottom: 10px !important;
-    }
+/* Header */
+.opay-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 12px;
+  background: #1e1e1e;
+  color: white;
+  flex-shrink: 0;
+  gap: 8px;
+  min-height: 56px;
+  margin-bottom: 10px;
+}
 
-    .opay-back-btn { 
-      background: none; 
-      border: none; 
-      color: #aaa; 
-      padding: 6px; 
-      cursor: pointer; 
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      min-width: 40px;
-      flex-shrink: 0;
-    }
+.opay-back-btn { 
+  background: none; 
+  border: none; 
+  color: #aaa; 
+  padding: 6px; 
+  cursor: pointer; 
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  flex-shrink: 0;
+}
 
-    .opay-title { 
-      font-size: 17px; 
-      font-weight: 600; 
-      margin: 0; 
-      color: #fff;
-      flex: 1;
-      text-align: center;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    
-    .opay-download-btn { 
-      background: none; 
-      border: none; 
-      color: #60a5fa; 
-      font-weight: 600; 
-      cursor: pointer; 
-      padding: 6px 8px; 
-      border-radius: 8px;
-      font-size: 14px;
-      white-space: nowrap;
-      flex-shrink: 0;
-    }
-    .main-month {
+.opay-title { 
+  font-size: 17px; 
+  font-weight: 600; 
+  margin: 0; 
+  color: #fff;
+  flex: 1;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.opay-download-btn { 
+  background: none; 
+  border: none; 
+  color: #60a5fa; 
+  font-weight: 600; 
+  cursor: pointer; 
+  padding: 6px 8px; 
+  border-radius: 8px;
+  font-size: 14px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.main-month {
   margin-left: 15px;
   margin-right: 15px;
   margin-top: 10px;
@@ -4169,239 +4174,231 @@ a[style*="color: #f00"] { color: var(--danger); }
   height: 100%;
   overflow: hidden;
 }
-.month-container {
-  position: relative;
-  border-top-right-radius: 20px;
-  border-top-left-radius: 20px;
+
+/* Filters */
+.opay-filters { 
+  display: none; 
+  gap: 12px; 
+  padding: 12px 16px; 
+  background: #1e1e1e;
+  flex-wrap: wrap;
 }
 
-.month-container::before {
-  content: "";
-  position: absolute;
-  bottom: 0;
-  left: 16px;  /* distance from left */
-  right: 16px; /* distance from right */
-  height: 1px;
-  background: rgba(255, 255, 255, 0.123);
+.opay-select { 
+  flex: 1; 
+  min-width: 140px;
+  background: #2d2d2d; 
+  color: white; 
+  border: none; 
+  padding: 10px; 
+  border-radius: 8px; 
+  font-size: 14px;
 }
 
-
-    /* Filters */
-    .opay-filters { 
-      display: none; 
-      gap: 12px; 
-      padding: 12px 16px; 
-      background: #1e1e1e;
-      flex-wrap: wrap;
-    }
-    .opay-select { 
-      flex: 1; 
-      min-width: 140px;
-      background: #2d2d2d; 
-      color: white; 
-      border: none; 
-      padding: 10px; 
-      border-radius: 8px; 
-      font-size: 14px;
-    }
-
-    /* Month Header */
-    .opay-month-header { 
-      display: flex; 
-      justify-content: space-between; 
-      align-items: center; 
-      padding: 12px 12px; 
-      background: #1e1e1e; 
-      gap: 12px;
-      flex-wrap: wrap;
-      overflow: hidden;
-    }
-    
-    .opay-month-selector { 
-      display: inline-flex; 
-      align-items: center; 
-      gap: 6px; 
-      font-size: 16px; 
-      font-weight: 600; 
-      color: white; 
-      cursor: pointer;
-      white-space: nowrap;
-    }
-    
-    .opay-analysis-btn { 
-      background: #60a5fa; 
-      color: black; 
-      border: none; 
-      padding: 7px 14px; 
-      border-radius: 20px; 
-      font-weight: 600; 
-      font-size: 13px; 
-      cursor: pointer;
-      white-space: nowrap;
-    }
-
-    /* Summary */
-    .opay-summary { 
-      display: flex; 
-      justify-content: space-between; 
-      padding: 12px 12px; 
-      background: #1e1e1e; 
-      font-size: 14px; 
-      color: #999; 
-      gap: 16px;
-      flex-wrap: wrap;
-    }
-    .opay-summary > div {
-      white-space: nowrap;
-    }
-    .opay-summary strong { 
-      color: white; 
-      font-weight: 600;
-      margin-left: 4px;
-    }
-
-/* Body */
+/* Body - Transaction List Container */
 .opay-body { 
   flex: 1; 
   overflow-y: auto; 
   overflow-x: hidden;
-  padding: 0 0; 
-  background: #1e1e1e;
-    max-width: 100%;        /* Prevent the container from expanding */
-  overflow-x: hidden;     /* Hide any accidental overflow */
+  padding: 0; 
+  background: #121212;
+  max-width: 100%;
 
   /* Hide scrollbar */
-  scrollbar-width: none;              /* Firefox */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 
 .opay-body::-webkit-scrollbar { 
-  display: none;                      /* Chrome/Safari/Edge */
+  display: none;
 }
-.month-container {
+
+/* Month Section Headers - Each month gets one of these */
+.month-section-header {
   position: sticky;
   top: 0;
   z-index: 10;
-  background: #121212;
-  margin: 0;
-  overflow: hidden;
-  flex-shrink: 0;
+  background: #1e1e1e;
+  margin: 10px 15px 0 15px;
+  border-top-left-radius: 20px;
+  border-top-right-radius: 20px;
   transform: translateZ(0);
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
 }
 
+.month-section-header:first-child {
+  margin-top: 0;
+}
 
+/* Month Header (inside each month section) */
+.opay-month-header { 
+  display: flex; 
+  justify-content: space-between; 
+  align-items: center; 
+  padding: 12px 12px; 
+  background: #1e1e1e; 
+  gap: 12px;
+  flex-wrap: wrap;
+}
 
-    /* Transaction Item */
-    .tx-item {
-      display: flex;
-      gap: 10px;
-      align-items: flex-start;
-      padding: 12px 12px;
-      background: transparent;
-      min-width: 0;    
-    }
+.opay-month-selector { 
+  display: inline-flex; 
+  align-items: center; 
+  gap: 6px; 
+  font-size: 16px; 
+  font-weight: 600; 
+  color: white; 
+  cursor: pointer;
+  white-space: nowrap;
+}
 
-    .tx-item:focus-within { background: rgba(255,255,255,0.02); }
+.opay-analysis-btn { 
+  background: #60a5fa; 
+  color: black; 
+  border: none; 
+  padding: 7px 14px; 
+  border-radius: 20px; 
+  font-weight: 600; 
+  font-size: 13px; 
+  cursor: pointer;
+  white-space: nowrap;
+}
 
-    /* Icon */
-    .tx-icon {
-      width: 40px;
-      height: 40px;
-      min-width: 40px;
-      border-radius: 10px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
-      font-size: 18px;
-      background: rgba(255,255,255,0.02);
-    }
+/* Summary (inside each month section) */
+.opay-summary { 
+  display: flex; 
+  justify-content: space-between; 
+  padding: 12px 12px; 
+  background: #1e1e1e; 
+  font-size: 14px; 
+  color: #999; 
+  gap: 16px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.123);
+}
 
-    .tx-icon.incoming  { background: rgba(34, 197, 94, 0.12);  color: #22c55e; }
-    .tx-icon.outgoing  { background: rgba(239, 68, 68, 0.12);  color: #ef4444; }
-    .tx-icon.targets   { background: rgba(59, 130, 246, 0.12); color: #3b82f6; }
-    .tx-icon.interest  { background: rgba(168, 85, 247, 0.12); color: #a855f7; }
-    .tx-icon.levy      { background: rgba(251, 146, 60, 0.12); color: #fb923c; }
+.opay-summary > div {
+  white-space: nowrap;
+}
 
-    .tx-svg {
+.opay-summary strong { 
+  color: white; 
+  font-weight: 600;
+  margin-left: 4px;
+}
+
+/* Transaction Item */
+.tx-item {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 12px 12px;
+  background: #1e1e1e;
+  margin: 0 15px;
+  min-width: 0;    
+}
+
+.tx-item:last-of-type {
+  margin-bottom: 10px;
+}
+
+.tx-item:focus-within { 
+  background: rgba(255,255,255,0.02); 
+}
+
+/* Transaction Icon */
+.tx-icon {
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 18px;
+  background: rgba(255,255,255,0.02);
+}
+
+.tx-icon.incoming  { background: rgba(34, 197, 94, 0.12);  color: #22c55e; }
+.tx-icon.outgoing  { background: rgba(239, 68, 68, 0.12);  color: #ef4444; }
+.tx-icon.targets   { background: rgba(59, 130, 246, 0.12); color: #3b82f6; }
+.tx-icon.interest  { background: rgba(168, 85, 247, 0.12); color: #a855f7; }
+.tx-icon.levy      { background: rgba(251, 146, 60, 0.12); color: #fb923c; }
+
+/* Network-specific colors */
+.tx-icon.mtn.targets          { background: #ffcb05; }
+.tx-icon.airtel.targets       { background: #e30613; color: white; }
+.tx-icon.glo.targets          { background: #00a650; color: white; }
+.tx-icon.nine-mobile.targets  { background: #8cc63e; color: black; }
+.tx-icon.refund.incoming      { background: #fb923c; color: white; }
+
+.tx-svg {
   width: 28px;
   height: 28px;
-  display: flex;          /* make it a flex container */
-  align-items: center;    /* vertical centering */
-  justify-content: center;/* horizontal centering */
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 6px;
 }
 
+.tx-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
 
-    .tx-img {
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-    }
-    .tx-icon.mtn{
-      background-color: var(--mtn-yellow);
-    }
-    .tx-icon.airtel{
-      background-color: var(--airtel-red);
-    }
-    .tx-icon.glo{
-      background-color: var(--glo-green);
-    }
-    .tx-icon.nine-mobile{
-      background-color: var(--nine-mobile);
-    }
+/* Transaction Content */
+.tx-content { 
+  flex: 1; 
+  min-width: 0;
+  display: flex; 
+  flex-direction: column; 
+  gap: 3px;
+  overflow: hidden;
+}
 
-    /* Content layout - KEY FIX: proper min-width handling */
-    .tx-content { 
-      flex: 1; 
-      min-width: 0;
-      display: flex; 
-      flex-direction: column; 
-      gap: 3px;
-      overflow: hidden;
-    }
+.tx-row { 
+  display: flex; 
+  align-items: center; 
+  justify-content: space-between; 
+  gap: 8px;
+  min-width: 0;
+}
 
-    .tx-row { 
-      display: flex; 
-      align-items: center; 
-      justify-content: space-between; 
-      gap: 8px;
-      min-width: 0;
-    }
+.tx-row.meta { 
+  align-items: center; 
+  justify-content: space-between; 
+  gap: 8px;
+  flex-wrap: wrap;
+}
 
-    .tx-row.meta { 
-      align-items: center; 
-      justify-content: space-between; 
-      gap: 8px;
-      flex-wrap: wrap;
-    }
+/* Description */
+.tx-desc {
+  color: white;
+  font-weight: 400;
+  font-size: 13.3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1 1 auto;
+  max-width: 100%;
+}
 
-    /* Description - KEY FIX: proper text truncation */
-    .tx-desc {
-      color: white;
-      font-weight: 400;
-      font-size: 13.3px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      min-width: 0;
-      flex: 1 1 auto;
-      max-width: 100%;
-    }
+/* Time */
+.tx-time { 
+  color: #999; 
+  font-size: 12px;
+  white-space: nowrap;
+  flex-shrink: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
 
-    /* Time and meta */
-    .tx-time { 
-      color: #999; 
-      font-size: 12px;
-      white-space: nowrap;
-      flex-shrink: 1;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      min-width: 0;
-    }
-    
-/* BASE STATUS BADGE */
+/* Status Badge */
 .tx-status {
   color: white;
   font-size: 7.9px;
@@ -4414,17 +4411,16 @@ a[style*="color: #f00"] { color: var(--danger); }
   min-width: fit-content;
 }
 
-/* SUCCESS VARIATIONS */
+/* Status variations */
 .tx-status[data-status="success"],
 .tx-status[data-status="successful"],
 .tx-status[data-status="completed"],
 .tx-status:where([title*="success" i], [title*="complete" i]) {
-  background: #00d4aa;  /* Opay Green */
+  background: #00d4aa;
   color: rgb(15, 100, 15);
   font-weight: 700;
 }
 
-/* FAILED */
 .tx-status[data-status="failed"],
 .tx-status[data-status="fail"],
 .tx-status[title*="fail" i] {
@@ -4432,78 +4428,131 @@ a[style*="color: #f00"] { color: var(--danger); }
   color: white;
 }
 
-/* REFUND */
 .tx-status[data-status="refund"],
 .tx-status[title*="refund" i] {
   background: #fb923c;
   color: white;
 }
 
-/* PENDING */
 .tx-status[data-status="pending"],
 .tx-status[title*="pending" i] {
   background: #f59e0b;
   color: black;
 }
-.tx-icon.mtn.targets          { background: #ffcb05; }  /* MTN Yellow */
-.tx-icon.airtel.targets       { background: #e30613; color: white; }
-.tx-icon.glo.targets          { background: #00a650; color: white; }
-.tx-icon.nine-mobile.targets  { background: #8cc63e; color: black; }
-.tx-icon.refund.incoming      { background: #fb923c; color: white; }
 
-    /* Amount - KEY FIX: prevent overflow */
-    .tx-amount { 
-      text-align: right; 
-      font-weight: 600; 
-      font-size: 14px; 
-      white-space: nowrap;
-      flex-shrink: 0;
-      min-width: fit-content;
-    }
-    .tx-amount.credit { color: #22c55e; }
-    .tx-amount.debit  { color: #ffffff; }
+/* Amount */
+.tx-amount { 
+  text-align: right; 
+  font-weight: 600; 
+  font-size: 14px; 
+  white-space: nowrap;
+  flex-shrink: 0;
+  min-width: fit-content;
+}
 
+.tx-amount.credit { color: #22c55e; }
+.tx-amount.debit  { color: #ffffff; }
 
-    
-    /* states */
-    .opay-loading, .opay-empty, .opay-error { 
-      text-align: center; 
-      padding: 40px 20px; 
-      color: #999; 
-      font-size: 15px;
-    }
-    .hidden { display: none !important; }
+/* Loading/Empty/Error States */
+.opay-loading, 
+.opay-empty, 
+.opay-error { 
+  text-align: center; 
+  padding: 40px 20px; 
+  color: #999; 
+  font-size: 15px;
+}
 
-    /* Tablet and up */
-    @media (min-width: 640px) {
-      .opay-panel { 
-        max-width: 640px; 
-        border-radius: 12px; 
-        height: auto; 
-        max-height: 90vh; 
-        margin: 32px;
-      }
-      .opay-history-modal { align-items: center; }
-      .opay-filters { display: flex; }
-      .opay-header { padding: 12px 16px; }
-      .opay-month-header { padding: 14px 16px; }
-      .opay-summary { padding: 12px 16px; font-size: 15px; }
-      .tx-item { padding: 14px 16px; gap: 12px; }
-      .tx-icon { width: 48px; height: 48px; min-width: 48px; }
-      .tx-svg { width: 32px; height: 32px; }
-      .tx-desc { font-size: 15px; }
-      .tx-amount { font-size: 15px; }
-      .tx-time { font-size: 13px; }
-      .tx-status { font-size: 11px; padding: 4px 10px; }
-      .opay-title { font-size: 18px; }
-    }
+.hidden { 
+  display: none !important; 
+}
 
-    /* Large screens */
-    @media (min-width: 1024px) {
-      .opay-panel { max-width: 720px; }
-      .tx-icon { width: 52px; height: 52px; min-width: 52px; }
-      .tx-svg { width: 36px; height: 36px; }
-    }
+/* Tablet and up */
+@media (min-width: 640px) {
+  .opay-panel { 
+    max-width: 640px; 
+    border-radius: 12px; 
+    height: auto; 
+    max-height: 90vh; 
+    margin: 32px;
+  }
+  
+  .opay-history-modal { 
+    align-items: center; 
+  }
+  
+  .opay-filters { 
+    display: flex; 
+  }
+  
+  .opay-header { 
+    padding: 12px 16px; 
+  }
+  
+  .opay-month-header { 
+    padding: 14px 16px; 
+  }
+  
+  .opay-summary { 
+    padding: 12px 16px; 
+    font-size: 15px; 
+  }
+  
+  .tx-item { 
+    padding: 14px 16px; 
+    gap: 12px; 
+  }
+  
+  .tx-icon { 
+    width: 48px; 
+    height: 48px; 
+    min-width: 48px; 
+  }
+  
+  .tx-svg { 
+    width: 32px; 
+    height: 32px; 
+  }
+  
+  .tx-desc { 
+    font-size: 15px; 
+  }
+  
+  .tx-amount { 
+    font-size: 15px; 
+  }
+  
+  .tx-time { 
+    font-size: 13px; 
+  }
+  
+  .tx-status { 
+    font-size: 11px; 
+    padding: 4px 10px; 
+  }
+  
+  .opay-title { 
+    font-size: 18px; 
+  }
+}
+
+/* Large screens */
+@media (min-width: 1024px) {
+  .opay-panel { 
+    max-width: 720px; 
+  }
+  
+  .tx-icon { 
+    width: 52px; 
+    height: 52px; 
+    min-width: 52px; 
+  }
+  
+  .tx-svg { 
+    width: 36px; 
+    height: 36px; 
+  }
+}
 
     /* Demo button */
     .demo-btn {

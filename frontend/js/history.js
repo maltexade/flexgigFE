@@ -30,9 +30,7 @@
   const emptyEl = document.getElementById('historyEmpty');
   const errorEl = document.getElementById('historyError');
   const downloadBtn = document.getElementById('downloadHistory');
-  const monthSelector = modal?.querySelector('.opay-month-selector span');
-  const inEl = modal?.querySelector('.opay-in strong');
-  const outEl = modal?.querySelector('.opay-out strong');
+
 
   if (!modal || !panel) {
     console.error('[TransactionHistory] Modal elements not found - check your HTML');
@@ -269,70 +267,111 @@
   });
 
   /* -------------------------- STICKY MONTH DIVIDERS (matching HTML structure) -------------------------- */
-  function makeMonthDivider(month) {
-    const divider = document.createElement('div');
-    divider.className = 'month-divider';
-    divider.dataset.monthKey = month.monthKey;
-    divider.style.cssText = `
-      position: sticky;
-      top: 0;
-      z-index: 5;
-      background: #1e1e1e;
-      padding: 10px 12px;
-      margin: 0;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-      font-size: 14px;
-      font-weight: 600;
-      color: #999;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    `;
-    divider.innerHTML = `
-      <span>${month.prettyMonth}</span>
-      <span style="font-size: 12px; opacity: 0.8;">
-        ↓ ${formatCurrency(month.totalIn)} | ↑ ${formatCurrency(month.totalOut)}
-      </span>
-    `;
-    return divider;
+/* -------------------------- STICKY MONTH DIVIDERS (Opay-style with full header) -------------------------- */
+function makeMonthDivider(month) {
+  const container = document.createElement('div');
+  container.className = 'month-section-header';
+  container.dataset.monthKey = month.monthKey;
+  
+  container.style.cssText = `
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: #1e1e1e;
+    margin: 0;
+    padding: 0;
+    transform: translateZ(0);
+    backface-visibility: hidden;
+    border-top-left-radius: 20px;
+    border-top-right-radius: 20px;
+    overflow: hidden;
+  `;
+  
+  // Create the full Opay-style header with month selector and totals
+  container.innerHTML = `
+    <div class="opay-month-header" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 12px; background: #1e1e1e; gap: 12px;">
+      <div class="opay-month-selector" style="display: inline-flex; align-items: center; gap: 6px; font-size: 16px; font-weight: 600; color: white; cursor: pointer;">
+        <span>${month.prettyMonth}</span>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M6 9l6 6 6-6"/>
+        </svg>
+      </div>
+      <button class="opay-analysis-btn" style="background: #60a5fa; color: black; border: none; padding: 7px 14px; border-radius: 20px; font-weight: 600; font-size: 13px; cursor: pointer;">
+        Analysis
+      </button>
+    </div>
+    
+    <div class="opay-summary" style="display: flex; justify-content: space-between; padding: 12px 12px; background: #1e1e1e; font-size: 14px; color: #999; gap: 16px; border-bottom: 1px solid rgba(255, 255, 255, 0.123);">
+      <div>In: <strong style="color: white; font-weight: 600; margin-left: 4px;">${formatCurrency(month.totalIn)}</strong></div>
+      <div>Out: <strong style="color: white; font-weight: 600; margin-left: 4px;">${formatCurrency(month.totalOut)}</strong></div>
+    </div>
+  `;
+  
+  // Make the month selector clickable to open month picker
+  const monthSelector = container.querySelector('.opay-month-selector');
+  if (monthSelector) {
+    monthSelector.addEventListener('click', (e) => {
+      e.stopPropagation();
+      // Extract year and month from the month object
+      const [year, monthNum] = month.monthKey.split('-');
+      selectedMonth = { year: parseInt(year), month: parseInt(monthNum) };
+      
+      // Open month picker modal
+      createMonthPickerModal();
+      const modalEl = document.getElementById('monthFilterModal');
+      modalEl.classList.remove('hidden');
+      generateMonthGrid();
+
+      setTimeout(() => {
+        const panel = modalEl.querySelector('.opay-panel');
+        if (panel) {
+          panel.style.transform = 'scale(1)';
+          panel.style.opacity = '1';
+        }
+      }, 10);
+    });
   }
+  
+  return container;
+}
 
 /* -------------------------- RENDER WITH MONTH DIVIDERS -------------------------- */
-  function renderChunked(groupedMonths) {
-    historyList.innerHTML = '';
-    state.lastRenderIndex = 0;
+  /* -------------------------- RENDER WITH MONTH DIVIDERS -------------------------- */
+function renderChunked(groupedMonths) {
+  historyList.innerHTML = '';
+  state.lastRenderIndex = 0;
 
-    const flat = [];
-    groupedMonths.forEach(month => {
-      flat.push({ type: 'month-divider', month });
-      month.txs.forEach(tx => flat.push({ type: 'tx', tx }));
-    });
+  const flat = [];
+  groupedMonths.forEach(month => {
+    flat.push({ type: 'month-divider', month });  // Add the month header
+    month.txs.forEach(tx => flat.push({ type: 'tx', tx }));
+  });
 
-    function renderNextChunk() {
-      const start = state.lastRenderIndex;
-      const end = Math.min(flat.length, start + CONFIG.chunkRenderSize);
-      const fragment = document.createDocumentFragment();
+  function renderNextChunk() {
+    const start = state.lastRenderIndex;
+    const end = Math.min(flat.length, start + CONFIG.chunkRenderSize);
+    const fragment = document.createDocumentFragment();
 
-      for (let i = start; i < end; i++) {
-        const entry = flat[i];
-        if (entry.type === 'month-divider') {
-          fragment.appendChild(makeMonthDivider(entry.month));
-        } else {
-          fragment.appendChild(makeTxNode(entry.tx));
-        }
-      }
-
-      historyList.appendChild(fragment);
-      state.lastRenderIndex = end;
-
-      if (end < flat.length) {
-        requestAnimationFrame(renderNextChunk);
+    for (let i = start; i < end; i++) {
+      const entry = flat[i];
+      if (entry.type === 'month-divider') {
+        fragment.appendChild(makeMonthDivider(entry.month));
       } else {
-        window.trunTx?.();
+        fragment.appendChild(makeTxNode(entry.tx));
       }
     }
-    renderNextChunk();
+
+    historyList.appendChild(fragment);
+    state.lastRenderIndex = end;
+
+    if (end < flat.length) {
+      requestAnimationFrame(renderNextChunk);
+    } else {
+      window.trunTx?.();
+    }
   }
+  renderNextChunk();
+}
 
   function showStateUI() {
     hide(loadingEl); hide(emptyEl); hide(errorEl);
@@ -399,15 +438,10 @@
     return date.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
   }
 
-  function updateMonthDisplay() {
-    if (!monthSelector) return;
-    if (selectedMonth) {
-      const date = new Date(selectedMonth.year, selectedMonth.month);
-      monthSelector.textContent = formatMonthYear(date);
-    } else {
-      monthSelector.textContent = 'All Time';
-    }
-  }
+function updateMonthDisplay() {
+  // This function is no longer needed since each month header shows its own date
+  console.log('[TransactionHistory] Month display updated in individual headers');
+}
 
   function filterBySelectedMonth(items) {
     if (!selectedMonth) return items;
@@ -420,16 +454,16 @@
   }
 
   function computeFilteredSummary(filteredItems) {
-    let totalIn = 0, totalOut = 0;
-    filteredItems.forEach(tx => {
-      const amt = Math.abs(Number(tx.amount || 0));
-      if (tx.type === 'credit') totalIn += amt;
-      else totalOut += amt;
-    });
+  let totalIn = 0, totalOut = 0;
+  filteredItems.forEach(tx => {
+    const amt = Math.abs(Number(tx.amount || 0));
+    if (tx.type === 'credit') totalIn += amt;
+    else totalOut += amt;
+  });
 
-    if (inEl) inEl.textContent = `₦${totalIn.toLocaleString()}`;
-    if (outEl) outEl.textContent = `₦${totalOut.toLocaleString()}`;
-  }
+  // Update will happen in the month headers themselves
+  console.log(`[TransactionHistory] Total In: ${formatCurrency(totalIn)}, Total Out: ${formatCurrency(totalOut)}`);
+}
 
   function applyMonthFilterAndRender() {
     let itemsToRender;
@@ -484,32 +518,55 @@
   window.applyTransformsAndRender = applyTransformsAndRender;
 
   /* -------------------------- MONTH PICKER MODAL -------------------------- */
-  function createMonthPickerModal() {
-    const existing = document.getElementById('monthFilterModal');
-    if (existing) existing.remove();
+function createMonthPickerModal() {
+  const existing = document.getElementById('monthFilterModal');
+  if (existing) existing.remove();
 
-    const modalHTML = `
-      <div id="monthFilterModal" class="opay-modal hidden" style="position: fixed; inset: 0; z-index: 10000000; display: flex; align-items: center; justify-content: center; font-family: 'Inter', sans-serif;">
-        <div class="opay-backdrop" data-close-month style="position: absolute; inset: 0; background: rgba(0,0,0,0.5); backdrop-filter: blur(2px);"></div>
+  const modalHTML = `
+    <div id="monthFilterModal" class="opay-modal hidden" style="position: fixed; inset: 0; z-index: 10000000; display: flex; align-items: center; justify-content: center; font-family: 'Inter', sans-serif;">
+      <div class="opay-backdrop" data-close-month style="position: absolute; inset: 0; background: rgba(0,0,0,0.5); backdrop-filter: blur(2px);"></div>
+      
+      <div class="opay-panel" style="position: relative; max-width: 380px; width: 90%; background: #fff; border-radius: 16px; box-shadow: 0 20px 40px rgba(0,0,0,0.2); overflow: hidden; transform: scale(0.9); opacity: 0; transition: all 0.3s ease-in-out;">
         
-        <div class="opay-panel" style="position: relative; max-width: 380px; width: 90%; background: #fff; border-radius: 16px; box-shadow: 0 20px 40px rgba(0,0,0,0.2); overflow: hidden; transform: scale(0.9); opacity: 0; transition: all 0.3s ease-in-out;">
-          
-          <div class="opay-header" style="padding: 18px 16px; border-bottom: 1px solid #eee; font-weight: 600; text-align: center; position: relative; color: #222; font-size: 18px;">
-            <button data-close-month style="position: absolute; left: 16px; background: transparent; border: none; font-size: 24px; cursor: pointer; color: #999; transition: color 0.2s;">×</button>
-            Select Month
-          </div>
-          
-          <div id="monthGrid" style="padding: 24px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;"></div>
-          
-          <div style="padding: 16px; border-top: 1px solid #eee; display: flex; gap: 12px; justify-content: center;">
-            <button id="allTimeBtn" style="background: #6c757d; color: white; border: none; padding: 12px 24px; border-radius: 10px; font-weight: 600; cursor: pointer; transition: background 0.2s;">All Time</button>
-            <button id="confirmMonthBtn" style="background: linear-gradient(90deg,#00d4aa,#00bfa5); color: white; border: none; padding: 12px 32px; border-radius: 10px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 10px rgba(0,212,170,0.3); transition: all 0.2s;">Confirm</button>
-          </div>
+        <div class="opay-header" style="padding: 18px 16px; border-bottom: 1px solid #eee; font-weight: 600; text-align: center; position: relative; color: #222; font-size: 18px;">
+          <button data-close-month style="position: absolute; left: 16px; background: transparent; border: none; font-size: 24px; cursor: pointer; color: #999; transition: color 0.2s;">×</button>
+          Select Month
+        </div>
+        
+        <div id="monthGrid" style="padding: 24px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;"></div>
+        
+        <div style="padding: 16px; border-top: 1px solid #eee; display: flex; gap: 12px; justify-content: center;">
+          <button id="allTimeBtn" style="background: #6c757d; color: white; border: none; padding: 12px 24px; border-radius: 10px; font-weight: 600; cursor: pointer; transition: background 0.2s;">All Time</button>
+          <button id="confirmMonthBtn" style="background: linear-gradient(90deg,#00d4aa,#00bfa5); color: white; border: none; padding: 12px 32px; border-radius: 10px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 10px rgba(0,212,170,0.3); transition: all 0.2s;">Confirm</button>
         </div>
       </div>
-    `;
-    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    </div>
+  `;
+  document.body.insertAdjacentHTML('beforeend', modalHTML);
+  
+  // Setup handlers
+  const modalEl = document.getElementById('monthFilterModal');
+  
+  modalEl.querySelector('#confirmMonthBtn').onclick = () => {
+    applyMonthFilterAndRender();
+    modalEl.classList.add('hidden');
+  };
+
+  modalEl.querySelector('#allTimeBtn').onclick = () => {
+    selectedMonth = null;
+    applyMonthFilterAndRender();
+    modalEl.classList.add('hidden');
+  };
+
+  modalEl.querySelectorAll('[data-close-month]').forEach(el => {
+    el.onclick = () => modalEl.classList.add('hidden');
+  });
+  
+  const backdrop = modalEl.querySelector('.opay-backdrop');
+  if (backdrop) {
+    backdrop.onclick = () => modalEl.classList.add('hidden');
   }
+}
 
   function generateMonthGrid() {
     const grid = document.getElementById('monthGrid');
@@ -551,39 +608,39 @@
     }
   }
 
-  if (monthSelector) {
-    monthSelector.addEventListener('click', () => {
-      createMonthPickerModal();
-      const modalEl = document.getElementById('monthFilterModal');
-      modalEl.classList.remove('hidden');
-      generateMonthGrid();
+  // if (monthSelector) {
+  //   monthSelector.addEventListener('click', () => {
+  //     createMonthPickerModal();
+  //     const modalEl = document.getElementById('monthFilterModal');
+  //     modalEl.classList.remove('hidden');
+  //     generateMonthGrid();
 
-      setTimeout(() => {
-        const panel = modalEl.querySelector('.opay-panel');
-        if (panel) {
-          panel.style.transform = 'scale(1)';
-          panel.style.opacity = '1';
-        }
-      }, 10);
+  //     setTimeout(() => {
+  //       const panel = modalEl.querySelector('.opay-panel');
+  //       if (panel) {
+  //         panel.style.transform = 'scale(1)';
+  //         panel.style.opacity = '1';
+  //       }
+  //     }, 10);
 
-      modalEl.querySelector('#confirmMonthBtn').onclick = () => {
-        updateMonthDisplay();
-        applyMonthFilterAndRender();
-        modalEl.classList.add('hidden');
-      };
+  //     modalEl.querySelector('#confirmMonthBtn').onclick = () => {
+  //       updateMonthDisplay();
+  //       applyMonthFilterAndRender();
+  //       modalEl.classList.add('hidden');
+  //     };
 
-      modalEl.querySelector('#allTimeBtn').onclick = () => {
-        selectedMonth = null;
-        updateMonthDisplay();
-        applyMonthFilterAndRender();
-        modalEl.classList.add('hidden');
-      };
+  //     modalEl.querySelector('#allTimeBtn').onclick = () => {
+  //       selectedMonth = null;
+  //       updateMonthDisplay();
+  //       applyMonthFilterAndRender();
+  //       modalEl.classList.add('hidden');
+  //     };
 
-      modalEl.querySelectorAll('[data-close-month], .opay-backdrop').forEach(el => {
-        el.onclick = () => modalEl.classList.add('hidden');
-      });
-    });
-  }
+  //     modalEl.querySelectorAll('[data-close-month], .opay-backdrop').forEach(el => {
+  //       el.onclick = () => modalEl.classList.add('hidden');
+  //     });
+  //   });
+  // }
 
   /* -------------------------- MODAL OPEN/CLOSE -------------------------- */
   document.addEventListener('modalOpened', (e) => {

@@ -1468,7 +1468,7 @@
     </a>
   </nav>
 
-<!-- --------------- HTML: Opay-Style Transaction History Modal --------------- -->
+<!-- Transaction History Modal - Opay Style with Dynamic Month Headers -->
 <div id="historyModal" class="opay-history-modal hidden" role="dialog" aria-modal="true" aria-labelledby="historyModalTitle">
   <div class="opay-backdrop" data-close></div>
 
@@ -1492,33 +1492,21 @@
       <select class="opay-select"><option>All Status</option></select>
     </div>
 
-    <!-- Transaction List -->
+    <!-- Transaction List Container -->
     <div class="main-month">
-      <div class="month-container">
-        <!-- Month Summary (kept for month selector UI) -->
-        <div class="opay-month-header">
-          <div class="opay-month-selector" role="button" tabindex="0" aria-label="Select month">
-            <span>Dec 2025</span>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-              <path d="M6 9l6 6 6-6"/>
-            </svg>
-          </div>
-          <button class="opay-analysis-btn" aria-label="Open analysis">Analysis</button>
-        </div>
-
-        <div class="opay-summary" role="status" aria-live="polite">
-          <div class="opay-in">In: <strong>₦0.00</strong></div>
-          <div class="opay-out">Out: <strong>₦0.00</strong></div>
-        </div>
-      </div>
-
-      <!-- Transaction list - month dividers and transactions injected by JS -->
+      <!-- All month headers and transactions will be dynamically inserted here -->
       <main class="opay-body" id="historyList" aria-label="Transaction list">
-        <!-- Transactions and month dividers will be dynamically inserted here -->
+        <!-- JavaScript will create:
+             - Month section header (sticky) with selector and totals
+             - Transaction items for that month
+             - Next month section header (sticky)
+             - Transaction items for next month
+             - And so on...
+        -->
       </main>
     </div>
 
-    <!-- States -->
+    <!-- Loading/Empty/Error States -->
     <div class="opay-loading hidden" id="historyLoading">Loading transactions…</div>
     <div class="opay-empty hidden" id="historyEmpty">No transactions yet.</div>
     <div class="opay-error hidden" id="historyError">Could not load history. Try again later.</div>
