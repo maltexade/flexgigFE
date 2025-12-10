@@ -370,6 +370,7 @@ function makeMonthDivider(month) {
       // Extract year and month from the month object
       const [year, monthNum] = month.monthKey.split('-');
       selectedMonth = { year: parseInt(year), month: parseInt(monthNum) };
+      window.currentMonthPickerYear = parseInt(year);
       
       // Open month picker modal
       createMonthPickerModal();
@@ -659,6 +660,9 @@ function createMonthPickerModal() {
   const existing = document.getElementById('monthFilterModal');
   if (existing) existing.remove();
 
+  // Track current year being displayed in the grid
+  window.currentMonthPickerYear = window.currentMonthPickerYear || new Date().getFullYear();
+
   const modalHTML = `
     <div id="monthFilterModal" class="opay-modal hidden" style="position: fixed; inset: 0; z-index: 10000000; display: flex; align-items: center; justify-content: center; font-family: 'Inter', sans-serif;">
       <div class="opay-backdrop" data-close-month style="position: absolute; inset: 0; background: rgba(0,0,0,0.5); backdrop-filter: blur(2px);"></div>
@@ -666,24 +670,44 @@ function createMonthPickerModal() {
       <div class="opay-panel" style="position: relative; max-width: 380px; width: 90%; background: #fff; border-radius: 10px; box-shadow: 0 20px 40px rgba(0,0,0,0.2); overflow: hidden; transform: scale(0.9); opacity: 0; transition: all 0.3s ease-in-out;">
         
         <div class="opay-header" style="padding: 18px 16px; border-bottom: 1px solid #eee; font-weight: 600; text-align: center; position: relative; color: #222; font-size: 18px;">
-          <button data-close-month style="position: absolute; left: 16px; background: transparent; border: none; font-size: 24px; cursor: pointer; color: #999; transition: color 0.2s;">×</button>
+          <button data-close-month style="position: absolute; left: 16px; background: transparent; border: none; font-size: 24px; cursor: pointer; color: #999;">×</button>
           Select Month
+        </div>
+
+        <!-- YEAR NAVIGATION -->
+        <div style="padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; background: #f8f9fa; border-bottom: 1px solid #eee;">
+          <button id="prevYearBtn" style="background:none; border:none; font-size:28px; cursor:pointer; color:#00d4aa; padding:4px 8px;">‹</button>
+          <div id="currentYearDisplay" style="font-weight:700; font-size:18px; color:#222;">${window.currentMonthPickerYear}</div>
+          <button id="nextYearBtn" style="background:none; border:none; font-size:28px; cursor:pointer; color:#00d4aa; padding:4px 8px;">›</button>
         </div>
         
         <div id="monthGrid" style="padding: 24px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;"></div>
         
         <div style="padding: 16px; border-top: 1px solid #eee; display: flex; gap: 12px; justify-content: center;">
-          <button id="allTimeBtn" style="background: #6c757d; color: white; border: none; padding: 12px 24px; border-radius: 10px; font-weight: 600; cursor: pointer; transition: background 0.2s;">All Time</button>
-          <button id="confirmMonthBtn" style="background: linear-gradient(90deg,#00d4aa,#00bfa5); color: white; border: none; padding: 12px 32px; border-radius: 10px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 10px rgba(0,212,170,0.3); transition: all 0.2s;">Confirm</button>
+          <button id="allTimeBtn" style="background: #6c757d; color: white; border: none; padding: 12px 24px; border-radius: 10px; font-weight: 600; cursor: pointer;">All Time</button>
+          <button id="confirmMonthBtn" style="background: linear-gradient(90deg,#00d4aa,#00bfa5); color: white; border: none; padding: 12px 32px; border-radius: 10px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 10px rgba(0,212,170,0.3);">Confirm</button>
         </div>
       </div>
     </div>
   `;
   document.body.insertAdjacentHTML('beforeend', modalHTML);
-  
-  // Setup handlers
+
   const modalEl = document.getElementById('monthFilterModal');
-  
+
+  // Year navigation
+  modalEl.querySelector('#prevYearBtn').onclick = () => {
+    window.currentMonthPickerYear--;
+    generateMonthGrid();
+    modalEl.querySelector('#currentYearDisplay').textContent = window.currentMonthPickerYear;
+  };
+
+  modalEl.querySelector('#nextYearBtn').onclick = () => {
+    window.currentMonthPickerYear++;
+    generateMonthGrid();
+    modalEl.querySelector('#currentYearDisplay').textContent = window.currentMonthPickerYear;
+  };
+
+  // Confirm / All Time / Close
   modalEl.querySelector('#confirmMonthBtn').onclick = () => {
     applyMonthFilterAndRender();
     modalEl.classList.add('hidden');
@@ -698,52 +722,53 @@ function createMonthPickerModal() {
   modalEl.querySelectorAll('[data-close-month]').forEach(el => {
     el.onclick = () => modalEl.classList.add('hidden');
   });
-  
-  const backdrop = modalEl.querySelector('.opay-backdrop');
-  if (backdrop) {
-    backdrop.onclick = () => modalEl.classList.add('hidden');
-  }
+
+  modalEl.querySelector('.opay-backdrop').onclick = () => modalEl.classList.add('hidden');
 }
 
   function generateMonthGrid() {
-    const grid = document.getElementById('monthGrid');
-    if (!grid) return;
-    grid.innerHTML = '';
+  const grid = document.getElementById('monthGrid');
+  if (!grid) return;
+  grid.innerHTML = '';
 
-    const today = new Date();
-    const currentYear = today.getFullYear();
-    const currentMonth = today.getMonth();
+  const year = window.currentMonthPickerYear || new Date().getFullYear();
 
-    for (let i = 11; i >= 0; i--) {
-      const date = new Date(currentYear, currentMonth - i, 1);
-      const year = date.getFullYear();
-      const month = date.getMonth();
+  for (let month = 0; month < 12; month++) {
+    const date = new Date(year, month, 1);
+    const pretty = date.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
 
-      const btn = document.createElement('button');
-      btn.textContent = formatMonthYear(date);
-      btn.style.cssText = `
-        padding: 14px 8px; border: 1px solid #ddd; border-radius: 8px; background: white;
-        font-size: 14px; cursor: pointer; transition: all 0.2s;
-      `;
+    const btn = document.createElement('button');
+    btn.textContent = date.toLocaleDateString('en-GB', { month: 'short' });
+    btn.style.cssText = `
+      padding: 16px 8px; border: 1px solid #ddd; border-radius: 8px; background: white;
+      font-size: 15px; font-weight: 500; cursor: pointer; transition: all 0.2s;
+    `;
 
-      if (selectedMonth && selectedMonth.year === year && selectedMonth.month === month) {
-        btn.style.background = '#00d4aa';
-        btn.style.color = 'white';
-        btn.style.borderColor = '#00d4aa';
-      }
+    // Highlight selected month
+    const isSelected = selectedMonth &&
+      selectedMonth.year === year &&
+      selectedMonth.month === month;
 
-      if (i === 0) {
-        btn.style.fontWeight = '600';
-      }
-
-      btn.addEventListener('click', () => {
-        selectedMonth = { year, month };
-        generateMonthGrid();
-      });
-
-      grid.appendChild(btn);
+    if (isSelected) {
+      btn.style.background = '#00d4aa';
+      btn.style.color = 'white';
+      btn.style.borderColor = '#00d4aa';
     }
+
+    // Highlight current month (today)
+    const today = new Date();
+    if (year === today.getFullYear() && month === today.getMonth()) {
+      if (!isSelected) btn.style.fontWeight = '700';
+    }
+
+    btn.addEventListener('click', () => {
+      selectedMonth = { year, month };
+      generateMonthGrid(); // Re-render to update highlight
+    });
+
+    grid.appendChild(btn);
   }
+}
 
   /* -------------------------- MODAL OPEN/CLOSE -------------------------- */
   document.addEventListener('modalOpened', (e) => {
