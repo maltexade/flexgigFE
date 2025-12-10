@@ -312,13 +312,18 @@ function showTransactionReceipt(tx) {
   const existing = document.getElementById('receiptModal');
   if (existing) existing.remove();
 
+  // Reuse the same icon logic from getTxIcon
+  const icon = getTxIcon(tx);
+  
   const networkInfo = (() => {
     const desc = (tx.description || '').toLowerCase();
-    if (desc.includes('mtn')) return { name: 'MTN', color: '#FFC107', logo: '/frontend/img/mtn.svg' };
-    if (desc.includes('airtel')) return { name: 'Airtel', color: '#E4002B', logo: '/frontend/svg/airtel-icon.svg' };
-    if (desc.includes('glo')) return { name: 'GLO', color: '#6FBF48', logo: '/frontend/svg/glo-icon.svg' };
-    if (desc.includes('9mobile') || desc.includes('etisalat')) return { name: '9Mobile', color: '#00A650', logo: '/frontend/svg/9mobile-icon.svg' };
-    return { name: 'Transaction', color: '#00D4AA', logo: null };
+    if (desc.includes('mtn')) return { name: 'MTN', color: '#FFC107' };
+    if (desc.includes('airtel')) return { name: 'Airtel', color: '#E4002B' };
+    if (desc.includes('glo')) return { name: 'GLO', color: '#6FBF48' };
+    if (desc.includes('9mobile') || desc.includes('etisalat')) return { name: '9Mobile', color: '#00A650' };
+    if (desc.includes('opay')) return { name: 'Opay', color: '#00D4AA' };
+    if (desc.includes('refund')) return { name: 'Refund', color: '#00D4AA' };
+    return { name: 'Transaction', color: '#00D4AA' };
   })();
 
   const amount = formatCurrency(Math.abs(Number(tx.amount || 0)));
@@ -361,7 +366,13 @@ function showTransactionReceipt(tx) {
           
           <!-- Floating Logo Circle -->
           <div style="width:50px;height:50px;background:${networkInfo.color};border-radius:50%;display:flex;align-items:center;justify-content:center;position:absolute;top:-25px;left:50%;transform:translateX(-50%);box-shadow:0 6px 16px rgba(0,0,0,0.5);">
-            ${networkInfo.logo ? `<img src="${networkInfo.logo}" style="width:28px;height:28px;object-fit:contain;image-rendering:crisp-edges;">` : ''}
+            ${icon.img ? `<img src="${icon.img}" style="width:28px;height:28px;object-fit:contain;image-rendering:crisp-edges;" alt="${icon.alt}">` : `
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                ${tx.type === 'credit' 
+                  ? '<path d="M12 19V5M5 12l7 7 7-7"/>' 
+                  : '<path d="M12 5v14M19 12l-7-7-7 7"/>'}
+              </svg>
+            `}
           </div>
 
           <!-- Amount -->
@@ -413,7 +424,7 @@ function showTransactionReceipt(tx) {
         <!-- Action Buttons -->
         <div style="display:flex;gap:12px;margin-top:auto;">
           <button onclick="reportTransactionIssue('${tx.id || tx.reference}')" style="flex:1;background:#2c2c2c;color:#00d4aa;border:1.5px solid #00d4aa;border-radius:50px;padding:12px;font-weight:600;cursor:pointer;">Report Issue</button>
-          <button onclick="shareReceipt(this.closest('#receiptModal'), '${tx.reference || tx.id}', '${amount}', '${tx.description}', '${formattedDate} ${formattedTime}')" style="flex:1;background:linear-gradient(90deg,#00d4aa,#00bfa5);color:white;border:none;border-radius:50px;padding:12px;font-weight:600;cursor:pointer;">Share Receipt</button>
+          <button onclick="shareReceipt(this.closest('#receiptModal'), '${tx.reference || tx.id}', '${amount}', '${(tx.description || '').replace(/'/g, "\\'")}', '${formattedDate}', '${formattedTime}', '${status.text}', '${networkInfo.name}', '${networkInfo.color}', '${icon.img || ''}', '${tx.type}')" style="flex:1;background:linear-gradient(90deg,#00d4aa,#00bfa5);color:white;border:none;border-radius:50px;padding:12px;font-weight:600;cursor:pointer;">Share Receipt</button>
         </div>
 
       </div>
