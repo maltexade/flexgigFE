@@ -589,11 +589,23 @@ function updateMonthDisplay() {
     renderChunked(grouped);
     computeFilteredSummary(itemsToRender);
 
-    if (itemsToRender.length === 0) {
-      show(emptyEl);
-    } else {
-      hide(emptyEl);
-    }
+    // In applyMonthFilterAndRender()
+if (itemsToRender.length === 0) {
+  // Show month header + "No transactions" message
+  const emptyMonth = {
+    monthKey: `${selectedMonth.year}-${selectedMonth.month}`,
+    prettyMonth: new Date(selectedMonth.year, selectedMonth.month).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }),
+    totalIn: 0,
+    totalOut: 0,
+    txs: []
+  };
+  renderChunked([emptyMonth]);
+  hide(emptyEl);
+} else {
+  const grouped = groupTransactions(itemsToRender);
+  renderChunked(grouped);
+  hide(emptyEl);
+}
   }
 
   function applyTransformsAndRender() {
@@ -617,12 +629,27 @@ function updateMonthDisplay() {
 
     computeFilteredSummary(items);
 
-    if (items.length === 0) {
-      show(emptyEl);
-    } else {
-      hide(emptyEl);
-      hide(loadingEl);
-    }
+    // In applyTransformsAndRender() — replace the final if/else
+if (items.length === 0) {
+  if (selectedMonth) {
+    // User selected a month with no tx → show month header + empty message
+    const emptyMonth = {
+      monthKey: `${selectedMonth.year}-${selectedMonth.month}`,
+      prettyMonth: new Date(selectedMonth.year, selectedMonth.month).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }),
+      totalIn: 0,
+      totalOut: 0,
+      txs: []
+    };
+    renderChunked([emptyMonth]);
+  } else {
+    // Truly no transactions ever → show global empty state
+    show(emptyEl);
+  }
+} else {
+  const groupedMonths = groupTransactions(items);
+  renderChunked(groupedMonths);
+  hide(emptyEl);
+}
   }
 
   window.applyTransformsAndRender = applyTransformsAndRender;
