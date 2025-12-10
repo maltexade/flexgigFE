@@ -397,9 +397,18 @@ function renderChunked(groupedMonths) {
   state.lastRenderIndex = 0;
 
   const flat = [];
+
   groupedMonths.forEach(month => {
-    flat.push({ type: 'month-divider', month });  // Add the month header
-    month.txs.forEach(tx => flat.push({ type: 'tx', tx }));
+    // Always push the month divider (even if empty)
+    flat.push({ type: 'month-divider', month });
+
+    // If month has transactions → push them
+    if (month.txs.length > 0) {
+      month.txs.forEach(tx => flat.push({ type: 'tx', tx }));
+    } else {
+      // Empty month → push a special "no transactions" entry
+      flat.push({ type: 'no-tx', month });
+    }
   });
 
   function renderNextChunk() {
@@ -409,34 +418,48 @@ function renderChunked(groupedMonths) {
 
     for (let i = start; i < end; i++) {
       const entry = flat[i];
+
       if (entry.type === 'month-divider') {
         fragment.appendChild(makeMonthDivider(entry.month));
-      } else {
+      } 
+      else if (entry.type === 'tx') {
         fragment.appendChild(makeTxNode(entry.tx));
+      }
+      else if (entry.type === 'no-tx') {
+        // Create "No transactions" placeholder
+        const noTxEl = document.createElement('div');
+        noTxEl.className = 'no-transactions-placeholder';
+        noTxEl.style.cssText = `
+          padding: 40px 20px;
+          text-align: center;
+          color: #999;
+          font-size: 15px;
+          background: transparent;
+          margin-bottom: 20px;
+        `;
+        noTxEl.textContent = `No transactions in ${entry.month.prettyMonth}`;
+        fragment.appendChild(noTxEl);
       }
     }
 
     historyList.appendChild(fragment);
     state.lastRenderIndex = end;
 
-    // Apply margin-bottom to last tx-item of each month
-const monthSections = document.querySelectorAll('.month-section-header');
-monthSections.forEach(section => {
-  let lastTx = null;
-  let next = section.nextElementSibling;
+    // Re-apply bottom margin to last item of each month (including no-tx placeholder)
+    const monthSections = document.querySelectorAll('.month-section-header');
+    monthSections.forEach(section => {
+      let lastItem = null;
+      let next = section.nextElementSibling;
 
-  while (next && !next.classList.contains('month-section-header')) {
-    if (next.classList.contains('tx-item')) {
-      // reset margin for all txs in this month
-      next.style.marginBottom = '0';
-      lastTx = next;
-    }
-    next = next.nextElementSibling;
-  }
-
-  if (lastTx) lastTx.style.marginBottom = '20px'; // add margin only to the last tx of the month
-});
-
+      while (next && !next.classList.contains('month-section-header')) {
+        if (next.classList.contains('tx-item') || next.classList.contains('no-transactions-placeholder')) {
+          next.style.marginBottom = '0';
+          lastItem = next;
+        }
+        next = next.nextElementSibling;
+      }
+      if (lastItem) lastItem.style.marginBottom = '20px';
+    });
 
     if (end < flat.length) {
       requestAnimationFrame(renderNextChunk);

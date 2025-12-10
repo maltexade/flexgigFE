@@ -4670,6 +4670,13 @@ a[style*="color: #f00"] { color: var(--danger); }
 #monthFilterModal button:active {
   transform: scale(0.98);
 }
+.no-transactions-placeholder {
+  color: #777;
+  font-size: 15px;
+  text-align: center;
+  padding: 48px 20px;
+  opacity: 0.8;
+}
 
 
 
