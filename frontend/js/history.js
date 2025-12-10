@@ -22,7 +22,7 @@
   };
 
   /* -------------------------- FAKE DATA GENERATOR (FOR TESTING) -------------------------- */
-const USE_FAKE_DATA = false;  // Set to false to use real API
+const USE_FAKE_DATA = true;  // Set to false to use real API
 
 function generateFakeTransactions() {
   const transactions = [];
@@ -308,7 +308,7 @@ function generateFakeTransactions() {
     }
   }
 
- function showTransactionReceipt(tx) {
+function showTransactionReceipt(tx) {
   const existing = document.getElementById('receiptModal');
   if (existing) existing.remove();
 
@@ -321,90 +321,122 @@ function generateFakeTransactions() {
     return { name: 'FlexGig', color: '#00D4AA', logo: '/frontend/svg/logo.svg' };
   })();
 
-  const isCredit = tx.type === 'credit';
   const amount = formatCurrency(Math.abs(Number(tx.amount || 0)));
   const date = new Date(tx.time || tx.created_at);
   const formattedDate = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
   const formattedTime = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
 
-  const recipientPhone = tx.description?.match(/\d{11}/)?.[0] || '—';
-  const dataBundle = tx.description?.match(/\d+\.?\d* ?GB|\d+ ?Days?|\d+ ?Day?/gi)?.join(' ') || null;
+  const recipientPhone = tx.description?.match(/\d{11}/)?.[0] || null;
+  const dataBundle = tx.description?.match(/\d+\.?\d* ?GB|[\d.]+ ?Days?/gi)?.join(' ') || null;
+
+  const statusConfig = {
+    success: { text: 'Successful', color: '#00D4AA' },
+    failed: { text: 'Failed', color: '#FF3B30' },
+    pending: { text: 'Pending', color: '#FF9500' },
+    refund: { text: 'Refunded', color: '#00D4AA' }
+  };
+
+  const statusKey = (tx.status || 'success').toLowerCase();
+  const status = statusConfig[statusKey.includes('fail') ? 'failed' : statusKey.includes('refund') ? 'refund' : statusKey.includes('pending') ? 'pending' : 'success'];
 
   const modalHTML = `
-    <div id="receiptModal" class="opay-modal" style="position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center;padding:16px;font-family:'Inter',sans-serif;">
-      <div class="opay-backdrop" onclick="this.parentElement.remove()"></div>
+    <div id="receiptModal" style="position:fixed;inset:0;z-index:999999;background:#000;display:flex;flex-direction:column;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+      <div class="opay-backdrop" onclick="this.parentElement.remove()" style="position:absolute;inset:0;cursor:pointer;"></div>
       
-      <div style="width:100%;max-width:420px;background:#111;border-radius:20px;overflow:hidden;box-shadow:0 20px 50px rgba(0,212,170,0.25);animation:slideUp 0.35s ease-out;">
+      <!-- Header -->
+      <div style="background:#1e1e1e;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;position:relative;z-index:10;">
+        <button onclick="this.closest('#receiptModal').remove()" style="background:none;border:none;color:#aaa;cursor:pointer;padding:8px;border-radius:50%;">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M19 12H5M12 19l-7-7 7-7"/>
+          </svg>
+        </button>
+        <h2 style="margin:0;color:white;font-size:17px;font-weight:700;letter-spacing:-0.2px;">Transaction Details</h2>
+        <div style="width:40px;"></div>
+      </div>
+
+      <div style="flex:1;display:flex;flex-direction:column;background:#121212;margin-top:env(safe-area-inset-top);overflow:hidden;padding:16px;gap:30px;">
         
-        <!-- Top Success Card -->
-        <div style="background:#1e1e1e;padding:32px 24px 24px;text-align:center;position:relative;">
-          <div style="width:64px;height:64px;background:${networkInfo.color};border-radius:50%;margin:0 auto 12px;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 16px rgba(0,0,0,0.4);">
-            ${networkInfo.logo ? `<img src="${networkInfo.logo}" style="width:48px;height:48px;object-fit:contain;">` : ''}
+        <!-- Floating Logo + Amount Card -->
+        <div style="background:#1e1e1e;border-radius:16px;padding:32px 24px 24px;position:relative;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;margin-top:35px;">
+          
+          <!-- Floating Network Logo -->
+          <div style="width:50px;height:50px;background:${networkInfo.color};border-radius:50%;display:flex;align-items:center;justify-content:center;position:absolute;top:-25px;left:50%;transform:translateX(-50%);box-shadow:0 6px 16px rgba(0,0,0,0.6);z-index:10;">
+            ${networkInfo.logo ? `<img src="${networkInfo.logo}" style="width:28px;height:28px;object-fit:contain;image-rendering:crisp-edges;">` : ''}
           </div>
-          <h2 style="margin:0 0 8px;color:white;font-size:18px;font-weight:700;">${networkInfo.name}</h2>
-          <div style="font-size:28px;font-weight:800;color:white;margin:8px 0;">${isCredit ? '+' : ''}${amount}</div>
-          <div style="color:#00ffaa;font-size:16px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#00ffaa" stroke-width="3"><circle cx="12" cy="12" r="10"/><path d="M8 12l2 2 4-4"/></svg>
-            Successful
+
+          <!-- Amount -->
+          <div style="font-size:32px;font-weight:800;color:white;margin-top:32px;margin-bottom:8px;line-height:1;letter-spacing:-1px;">
+            ${amount}
+          </div>
+
+          <!-- Status -->
+          <div style="color:${status.color};font-size:16px;font-weight:600;display:flex;align-items:center;gap:7px;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              ${statusKey.includes('fail') ? `<path d="M15 9l-6 6M9 9l6 6"/>` : 
+                statusKey.includes('pending') ? `<path d="M12 8v4l3 3"/>` : 
+                `<path d="M8 12l2 2 4-4"/>`}
+            </svg>
+            ${status.text}
           </div>
         </div>
 
         <!-- Transaction Details Card -->
-        <div style="background:#1a1a1a;margin:20px;border-radius:16px;padding:20px 20px 24px;">
-          <h3 style="margin:0 0 20px;color:white;font-size:16px;font-weight:700;letter-spacing:0.5px;">Transaction Details</h3>
+        <div style="background:#1e1e1e;border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:12px;">
+          <h3 style="margin:0 0 8px;color:#ccc;font-size:16px;font-weight:600;">Transaction Details</h3>
           
-          ${dataBundle ? `
-          <div class="detail-row"><span>Recipient Mobile</span><strong>${recipientPhone}</strong></div>
-          <div class="detail-row"><span>Data Bundle</span><strong>${dataBundle}</strong></div>
-          ` : ''}
-
-          <div class="detail-row"><span>Transaction Type</span>
-            <strong>${tx.description.includes('Data') ? 'Mobile Data' : tx.description.includes('Airtime') ? 'Airtime Top-up' : isCredit ? 'Wallet Credit' : 'Payment'}</strong>
+          ${recipientPhone ? `<div class="detail-row"><span>Recipient Mobile</span><strong>${recipientPhone}</strong></div>` : ''}
+          ${dataBundle ? `<div class="detail-row"><span>Data Bundle</span><strong>${dataBundle}</strong></div>` : ''}
+          
+          <div class="detail-row">
+            <span>Transaction Type</span>
+            <strong>${tx.description.includes('Data') ? 'Mobile Data' : tx.description.includes('Airtime') ? 'Airtime Top-up' : tx.type === 'credit' ? 'Credit' : 'Debit'}</strong>
           </div>
 
-          ${!isCredit ? `<div class="detail-row"><span>Payment Method</span><strong>Wallet Balance</strong></div>` : ''}
+          ${tx.type !== 'credit' ? `<div class="detail-row"><span>Payment Method</span><strong>Wallet Balance</strong></div>` : ''}
 
           <div class="detail-row" style="align-items:center;">
             <span>Transaction No.</span>
-            <div style="display:flex;align-items:center;gap:8px;">
-              <strong style="font-family:monospace;">${tx.reference || tx.id || '—'}</strong>
-              <button onclick="navigator.clipboard.writeText('${tx.reference || tx.id}');this.innerHTML='Copied'" 
-                      style="background:none;border:none;color:#00d4aa;font-size:18px;cursor:pointer;">Copy</button>
+            <div style="display:flex;align-items:center;gap:10px;">
+              <strong>${tx.reference || tx.id || '—'}</strong>
+              <button onclick="navigator.clipboard.writeText('${tx.reference || tx.id}');this.innerHTML='Copied';setTimeout(()=>this.innerHTML=copySvg,1500)" style="background:none;border:none;color:#00d4aa;cursor:pointer;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                </svg>
+              </button>
             </div>
           </div>
 
-          <div class="detail-row"><span>Transaction Date</span><strong>${formattedDate} ${formattedTime}</strong></div>
+          <div class="detail-row">
+            <span>Transaction Date</span>
+            <strong>${formattedDate} ${formattedTime}</strong>
+          </div>
         </div>
 
         <!-- Action Buttons -->
-        <div style="padding:0 20px 24px;display:flex;gap:12px;">
+        <div style="display:flex;gap:12px;margin-top:auto;">
           <button onclick="reportTransactionIssue('${tx.id || tx.reference}')" 
-                  style="flex:1;background:#333;color:#00d4aa;border:1px solid #444;padding:14px;border-radius:50px;font-weight:600;font-size:15px;cursor:pointer;transition:0.2s;">
+                  style="flex:1;background:#2c2c2c;color:#00d4aa;border:1.5px solid #00d4aa;border-radius:50px;padding:14px;font-weight:600;font-size:15px;cursor:pointer;">
             Report Issue
           </button>
           <button onclick="shareReceipt(this.closest('#receiptModal'), '${tx.reference || tx.id}', '${amount}', '${tx.description}', '${formattedDate} ${formattedTime}')" 
-                  style="flex:1;background:linear-gradient(90deg,#00d4aa,#00bfa5);color:white;border:none;padding:14px;border-radius:50px;font-weight:600;font-size:15px;cursor:pointer;box-shadow:0 4px 15px rgba(0,212,170,0.4);">
+                  style="flex:1;background:linear-gradient(90deg,#00d4aa,#00bfa5);color:white;border:none;border-radius:50px;padding:14px;font-weight:600;font-size:15px;cursor:pointer;box-shadow:0 6px 20px rgba(0,212,170,0.4);">
             Share Receipt
           </button>
         </div>
-
-        <button onclick="this.closest('#receiptModal').remove()" 
-                style="position:absolute;top:16px;right:16px;background:none;border:none;color:#888;font-size:28px;cursor:pointer;">×</button>
       </div>
     </div>
 
     <style>
-      @keyframes slideUp { from { transform:translateY(60px); opacity:0; } to { transform:translateY(0); opacity:1; } }
-      .detail-row {
-        display: flex;
-        justify-content: space-between;
-        margin-bottom: 16px;
-        color: #ccc;
-        font-size: 15px;
-      }
-      .detail-row span { color: #999; }
-      .detail-row strong { color: white; font-weight: 600; }
+      #receiptModal * { -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; text-rendering:optimizeLegibility; box-sizing:border-box; }
+      .detail-row { display:flex; justify-content:space-between; align-items:center; color:#e0e0e0; font-size:13px; }
+      .detail-row span { color:#aaa; font-weight:500; }
+      .detail-row strong { color:white; font-weight:600; }
     </style>
+
+    <script>
+      const copySvg = \`<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>\`;
+    </script>
   `;
 
   document.body.insertAdjacentHTML('beforeend', modalHTML);
