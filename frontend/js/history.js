@@ -308,100 +308,102 @@ function generateFakeTransactions() {
     }
   }
 
-  function showTransactionReceipt(tx) {
-  // Prevent duplicate modals
+ function showTransactionReceipt(tx) {
   const existing = document.getElementById('receiptModal');
   if (existing) existing.remove();
 
-  // Determine network logo and color
   const networkInfo = (() => {
     const desc = (tx.description || '').toLowerCase();
-    if (desc.includes('mtn')) return { name: 'MTN', color: '#ffcb05', logo: '/frontend/img/mtn.svg' };
-    if (desc.includes('airtel')) return { name: 'Airtel', color: '#e4002b', logo: '/frontend/svg/airtel-icon.svg' };
-    if (desc.includes('glo')) return { name: 'GLO', color: '#6fbf48', logo: '/frontend/svg/glo-icon.svg' };
-    if (desc.includes('9mobile') || desc.includes('etisalat')) return { name: '9Mobile', color: '#00a650', logo: '/frontend/svg/9mobile-icon.svg' };
-    return { name: 'FlexGig', color: '#00d4aa', logo: '/frontend/svg/logo.svg' };
+    if (desc.includes('mtn')) return { name: 'MTN', color: '#FFC107', logo: '/frontend/img/mtn.svg' };
+    if (desc.includes('airtel')) return { name: 'Airtel', color: '#E4002B', logo: '/frontend/svg/airtel-icon.svg' };
+    if (desc.includes('glo')) return { name: 'GLO', color: '#6FBF48', logo: '/frontend/svg/glo-icon.svg' };
+    if (desc.includes('9mobile') || desc.includes('etisalat')) return { name: '9Mobile', color: '#00A650', logo: '/frontend/svg/9mobile-icon.svg' };
+    return { name: 'FlexGig', color: '#00D4AA', logo: '/frontend/svg/logo.svg' };
   })();
 
   const isCredit = tx.type === 'credit';
   const amount = formatCurrency(Math.abs(Number(tx.amount || 0)));
   const date = new Date(tx.time || tx.created_at);
-  const formattedDate = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+  const formattedDate = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
   const formattedTime = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
 
+  const recipientPhone = tx.description?.match(/\d{11}/)?.[0] || '—';
+  const dataBundle = tx.description?.match(/\d+\.?\d* ?GB|\d+ ?Days?|\d+ ?Day?/gi)?.join(' ') || null;
+
   const modalHTML = `
-    <div id="receiptModal" class="opay-modal" style="position:fixed; inset:0; z-index:100000; background:rgba(0,0,0,0.8); display:flex; align-items:center; justify-content:center; font-family:'Inter',sans-serif;">
+    <div id="receiptModal" class="opay-modal" style="position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center;padding:16px;font-family:'Inter',sans-serif;">
       <div class="opay-backdrop" onclick="this.parentElement.remove()"></div>
       
-      <div class="opay-panel" style="position:relative; width:90%; max-width:420px; background:#111; border-radius:20px; overflow:hidden; box-shadow:0 20px 50px rgba(0,212,170,0.3); animation:slideUp 0.4s ease-out;">
+      <div style="width:100%;max-width:420px;background:#111;border-radius:20px;overflow:hidden;box-shadow:0 20px 50px rgba(0,212,170,0.25);animation:slideUp 0.35s ease-out;">
         
-        <!-- Header with Network Logo -->
-        <div style="background:#1e1e1e; padding:32px 20px 20px; text-align:center; position:relative;">
-          <div style="width:80px; height:80px; background:${networkInfo.color}; border-radius:50%; margin:0 auto 16px; display:flex; align-items:center; justify-content:center; box-shadow:0 8px 20px rgba(0,0,0,0.4);">
-            ${networkInfo.logo ? `<img src="${networkInfo.logo}" style="width:60%; height:60%; object-fit:contain;">` : ''}
+        <!-- Top Success Card -->
+        <div style="background:#1e1e1e;padding:32px 24px 24px;text-align:center;position:relative;">
+          <div style="width:64px;height:64px;background:${networkInfo.color};border-radius:50%;margin:0 auto 12px;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 16px rgba(0,0,0,0.4);">
+            ${networkInfo.logo ? `<img src="${networkInfo.logo}" style="width:48px;height:48px;object-fit:contain;">` : ''}
           </div>
-          <h2 style="margin:0; color:white; font-size:20px; font-weight:700;">${networkInfo.name}</h2>
-          <div style="font-size:32px; font-weight:800; color:white; margin:16px 0;">${isCredit ? '+' : ''}${amount}</div>
-          <div style="color:#00ffaa; font-size:18px; font-weight:600; display:flex; align-items:center; justify-content:center; gap:8px;">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#00ffaa" stroke-width="3"><circle cx="12" cy="12" r="10"/><path d="M8 12l2 2 4-4"/></svg>
+          <h2 style="margin:0 0 8px;color:white;font-size:18px;font-weight:700;">${networkInfo.name}</h2>
+          <div style="font-size:28px;font-weight:800;color:white;margin:8px 0;">${isCredit ? '+' : ''}${amount}</div>
+          <div style="color:#00ffaa;font-size:16px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#00ffaa" stroke-width="3"><circle cx="12" cy="12" r="10"/><path d="M8 12l2 2 4-4"/></svg>
             Successful
           </div>
         </div>
 
-        <!-- Details Card -->
-        <div style="background:#1a1a1a; margin:20px; border-radius:16px; padding:20px;">
-          <h3 style="margin:0 0 20px; color:#ccc; font-size:16px; font-weight:600;">Transaction Details</h3>
+        <!-- Transaction Details Card -->
+        <div style="background:#1a1a1a;margin:20px;border-radius:16px;padding:20px 20px 24px;">
+          <h3 style="margin:0 0 20px;color:white;font-size:16px;font-weight:700;letter-spacing:0.5px;">Transaction Details</h3>
           
-          ${tx.description?.includes('Data') || tx.description?.includes('GB') ? `
-          <div style="display:flex; justify-content:space-between; margin-bottom:16px; color:#ddd;">
-            <span>Recipient Mobile</span>
-            <strong>${tx.description.match(/\d{11}/)?.[0] || '—'}</strong>
-          </div>
-          <div style="display:flex; justify-content:space-between; margin-bottom:16px; color:#ddd;">
-            <span>Data Bundle</span>
-            <strong>${tx.description.match(/\d+\.?\d*GB|\d+ ?Days?/gi)?.join(' ') || '—'}</strong>
-          </div>
+          ${dataBundle ? `
+          <div class="detail-row"><span>Recipient Mobile</span><strong>${recipientPhone}</strong></div>
+          <div class="detail-row"><span>Data Bundle</span><strong>${dataBundle}</strong></div>
           ` : ''}
 
-          <div style="display:flex; justify-content:space-between; margin-bottom:16px; color:#ddd;">
-            <span>Transaction Type</span>
+          <div class="detail-row"><span>Transaction Type</span>
             <strong>${tx.description.includes('Data') ? 'Mobile Data' : tx.description.includes('Airtime') ? 'Airtime Top-up' : isCredit ? 'Wallet Credit' : 'Payment'}</strong>
           </div>
-          
-          ${!isCredit ? `
-          <div style="display:flex; justify-content:space-between; margin-bottom:16px; color:#ddd;">
-            <span>Payment Method</span>
-            <strong>Wallet Balance</strong>
-          </div>` : ''}
 
-          <div style="display:flex; justify-content:space-between; margin-bottom:16px; color:#ddd; align-items:center;">
+          ${!isCredit ? `<div class="detail-row"><span>Payment Method</span><strong>Wallet Balance</strong></div>` : ''}
+
+          <div class="detail-row" style="align-items:center;">
             <span>Transaction No.</span>
-            <strong style="font-family:monospace; letter-spacing:1px;">${tx.reference || tx.id || '—'}</strong>
-            <button onclick="navigator.clipboard.writeText('${tx.reference || tx.id}')" style="background:none; border:none; color:#00d4aa; font-size:20px; margin-left:8px; cursor:pointer;">Copy</button>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <strong style="font-family:monospace;">${tx.reference || tx.id || '—'}</strong>
+              <button onclick="navigator.clipboard.writeText('${tx.reference || tx.id}');this.innerHTML='Copied'" 
+                      style="background:none;border:none;color:#00d4aa;font-size:18px;cursor:pointer;">Copy</button>
+            </div>
           </div>
 
-          <div style="display:flex; justify-content:space-between; color:#aaa;">
-            <span>Transaction Date</span>
-            <strong>${formattedDate} ${formattedTime}</strong>
-          </div>
+          <div class="detail-row"><span>Transaction Date</span><strong>${formattedDate} ${formattedTime}</strong></div>
         </div>
 
         <!-- Action Buttons -->
-        <div style="padding:20px; display:flex; gap:16px;">
-          <button onclick="reportTransactionIssue('${tx.id || tx.reference}')" style="flex:1; background:#333; color:#00d4aa; border:1px solid #00d4aa; padding:16px; border-radius:50px; font-weight:600; font-size:16px; cursor:pointer;">
+        <div style="padding:0 20px 24px;display:flex;gap:12px;">
+          <button onclick="reportTransactionIssue('${tx.id || tx.reference}')" 
+                  style="flex:1;background:#333;color:#00d4aa;border:1px solid #444;padding:14px;border-radius:50px;font-weight:600;font-size:15px;cursor:pointer;transition:0.2s;">
             Report Issue
           </button>
-          <button onclick="shareReceipt(this.closest('#receiptModal'), '${tx.reference || tx.id}', '${amount}', '${tx.description}', '${formattedDate} ${formattedTime}')" style="flex:1; background:linear-gradient(90deg,#00d4aa,#00bfa5); color:white; border:none; padding:16px; border-radius:50px; font-weight:600; font-size:16px; cursor:pointer; box-shadow:0 4px 15px rgba(0,212,170,0.4);">
+          <button onclick="shareReceipt(this.closest('#receiptModal'), '${tx.reference || tx.id}', '${amount}', '${tx.description}', '${formattedDate} ${formattedTime}')" 
+                  style="flex:1;background:linear-gradient(90deg,#00d4aa,#00bfa5);color:white;border:none;padding:14px;border-radius:50px;font-weight:600;font-size:15px;cursor:pointer;box-shadow:0 4px 15px rgba(0,212,170,0.4);">
             Share Receipt
           </button>
         </div>
 
-        <button onclick="this.closest('#receiptModal').remove()" style="position:absolute; top:16px; right:16px; background:none; border:none; color:#666; font-size:28px; cursor:pointer;">×</button>
+        <button onclick="this.closest('#receiptModal').remove()" 
+                style="position:absolute;top:16px;right:16px;background:none;border:none;color:#888;font-size:28px;cursor:pointer;">×</button>
       </div>
     </div>
 
     <style>
-      @keyframes slideUp { from { transform:translateY(100px); opacity:0; } to { transform:translateY(0); opacity:1; } }
+      @keyframes slideUp { from { transform:translateY(60px); opacity:0; } to { transform:translateY(0); opacity:1; } }
+      .detail-row {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 16px;
+        color: #ccc;
+        font-size: 15px;
+      }
+      .detail-row span { color: #999; }
+      .detail-row strong { color: white; font-weight: 600; }
     </style>
   `;
 
