@@ -290,21 +290,12 @@ function generateFakeTransactions() {
       `;
 
       item.addEventListener('click', (e) => {
-        const details = {
-          id: tx.id || tx.reference,
-          reference: tx.reference,
-          description: rawDesc,
-          amount: tx.amount,
-          type: tx.type,
-          time: tx.time || tx.created_at,
-          status: tx.status || 'SUCCESS'
-        };
-        if (e.ctrlKey || e.metaKey) {
-          navigator.clipboard?.writeText(JSON.stringify(details, null, 2));
-        } else {
-          alert(`Transaction\n\n${JSON.stringify(details, null, 2)}`);
-        }
-      });
+  e.preventDefault();
+  e.stopPropagation();
+
+  // Reuse the same logic but show beautiful receipt instead
+  showTransactionReceipt(tx);
+});
 
       return item;
 
@@ -316,6 +307,125 @@ function generateFakeTransactions() {
       return fallback;
     }
   }
+
+  function showTransactionReceipt(tx) {
+  // Prevent duplicate modals
+  const existing = document.getElementById('receiptModal');
+  if (existing) existing.remove();
+
+  // Determine network logo and color
+  const networkInfo = (() => {
+    const desc = (tx.description || '').toLowerCase();
+    if (desc.includes('mtn')) return { name: 'MTN', color: '#ffcb05', logo: '/frontend/img/mtn.svg' };
+    if (desc.includes('airtel')) return { name: 'Airtel', color: '#e4002b', logo: '/frontend/svg/airtel-icon.svg' };
+    if (desc.includes('glo')) return { name: 'GLO', color: '#6fbf48', logo: '/frontend/svg/glo-icon.svg' };
+    if (desc.includes('9mobile') || desc.includes('etisalat')) return { name: '9Mobile', color: '#00a650', logo: '/frontend/svg/9mobile-icon.svg' };
+    return { name: 'FlexGig', color: '#00d4aa', logo: '/frontend/svg/logo.svg' };
+  })();
+
+  const isCredit = tx.type === 'credit';
+  const amount = formatCurrency(Math.abs(Number(tx.amount || 0)));
+  const date = new Date(tx.time || tx.created_at);
+  const formattedDate = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+  const formattedTime = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+  const modalHTML = `
+    <div id="receiptModal" class="opay-modal" style="position:fixed; inset:0; z-index:100000; background:rgba(0,0,0,0.8); display:flex; align-items:center; justify-content:center; font-family:'Inter',sans-serif;">
+      <div class="opay-backdrop" onclick="this.parentElement.remove()"></div>
+      
+      <div class="opay-panel" style="position:relative; width:90%; max-width:420px; background:#111; border-radius:20px; overflow:hidden; box-shadow:0 20px 50px rgba(0,212,170,0.3); animation:slideUp 0.4s ease-out;">
+        
+        <!-- Header with Network Logo -->
+        <div style="background:#1e1e1e; padding:32px 20px 20px; text-align:center; position:relative;">
+          <div style="width:80px; height:80px; background:${networkInfo.color}; border-radius:50%; margin:0 auto 16px; display:flex; align-items:center; justify-content:center; box-shadow:0 8px 20px rgba(0,0,0,0.4);">
+            ${networkInfo.logo ? `<img src="${networkInfo.logo}" style="width:60%; height:60%; object-fit:contain;">` : ''}
+          </div>
+          <h2 style="margin:0; color:white; font-size:20px; font-weight:700;">${networkInfo.name}</h2>
+          <div style="font-size:32px; font-weight:800; color:white; margin:16px 0;">${isCredit ? '+' : ''}${amount}</div>
+          <div style="color:#00ffaa; font-size:18px; font-weight:600; display:flex; align-items:center; justify-content:center; gap:8px;">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#00ffaa" stroke-width="3"><circle cx="12" cy="12" r="10"/><path d="M8 12l2 2 4-4"/></svg>
+            Successful
+          </div>
+        </div>
+
+        <!-- Details Card -->
+        <div style="background:#1a1a1a; margin:20px; border-radius:16px; padding:20px;">
+          <h3 style="margin:0 0 20px; color:#ccc; font-size:16px; font-weight:600;">Transaction Details</h3>
+          
+          ${tx.description?.includes('Data') || tx.description?.includes('GB') ? `
+          <div style="display:flex; justify-content:space-between; margin-bottom:16px; color:#ddd;">
+            <span>Recipient Mobile</span>
+            <strong>${tx.description.match(/\d{11}/)?.[0] || '—'}</strong>
+          </div>
+          <div style="display:flex; justify-content:space-between; margin-bottom:16px; color:#ddd;">
+            <span>Data Bundle</span>
+            <strong>${tx.description.match(/\d+\.?\d*GB|\d+ ?Days?/gi)?.join(' ') || '—'}</strong>
+          </div>
+          ` : ''}
+
+          <div style="display:flex; justify-content:space-between; margin-bottom:16px; color:#ddd;">
+            <span>Transaction Type</span>
+            <strong>${tx.description.includes('Data') ? 'Mobile Data' : tx.description.includes('Airtime') ? 'Airtime Top-up' : isCredit ? 'Wallet Credit' : 'Payment'}</strong>
+          </div>
+          
+          ${!isCredit ? `
+          <div style="display:flex; justify-content:space-between; margin-bottom:16px; color:#ddd;">
+            <span>Payment Method</span>
+            <strong>Wallet Balance</strong>
+          </div>` : ''}
+
+          <div style="display:flex; justify-content:space-between; margin-bottom:16px; color:#ddd; align-items:center;">
+            <span>Transaction No.</span>
+            <strong style="font-family:monospace; letter-spacing:1px;">${tx.reference || tx.id || '—'}</strong>
+            <button onclick="navigator.clipboard.writeText('${tx.reference || tx.id}')" style="background:none; border:none; color:#00d4aa; font-size:20px; margin-left:8px; cursor:pointer;">Copy</button>
+          </div>
+
+          <div style="display:flex; justify-content:space-between; color:#aaa;">
+            <span>Transaction Date</span>
+            <strong>${formattedDate} ${formattedTime}</strong>
+          </div>
+        </div>
+
+        <!-- Action Buttons -->
+        <div style="padding:20px; display:flex; gap:16px;">
+          <button onclick="reportTransactionIssue('${tx.id || tx.reference}')" style="flex:1; background:#333; color:#00d4aa; border:1px solid #00d4aa; padding:16px; border-radius:50px; font-weight:600; font-size:16px; cursor:pointer;">
+            Report Issue
+          </button>
+          <button onclick="shareReceipt(this.closest('#receiptModal'), '${tx.reference || tx.id}', '${amount}', '${tx.description}', '${formattedDate} ${formattedTime}')" style="flex:1; background:linear-gradient(90deg,#00d4aa,#00bfa5); color:white; border:none; padding:16px; border-radius:50px; font-weight:600; font-size:16px; cursor:pointer; box-shadow:0 4px 15px rgba(0,212,170,0.4);">
+            Share Receipt
+          </button>
+        </div>
+
+        <button onclick="this.closest('#receiptModal').remove()" style="position:absolute; top:16px; right:16px; background:none; border:none; color:#666; font-size:28px; cursor:pointer;">×</button>
+      </div>
+    </div>
+
+    <style>
+      @keyframes slideUp { from { transform:translateY(100px); opacity:0; } to { transform:translateY(0); opacity:1; } }
+    </style>
+  `;
+
+  document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
+
+function reportTransactionIssue(txId) {
+  alert(`Report issue for transaction ${txId}\n\nThis will open support chat in production`);
+  // Later: open WhatsApp, email, or in-app support
+  document.getElementById('receiptModal')?.remove();
+}
+
+function shareReceipt(modalEl, ref, amount, desc, date) {
+  const text = `FlexGig Transaction Receipt\n\nAmount: ${amount}\nDescription: ${desc}\nReference: ${ref}\nDate: ${date}\n\nPowered by FlexGig`;
+  
+  if (navigator.share) {
+    navigator.share({ title: 'Transaction Receipt', text });
+  } else {
+    navigator.clipboard.writeText(text);
+    alert('Receipt copied to clipboard!');
+  }
+  
+  modalEl.remove();
+}
 
   window.addEventListener('resize', () => {
     document.querySelectorAll('.tx-desc').forEach(descEl => {
