@@ -312,17 +312,19 @@ function showTransactionReceipt(tx) {
   const existing = document.getElementById('receiptModal');
   if (existing) existing.remove();
 
-  const icon = getTxIcon(tx); // ← Uses your exact same logic + image
-
-  const networkInfo = {
-    color: icon.cls.includes('mtn') ? '#FFC107' :
-           icon.cls.includes('airtel') ? '#E4002B' :
-           icon.cls.includes('glo') ? '#6FBF48' :
-           icon.cls.includes('nine-mobile') ? '#00A650' :
-           icon.cls.includes('refund') ? '#00D4AA' :
-           icon.cls.includes('incoming') ? '#00D4AA' : '#888',
-    logo: icon.img || null
-  };
+  // Reuse the same icon logic from getTxIcon
+  const icon = getTxIcon(tx);
+  
+  const networkInfo = (() => {
+    const desc = (tx.description || '').toLowerCase();
+    if (desc.includes('mtn')) return { name: 'MTN', color: '#FFC107' };
+    if (desc.includes('airtel')) return { name: 'Airtel', color: '#E4002B' };
+    if (desc.includes('glo')) return { name: 'GLO', color: '#6FBF48' };
+    if (desc.includes('9mobile') || desc.includes('etisalat')) return { name: '9Mobile', color: '#00A650' };
+    if (desc.includes('opay')) return { name: 'Opay', color: '#00D4AA' };
+    if (desc.includes('refund')) return { name: 'Refund', color: '#00D4AA' };
+    return { name: 'Transaction', color: '#00D4AA' };
+  })();
 
   const amount = formatCurrency(Math.abs(Number(tx.amount || 0)));
   const date = new Date(tx.time || tx.created_at);
@@ -338,125 +340,132 @@ function showTransactionReceipt(tx) {
     pending: { text: 'Pending', color: '#FF9500' },
     refund: { text: 'Refunded', color: '#00D4AA' }
   };
+
   const statusKey = (tx.status || 'success').toLowerCase();
   const status = statusConfig[statusKey.includes('fail') ? 'failed' : statusKey.includes('refund') ? 'refund' : statusKey.includes('pending') ? 'pending' : 'success'];
 
   const modalHTML = `
-    <div id="receiptModal" style="position:fixed;inset:0;z-index:999999;background:#000;display:flex;flex-direction:column;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
-      <div class="opay-backdrop" onclick="this.parentElement.remove()" style="position:absolute;inset:0;cursor:pointer;"></div>
+    <div id="receiptModal" style="position:fixed;inset:0;z-index:100000;background:#000;display:flex;flex-direction:column;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+      <div class="opay-backdrop" onclick="this.parentElement.remove()" style="position:absolute;inset:0;"></div>
       
-      <!-- Header -->
+      <!-- Top Header Bar -->
       <div style="background:#1e1e1e;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;position:relative;z-index:10;">
-        <button onclick="this.closest('#receiptModal').remove()" style="background:none;border:none;color:#aaa;cursor:pointer;padding:8px;">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+        <button onclick="this.closest('#receiptModal').remove()" style="background:none;border:none;color:#aaa;cursor:pointer;padding:8px;border-radius:50%;">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M19 12H5M12 19l-7-7 7-7"/>
+          </svg>
         </button>
-        <h2 style="margin:0;color:white;font-size:17px;font-weight:700;">Transaction Details</h2>
+        <h2 style="margin:0;color:white;font-size:17px;font-weight:700;letter-spacing:-0.2px;">Transaction Details</h2>
         <div style="width:40px;"></div>
       </div>
-
-      <div style="flex:1;display:flex;flex-direction:column;background:#121212;margin-top:env(safe-area-inset-top);overflow:hidden;padding:16px;gap:30px;">
+      
+      <div style="flex:1;display:flex;flex-direction:column;background:#121212;margin-top:env(safe-area-inset-top);overflow:hidden;transform:translateZ(0);padding:16px;gap:30px;">
         
-        <!-- Floating Logo + Amount -->
-        <div style="background:#1e1e1e;border-radius:16px;padding:32px 24px 24px;position:relative;margin-top:35px;display:flex;flex-direction:column;align-items:center;">
-          <div style="width:50px;height:50px;background:${networkInfo.color};border-radius:50%;position:absolute;top:-25px;left:50%;transform:translateX(-50%);box-shadow:0 6px 16px rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;">
-            ${networkInfo.logo ? `<img src="${networkInfo.logo}" style="width:28px;height:28px;object-fit:contain;">` : 
-              `<svg width="24" height="24" viewBox="0 0 24 24" fill="white"><path d="M12 2L2 12h3v8h14v-8h3L12 2z"/></svg>`}
-          </div>
-          <div style="font-size:32px;font-weight:800;color:white;margin-top:32px;margin-bottom:8px;">${amount}</div>
-          <div style="color:${status.color};font-size:16px;font-weight:600;display:flex;align-items:center;gap:7px;">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5">
+        <!-- Amount & Status Card -->
+        <div style="max-height:40%;background:#1e1e1e;border-radius:16px;padding:32px 24px 24px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;position:relative;margin-top:35px;">
+          
+          // Floating Logo Circle
+<div style="
+  width:50px;height:50px;
+  background:${networkInfo.color};
+  border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  position:absolute;top:-25px;left:50%;transform:translateX(-50%);
+  box-shadow:0 6px 16px rgba(0,0,0,0.5);"
+>
+  ${icon.img ? `<img src="${icon.img}" style="width:28px;height:28px;object-fit:contain;" alt="${icon.alt}">` 
+  : `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+       ${tx.type==='credit' ? '<path d="M12 19V5M5 12l7 7 7-7"/>' : '<path d="M12 5v14M19 12l-7-7-7 7"/>'}
+     </svg>`}
+</div>
+
+
+          <!-- Amount -->
+          <div style="font-size:32px;font-weight:800;color:white;margin-top:32px;margin-bottom:8px;line-height:1;letter-spacing:-1px;">${amount}</div>
+
+          <!-- Status -->
+          <div style="color:${status.color};font-size:16px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:7px;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="12" cy="12" r="10"/>
-              ${statusKey.includes('fail') ? '<path d="M15 9l-6 6M9 9l6 6"/>' : 
-                statusKey.includes('pending') ? '<path d="M12 8v4l3 3"/>' : 
-                '<path d="M8 12l2 2 4-4"/>'}
+              <path d="M8 12l2 2 4-4"/>
             </svg>
             ${status.text}
           </div>
         </div>
 
-        <!-- Details -->
-        <div style="background:#1e1e1e;border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:12px;">
-          <h3 style="margin:0 0 8px;color:#ccc;font-size:16px;font-weight:600;">Transaction Details</h3>
+        <!-- Details Card -->
+        <div style="max-height:45%;background:#1e1e1e;border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:12px;overflow:hidden;">
+          <h3 style="margin:0 0 8px;color:#ccc;font-size:16px;font-weight:600;letter-spacing:0.2px;">Transaction Details</h3>
+          
           ${recipientPhone ? `<div class="detail-row"><span>Recipient Mobile</span><strong>${recipientPhone}</strong></div>` : ''}
           ${dataBundle ? `<div class="detail-row"><span>Data Bundle</span><strong>${dataBundle}</strong></div>` : ''}
-          <div class="detail-row"><span>Transaction Type</span><strong>${tx.description.includes('Data') ? 'Mobile Data' : tx.description.includes('Airtime') ? 'Airtime Top-up' : tx.type === 'credit' ? 'Credit' : 'Debit'}</strong></div>
+
+          <div class="detail-row">
+            <span>Transaction Type</span>
+            <strong>${tx.description.includes('Data') ? 'Mobile Data' : tx.description.includes('Airtime') ? 'Airtime Top-up' : tx.type === 'credit' ? 'Credit' : 'Debit'}</strong>
+          </div>
+
           ${tx.type !== 'credit' ? `<div class="detail-row"><span>Payment Method</span><strong>Wallet Balance</strong></div>` : ''}
-          <div class="detail-row" style="align-items:center;">
+
+          <div class="detail-row">
             <span>Transaction No.</span>
             <div style="display:flex;align-items:center;gap:10px;">
-              <strong style="font-family:monospace;">${tx.reference || tx.id || '—'}</strong>
+              <strong style="font-family:ui-monospace,monospace;font-size:13px;letter-spacing:0.8px;">${tx.reference || tx.id || '—'}</strong>
               <button onclick="navigator.clipboard.writeText('${tx.reference || tx.id}');this.innerHTML='Copied';setTimeout(()=>this.innerHTML=copySvg,1500)" style="background:none;border:none;color:#00d4aa;cursor:pointer;">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                </svg>
               </button>
             </div>
           </div>
-          <div class="detail-row"><span>Transaction Date</span><strong>${formattedDate} ${formattedTime}</strong></div>
+
+          <div class="detail-row">
+            <span>Transaction Date</span>
+            <strong>${formattedDate} ${formattedTime}</strong>
+          </div>
         </div>
 
-        <!-- Buttons -->
+        <!-- Action Buttons -->
         <div style="display:flex;gap:12px;margin-top:auto;">
-          <button onclick="reportTransactionIssue('${tx.id || tx.reference}')" style="flex:1;background:#2c2c2c;color:#00d4aa;border:1.5px solid #00d4aa;border-radius:50px;padding:14px;font-weight:600;font-size:15px;">Report Issue</button>
-          <button id="shareReceiptBtn" style="flex:1;background:linear-gradient(90deg,#00d4aa,#00bfa5);color:white;border:none;border-radius:50px;padding:14px;font-weight:600;font-size:15px;box-shadow:0 6px 20px rgba(0,212,170,0.4);">
-            Share Receipt
-          </button>
+          <button onclick="reportTransactionIssue('${tx.id || tx.reference}')" style="flex:1;background:#2c2c2c;color:#00d4aa;border:1.5px solid #00d4aa;border-radius:50px;padding:12px;font-weight:600;cursor:pointer;">Report Issue</button>
+          <button onclick="shareReceipt(this.closest('#receiptModal'), '${tx.reference || tx.id}', '${amount}', '${(tx.description || '').replace(/'/g, "\\'")}', '${formattedDate}', '${formattedTime}', '${status.text}', '${networkInfo.name}', '${networkInfo.color}', '${icon.img || ''}', '${tx.type}')" style="flex:1;background:linear-gradient(90deg,#00d4aa,#00bfa5);color:white;border:none;border-radius:50px;padding:12px;font-weight:600;cursor:pointer;">Share Receipt</button>
         </div>
+
       </div>
     </div>
 
     <style>
-      #receiptModal * { -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; text-rendering:optimizeLegibility; }
-      .detail-row { display:flex; justify-content:space-between; align-items:center; font-size:13px; color:#e0e0e0; }
-      .detail-row span { color:#aaa; font-weight:500; }
-      .detail-row strong { color:white; font-weight:600; }
+      #receiptModal * { 
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        text-rendering: optimizeLegibility;
+        box-sizing: border-box;
+      }
+      .detail-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        color: #e0e0e0;
+        font-size: 13px;
+      }
+      .detail-row span { 
+        color: #aaa; 
+        font-weight: 500;
+      }
+      .detail-row strong { 
+        color: white; 
+        font-weight: 600;
+      }
+      .detail-row button svg { transition: all 0.2s; }
+      .detail-row button:active svg { transform: scale(0.9); }
     </style>
 
     <script>
-      const copySvg = \`<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>\`;
-
-      // SHARE AS BEAUTIFUL PNG IMAGE
-      document.getElementById('shareReceiptBtn')?.addEventListener('click', async () => {
-        const receipt = document.createElement('div');
-        receipt.style.cssText = 'padding:40px 30px;background:white;color:black;font-family:system-ui;border-radius:20px;max-width:400px;box-shadow:0 10px 30px rgba(0,0,0,0.1);';
-        receipt.innerHTML = \`
-          <div style="text-align:center;margin-bottom:30px;">
-            <div style="width:70px;height:70px;background:\${networkInfo.color};border-radius:50%;margin:0 auto 20px;display:flex;align-items:center;justify-content:center;">
-              \${networkInfo.logo ? '<img src="\${networkInfo.logo}" style="width:40px;height:40px;">' : ''}
-            </div>
-            <div style="font-size:36px;font-weight:800;margin:10px 0;">\${amount}</div>
-            <div style="color:\${status.color};font-size:18px;font-weight:600;">\${status.text}</div>
-          </div>
-          <div style="background:#f8f9fa;padding:20px;border-radius:12px;font-size:15px;">
-            <div style="display:flex;justify-content:space-between;margin:12px 0;"><span style="color:#666;">Recipient Mobile</span><strong>\${recipientPhone || '—'}</strong></div>
-            <div style="display:flex;justify-content:space-between;margin:12px 0;"><span style="color:#666;">Data Bundle</span><strong>\${dataBundle || '—'}</strong></div>
-            <div style="display:flex;justify-content:space-between;margin:12px 0;"><span style="color:#666;">Transaction Type</span><strong>\${tx.description.includes('Data') ? 'Mobile Data' : tx.description.includes('Airtime') ? 'Airtime Top-up' : tx.type === 'credit' ? 'Credit' : 'Debit'}</strong></div>
-            <div style="display:flex;justify-content:space-between;margin:12px 0;"><span style="color:#666;">Transaction No.</span><strong style="font-family:monospace;">\${tx.reference || tx.id || '—'}</strong></div>
-            <div style="display:flex;justify-content:space-between;margin:12px 0;"><span style="color:#666;">Date & Time</span><strong>\${formattedDate} \${formattedTime}</strong></div>
-          </div>
-          <div style="text-align:center;margin-top:30px;color:#888;font-size:13px;">Powered by FlexGig</div>
-        \`;
-        document.body.appendChild(receipt);
-
-        try {
-          const canvas = await html2canvas(receipt, { scale: 2, backgroundColor: '#ffffff' });
-          canvas.toBlob(blob => {
-            const item = new ClipboardItem({ 'image/png': blob });
-            navigator.clipboard.write([item]).then(() => {
-              alert('Receipt image copied to clipboard! Paste in WhatsApp');
-            });
-            if (navigator.share && navigator.canShare && navigator.canShare({ files: [new File([blob], 'receipt.png', { type: 'image/png' })] })) {
-              navigator.share({
-                files: [new File([blob], 'flexgig-receipt.png', { type: 'image/png' })],
-                title: 'Transaction Receipt',
-                text: 'Here is my transaction receipt from FlexGig'
-              });
-            }
-          });
-        } catch (e) {
-          alert('Image generated! (html2canvas not loaded yet)');
-        }
-        receipt.remove();
-        document.getElementById('receiptModal')?.remove();
-      });
+      const copySvg = \`<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+      </svg>\`;
     </script>
   `;
 
@@ -470,6 +479,46 @@ function reportTransactionIssue(txId) {
 }
 
 window.reportTransactionIssue = reportTransactionIssue;
+window.shareReceipt = shareReceipt;
+
+function shareReceipt(modalEl, ref, amount, desc, date, time, statusText, networkName, networkColor, logoImg, txType) {
+  // Clone the receipt container
+  const receiptContent = modalEl.querySelector('div[style*="flex:1"]');
+  if (!receiptContent) return;
+
+  // Clone to modify for white background
+  const clone = receiptContent.cloneNode(true);
+  clone.style.background = '#fff';        // white background for image
+  clone.style.color = '#000';             // dark text
+  clone.style.boxShadow = 'none';         // remove shadows
+
+  // Temporarily append off-screen
+  clone.style.position = 'fixed';
+  clone.style.top = '-9999px';
+  document.body.appendChild(clone);
+
+  html2canvas(clone, { scale: 2 }).then(canvas => {
+    canvas.toBlob(blob => {
+      const file = new File([blob], `FlexGig-Receipt-${ref}.png`, { type: 'image/png' });
+      
+      // Share via Web Share API if supported
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        navigator.share({ files: [file], title: 'FlexGig Transaction Receipt' });
+      } else {
+        // Otherwise download
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `FlexGig-Receipt-${ref}.png`;
+        link.click();
+        URL.revokeObjectURL(link.href);
+      }
+    });
+    clone.remove();  // Clean up
+  });
+  
+  modalEl.remove();
+}
+
 
   window.addEventListener('resize', () => {
     document.querySelectorAll('.tx-desc').forEach(descEl => {
