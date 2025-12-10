@@ -364,19 +364,34 @@ function showTransactionReceipt(tx) {
         <!-- Amount & Status Card -->
         <div style="max-height:40%;background:#1e1e1e;border-radius:16px;padding:32px 24px 24px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;position:relative;margin-top:35px;">
           
-          // Floating Logo Circle
-<div style="
-  width:50px;height:50px;
+          <!-- Floating Logo Circle -->
+          <div style="
+  width:50px;
+  height:50px;
   background:${networkInfo.color};
   border-radius:50%;
-  display:flex;align-items:center;justify-content:center;
-  position:absolute;top:-25px;left:50%;transform:translateX(-50%);
-  box-shadow:0 6px 16px rgba(0,0,0,0.5);"
->
-  ${icon.img ? `<img src="${icon.img}" style="width:28px;height:28px;object-fit:contain;" alt="${icon.alt}">` 
-  : `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-       ${tx.type==='credit' ? '<path d="M12 19V5M5 12l7 7 7-7"/>' : '<path d="M12 5v14M19 12l-7-7-7 7"/>'}
-     </svg>`}
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  position:absolute;
+  top:-25px;
+  left:50%;
+  transform:translateX(-50%);
+  box-shadow:0 6px 16px rgba(0,0,0,0.5);
+  flex-shrink:0;
+">
+  ${icon.img 
+    ? `<img src="${icon.img}" style="
+        width:28px;
+        height:28px;
+        object-fit:contain;
+        image-rendering:crisp-edges;
+      " alt="${icon.alt}">` 
+    : `<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        ${tx.type === 'credit' 
+          ? '<path d="M12 19V5M5 12l7 7 7-7"/>' 
+          : '<path d="M12 5v14M19 12l-7-7-7 7"/>'}
+      </svg>`}
 </div>
 
 
