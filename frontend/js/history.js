@@ -462,6 +462,9 @@ function reportTransactionIssue(txId) {
   document.getElementById('receiptModal')?.remove();
 }
 
+window.reportTransactionIssue = reportTransactionIssue;
+window.shareReceipt = shareReceipt;
+
 function shareReceipt(modalEl, ref, amount, desc, date) {
   const text = `FlexGig Transaction Receipt\n\nAmount: ${amount}\nDescription: ${desc}\nReference: ${ref}\nDate: ${date}\n\nPowered by FlexGig`;
   
