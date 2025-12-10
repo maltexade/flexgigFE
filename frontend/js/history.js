@@ -22,7 +22,7 @@
   };
 
   /* -------------------------- FAKE DATA GENERATOR (FOR TESTING) -------------------------- */
-const USE_FAKE_DATA = true;  // Set to false to use real API
+const USE_FAKE_DATA = false;  // Set to false to use real API
 
 function generateFakeTransactions() {
   const transactions = [];
