@@ -484,92 +484,178 @@ window.reportTransactionIssue = reportTransactionIssue;
 window.shareReceipt = shareReceipt;
 
 /**
- * shareReceipt - Generates styled receipt image for sharing
- * @param {HTMLElement} modalEl - The receipt modal element
- * @param {string} ref - Transaction reference
- * @param {string} amount - Formatted amount
- * @param {string} desc - Transaction description
- * @param {string} date - Formatted date
- * @param {string} time - Formatted time
- * @param {string} statusText - Status (Successful/Failed/Pending)
- * @param {string} networkName - Network name (MTN/Airtel/GLO/etc)
- * @param {string} networkColor - Network brand color
- * @param {string} logoImg - Network logo URL
- * @param {string} txType - Transaction type (credit/debit)
+ * shareReceipt - Generates dynamic styled receipt image for ALL transaction types
+ * Automatically detects: Data purchases, Airtime, Credits, Debits, Refunds, etc.
  */
 function shareReceipt(modalEl, ref, amount, desc, date, time, statusText, networkName, networkColor, logoImg, txType) {
-  // Extract data bundle info from description
-  const dataBundle = desc.match(/\d+\.?\d* ?GB|[\d.]+ ?Days?/gi)?.join(' ') || '—';
-  const phoneNumber = desc.match(/\d{11}/)?.[0] || '—';
-  const planType = desc.includes('SME') ? 'SME' : desc.includes('Direct') ? 'Direct' : 'Data Plan';
   
-  // Determine provider type
+  // ====================
+  // 1. INTELLIGENT DATA EXTRACTION
+  // ====================
+  
+  const dataBundle = desc.match(/\d+\.?\d*\s?GB|[\d.]+\s?Days?/gi)?.join(' ') || null;
+  const phoneNumber = desc.match(/0?\d{10,11}/)?.[0] || null;
+  const airtimeAmount = desc.match(/₦?[\d,]+\.?\d*/)?.[0] || null;
+  
+  // Determine transaction category
+  const isDataPurchase = desc.toLowerCase().includes('data') || dataBundle;
+  const isAirtimePurchase = desc.toLowerCase().includes('airtime');
+  const isCreditTransaction = txType === 'credit';
+  const isRefund = desc.toLowerCase().includes('refund');
+  const isWalletFunding = desc.toLowerCase().includes('fund') || desc.toLowerCase().includes('deposit');
+  
+  // Provider type detection
   const providerType = desc.toLowerCase().includes('sme') ? 'SME' 
     : desc.toLowerCase().includes('direct') ? 'Direct Data'
     : desc.toLowerCase().includes('gifting') ? 'Gifting'
+    : desc.toLowerCase().includes('corporate') ? 'Corporate'
+    : isAirtimePurchase ? 'VTU'
     : 'Standard';
 
-  // Create receipt HTML matching your design
+  // ====================
+  // 2. DYNAMIC HEADLINE (What to show at top)
+  // ====================
+  
+  let headline = '';
+  if (isDataPurchase && dataBundle) {
+    headline = dataBundle; // "3.5GB"
+  } else if (isAirtimePurchase && airtimeAmount) {
+    headline = airtimeAmount; // "₦500"
+  } else if (isCreditTransaction) {
+    headline = 'Credit'; // For wallet funding
+  } else {
+    headline = amount; // Fallback to amount
+  }
+
+  // ====================
+  // 3. DYNAMIC METADATA ROWS
+  // ====================
+  
+  const metadataRows = [];
+  
+  // Network (only for telco transactions)
+  if (networkName && networkName !== 'Transaction') {
+    metadataRows.push({
+      label: 'Network',
+      value: `${logoImg ? `<img src="${logoImg}" alt="${networkName}" style="width: 20px; height: 20px; object-fit: contain; margin-right: 6px; vertical-align: middle;">` : ''}${networkName}`,
+      hasLogo: true
+    });
+  }
+  
+  // Type (SME/Direct/etc)
+  if (providerType !== 'Standard') {
+    metadataRows.push({
+      label: 'Type',
+      value: providerType,
+      hasLogo: false
+    });
+  }
+  
+  // Phone Number (for outgoing transactions)
+  if (phoneNumber && !isCreditTransaction) {
+    metadataRows.push({
+      label: 'Recipient',
+      value: phoneNumber,
+      hasLogo: false
+    });
+  }
+  
+  // Plan Duration (for data purchases)
+  if (isDataPurchase && dataBundle) {
+    metadataRows.push({
+      label: 'Plan Duration',
+      value: `${dataBundle} Monthly`,
+      hasLogo: false
+    });
+  }
+  
+  // Transaction Type
+  let txTypeDisplay = '';
+  if (isDataPurchase) txTypeDisplay = 'Mobile Data';
+  else if (isAirtimePurchase) txTypeDisplay = 'Airtime Top-up';
+  else if (isWalletFunding) txTypeDisplay = 'Wallet Funding';
+  else if (isRefund) txTypeDisplay = 'Refund';
+  else if (isCreditTransaction) txTypeDisplay = 'Credit';
+  else txTypeDisplay = 'Debit';
+  
+  metadataRows.push({
+    label: 'Transaction Type',
+    value: txTypeDisplay,
+    hasLogo: false
+  });
+  
+  // Payment Method (for debits)
+  if (!isCreditTransaction) {
+    metadataRows.push({
+      label: 'Payment Method',
+      value: 'Wallet Balance',
+      hasLogo: false
+    });
+  }
+  
+  // Amount (always show)
+  metadataRows.push({
+    label: 'Amount',
+    value: amount,
+    hasLogo: false,
+    isAmount: true
+  });
+
+  // ====================
+  // 4. BUILD HTML (Fixed container & styling)
+  // ====================
+  
   const receiptHTML = `
-    <div class="wrap" style="
+    <div style="
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       padding: 40px 20px;
-      min-height: 100vh;
+      min-height: 600px;
       display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
+      box-sizing: border-box;
     ">
       
       <!-- Header -->
-      <div class="header" style="
-        text-align: center;
-        margin-bottom: 24px;
-      ">
-        <div class="brand" style="
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 12px;
-          margin-bottom: 8px;
-        ">
-          <img src="https://flexgig.com.ng/frontend/svg/logo.svg" alt="Flexgig logo" style="width: 40px; height: 40px;">
-          <span class="name" style="
-            font-size: 28px;
-            font-weight: 700;
-            color: white;
-            letter-spacing: -0.5px;
-          ">Flexgig</span>
+      <div style="text-align: center; margin-bottom: 24px;">
+        <div style="display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 8px;">
+          <img src="https://flexgig.com.ng/frontend/svg/logo.svg" 
+               alt="Flexgig" 
+               style="width: 40px; height: 40px; object-fit: contain;"
+               crossorigin="anonymous">
+          <span style="font-size: 28px; font-weight: 700; color: white; letter-spacing: -0.5px;">Flexgig</span>
         </div>
-        <div class="small" style="
-          font-size: 14px;
-          color: rgba(255, 255, 255, 0.8);
-          font-weight: 500;
-        ">Transaction Receipt</div>
+        <div style="font-size: 14px; color: rgba(255, 255, 255, 0.9); font-weight: 500;">
+          Transaction Receipt
+        </div>
       </div>
 
       <!-- Receipt Card -->
-      <div class="receipt" style="
+      <div style="
         background: white;
         border-radius: 20px;
         padding: 32px 24px;
         box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
         max-width: 400px;
         width: 100%;
+        box-sizing: border-box;
       ">
         
-        <!-- Data Bundle (Headline) -->
-        <div class="headline" style="
+        <!-- Headline -->
+        <div style="
           font-size: 48px;
           font-weight: 800;
           color: #1a1a1a;
           text-align: center;
           margin-bottom: 12px;
           letter-spacing: -1.5px;
-        ">${dataBundle}</div>
+          word-break: break-word;
+        ">${headline}</div>
 
         <!-- Status -->
-        <div class="status" style="
+        <div style="
           text-align: center;
           font-size: 18px;
           font-weight: 600;
@@ -588,126 +674,53 @@ function shareReceipt(modalEl, ref, amount, desc, date, time, statusText, networ
         </div>
 
         <!-- Timestamp -->
-        <div class="ts" style="
-          text-align: center;
-          font-size: 14px;
-          color: #999;
-          margin-bottom: 24px;
-        ">${date} ${time}</div>
-
-        <hr class="divider" style="
-          border: none;
-          border-top: 1px solid #eee;
-          margin: 20px 0;
-        ">
-
-        <!-- Metadata Rows -->
-        <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px;">
-          
-          <!-- Network -->
-          <div class="meta-row" style="
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-size: 15px;
-          ">
-            <div class="meta-left" style="color: #666; font-weight: 500;">Network</div>
-            <div class="meta-right" style="
-              color: #1a1a1a;
-              font-weight: 700;
-              display: flex;
-              align-items: center;
-              gap: 8px;
-            ">
-              ${logoImg ? `<img src="${logoImg}" alt="${networkName}" style="width: 24px; height: 24px; object-fit: contain;">` : ''}
-              ${networkName}
-            </div>
-          </div>
-
-          <!-- Provider Type -->
-          <div class="meta-row" style="
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-size: 15px;
-          ">
-            <div class="meta-left" style="color: #666; font-weight: 500;">Type</div>
-            <div class="meta-right" style="color: #1a1a1a; font-weight: 700;">${providerType}</div>
-          </div>
-
-          <!-- Phone Number -->
-          <div class="meta-row" style="
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-size: 15px;
-          ">
-            <div class="meta-left" style="color: #666; font-weight: 500;">Phone Number</div>
-            <div class="meta-right" style="
-              color: #1a1a1a;
-              font-weight: 700;
-              font-family: 'Courier New', monospace;
-            ">${phoneNumber}</div>
-          </div>
-
-          <!-- Plan Duration -->
-          <div class="meta-row" style="
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-size: 15px;
-          ">
-            <div class="meta-left" style="color: #666; font-weight: 500;">Plan Duration</div>
-            <div class="meta-right" style="color: #1a1a1a; font-weight: 700;">${dataBundle} Monthly</div>
-          </div>
-
-          <!-- Amount -->
-          <div class="meta-row" style="
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-size: 15px;
-          ">
-            <div class="meta-left" style="color: #666; font-weight: 500;">Amount</div>
-            <div class="meta-right" style="
-              color: #00d4aa;
-              font-weight: 800;
-              font-size: 18px;
-            ">${amount}</div>
-          </div>
-
+        <div style="text-align: center; font-size: 14px; color: #999; margin-bottom: 24px;">
+          ${date} ${time}
         </div>
 
-        <!-- Transaction No -->
-        <div class="info" style="
+        <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+
+        <!-- Dynamic Metadata -->
+        <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px;">
+          ${metadataRows.map(row => `
+            <div style="display: flex; justify-content: space-between; align-items: center; font-size: 15px;">
+              <div style="color: #666; font-weight: 500;">${row.label}</div>
+              <div style="
+                color: ${row.isAmount ? '#00d4aa' : '#1a1a1a'};
+                font-weight: ${row.isAmount ? '800' : '700'};
+                font-size: ${row.isAmount ? '18px' : '15px'};
+                text-align: right;
+                ${row.label === 'Recipient' ? 'font-family: monospace; letter-spacing: 0.5px;' : ''}
+              ">${row.value}</div>
+            </div>
+          `).join('')}
+        </div>
+
+        <!-- Transaction Number -->
+        <div style="
           background: #f8f9fa;
           border-radius: 12px;
           padding: 16px;
           margin-bottom: 20px;
           text-align: center;
         ">
-          <div style="
-            font-size: 14px;
-            color: #666;
-            margin-bottom: 4px;
-          "><strong>Transaction No.:</strong></div>
+          <div style="font-size: 14px; color: #666; margin-bottom: 4px;">
+            <strong>Transaction No.:</strong>
+          </div>
           <div style="
             font-family: 'Courier New', monospace;
-            font-size: 16px;
+            font-size: 15px;
             font-weight: 700;
             color: #1a1a1a;
-            letter-spacing: 1px;
+            letter-spacing: 0.8px;
+            word-break: break-all;
           ">${ref}</div>
         </div>
 
-        <hr class="divider" style="
-          border: none;
-          border-top: 1px solid #eee;
-          margin: 20px 0;
-        ">
+        <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
 
         <!-- Footer -->
-        <p class="footer" style="
+        <p style="
           text-align: center;
           font-size: 13px;
           color: #999;
@@ -722,63 +735,77 @@ function shareReceipt(modalEl, ref, amount, desc, date, time, statusText, networ
     </div>
   `;
 
-  // Create temporary container
+  // ====================
+  // 5. RENDER & CAPTURE (Fixed)
+  // ====================
+  
   const tempContainer = document.createElement('div');
   tempContainer.innerHTML = receiptHTML;
-  tempContainer.style.position = 'fixed';
-  tempContainer.style.top = '-9999px';
-  tempContainer.style.left = '-9999px';
-  tempContainer.style.width = '480px'; // Fixed width for consistent output
+  tempContainer.style.cssText = 'position: fixed; top: -99999px; left: -99999px; width: 480px;';
   document.body.appendChild(tempContainer);
 
-  // Wait for images to load, then capture
-  const images = tempContainer.querySelectorAll('img');
-  const imagePromises = Array.from(images).map(img => {
-    return new Promise((resolve) => {
-      if (img.complete) {
-        resolve();
-      } else {
-        img.onload = resolve;
-        img.onerror = resolve; // Continue even if image fails
-      }
-    });
+  // Wait for logo to load
+  const logo = tempContainer.querySelector('img[alt="Flexgig"]');
+  const logoPromise = new Promise(resolve => {
+    if (logo && logo.complete) {
+      resolve();
+    } else if (logo) {
+      logo.onload = resolve;
+      logo.onerror = resolve;
+    } else {
+      resolve();
+    }
   });
 
-  Promise.all(imagePromises).then(() => {
+  logoPromise.then(() => {
     html2canvas(tempContainer.firstElementChild, {
       scale: 2,
       backgroundColor: null,
       logging: false,
       useCORS: true,
-      allowTaint: true
+      allowTaint: false,
+      foreignObjectRendering: false
     }).then(canvas => {
       canvas.toBlob(blob => {
-        const file = new File([blob], `FlexGig-Receipt-${ref}.png`, { type: 'image/png' });
+        const filename = `FlexGig-Receipt-${ref.replace(/[^a-zA-Z0-9]/g, '-')}.png`;
+        const file = new File([blob], filename, { type: 'image/png' });
         
-        // Share via Web Share API if supported
+        // Share or download
         if (navigator.canShare && navigator.canShare({ files: [file] })) {
           navigator.share({
             files: [file],
             title: 'FlexGig Transaction Receipt',
-            text: `Transaction receipt for ${dataBundle} - ${networkName}`
-          }).catch(err => console.log('Share cancelled:', err));
+            text: `${txTypeDisplay} - ${headline}`
+          }).catch(err => {
+            if (err.name !== 'AbortError') {
+              console.log('Share failed, downloading instead');
+              downloadImage(blob, filename);
+            }
+          });
         } else {
-          // Fallback: Download the image
-          const link = document.createElement('a');
-          link.href = URL.createObjectURL(blob);
-          link.download = `FlexGig-Receipt-${ref}.png`;
-          link.click();
-          URL.revokeObjectURL(link.href);
+          downloadImage(blob, filename);
         }
         
-        // Cleanup
         tempContainer.remove();
       }, 'image/png');
+    }).catch(err => {
+      console.error('Canvas generation failed:', err);
+      alert('Failed to generate receipt image. Please try again.');
+      tempContainer.remove();
     });
   });
 
-  // Close the modal
-  modalEl?.remove();
+  // Helper function for downloading
+  function downloadImage(blob, filename) {
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  }
+
+  // Close modal
+  if (modalEl) modalEl.remove();
 }
 
 
