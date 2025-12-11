@@ -485,7 +485,7 @@ window.shareReceipt = shareReceipt;
 
 /**
  * shareReceipt - Generates receipt matching the EXACT minimalist design
- * Clean white card, no fancy backgrounds, fits mobile screen perfectly
+ * Clean white card, properly centered, with smart credit transaction handling
  */
 function shareReceipt(modalEl, ref, amount, desc, date, time, statusText, networkName, networkColor, logoImg, txType) {
   
@@ -495,6 +495,15 @@ function shareReceipt(modalEl, ref, amount, desc, date, time, statusText, networ
   
   const dataBundle = desc.match(/\d+\.?\d*\s?GB|[\d.]+\s?Days?/gi)?.join(' ') || null;
   const phoneNumber = desc.match(/0?\d{10,11}/)?.[0] || null;
+  
+  // Extract credit/funding source info
+  const fromMatch = desc.match(/(?:from|via)\s+([A-Za-z0-9\s]+)/i);
+  const accountNumberMatch = desc.match(/\b\d{10}\b/); // 10-digit account number
+  const accountNameMatch = desc.match(/([A-Z][a-z]+\s+[A-Z][a-z]+)/); // Name pattern
+  
+  const fundingSource = fromMatch ? fromMatch[1].trim() : 'External Source';
+  const accountNumber = accountNumberMatch ? accountNumberMatch[0] : null;
+  const accountName = accountNameMatch ? accountNameMatch[0] : null;
   
   // Determine transaction category
   const isDataPurchase = desc.toLowerCase().includes('data') || dataBundle;
@@ -516,12 +525,12 @@ function shareReceipt(modalEl, ref, amount, desc, date, time, statusText, networ
   // ====================
   
   let headline = '';
-  if (isDataPurchase && dataBundle) {
+  if (isCreditTransaction || isWalletFunding) {
+    headline = amount; // Show amount for credits (e.g., "₦5,000")
+  } else if (isDataPurchase && dataBundle) {
     headline = dataBundle; // "3.5GB"
   } else if (isAirtimePurchase) {
     headline = amount; // "₦500"
-  } else if (isCreditTransaction || isWalletFunding) {
-    headline = 'Credit'; // For wallet funding
   } else if (isRefund) {
     headline = 'Refund';
   } else {
@@ -534,47 +543,70 @@ function shareReceipt(modalEl, ref, amount, desc, date, time, statusText, networ
   
   const metadataRows = [];
   
-  // Network (only for telco transactions)
-  if (networkName && networkName !== 'Transaction' && (isDataPurchase || isAirtimePurchase)) {
-    metadataRows.push({ label: 'Network', value: networkName });
+  // FOR CREDIT TRANSACTIONS - Show funding source details
+  if (isCreditTransaction || isWalletFunding) {
+    metadataRows.push({ label: 'Source', value: fundingSource });
+    
+    if (accountNumber) {
+      metadataRows.push({ label: 'Account Number', value: accountNumber });
+    }
+    
+    if (accountName) {
+      metadataRows.push({ label: 'Account Name', value: accountName });
+    }
+    
+    // Determine bank/platform from description
+    let platform = 'Bank Transfer';
+    if (desc.toLowerCase().includes('opay')) platform = 'Opay';
+    else if (desc.toLowerCase().includes('palmpay')) platform = 'PalmPay';
+    else if (desc.toLowerCase().includes('kuda')) platform = 'Kuda Bank';
+    else if (desc.toLowerCase().includes('gtbank') || desc.toLowerCase().includes('gtb')) platform = 'GTBank';
+    
+    metadataRows.push({ label: 'Via', value: platform });
   }
-  
-  // Type (SME/Direct/etc)
-  if (providerType !== 'Standard' && (isDataPurchase || isAirtimePurchase)) {
-    metadataRows.push({ label: 'Type', value: providerType });
-  }
-  
-  // Phone Number (for outgoing transactions)
-  if (phoneNumber && !isCreditTransaction) {
-    metadataRows.push({ label: 'Phone Number', value: phoneNumber });
-  }
-  
-  // Plan Duration (for data purchases)
-  if (isDataPurchase && dataBundle) {
-    metadataRows.push({ label: 'Plan Duration', value: `${dataBundle} Monthly` });
+  // FOR DATA/AIRTIME PURCHASES
+  else if (isDataPurchase || isAirtimePurchase) {
+    if (networkName && networkName !== 'Transaction') {
+      metadataRows.push({ label: 'Network', value: networkName });
+    }
+    
+    if (providerType !== 'Standard') {
+      metadataRows.push({ label: 'Type', value: providerType });
+    }
+    
+    if (phoneNumber) {
+      metadataRows.push({ label: 'Phone Number', value: phoneNumber });
+    }
+    
+    if (isDataPurchase && dataBundle) {
+      metadataRows.push({ label: 'Plan Duration', value: `${dataBundle} Monthly` });
+    }
   }
   
   // Amount (always show)
   metadataRows.push({ label: 'Amount', value: amount });
 
   // ====================
-  // 4. BUILD HTML - EXACT MATCH TO YOUR DESIGN
+  // 4. BUILD HTML - PERFECTLY CENTERED
   // ====================
   
   const receiptHTML = `
     <div style="
       background: #f5f5f5;
-      padding: 20px 12px 40px;
+      padding: 20px;
       min-height: 100vh;
       box-sizing: border-box;
       font-family: Arial, Helvetica, sans-serif;
       -webkit-font-smoothing: antialiased;
+      display: flex;
+      align-items: center;
+      justify-content: center;
     ">
       
-      <div style="max-width: 360px; margin: 0 auto;">
+      <div style="max-width: 360px; width: 100%;">
         
         <!-- Header -->
-        <div style="display: flex; justify-content: space-between; align-items: center; padding: 20px 4px 0; margin-bottom: 10px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 20px 4px; margin-bottom: 10px;">
           <div style="display: flex; align-items: center;">
             <img src="https://flexgig.com.ng/frontend/svg/logo.svg" 
                  alt="Flexgig logo" 
@@ -647,7 +679,10 @@ function shareReceipt(modalEl, ref, amount, desc, date, time, statusText, networ
                   color: #555;
                   font-size: 14px;
                   font-weight: 600;
-                  ${row.label === 'Phone Number' ? 'font-family: monospace;' : ''}
+                  text-align: right;
+                  max-width: 60%;
+                  word-break: break-word;
+                  ${row.label === 'Phone Number' || row.label === 'Account Number' ? 'font-family: monospace; letter-spacing: 0.5px;' : ''}
                 ">${row.value}</div>
               </div>
             `).join('')}
@@ -701,17 +736,17 @@ function shareReceipt(modalEl, ref, amount, desc, date, time, statusText, networ
   });
 
   logoPromise.then(() => {
-    // Capture only the content area (not the full viewport height)
-    const contentDiv = tempContainer.querySelector('div[style*="max-width: 360px"]');
+    // Capture the entire centered container
+    const mainDiv = tempContainer.firstElementChild;
     
-    html2canvas(contentDiv, {
+    html2canvas(mainDiv, {
       scale: 2,
       backgroundColor: '#f5f5f5',
       logging: false,
       useCORS: true,
       allowTaint: false,
       width: 400,
-      height: contentDiv.scrollHeight
+      height: mainDiv.scrollHeight
     }).then(canvas => {
       canvas.toBlob(blob => {
         const filename = `FlexGig-Receipt-${ref.replace(/[^a-zA-Z0-9]/g, '-')}.png`;
