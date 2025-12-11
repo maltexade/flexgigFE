@@ -5560,7 +5560,7 @@ payBtn.addEventListener('click', () => {
       console.log('[DEBUG] payBtn: Mock API response:', mockResponse);
 
       // Update balance
-      userBalance -= plan.price;
+      window.userBalance -= plan.price;
       updateBalanceDisplay();
 
       // Determine subType for plan type display
