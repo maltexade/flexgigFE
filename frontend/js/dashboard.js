@@ -5523,57 +5523,51 @@ viewAllLink.addEventListener('click', (e) => {
 
 //     // Inside checkoutModal event listeners
 const payBtn = document.getElementById('payBtn');
+
 payBtn.addEventListener('click', () => {
-  if (!payBtn.disabled) {
-    payBtn.disabled = true;
-    payBtn.textContent = 'Processing...';
-    setTimeout(() => {
+  if (payBtn.disabled) return;
+
+  payBtn.disabled = true;
+  payBtn.textContent = 'Processing...';
+
+  setTimeout(() => {
+    try {
       const state = JSON.parse(localStorage.getItem('userState') || '{}');
       const { provider, planId, number } = state;
+
       const rawNumber = normalizePhone(number);
       if (!rawNumber || rawNumber.length !== 11) {
-        console.error('[ERROR] payBtn: Invalid phone number:', rawNumber, 'Original:', number);
         alert('Invalid phone number. Please enter a valid Nigerian number.');
-        payBtn.disabled = false;
-        payBtn.textContent = 'Pay';
         return;
       }
+
       const plan = findPlanById(planId, provider);
       if (!plan) {
-        console.error('[ERROR] payBtn: No plan found for ID:', planId);
         alert('Invalid plan selected. Please try again.');
-        payBtn.disabled = false;
-        payBtn.textContent = 'Pay';
         return;
       }
-      if (userBalance < plan.price) {
-        console.error('[ERROR] payBtn: Insufficient balance:', userBalance, 'Required:', plan.price);
+
+      if (window.userBalance < plan.price) {
         alert('Insufficient balance. Please add funds.');
-        payBtn.disabled = false;
-        payBtn.textContent = 'Pay';
         return;
       }
+
       onPayClicked(); // Trigger re-authentication
 
       // Mock API call
       const mockResponse = { success: true, transactionId: `TX${Date.now()}` };
       console.log('[DEBUG] payBtn: Mock API response:', mockResponse);
 
-      // Update balance
-      window.userBalance -= plan.price;
-      updateBalanceDisplay();
+      // ✅ Update balance safely
+      window.userBalance -= plan.price; // setter updates DOM & localStorage
 
       // Determine subType for plan type display
       let subType = '';
-      if (provider === 'mtn') {
-        subType = planId.includes('awoof') ? 'AWOOF' : 'GIFTING';
-      } else if (provider === 'airtel') {
-        subType = planId.includes('awoof') ? 'AWOOF' : 'CG';
-      } else if (provider === 'glo') {
-        subType = planId.includes('cg') ? 'CG' : 'GIFTING';
-      }
+      if (provider === 'mtn') subType = planId.includes('awoof') ? 'AWOOF' : 'GIFTING';
+      else if (provider === 'airtel') subType = planId.includes('awoof') ? 'AWOOF' : 'CG';
+      else if (provider === 'glo') subType = planId.includes('cg') ? 'CG' : 'GIFTING';
 
-      // Add to transactions
+      // Add transaction
       const transaction = {
         type: 'data',
         description: 'Data Purchase',
@@ -5584,15 +5578,16 @@ payBtn.addEventListener('click', () => {
         data: plan.data,
         duration: plan.duration,
         timestamp: new Date().toISOString(),
-        status: 'success' // Mock success
+        status: 'success'
       };
+
       transactions.push(transaction);
       recentTransactions.push(transaction);
       localStorage.setItem('recentTransactions', JSON.stringify(recentTransactions));
       renderTransactions();
       renderRecentTransactions();
 
-      // Clear phone number, reset provider to MTN, and clear plan selection
+      // Reset UI
       phoneInput.value = '';
       document.querySelectorAll('.plan-box.selected').forEach(p => p.classList.remove('selected'));
       selectProvider('mtn');
@@ -5601,14 +5596,23 @@ payBtn.addEventListener('click', () => {
       saveUserState();
       saveCurrentAppState();
 
-      window.showSlideNotification(`Payment of ₦${plan.price} for ${plan.data} (${plan.duration}) to ${formatNigeriaNumber(rawNumber).value} successful!`, 'success');
+      window.showSlideNotification(
+        `Payment of ₦${plan.price} for ${plan.data} (${plan.duration}) to ${formatNigeriaNumber(rawNumber).value} successful!`,
+        'success'
+      );
       closeCheckoutModal();
-      console.log('[DEBUG] payBtn: Payment processed, new balance:', userBalance, 'Transaction:', transaction);
+
+      console.log('[DEBUG] payBtn: Payment processed, new balance:', window.userBalance, 'Transaction:', transaction);
+    } catch (err) {
+      console.error('[ERROR] payBtn handler failed', err);
+      alert('An unexpected error occurred.');
+    } finally {
       payBtn.disabled = false;
       payBtn.textContent = 'Pay';
-    }, 1000);
-  }
+    }
+  }, 1000);
 });
+
 
 
   // --- CONTACT/CANCEL BUTTON ICONS ---
