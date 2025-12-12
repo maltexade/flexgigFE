@@ -4466,6 +4466,7 @@ window.saveUserState = window.saveUserState || saveUserState;
 
 
 // GLOBAL CACHE
+
 let __allPlansCache = [];
 let __plansLoaded = false;
 
@@ -4715,48 +4716,76 @@ if (seeAllBtn) {
     });
   }
 
-  // --- PLAN CLICK HANDLER ---
-// FINAL handlePlanClick — MODAL → DASHBOARD 100% WORKING
+// --- PLAN CLICK HANDLER — FINAL & PERMANENT (100% YOUR ORIGINAL RULES) ---
 function handlePlanClick(e) {
   const plan = e.currentTarget;
-  const id = plan.dataset.id;
-  if (!id) return;
-
-  const isModalClick = !!plan.closest('.plan-modal-content');
+  const id = plan.getAttribute('data-id');
+  const isModalClick = plan.closest('.plan-modal-content');
   const activeProvider = providerClasses.find(cls => slider.classList.contains(cls));
-  if (!activeProvider) return;
 
-  // Always select
-  selectPlanById(id);
+  // Must have ID and provider
+  if (!id || !activeProvider) return;
 
+  const dashPlan = plansRow.querySelector(`.plan-box[data-id="${id}"]`);
+  const isDashSelected = dashPlan && dashPlan.classList.contains('selected');
+
+  // If clicking same plan already on dashboard → just close modal
+  if (isModalClick && isDashSelected) {
+    ModalManager.closeModal('allPlansModal');
+    return;
+  }
+
+  // If from modal → do the magic
   if (isModalClick) {
-    const alreadyInDash = plansRow.querySelector(`.plan-box[data-id="${id}"]`);
-    if (!alreadyInDash) {
-      const clone = plan.cloneNode(true);
-      clone.classList.add(activeProvider);
+    const dashPlans = Array.from(plansRow.querySelectorAll('.plan-box'));
+    const sameAsFirst = dashPlans.length > 0 && dashPlans[0].getAttribute('data-id') === id;
 
-      // Add correct tag
-      const realPlan = __allPlansCache.find(p => p.plan_id === id);
-      if (realPlan?.category && !['STANDARD', 'NORMAL'].includes(realPlan.category)) {
-        const tag = document.createElement('span');
-        tag.className = 'plan-type-tag';
-        tag.textContent = realPlan.category;
-        clone.appendChild(tag);
+    // Always select it (in both modal and dashboard if exists)
+    selectPlanById(id);
+
+    // If it's not the first one → clone it to dashboard
+    if (!sameAsFirst) {
+      const cloneForDashboard = plan.cloneNode(true);
+      cloneForDashboard.classList.add(activeProvider);
+
+      // Add correct tag using your original id.includes() logic
+      let subType = '';
+      if (activeProvider === 'mtn') {
+        subType = id.includes('awoof') ? 'awoof' : id.includes('gifting') ? 'gifting' : '';
+      } else if (activeProvider === 'airtel') {
+        subType = id.includes('awoof') ? 'awoof' : id.includes('cg') ? 'cg' : '';
+      } else if (activeProvider === 'glo') {
+        subType = id.includes('cg') ? 'cg' : id.includes('gifting') ? 'gifting' : '';
       }
 
-      const seeAllBtn = plansRow.querySelector('.see-all-plans');
-      plansRow.insertBefore(clone, seeAllBtn);
+      if (subType && activeProvider !== 'ninemobile') {
+        const tag = document.createElement('span');
+        tag.className = 'plan-type-tag';
+        tag.textContent = subType.charAt(0).toUpperCase() + subType.slice(1);
+        cloneForDashboard.appendChild(tag);
+      }
 
-      // Keep only 2
-      const all = plansRow.querySelectorAll('.plan-box');
-      if (all.length > 2) plansRow.removeChild(all[all.length - 1]);
+      // Insert at the beginning — YOUR RULE
+      plansRow.insertBefore(cloneForDashboard, plansRow.firstChild);
 
-      clone.addEventListener('click', handlePlanClick);
+      // Remove the 3rd box — YOUR RULE
+      const allDashPlans = Array.from(plansRow.querySelectorAll('.plan-box'));
+      if (allDashPlans.length > 2) {
+        plansRow.removeChild(allDashPlans[2]);
+      }
+
+      // Re-attach listener
+      cloneForDashboard.addEventListener('click', handlePlanClick);
     }
 
+    // Save state and close modal
     saveUserState();
     saveCurrentAppState();
     ModalManager.closeModal('allPlansModal');
+  } 
+  // If not from modal → just select it
+  else {
+    selectPlanById(id);
   }
 }
   // --- UPDATE CONTACT/CANCEL BUTTON ---
