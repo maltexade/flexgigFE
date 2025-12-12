@@ -4465,9 +4465,6 @@ window.saveUserState = window.saveUserState || saveUserState;
 
 
 
-  // --- RENDER DASHBOARD PLANS ---
-// --- RENDER DASHBOARD PLANS FROM SUPABASE ---
-// --- RENDER DASHBOARD PLANS (FIXED & FINAL) ---
 // GLOBAL CACHE
 let __allPlansCache = [];
 let __plansLoaded = false;
@@ -4480,7 +4477,7 @@ async function loadAllPlansOnce() {
   return __allPlansCache;
 }
 
-// DASHBOARD: 2 plans max (special 9mobile handling)
+// FIXED: renderDashboardPlans — NOW SHOWS CG FOR AIRTEL & GLO
 async function renderDashboardPlans(provider) {
   const plansRow = document.querySelector('.plans-row');
   if (!plansRow) return;
@@ -4489,23 +4486,19 @@ async function renderDashboardPlans(provider) {
 
   const plans = await loadAllPlansOnce();
   let providerPlans = plans.filter(p => 
-    p.provider?.toLowerCase() === provider.toLowerCase()
+    p.provider?.toLowerCase() === (provider === 'ninemobile' ? '9mobile' : provider.toLowerCase())
   );
-
-  // Fix for 9mobile
-  if (provider === 'ninemobile') {
-    providerPlans = plans.filter(p => p.provider?.toLowerCase() === '9mobile');
-  }
 
   let plansToShow = [];
 
   if (provider === 'ninemobile') {
-    // Show first 2 plans only
     plansToShow = providerPlans.slice(0, 2);
   } else {
-    // Normal networks: 1 AWOOF/CG + 1 GIFTING
+    // PRIMARY: AWOOF or CG
     const primary = providerPlans.find(p => ['AWOOF', 'CG'].includes(p.category));
+    // GIFTING: Only actual GIFTING
     const gifting = providerPlans.find(p => p.category === 'GIFTING');
+
     if (primary) plansToShow.push(primary);
     if (gifting) plansToShow.push(gifting);
   }
@@ -4518,7 +4511,7 @@ async function renderDashboardPlans(provider) {
     box.className = `plan-box ${provider}`;
     box.dataset.id = plan.plan_id;
 
-    const tag = (plan.category && plan.category !== 'STANDARD')
+    const tag = (plan.category && !['STANDARD', 'NORMAL'].includes(plan.category))
       ? `<span class="plan-type-tag">${plan.category}</span>`
       : '';
 
@@ -4536,8 +4529,7 @@ async function renderDashboardPlans(provider) {
   console.log(`[DASHBOARD] Rendered ${plansToShow.length} plans for ${provider}`);
 }
 
-// FINAL renderModalPlans — FULLY SUPPORTS AIRTEL AWOOF + CG (GIFTING)
-// FINAL renderModalPlans — SUPPORTS AIRTEL AWOOF + CG CORRECTLY
+// FINAL renderModalPlans — AIRTEL AWOOF + CG, GLO CG + GIFTING, HEADER FIXED
 async function renderModalPlans(provider) {
   const modal = document.getElementById('allPlansModal');
   if (!modal) return;
@@ -4547,13 +4539,8 @@ async function renderModalPlans(provider) {
 
   const plans = await loadAllPlansOnce();
   let providerPlans = plans.filter(p => 
-    p.provider?.toLowerCase() === provider.toLowerCase()
+    p.provider?.toLowerCase() === (provider === 'ninemobile' ? '9mobile' : provider.toLowerCase())
   );
-
-  // Fix 9mobile
-  if (provider === 'ninemobile') {
-    providerPlans = plans.filter(p => p.provider?.toLowerCase() === '9mobile');
-  }
 
   if (provider === 'ninemobile') {
     if (awoofSection) {
@@ -4562,40 +4549,42 @@ async function renderModalPlans(provider) {
       );
     }
     if (giftingSection) giftingSection.style.display = 'none';
+    return;
+  }
 
-  } else {
-    // DECLARE VARIABLES PROPERLY
-    const awoofPlans = providerPlans.filter(p => p.category === 'AWOOF');
-    const cgOrGiftingPlans = providerPlans.filter(p => 
-      p.category === 'CG' || p.category === 'GIFTING'
-    );
+  // DECLARED PROPERLY — NO MORE "not defined" ERROR
+  const awoofPlans = providerPlans.filter(p => p.category === 'AWOOF');
+  const cgOrGiftingPlans = providerPlans.filter(p => 
+    p.category === 'CG' || p.category === 'GIFTING'
+  );
 
-    // First section: AWOOF (if exists)
-    if (awoofSection) {
-      if (awoofPlans.length > 0) {
-        fillPlanSection(awoofSection, provider, 'awoof', awoofPlans,
-          `${provider.toUpperCase()} AWOOF`, svgShapes[provider]
-        );
-        awoofSection.style.display = 'block';
-      } else {
-        awoofSection.style.display = 'none';
-      }
-    }
-
-    // Second section: CG or GIFTING
-    if (giftingSection) {
-      if (cgOrGiftingPlans.length > 0) {
-        const title = provider === 'airtel' ? 'CG' : 'GIFTING';
-        fillPlanSection(giftingSection, provider, 'cg-gifting', cgOrGiftingPlans,
-          `${provider.toUpperCase()} ${title}`, svgShapes[provider]
-        );
-        giftingSection.style.display = 'block';
-      } else {
-        giftingSection.style.display = 'none';
-      }
+  // First section: AWOOF only
+  if (awoofSection) {
+    if (awoofPlans.length > 0) {
+      fillPlanSection(awoofSection, provider, 'awoof', awoofPlans,
+        `${provider.toUpperCase()} AWOOF`, svgShapes[provider]
+      );
+      awoofSection.style.display = 'block';
+    } else {
+      awoofSection.style.display = 'none';
     }
   }
-};
+
+  // Second section: CG or GIFTING
+  if (giftingSection) {
+    if (cgOrGiftingPlans.length > 0) {
+      const title = provider === 'airtel' || provider === 'glo' ? 'CG' : 'GIFTING';
+      fillPlanSection(giftingSection, provider, 'cg-gifting', cgOrGiftingPlans,
+        `${provider.toUpperCase()} ${title}`, svgShapes[provider]
+      );
+      giftingSection.style.display = 'block';
+    } else {
+      giftingSection.style.display = 'none';
+    }
+  }
+}
+
+
 
   window.renderDashboardPlans = window.renderDashboardPlans || renderDashboardPlans;
 
@@ -4727,7 +4716,7 @@ if (seeAllBtn) {
   }
 
   // --- PLAN CLICK HANDLER ---
-// FINAL handlePlanClick — 100% WORKING MODAL → DASHBOARD
+// FINAL handlePlanClick — MODAL → DASHBOARD 100% WORKING
 function handlePlanClick(e) {
   const plan = e.currentTarget;
   const id = plan.dataset.id;
@@ -4737,18 +4726,16 @@ function handlePlanClick(e) {
   const activeProvider = providerClasses.find(cls => slider.classList.contains(cls));
   if (!activeProvider) return;
 
-  // Select the plan globally
+  // Always select
   selectPlanById(id);
 
-  // Only run cloning logic if clicked from modal
   if (isModalClick) {
-    const alreadyExists = plansRow.querySelector(`.plan-box[data-id="${id}"]`);
-    
-    if (!alreadyExists) {
+    const alreadyInDash = plansRow.querySelector(`.plan-box[data-id="${id}"]`);
+    if (!alreadyInDash) {
       const clone = plan.cloneNode(true);
       clone.classList.add(activeProvider);
 
-      // Add correct tag from real data
+      // Add correct tag
       const realPlan = __allPlansCache.find(p => p.plan_id === id);
       if (realPlan?.category && !['STANDARD', 'NORMAL'].includes(realPlan.category)) {
         const tag = document.createElement('span');
@@ -4760,11 +4747,9 @@ function handlePlanClick(e) {
       const seeAllBtn = plansRow.querySelector('.see-all-plans');
       plansRow.insertBefore(clone, seeAllBtn);
 
-      // Keep only 2 plans
-      const boxes = plansRow.querySelectorAll('.plan-box');
-      if (boxes.length > 2) {
-        plansRow.removeChild(boxes[boxes.length - 1]);
-      }
+      // Keep only 2
+      const all = plansRow.querySelectorAll('.plan-box');
+      if (all.length > 2) plansRow.removeChild(all[all.length - 1]);
 
       clone.addEventListener('click', handlePlanClick);
     }
