@@ -4463,105 +4463,148 @@ window.saveUserState = window.saveUserState || saveUserState;
     slider.addEventListener('transitionend', handleTransitionEnd);
   }
 
-  // --- PLAN ID GENERATOR ---
-  function generatePlanId(provider, subType, plan) {
-    return `${provider}${subType ? subType : ''}${plan.price}${plan.data.replace(/\W/g, '')}${plan.duration.replace(/\W/g, '')}`.toLowerCase();
-  }
+
 
   // --- RENDER DASHBOARD PLANS ---
 // --- RENDER DASHBOARD PLANS FROM SUPABASE ---
+// --- RENDER DASHBOARD PLANS (FIXED & FINAL) ---
 async function renderDashboardPlans(provider) {
   const plansRow = document.querySelector('.plans-row');
   if (!plansRow) return;
 
   // Clear old plans
-  Array.from(plansRow.querySelectorAll('.plan-box')).forEach(p => p.remove());
+  plansRow.querySelectorAll('.plan-box').forEach(p => p.remove());
 
-  // Get first plan from AWOOF/CG and first from GIFTING
-  const awoofPlans = await getPlans(provider, 'AWOOF');
-  const cgPlans = await getPlans(provider, 'CG');
-  const giftingPlans = await getPlans(provider, 'GIFTING');
+  try {
+    const plans = await getAllPlans();
+    const providerPlans = plans.filter(p => 
+      p.provider.toLowerCase() === provider.toLowerCase()
+    );
 
-  const firstAwoof = awoofPlans[0] || cgPlans[0];
-  const firstGifting = giftingPlans[0];
+    // Get first AWOOF/CG and first GIFTING
+    const awoofOrCg = providerPlans.find(p => 
+      ['AWOOF', 'CG'].includes(p.category)
+    );
+    const gifting = providerPlans.find(p => p.category === 'GIFTING');
 
-  const plansToShow = [];
-  if (firstAwoof) plansToShow.push({ subType: firstAwoof.category.toLowerCase(), plan: firstAwoof });
-  if (firstGifting) plansToShow.push({ subType: 'gifting', plan: firstGifting });
+    const plansToShow = [];
+    if (awoofOrCg) plansToShow.push(awoofOrCg);
+    if (gifting) plansToShow.push(gifting);
 
-  const seeAllBtn = plansRow.querySelector('.see-all-plans');
+    const seeAllBtn = plansRow.querySelector('.see-all-plans');
+    if (!seeAllBtn) return;
 
-  plansToShow.forEach(item => {
-    const { plan, subType } = item;
-    const box = document.createElement('div');
-    box.className = `plan-box ${provider}`;
-    box.setAttribute('data-id', plan.plan_id);  // ← This is the key change!
-    const tag = subType && subType !== 'standard' ? `<span class="plan-type-tag">${subType.toUpperCase()}</span>` : '';
-    box.innerHTML = `
-      <div class="plan-price plan-amount">₦${plan.price}</div>
-      <div class="plan-data plan-gb">${plan.data_amount}</div>
-      <div class="plan-duration">${plan.duration}</div>
-      ${tag}
-    `;
-    plansRow.insertBefore(box, seeAllBtn);
-  });
+    plansToShow.forEach(plan => {
+      const box = document.createElement('div');
+      box.className = `plan-box ${provider}`;
+      box.dataset.id = plan.plan_id;  // ← Use real plan_id!
 
-  attachPlanListeners();
+      const tag = plan.category && plan.category !== 'STANDARD' 
+        ? `<span class="plan-type-tag">${plan.category}</span>` 
+        : '';
+
+      box.innerHTML = `
+        <div class="plan-price plan-amount">₦${plan.price}</div>
+        <div class="plan-data plan-gb">${plan.data || plan.data_amount || '1GB'}</div>
+        <div class="plan-duration">${plan.validity || plan.duration || '30 Days'}</div>
+        ${tag}
+      `;
+
+      plansRow.insertBefore(box, seeAllBtn);
+    });
+
+    attachPlanListeners();
+    logPlanIDs();
+    console.log(`[PLANS] Dashboard rendered ${plansToShow.length} plans for ${provider}`);
+  } catch (err) {
+    console.error('[PLANS] renderDashboardPlans failed:', err);
+  }
 }
   window.renderDashboardPlans = window.renderDashboardPlans || renderDashboardPlans;
 
   // --- RENDER MODAL PLANS ---
-async function renderModalPlans(activeProvider) {
-  const allPlansModal = document.getElementById('allPlansModal');
-  if (!allPlansModal) return;
+// --- RENDER MODAL PLANS (FIXED & FINAL) ---
+async function renderModalPlans(provider) {
+  const modal = document.getElementById('allPlansModal');
+  if (!modal) return;
 
-  const awoofSection = allPlansModal.querySelector('.plan-section.awoof-section');
-  const giftingSection = allPlansModal.querySelector('.plan-section.gifting-section');
+  const awoofSection = modal.querySelector('.plan-section.awoof-section');
+  const giftingSection = modal.querySelector('.plan-section.gifting-section');
 
-  if (giftingSection) giftingSection.style.display = activeProvider === 'ninemobile' ? 'none' : 'block';
-  if (awoofSection) awoofSection.style.display = 'block';
+  try {
+    const plans = await getAllPlans();
+    const providerPlans = plans.filter(p => 
+      p.provider.toLowerCase() === provider.toLowerCase()
+    );
 
-  // Fetch plans
-  const awoofPlans = await getPlans(activeProvider, 'AWOOF');
-  const cgPlans = await getPlans(activeProvider, 'CG');
-  const giftingPlans = await getPlans(activeProvider, 'GIFTING');
+    // Primary section: AWOOF or CG
+    const primaryPlans = providerPlans.filter(p => 
+      ['AWOOF', 'CG'].includes(p.category)
+    );
+    const primaryTitle = primaryPlans.some(p => p.category === 'AWOOF') ? 'AWOOF' : 'CG';
 
-  // Use AWOOF or CG for first section
-  const primaryPlans = awoofPlans.length > 0 ? awoofPlans : cgPlans;
-  const primaryTitle = awoofPlans.length > 0 ? 'AWOOF' : 'CG';
+    // Gifting section
+    const giftingPlans = providerPlans.filter(p => p.category === 'GIFTING');
 
-  // Fill first section
-  if (primaryPlans.length > 0 && awoofSection) {
-    fillPlanSection(awoofSection, activeProvider, primaryTitle.toLowerCase(), primaryPlans, `${activeProvider.toUpperCase()} ${primaryTitle}`, svgShapes[activeProvider]);
-  }
+    // Render primary
+    if (primaryPlans.length > 0 && awoofSection) {
+      fillPlanSection(
+        awoofSection,
+        provider,
+        primaryTitle.toLowerCase(),
+        primaryPlans,
+        `${provider.toUpperCase()} ${primaryTitle}`,
+        svgShapes[provider]
+      );
+    }
 
-  // Fill second section (gifting)
-  if (giftingPlans.length > 0 && giftingSection) {
-    fillPlanSection(giftingSection, activeProvider, 'gifting', giftingPlans, `${activeProvider.toUpperCase()} GIFTING`, svgShapes[activeProvider]);
+    // Render gifting
+    if (giftingPlans.length > 0 && giftingSection) {
+      fillPlanSection(
+        giftingSection,
+        provider,
+        'gifting',
+        giftingPlans,
+        `${provider.toUpperCase()} GIFTING`,
+        svgShapes[provider]
+      );
+    }
+
+    // Hide gifting for 9mobile
+    if (giftingSection) {
+      giftingSection.style.display = provider === 'ninemobile' ? 'none' : 'block';
+    }
+
+    console.log(`[PLANS] Modal rendered for ${provider}: ${primaryPlans.length} + ${giftingPlans.length}`);
+  } catch (err) {
+    console.error('[PLANS] renderModalPlans failed:', err);
   }
 }
 // helper: fill a modal section
+// --- FILL PLAN SECTION (FIXED) ---
 function fillPlanSection(sectionEl, provider, subType, plans, title, svg) {
   sectionEl.setAttribute('data-provider', provider);
   const grid = sectionEl.querySelector('.plans-grid');
-  if (grid) {
-    grid.innerHTML = '';
-    plans.forEach(plan => {
-      const box = document.createElement('div');
-      box.className = `plan-box ${provider}`;
-      box.setAttribute('data-id', plan.plan_id || plan.id || `fallback-${Date.now()}`);
-      box.innerHTML = `
-        <div class="plan-amount">₦${plan.price}</div>
-        <div class="plan-data">${plan.data}</div>
-        <div class="plan-days">${plan.duration}</div>
-      `;
-      grid.appendChild(box);
-    });
-  }
+  if (!grid) return;
+
+  grid.innerHTML = '';
+  plans.forEach(plan => {
+    const box = document.createElement('div');
+    box.className = `plan-box ${provider}`;
+    box.dataset.id = plan.plan_id;
+
+    box.innerHTML = `
+      <div class="plan-amount">₦${plan.price}</div>
+      <div class="plan-data">${plan.data || plan.data_amount}</div>
+      <div class="plan-days">${plan.validity || plan.duration}</div>
+    `;
+
+    grid.appendChild(box);
+  });
+
   const header = sectionEl.querySelector('.section-header');
   if (header) {
-    const existingSvg = header.querySelector('svg');
-    if (existingSvg) existingSvg.remove();
+    header.querySelector('svg')?.remove();
     header.insertAdjacentHTML('afterbegin', svg);
     const h2 = header.querySelector('h2');
     if (h2) h2.textContent = title;
@@ -4753,10 +4796,12 @@ if (seeAllBtn) {
   
 
 async function findPlanById(planId, provider) {
-  const plans = await getPlans(provider);
-  return plans.find(p => p.plan_id === planId);
+  const plans = await getAllPlans();
+  return plans.find(p => 
+    p.plan_id === planId && 
+    p.provider.toLowerCase() === provider.toLowerCase()
+  );
 }
-
   // Full triggerCheckoutReauth - call this from your checkout flow
 async function triggerCheckoutReauth() {
   console.log('triggerCheckoutReauth called');
