@@ -201,3 +201,7 @@ window.forceRefreshPlans = async () => {
   await fetchPlans();
   location.reload();
 };
+
+// EXPOSE TO GLOBAL — REQUIRED FOR dashboard.js
+window.getAllPlans = getAllPlans;
+window.forceRefreshPlans = forceRefreshPlans;
