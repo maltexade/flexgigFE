@@ -1,4 +1,4 @@
-import { mtnAwoofPlans, mtnGiftingPlans, airtelAwoofPlans, airtelCgPlans, gloCgPlans, gloGiftingPlans, ninemobilePlans } from './dataPlans.js';
+import { getPlans } from './dataPlans.js';  // ← NEW FILE PATH MAY VARY — see note below
 import {
   openCheckoutModal,
   closeCheckoutModal,
@@ -4469,84 +4469,77 @@ window.saveUserState = window.saveUserState || saveUserState;
   }
 
   // --- RENDER DASHBOARD PLANS ---
-  function renderDashboardPlans(provider) {
-    const plansRow = document.querySelector('.plans-row');
-    if (!plansRow) return;
-    Array.from(plansRow.querySelectorAll('.plan-box')).forEach(p => p.remove());
-    let plansToShow = [];
-    if (provider === 'mtn') {
-      if (mtnAwoofPlans[0]) plansToShow.push({ subType: 'awoof', plan: mtnAwoofPlans[0] });
-      if (mtnGiftingPlans[0]) plansToShow.push({ subType: 'gifting', plan: mtnGiftingPlans[0] });
-    } else if (provider === 'airtel') {
-      if (airtelAwoofPlans[0]) plansToShow.push({ subType: 'awoof', plan: airtelAwoofPlans[0] });
-      if (airtelCgPlans[0]) plansToShow.push({ subType: 'cg', plan: airtelCgPlans[0] });
-    } else if (provider === 'glo') {
-      if (gloCgPlans[0]) plansToShow.push({ subType: 'cg', plan: gloCgPlans[0] });
-      if (gloGiftingPlans[0]) plansToShow.push({ subType: 'gifting', plan: gloGiftingPlans[0] });
-    } else if (provider === 'ninemobile') {
-      if (ninemobilePlans[0]) plansToShow.push({ subType: '', plan: ninemobilePlans[0] });
-      if (ninemobilePlans[1]) plansToShow.push({ subType: '', plan: ninemobilePlans[1] });
-    }
-    const seeAllBtn = plansRow.querySelector('.see-all-plans');
-    plansToShow.forEach(item => {
-      const { plan, subType } = item;
-      const box = document.createElement('div');
-      box.className = `plan-box ${provider}`;
-      box.setAttribute('data-id', generatePlanId(provider, subType, plan));
-      const tag = subType && provider !== 'ninemobile' ? `<span class="plan-type-tag">${subType.charAt(0).toUpperCase() + subType.slice(1)}</span>` : '';
-      box.innerHTML = `
-        <div class="plan-price plan-amount">₦${plan.price}</div>
-        <div class="plan-data plan-gb">${plan.data}</div>
-        <div class="plan-duration">${plan.duration}</div>
-        ${tag}
-      `;
-      plansRow.insertBefore(box, seeAllBtn);
-    });
-  }
+// --- RENDER DASHBOARD PLANS FROM SUPABASE ---
+async function renderDashboardPlans(provider) {
+  const plansRow = document.querySelector('.plans-row');
+  if (!plansRow) return;
+
+  // Clear old plans
+  Array.from(plansRow.querySelectorAll('.plan-box')).forEach(p => p.remove());
+
+  // Get first plan from AWOOF/CG and first from GIFTING
+  const awoofPlans = await getPlans(provider, 'AWOOF');
+  const cgPlans = await getPlans(provider, 'CG');
+  const giftingPlans = await getPlans(provider, 'GIFTING');
+
+  const firstAwoof = awoofPlans[0] || cgPlans[0];
+  const firstGifting = giftingPlans[0];
+
+  const plansToShow = [];
+  if (firstAwoof) plansToShow.push({ subType: firstAwoof.category.toLowerCase(), plan: firstAwoof });
+  if (firstGifting) plansToShow.push({ subType: 'gifting', plan: firstGifting });
+
+  const seeAllBtn = plansRow.querySelector('.see-all-plans');
+
+  plansToShow.forEach(item => {
+    const { plan, subType } = item;
+    const box = document.createElement('div');
+    box.className = `plan-box ${provider}`;
+    box.setAttribute('data-id', plan.plan_id);  // ← This is the key change!
+    const tag = subType && subType !== 'standard' ? `<span class="plan-type-tag">${subType.toUpperCase()}</span>` : '';
+    box.innerHTML = `
+      <div class="plan-price plan-amount">₦${plan.price}</div>
+      <div class="plan-data plan-gb">${plan.data_amount}</div>
+      <div class="plan-duration">${plan.duration}</div>
+      ${tag}
+    `;
+    plansRow.insertBefore(box, seeAllBtn);
+  });
+
+  attachPlanListeners();
+}
   window.renderDashboardPlans = window.renderDashboardPlans || renderDashboardPlans;
 
   // --- RENDER MODAL PLANS ---
-function renderModalPlans(activeProvider) {
+async function renderModalPlans(activeProvider) {
   const allPlansModal = document.getElementById('allPlansModal');
   if (!allPlansModal) return;
-
-  const sectionMap = [
-    { provider: 'mtn', subType: 'awoof', plans: mtnAwoofPlans, title: 'MTN AWOOF', svg: svgShapes.mtn },
-    { provider: 'mtn', subType: 'gifting', plans: mtnGiftingPlans, title: 'MTN GIFTING', svg: svgShapes.mtn },
-    { provider: 'airtel', subType: 'awoof', plans: airtelAwoofPlans, title: 'AIRTEL AWOOF', svg: svgShapes.airtel },
-    { provider: 'airtel', subType: 'cg', plans: airtelCgPlans, title: 'AIRTEL CG', svg: svgShapes.airtel },
-    { provider: 'glo', subType: 'cg', plans: gloCgPlans, title: 'GLO CG', svg: svgShapes.glo },
-    { provider: 'glo', subType: 'gifting', plans: gloGiftingPlans, title: 'GLO GIFTING', svg: svgShapes.glo },
-    { provider: 'ninemobile', subType: '', plans: ninemobilePlans, title: '9MOBILE', svg: svgShapes.ninemobile }
-  ];
 
   const awoofSection = allPlansModal.querySelector('.plan-section.awoof-section');
   const giftingSection = allPlansModal.querySelector('.plan-section.gifting-section');
 
-  if (giftingSection) {
-    giftingSection.style.display = activeProvider === 'ninemobile' ? 'none' : 'block';
-  }
-  if (awoofSection) {
-    awoofSection.style.display = 'block';
-  }
+  if (giftingSection) giftingSection.style.display = activeProvider === 'ninemobile' ? 'none' : 'block';
+  if (awoofSection) awoofSection.style.display = 'block';
 
-  const providerSections = sectionMap.filter(s => s.provider === activeProvider);
+  // Fetch plans
+  const awoofPlans = await getPlans(activeProvider, 'AWOOF');
+  const cgPlans = await getPlans(activeProvider, 'CG');
+  const giftingPlans = await getPlans(activeProvider, 'GIFTING');
 
-  // Render first section (awoof/cg/…)
-  if (providerSections.length >= 1 && awoofSection) {
-    const { provider, subType, plans, title, svg } = providerSections[0];
-    fillPlanSection(awoofSection, provider, subType, plans, title, svg);
-  }
+  // Use AWOOF or CG for first section
+  const primaryPlans = awoofPlans.length > 0 ? awoofPlans : cgPlans;
+  const primaryTitle = awoofPlans.length > 0 ? 'AWOOF' : 'CG';
 
-  // Render second section (gifting/…)
-  if (providerSections.length >= 2 && giftingSection) {
-    const { provider, subType, plans, title, svg } = providerSections[1];
-    fillPlanSection(giftingSection, provider, subType, plans, title, svg);
+  // Fill first section
+  if (primaryPlans.length > 0 && awoofSection) {
+    fillPlanSection(awoofSection, activeProvider, primaryTitle.toLowerCase(), primaryPlans, `${activeProvider.toUpperCase()} ${primaryTitle}`, svgShapes[activeProvider]);
   }
 
-  console.log(`[DEBUG] renderModalPlans: Populated modal sections for ${activeProvider}`);
+  // Fill second section (gifting)
+  if (giftingPlans.length > 0 && giftingSection) {
+    fillPlanSection(giftingSection, activeProvider, 'gifting', giftingPlans, `${activeProvider.toUpperCase()} GIFTING`, svgShapes[activeProvider]);
+  }
 }
-
 // helper: fill a modal section
 function fillPlanSection(sectionEl, provider, subType, plans, title, svg) {
   sectionEl.setAttribute('data-provider', provider);
@@ -4759,16 +4752,10 @@ if (seeAllBtn) {
 
   
 
-  // --- FIND PLAN BY ID ---
-  function findPlanById(planId, provider) {
-    const plansMap = {
-      mtn: [...mtnAwoofPlans.map(p => ({ ...p, subType: 'awoof' })), ...mtnGiftingPlans.map(p => ({ ...p, subType: 'gifting' }))],
-      airtel: [...airtelAwoofPlans.map(p => ({ ...p, subType: 'awoof' })), ...airtelCgPlans.map(p => ({ ...p, subType: 'cg' }))],
-      glo: [...gloCgPlans.map(p => ({ ...p, subType: 'cg' })), ...gloGiftingPlans.map(p => ({ ...p, subType: 'gifting' }))],
-      ninemobile: ninemobilePlans.map(p => ({ ...p, subType: '' }))
-    };
-    return plansMap[provider]?.find(p => generatePlanId(provider, p.subType, p) === planId);
-  }
+async function findPlanById(planId, provider) {
+  const plans = await getPlans(provider);
+  return plans.find(p => p.plan_id === planId);
+}
 
   // Full triggerCheckoutReauth - call this from your checkout flow
 async function triggerCheckoutReauth() {
