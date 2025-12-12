@@ -4549,7 +4549,7 @@ function fillPlanSection(sectionEl, provider, subType, plans, title, svg) {
     plans.forEach(plan => {
       const box = document.createElement('div');
       box.className = `plan-box ${provider}`;
-      box.setAttribute('data-id', generatePlanId(provider, subType, plan));
+      box.setAttribute('data-id', plan.plan_id || plan.id || `fallback-${Date.now()}`);
       box.innerHTML = `
         <div class="plan-amount">₦${plan.price}</div>
         <div class="plan-data">${plan.data}</div>
