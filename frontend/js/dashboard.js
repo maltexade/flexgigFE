@@ -4468,62 +4468,75 @@ window.saveUserState = window.saveUserState || saveUserState;
   // --- RENDER DASHBOARD PLANS ---
 // --- RENDER DASHBOARD PLANS FROM SUPABASE ---
 // --- RENDER DASHBOARD PLANS (FIXED & FINAL) ---
+// GLOBAL CACHE
+let __allPlansCache = [];
+let __plansLoaded = false;
+
+async function loadAllPlansOnce() {
+  if (__plansLoaded) return __allPlansCache;
+  __allPlansCache = await getAllPlans();
+  __plansLoaded = true;
+  console.log('[PLANS] Cached all plans:', __allPlansCache.length);
+  return __allPlansCache;
+}
+
+// DASHBOARD: 2 plans max (special 9mobile handling)
 async function renderDashboardPlans(provider) {
   const plansRow = document.querySelector('.plans-row');
   if (!plansRow) return;
 
-  // Clear old plans
   plansRow.querySelectorAll('.plan-box').forEach(p => p.remove());
 
-  try {
-    const plans = await getAllPlans();
-    const providerPlans = plans.filter(p => 
-      p.provider.toLowerCase() === provider.toLowerCase()
-    );
+  const plans = await loadAllPlansOnce();
+  let providerPlans = plans.filter(p => 
+    p.provider?.toLowerCase() === provider.toLowerCase()
+  );
 
-    // Get first AWOOF/CG and first GIFTING
-    const awoofOrCg = providerPlans.find(p => 
-      ['AWOOF', 'CG'].includes(p.category)
-    );
-    const gifting = providerPlans.find(p => p.category === 'GIFTING');
-
-    const plansToShow = [];
-    if (awoofOrCg) plansToShow.push(awoofOrCg);
-    if (gifting) plansToShow.push(gifting);
-
-    const seeAllBtn = plansRow.querySelector('.see-all-plans');
-    if (!seeAllBtn) return;
-
-    plansToShow.forEach(plan => {
-      const box = document.createElement('div');
-      box.className = `plan-box ${provider}`;
-      box.dataset.id = plan.plan_id;  // ← Use real plan_id!
-
-      const tag = plan.category && plan.category !== 'STANDARD' 
-        ? `<span class="plan-type-tag">${plan.category}</span>` 
-        : '';
-
-      box.innerHTML = `
-        <div class="plan-price plan-amount">₦${plan.price}</div>
-        <div class="plan-data plan-gb">${plan.data || plan.data_amount || '1GB'}</div>
-        <div class="plan-duration">${plan.validity || plan.duration || '30 Days'}</div>
-        ${tag}
-      `;
-
-      plansRow.insertBefore(box, seeAllBtn);
-    });
-
-    attachPlanListeners();
-    logPlanIDs();
-    console.log(`[PLANS] Dashboard rendered ${plansToShow.length} plans for ${provider}`);
-  } catch (err) {
-    console.error('[PLANS] renderDashboardPlans failed:', err);
+  // Fix for 9mobile
+  if (provider === 'ninemobile') {
+    providerPlans = plans.filter(p => p.provider?.toLowerCase() === '9mobile');
   }
-}
-  window.renderDashboardPlans = window.renderDashboardPlans || renderDashboardPlans;
 
-  // --- RENDER MODAL PLANS ---
-// --- RENDER MODAL PLANS (FIXED & FINAL) ---
+  let plansToShow = [];
+
+  if (provider === 'ninemobile') {
+    // Show first 2 plans only
+    plansToShow = providerPlans.slice(0, 2);
+  } else {
+    // Normal networks: 1 AWOOF/CG + 1 GIFTING
+    const primary = providerPlans.find(p => ['AWOOF', 'CG'].includes(p.category));
+    const gifting = providerPlans.find(p => p.category === 'GIFTING');
+    if (primary) plansToShow.push(primary);
+    if (gifting) plansToShow.push(gifting);
+  }
+
+  const seeAllBtn = plansRow.querySelector('.see-all-plans');
+  if (!seeAllBtn) return;
+
+  plansToShow.forEach(plan => {
+    const box = document.createElement('div');
+    box.className = `plan-box ${provider}`;
+    box.dataset.id = plan.plan_id;
+
+    const tag = (plan.category && plan.category !== 'STANDARD')
+      ? `<span class="plan-type-tag">${plan.category}</span>`
+      : '';
+
+    box.innerHTML = `
+      <div class="plan-price plan-amount">₦${plan.price}</div>
+      <div class="plan-data plan-gb">${plan.data || plan.data_amount}</div>
+      <div class="plan-duration">${plan.validity || plan.duration}</div>
+      ${tag}
+    `;
+
+    plansRow.insertBefore(box, seeAllBtn);
+  });
+
+  attachPlanListeners();
+  console.log(`[DASHBOARD] Rendered ${plansToShow.length} plans for ${provider}`);
+}
+
+// MODAL: Full list + 9mobile support
 async function renderModalPlans(provider) {
   const modal = document.getElementById('allPlansModal');
   if (!modal) return;
@@ -4531,55 +4544,52 @@ async function renderModalPlans(provider) {
   const awoofSection = modal.querySelector('.plan-section.awoof-section');
   const giftingSection = modal.querySelector('.plan-section.gifting-section');
 
-  try {
-    const plans = await getAllPlans();
-    const providerPlans = plans.filter(p => 
-      p.provider.toLowerCase() === provider.toLowerCase()
-    );
+  const plans = await loadAllPlansOnce();
+  let providerPlans = plans.filter(p => 
+    p.provider?.toLowerCase() === provider.toLowerCase()
+  );
 
-    // Primary section: AWOOF or CG
-    const primaryPlans = providerPlans.filter(p => 
-      ['AWOOF', 'CG'].includes(p.category)
-    );
-    const primaryTitle = primaryPlans.some(p => p.category === 'AWOOF') ? 'AWOOF' : 'CG';
+  if (provider === 'ninemobile') {
+    providerPlans = plans.filter(p => p.provider?.toLowerCase() === '9mobile');
+  }
 
-    // Gifting section
+  if (provider === 'ninemobile') {
+    // 9MOBILE: Show all plans in the first section only
+    if (awoofSection) {
+      fillPlanSection(awoofSection, provider, 'standard', providerPlans,
+        '9MOBILE PLANS', svgShapes.ninemobile
+      );
+    }
+    if (giftingSection) giftingSection.style.display = 'none';
+
+  } else {
+    // OTHER NETWORKS: AWOOF/CG + GIFTING
+    const primaryPlans = providerPlans.filter(p => ['AWOOF', 'CG'].includes(p.category));
     const giftingPlans = providerPlans.filter(p => p.category === 'GIFTING');
 
-    // Render primary
-    if (primaryPlans.length > 0 && awoofSection) {
-      fillPlanSection(
-        awoofSection,
-        provider,
-        primaryTitle.toLowerCase(),
-        primaryPlans,
-        `${provider.toUpperCase()} ${primaryTitle}`,
-        svgShapes[provider]
+    if (awoofSection) {
+      const title = primaryPlans.some(p => p.category === 'AWOOF') ? 'AWOOF' : 'CG';
+      fillPlanSection(awoofSection, provider, 'primary', primaryPlans,
+        `${provider.toUpperCase()} ${title}`, svgShapes[provider]
       );
     }
 
-    // Render gifting
-    if (giftingPlans.length > 0 && giftingSection) {
-      fillPlanSection(
-        giftingSection,
-        provider,
-        'gifting',
-        giftingPlans,
-        `${provider.toUpperCase()} GIFTING`,
-        svgShapes[provider]
-      );
-    }
-
-    // Hide gifting for 9mobile
     if (giftingSection) {
-      giftingSection.style.display = provider === 'ninemobile' ? 'none' : 'block';
+      fillPlanSection(giftingSection, provider, 'gifting', giftingPlans,
+        `${provider.toUpperCase()} GIFTING`, svgShapes[provider]
+      );
+      giftingSection.style.display = giftingPlans.length > 0 ? 'block' : 'none';
     }
-
-    console.log(`[PLANS] Modal rendered for ${provider}: ${primaryPlans.length} + ${giftingPlans.length}`);
-  } catch (err) {
-    console.error('[PLANS] renderModalPlans failed:', err);
   }
+
+  console.log(`[MODAL] Rendered plans for ${provider}`);
 }
+  window.renderDashboardPlans = window.renderDashboardPlans || renderDashboardPlans;
+
+// Preload plans on page load → switching becomes INSTANT
+document.addEventListener('DOMContentLoaded', () => {
+  loadAllPlansOnce();
+});
 // helper: fill a modal section
 // --- FILL PLAN SECTION (FIXED) ---
 function fillPlanSection(sectionEl, provider, subType, plans, title, svg) {
