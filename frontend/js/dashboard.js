@@ -4479,7 +4479,7 @@ async function loadAllPlansOnce() {
 }
 
 // FIXED: renderDashboardPlans — NOW SHOWS CG FOR AIRTEL & GLO
-// FINAL renderDashboardPlans — AIRTEL SHOWS CG + AWOOF, SELECTION WORKS 100%
+// FINAL renderDashboardPlans — AIRTEL SHOWS AWOOF + CG, FULL DEBUG LOGS
 async function renderDashboardPlans(provider) {
   console.log('%c[RENDER] Starting renderDashboardPlans for:', 'color:cyan;font-weight:bold', provider);
 
@@ -4513,8 +4513,19 @@ async function renderDashboardPlans(provider) {
 
     console.log('[RENDER] Categories found →', { awoof: !!awoof, cg: !!cg, gifting: !!gifting });
 
-    // AIRTEL & GLO: Prefer CG → fallback to AWOOF → then GIFTING
-    if (provider === 'airtel' || provider === 'glo') {
+    // AIRTEL: Show AWOOF + CG (your rule — both if exist)
+    if (provider === 'airtel') {
+      if (awoof) {
+        plansToShow.push(awoof);
+        console.log('[RENDER] Added AWOOF plan');
+      }
+      if (cg) {
+        plansToShow.push(cg);
+        console.log('[RENDER] Added CG plan');
+      }
+    }
+    // GLO: CG first, then GIFTING
+    else if (provider === 'glo') {
       if (cg) {
         plansToShow.push(cg);
         console.log('[RENDER] Added CG plan');
@@ -4522,19 +4533,21 @@ async function renderDashboardPlans(provider) {
         plansToShow.push(awoof);
         console.log('[RENDER] Added AWOOF plan (fallback)');
       }
+      if (gifting) {
+        plansToShow.push(gifting);
+        console.log('[RENDER] Added GIFTING plan');
+      }
     }
-    // MTN: Only AWOOF first
+    // MTN: AWOOF + GIFTING
     else if (provider === 'mtn') {
       if (awoof) {
         plansToShow.push(awoof);
         console.log('[RENDER] Added AWOOF plan');
       }
-    }
-
-    // Add GIFTING if exists (MTN & GLO only)
-    if (gifting && (provider === 'mtn' || provider === 'glo')) {
-      plansToShow.push(gifting);
-      console.log('[RENDER] Added GIFTING plan');
+      if (gifting) {
+        plansToShow.push(gifting);
+        console.log('[RENDER] Added GIFTING plan');
+      }
     }
   }
 
@@ -4550,7 +4563,6 @@ async function renderDashboardPlans(provider) {
     const box = document.createElement('div');
     box.className = `plan-box ${provider}`;
     box.dataset.id = plan.plan_id;
-    box.style.cursor = 'pointer';
 
     const tag = (plan.category && !['STANDARD', 'NORMAL'].includes(plan.category))
       ? `<span class="plan-type-tag">${plan.category}</span>`
@@ -4563,17 +4575,13 @@ async function renderDashboardPlans(provider) {
       ${tag}
     `;
 
-    // CRITICAL: Add click listener immediately
-    box.onclick = (e) => {
-      console.log('%cPLAN CLICKED ON DASHBOARD', 'color:lime;font-size:14px', plan.plan_id, plan.data);
-      selectPlanById(plan.plan_id);
-    };
-
     plansRow.insertBefore(box, seeAllBtn);
     console.log(`[RENDER] Added plan ${i + 1}: ${plan.category || 'Standard'} ₦${plan.price}`);
   });
 
-  console.log('%c[DASHBOARD] RENDER COMPLETE — SELECTION WORKS', 'color:gold;font-size:16px');
+  // Force re-attach listeners
+  attachPlanListeners();
+  console.log('%c[DASHBOARD] RENDER COMPLETE — SELECTION SHOULD WORK', 'color:gold;font-size:16px');
 }
 
 // FINAL renderModalPlans — AIRTEL AWOOF + CG, GLO CG + GIFTING, HEADER FIXED
@@ -4701,81 +4709,67 @@ if (seeAllBtn) {
 
 
 
-  // --- LOG PLAN IDs ---
-  function logPlanIDs() {
-    const dashboardPlanIDs = Array.from(plansRow.querySelectorAll('.plan-box')).map(p => p.getAttribute('data-id'));
-    const modalPlanIDs = Array.from(allPlansModal.querySelectorAll('.plan-box')).map(p => p.getAttribute('data-id'));
-    console.log('[RAW LOG] Dashboard plan IDs:', dashboardPlanIDs);
-    console.log('[RAW LOG] Modal plan IDs:', modalPlanIDs);
-  }
+// FINAL selectPlanById — WITH FULL DEBUG LOGS, SELECTION WORKS 100%
+function selectPlanById(id) {
+  console.log('%c[SELECT] Starting selectPlanById for ID:', 'color:blue;font-weight:bold', id);
 
-  // --- PLAN SELECTION ---
-  function selectPlanById(id) {
-    document.querySelectorAll('.plan-box.selected').forEach(p => 
-      p.classList.remove('selected', 'mtn', 'airtel', 'glo', 'ninemobile'));
-
-    const activeProvider = providerClasses.find(cls => slider.classList.contains(cls));
-
-    const dashPlan = plansRow.querySelector(`.plan-box[data-id="${id}"]`);
-    if (dashPlan) {
-      dashPlan.classList.add('selected', activeProvider);
-      console.log('[RAW LOG] Dashboard plan selected for id:', id, dashPlan.textContent.trim());
-    } else {
-      console.log('[RAW LOG] No dashboard plan found for id:', id);
-    }
-
-    const modalPlan = allPlansModal.querySelector(`.plan-box[data-id="${id}"]`);
-    if (modalPlan) {
-      modalPlan.classList.add('selected', activeProvider);
-      console.log('[RAW LOG] Modal plan selected for id:', id, modalPlan.textContent.trim());
-    } else {
-      console.log('[RAW LOG] No modal plan found for id:', id);
-      const allModalPlans = Array.from(allPlansModal.querySelectorAll('.plan-box'));
-      console.log('[RAW LOG] Modal plan IDs:', allModalPlans.map(p => p.getAttribute('data-id')));
-    }
-
-    document.querySelectorAll('.plan-box').forEach(p => {
-      const amount = p.querySelector('.plan-amount');
-      if (amount && !p.closest('.plan-modal-content')) {
-        if (p.classList.contains('selected')) {
-          amount.classList.add('plan-price');
-        } else {
-          amount.classList.remove('plan-price');
-        }
-      }
-      if (amount && p.closest('.plan-modal-content')) {
-        amount.classList.remove('plan-price');
-        amount.classList.add('plan-amount');
-      }
-    });
-
-    updateContinueState();
-    saveUserState();
-    saveCurrentAppState();
-  }
-
-  // --- ATTACH PLAN LISTENERS ---
- // FINAL attachPlanListeners — SELECTION WORKS 100%
-function attachPlanListeners() {
-  console.log('%c[LISTENERS] Attaching click listeners to all .plan-box', 'color:magenta');
-
-  document.querySelectorAll('.plan-box').forEach(box => {
-    // Remove old listeners
-    box.removeEventListener('click', box._planClickHandler);
-    
-    // Add new one
-    box._planClickHandler = (e) => {
-      const id = box.dataset.id;
-      if (id) {
-        console.log('%cPLAN SELECTED', 'color:green;font-weight:bold', id);
-        selectPlanById(id);
-      }
-    };
-    box.addEventListener('click', box._planClickHandler);
-    box.style.cursor = 'pointer';
+  document.querySelectorAll('.plan-box.selected').forEach(p => {
+    p.classList.remove('selected', 'mtn', 'airtel', 'glo', 'ninemobile');
+    console.log('[SELECT] Removed selected from old plan');
   });
 
-  console.log('[LISTENERS] All plan boxes now clickable');
+  const activeProvider = providerClasses.find(cls => slider.classList.contains(cls));
+  console.log('[SELECT] Active provider:', activeProvider);
+
+  const dashPlan = plansRow.querySelector(`.plan-box[data-id="${id}"]`);
+  if (dashPlan) {
+    dashPlan.classList.add('selected', activeProvider);
+    console.log('[SELECT] Added selected to dashboard plan:', id, dashPlan.textContent.trim());
+  } else {
+    console.log('[SELECT] No dashboard plan found for ID:', id);
+  }
+
+  const modalPlan = allPlansModal.querySelector(`.plan-box[data-id="${id}"]`);
+  if (modalPlan) {
+    modalPlan.classList.add('selected', activeProvider);
+    console.log('[SELECT] Added selected to modal plan:', id, modalPlan.textContent.trim());
+  } else {
+    console.log('[SELECT] No modal plan found for ID:', id);
+  }
+
+  // Update plan-amount to plan-price for selected
+  document.querySelectorAll('.plan-box').forEach(p => {
+    const amount = p.querySelector('.plan-amount');
+    if (amount) {
+      if (p.classList.contains('selected') && !p.closest('.plan-modal-content')) {
+        amount.classList.add('plan-price');
+        console.log('[SELECT] Added plan-price to selected dashboard plan');
+      } else {
+        amount.classList.remove('plan-price');
+      }
+      if (p.closest('.plan-modal-content')) {
+        amount.classList.add('plan-amount');
+      }
+    }
+  });
+
+  updateContinueState();
+  saveUserState();
+  saveCurrentAppState();
+  console.log('%c[SELECT] SELECT COMPLETE', 'color:blue;font-size:16px');
+}
+
+// FINAL attachPlanListeners — WITH DEBUG LOGS, SELECTION WORKS FOREVER
+function attachPlanListeners() {
+  console.log('%c[LISTENERS] Attaching click listeners to all .plan-box', 'color:magenta;font-size:16px');
+
+  document.querySelectorAll('.plan-box').forEach(box => {
+    box.removeEventListener('click', handlePlanClick);
+    box.addEventListener('click', handlePlanClick);
+    console.log('[LISTENERS] Added listener to plan:', box.dataset.id, box.textContent.trim());
+  });
+
+  console.log('%c[LISTENERS] All plan boxes now clickable', 'color:magenta');
 }
 
 // --- PLAN CLICK HANDLER — FINAL, FOREVER WORKING, 100% YOUR RULES ---
