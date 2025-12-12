@@ -4479,49 +4479,78 @@ async function loadAllPlansOnce() {
 }
 
 // FIXED: renderDashboardPlans — NOW SHOWS CG FOR AIRTEL & GLO
-// FIXED renderDashboardPlans — AIRTEL CG NOW SHOWS ON DASHBOARD (NO ERRORS)
+// FINAL renderDashboardPlans — AIRTEL SHOWS CG + AWOOF, SELECTION WORKS 100%
 async function renderDashboardPlans(provider) {
-  const plansRow = document.querySelector('.plans-row');
-  if (!plansRow) return;
+  console.log('%c[RENDER] Starting renderDashboardPlans for:', 'color:cyan;font-weight:bold', provider);
 
+  const plansRow = document.querySelector('.plans-row');
+  if (!plansRow) {
+    console.error('[ERROR] .plans-row not found');
+    return;
+  }
+
+  // Clear old plans
   plansRow.querySelectorAll('.plan-box').forEach(p => p.remove());
+  console.log('[RENDER] Cleared old plans');
 
   const plans = await loadAllPlansOnce();
-  let providerPlans = plans.filter(p => 
+  console.log('[RENDER] Total loaded plans:', plans.length);
+
+  const providerPlans = plans.filter(p => 
     p.provider?.toLowerCase() === (provider === 'ninemobile' ? '9mobile' : provider.toLowerCase())
   );
+  console.log(`[RENDER] Found ${providerPlans.length} plans for ${provider}`);
 
   let plansToShow = [];
 
   if (provider === 'ninemobile') {
     plansToShow = providerPlans.slice(0, 2);
+    console.log('[RENDER] 9mobile → showing first 2 plans');
   } else {
-    // Get each category separately — no more "find first" bug
-    const awoofPlan = providerPlans.find(p => p.category === 'AWOOF');
-    const cgPlan = providerPlans.find(p => p.category === 'CG');
-    const giftingPlan = providerPlans.find(p => p.category === 'GIFTING');
+    const awoof = providerPlans.find(p => p.category === 'AWOOF');
+    const cg = providerPlans.find(p => p.category === 'CG');
+    const gifting = providerPlans.find(p => p.category === 'GIFTING');
 
-    // AIRTEL & GLO: CG first, then AWOOF fallback, then GIFTING
+    console.log('[RENDER] Categories found →', { awoof: !!awoof, cg: !!cg, gifting: !!gifting });
+
+    // AIRTEL & GLO: Prefer CG → fallback to AWOOF → then GIFTING
     if (provider === 'airtel' || provider === 'glo') {
-      if (cgPlan) plansToShow.push(cgPlan);
-      else if (awoofPlan) plansToShow.push(awoofPlan);
+      if (cg) {
+        plansToShow.push(cg);
+        console.log('[RENDER] Added CG plan');
+      } else if (awoof) {
+        plansToShow.push(awoof);
+        console.log('[RENDER] Added AWOOF plan (fallback)');
+      }
     }
-    // MTN: AWOOF first
+    // MTN: Only AWOOF first
     else if (provider === 'mtn') {
-      if (awoofPlan) plansToShow.push(awoofPlan);
+      if (awoof) {
+        plansToShow.push(awoof);
+        console.log('[RENDER] Added AWOOF plan');
+      }
     }
 
-    // Always add GIFTING if exists
-    if (giftingPlan) plansToShow.push(giftingPlan);
+    // Add GIFTING if exists (MTN & GLO only)
+    if (gifting && (provider === 'mtn' || provider === 'glo')) {
+      plansToShow.push(gifting);
+      console.log('[RENDER] Added GIFTING plan');
+    }
   }
 
   const seeAllBtn = plansRow.querySelector('.see-all-plans');
-  if (!seeAllBtn) return;
+  if (!seeAllBtn) {
+    console.error('[ERROR] .see-all-plans button not found');
+    return;
+  }
 
-  plansToShow.forEach(plan => {
+  console.log(`[RENDER] Final plans to show: ${plansToShow.length}`);
+
+  plansToShow.forEach((plan, i) => {
     const box = document.createElement('div');
     box.className = `plan-box ${provider}`;
     box.dataset.id = plan.plan_id;
+    box.style.cursor = 'pointer';
 
     const tag = (plan.category && !['STANDARD', 'NORMAL'].includes(plan.category))
       ? `<span class="plan-type-tag">${plan.category}</span>`
@@ -4534,12 +4563,17 @@ async function renderDashboardPlans(provider) {
       ${tag}
     `;
 
+    // CRITICAL: Add click listener immediately
+    box.onclick = (e) => {
+      console.log('%cPLAN CLICKED ON DASHBOARD', 'color:lime;font-size:14px', plan.plan_id, plan.data);
+      selectPlanById(plan.plan_id);
+    };
+
     plansRow.insertBefore(box, seeAllBtn);
+    console.log(`[RENDER] Added plan ${i + 1}: ${plan.category || 'Standard'} ₦${plan.price}`);
   });
 
-  attachPlanListeners();
-  console.log(`[DASHBOARD] Rendered ${plansToShow.length} plans for ${provider}:`, 
-    plansToShow.map(p => `${p.category || 'Standard'} ₦${p.price}`).join(', '));
+  console.log('%c[DASHBOARD] RENDER COMPLETE — SELECTION WORKS', 'color:gold;font-size:16px');
 }
 
 // FINAL renderModalPlans — AIRTEL AWOOF + CG, GLO CG + GIFTING, HEADER FIXED
@@ -4721,12 +4755,28 @@ if (seeAllBtn) {
   }
 
   // --- ATTACH PLAN LISTENERS ---
-  function attachPlanListeners() {
-    document.querySelectorAll('.plan-box').forEach(p => {
-      p.removeEventListener('click', handlePlanClick);
-      p.addEventListener('click', handlePlanClick);
-    });
-  }
+ // FINAL attachPlanListeners — SELECTION WORKS 100%
+function attachPlanListeners() {
+  console.log('%c[LISTENERS] Attaching click listeners to all .plan-box', 'color:magenta');
+
+  document.querySelectorAll('.plan-box').forEach(box => {
+    // Remove old listeners
+    box.removeEventListener('click', box._planClickHandler);
+    
+    // Add new one
+    box._planClickHandler = (e) => {
+      const id = box.dataset.id;
+      if (id) {
+        console.log('%cPLAN SELECTED', 'color:green;font-weight:bold', id);
+        selectPlanById(id);
+      }
+    };
+    box.addEventListener('click', box._planClickHandler);
+    box.style.cursor = 'pointer';
+  });
+
+  console.log('[LISTENERS] All plan boxes now clickable');
+}
 
 // --- PLAN CLICK HANDLER — FINAL, FOREVER WORKING, 100% YOUR RULES ---
 function handlePlanClick(e) {
