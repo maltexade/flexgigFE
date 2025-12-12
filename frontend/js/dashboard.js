@@ -4463,25 +4463,33 @@ window.saveUserState = window.saveUserState || saveUserState;
     slider.addEventListener('transitionend', handleTransitionEnd);
   }
 
+// GLOBAL CACHE — NOW USES YOUR PERFECT dataPlans.js
+let __allPlansCache = [];
 
-// GLOBAL CACHE — NEVER FAILS
-let __allPlansCache = ALL_STATIC_PLANS;
-let __plansLoaded = true;
-
-// MOCK getAllPlans() — ALWAYS RETURNS DATA
+// Use your exported getAllPlans from dataPlans.js
 async function getAllPlans() {
-  console.log('[PLANS] Using bulletproof static plans:', __allPlansCache.length);
+  if (__allPlansCache.length === 0) {
+    // This will use cache → static → server (in that order)
+    __allPlansCache = await window.getAllPlans?.() || [];
+    console.log('[PLANS] Loaded via dataPlans.js:', __allPlansCache.length);
+  }
   return __allPlansCache;
 }
 
-// FORCE RELOAD (for testing)
-window.reloadPlans = () => location.reload();
-
-// LOAD ONCE (does nothing now — already loaded)
+// Preload on start
 async function loadAllPlansOnce() {
+  if (__allPlansCache.length === 0) {
+    await getAllPlans();
+  }
   return __allPlansCache;
 }
 
+// Force reload from console
+window.reloadPlans = async () => {
+  __allPlansCache = [];
+  if (window.forceRefreshPlans) await window.forceRefreshPlans();
+  location.reload();
+};
 // ================ FINAL RENDERING FUNCTIONS (100% WORKING) ================
 
 async function renderDashboardPlans(provider) {
