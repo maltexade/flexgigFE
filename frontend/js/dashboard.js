@@ -1,4 +1,4 @@
-import { getPlans } from './dataPlans.js';  // ← NEW FILE PATH MAY VARY — see note below
+import { getAllPlans, getPlans } from './dataPlans.js';  // ADD THIS LINE
 import {
   openCheckoutModal,
   closeCheckoutModal,
