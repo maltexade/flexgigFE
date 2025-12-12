@@ -4706,7 +4706,13 @@ if (seeAllBtn) {
     }, 300);
   });
 }
-
+  // --- LOG PLAN IDs ---
+  function logPlanIDs() {
+    const dashboardPlanIDs = Array.from(plansRow.querySelectorAll('.plan-box')).map(p => p.getAttribute('data-id'));
+    const modalPlanIDs = Array.from(allPlansModal.querySelectorAll('.plan-box')).map(p => p.getAttribute('data-id'));
+    console.log('[RAW LOG] Dashboard plan IDs:', dashboardPlanIDs);
+    console.log('[RAW LOG] Modal plan IDs:', modalPlanIDs);
+  }
 
 
 // FINAL selectPlanById — WITH FULL DEBUG LOGS, SELECTION WORKS 100%
