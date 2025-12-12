@@ -4536,7 +4536,7 @@ async function renderDashboardPlans(provider) {
   console.log(`[DASHBOARD] Rendered ${plansToShow.length} plans for ${provider}`);
 }
 
-// MODAL: Full list + 9mobile support
+// FINAL renderModalPlans — FULLY SUPPORTS AIRTEL AWOOF + CG (GIFTING)
 async function renderModalPlans(provider) {
   const modal = document.getElementById('allPlansModal');
   if (!modal) return;
@@ -4549,12 +4549,13 @@ async function renderModalPlans(provider) {
     p.provider?.toLowerCase() === provider.toLowerCase()
   );
 
+  // Fix 9mobile
   if (provider === 'ninemobile') {
     providerPlans = plans.filter(p => p.provider?.toLowerCase() === '9mobile');
   }
 
   if (provider === 'ninemobile') {
-    // 9MOBILE: Show all plans in the first section only
+    // 9mobile: all in first section
     if (awoofSection) {
       fillPlanSection(awoofSection, provider, 'standard', providerPlans,
         '9MOBILE PLANS', svgShapes.ninemobile
@@ -4563,26 +4564,39 @@ async function renderModalPlans(provider) {
     if (giftingSection) giftingSection.style.display = 'none';
 
   } else {
-    // OTHER NETWORKS: AWOOF/CG + GIFTING
-    const primaryPlans = providerPlans.filter(p => ['AWOOF', 'CG'].includes(p.category));
-    const giftingPlans = providerPlans.filter(p => p.category === 'GIFTING');
+    // ALL OTHER NETWORKS: AWOOF first, then CG/GIFTING second
+    const awoofPlans = providerPlans.filter(p => p.category === 'AWOOF');
+    const cgOrGiftingPlans = providerPlans.filter(p => 
+      p.category === 'CG' || p.category === 'GIFTING'
+    );
 
+    // First section: AWOOF only (if exists)
     if (awoofSection) {
-      const title = primaryPlans.some(p => p.category === 'AWOOF') ? 'AWOOF' : 'CG';
-      fillPlanSection(awoofSection, provider, 'primary', primaryPlans,
-        `${provider.toUpperCase()} ${title}`, svgShapes[provider]
-      );
+      if (awoofPlans.length > 0) {
+        fillPlanSection(awoofSection, provider, 'awoof', awoofPlans,
+          `${provider.toUpperCase()} AWOOF`, svgShapes[provider]
+        );
+      } else {
+        // Hide section if no AWOOF
+        awoofSection.style.display = 'none';
+      }
     }
 
+    // Second section: CG or GIFTING
     if (giftingSection) {
-      fillPlanSection(giftingSection, provider, 'gifting', giftingPlans,
-        `${provider.toUpperCase()} GIFTING`, svgShapes[provider]
-      );
-      giftingSection.style.display = giftingPlans.length > 0 ? 'block' : 'none';
+      if (cgOrGiftingPlans.length > 0) {
+        const title = provider === 'airtel' ? 'CG' : 'GIFTING';
+        fillPlanSection(giftingSection, provider, 'cg-gifting', cgOrGiftingPlans,
+          `${provider.toUpperCase()} ${title}`, svgShapes[provider]
+        );
+        giftingSection.style.display = 'block';
+      } else {
+        giftingSection.style.display = 'none';
+      }
     }
   }
 
-  console.log(`[MODAL] Rendered plans for ${provider}`);
+  console.log(`[MODAL] Rendered ${provider}: AWOOF=${awoofPlans?.length || 0}, CG/GIFTING=${cgOrGiftingPlans?.length || 0}`);
 }
   window.renderDashboardPlans = window.renderDashboardPlans || renderDashboardPlans;
 
@@ -4714,58 +4728,62 @@ if (seeAllBtn) {
   }
 
   // --- PLAN CLICK HANDLER ---
-  function handlePlanClick(e) {
-    const plan = e.currentTarget;
-    const id = plan.getAttribute('data-id');
-    const isModalClick = plan.closest('.plan-modal-content');
-    const activeProvider = providerClasses.find(cls => slider.classList.contains(cls));
+  // FINAL handlePlanClick — WORKS WITH REAL plan_id + ALL NETWORKS
+function handlePlanClick(e) {
+  const plan = e.currentTarget;
+  const id = plan.dataset.id;
+  if (!id) return;
 
-    const dashPlan = plansRow.querySelector(`.plan-box[data-id="${id}"]`);
-    const isDashSelected = dashPlan && dashPlan.classList.contains('selected');
+  const isModalClick = plan.closest('.plan-modal-content');
+  const activeProvider = providerClasses.find(cls => slider.classList.contains(cls));
+  if (!activeProvider) return;
 
-    if (isModalClick && isDashSelected) {
-      e.stopPropagation();
-      ModalManager.closeModal('allPlansModal'); 
-      console.log('[DEBUG] handlePlanClick: Reselected same plan, modal closed, ID:', id);
-    } else if (isModalClick) {
-      const dashPlans = Array.from(plansRow.querySelectorAll('.plan-box'));
-      const sameAsFirst = dashPlans.length && dashPlans[0].getAttribute('data-id') === id;
-      selectPlanById(id);
-      if (!sameAsFirst) {
-        const cloneForDashboard = plan.cloneNode(true);
-        cloneForDashboard.classList.add(activeProvider);
-        let subType = '';
-        if (activeProvider === 'mtn') {
-          subType = id.includes('awoof') ? 'awoof' : id.includes('gifting') ? 'gifting' : '';
-        } else if (activeProvider === 'airtel') {
-          subType = id.includes('awoof') ? 'awoof' : id.includes('cg') ? 'cg' : '';
-        } else if (activeProvider === 'glo') {
-          subType = id.includes('cg') ? 'cg' : id.includes('gifting') ? 'gifting' : '';
-        }
-        if (subType && activeProvider !== 'ninemobile') {
-          const tag = document.createElement('span');
-          tag.className = 'plan-type-tag';
-          tag.textContent = subType.charAt(0).toUpperCase() + subType.slice(1);
-          cloneForDashboard.appendChild(tag);
-        }
-        plansRow.insertBefore(cloneForDashboard, plansRow.firstChild);
-        const allDashPlans = Array.from(plansRow.querySelectorAll('.plan-box'));
-        if (allDashPlans.length > 2) {
-          plansRow.removeChild(allDashPlans[2]);
-        }
-        cloneForDashboard.addEventListener('click', handlePlanClick);
-        console.log('[DEBUG] handlePlanClick: Cloned modal plan to dashboard, ID:', id);
-      } else {
-        dashPlans[0].classList.add('selected', activeProvider);
-        console.log('[DEBUG] handlePlanClick: Selected first dashboard plan, no cloning needed, ID:', id);
-      }
-      saveUserState();
-      saveCurrentAppState();
-      ModalManager.closeModal('allPlansModal'); 
-    } else {
-      selectPlanById(id);
-    }
+  // Close modal if re-tapping already selected plan
+  if (isModalClick && plan.closest('.plan-box')?.classList.contains('selected')) {
+    ModalManager.closeModal('allPlansModal');
+    return;
   }
+
+  // Always select the plan (updates .selected + continue button)
+  selectPlanById(id);
+
+  // If clicked from modal → bring it to dashboard
+  if (isModalClick) {
+  const alreadyInDashboard = plansRow.querySelector(`.plan-box[data-id="${id}"]`);
+
+  if (!alreadyInDashboard) {
+    const clone = plan.cloneNode(true);
+    clone.classList.remove('selected'); // will be added by selectPlanById
+    clone.classList.add(activeProvider);
+
+    // Add tag if it's not STANDARD
+    const planData = __allPlansCache.find(p => p.plan_id === id);
+    if (planData?.category && !['STANDARD', 'NORMAL'].includes(planData.category)) {
+      const tag = document.createElement('span');
+      tag.className = 'plan-type-tag';
+      tag.textContent = planData.category; // CG, AWOOF, GIFTING
+      clone.appendChild(tag);
+    }
+
+    // Insert at beginning (most recent selection)
+    const seeAllBtn = plansRow.querySelector('.see-all-plans');
+    plansRow.insertBefore(clone, seeAllBtn);
+
+    // Keep only 2 plans visible
+    const allBoxes = plansRow.querySelectorAll('.plan-box');
+    if (allBoxes.length > 2) {
+      plansRow.removeChild(allBoxes[allBoxes.length - 1]);
+    }
+
+    // Re-attach click listener
+    clone.addEventListener('click', handlePlanClick);
+  }
+
+    saveUserState();
+    saveCurrentAppState();
+    ModalManager.closeModal('allPlansModal');
+  }
+}
 
   // --- UPDATE CONTACT/CANCEL BUTTON ---
   function updateContactOrCancel() {
