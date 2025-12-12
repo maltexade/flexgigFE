@@ -4766,92 +4766,54 @@ function selectPlanById(id) {
 }
 
 // FINAL attachPlanListeners — WITH DEBUG LOGS, SELECTION WORKS FOREVER
-function attachPlanListeners() {
-  console.log('%c[LISTENERS] Attaching click listeners to all .plan-box', 'color:magenta;font-size:16px');
-
-  document.querySelectorAll('.plan-box').forEach(box => {
-    box.removeEventListener('click', handlePlanClick);
-    box.addEventListener('click', handlePlanClick);
-    console.log('[LISTENERS] Added listener to plan:', box.dataset.id, box.textContent.trim());
-  });
-
-  console.log('%c[LISTENERS] All plan boxes now clickable', 'color:magenta');
-}
-
-// --- PLAN CLICK HANDLER — FINAL, FOREVER WORKING, 100% YOUR RULES ---
-function handlePlanClick(e) {
-  const plan = e.currentTarget;
-  const id = plan.getAttribute('data-id');
-  const isModalClick = plan.closest('.plan-modal-content');
-  const activeProvider = providerClasses.find(cls => slider.classList.contains(cls));
-
-  // Critical checks
-  if (!id || !activeProvider) return;
-
-  const dashPlan = plansRow.querySelector(`.plan-box[data-id="${id}"]`);
-  const isDashSelected = dashPlan && dashPlan.classList.contains('selected');
-
-  // If clicking the same plan already on dashboard → just close modal
-  if (isModalClick && isDashSelected) {
-    ModalManager.closeModal('allPlansModal');
-    return;
+  // --- ATTACH PLAN LISTENERS ---
+  function attachPlanListeners() {
+    document.querySelectorAll('.plan-box').forEach(p => {
+      p.removeEventListener('click', handlePlanClick);
+      p.addEventListener('click', handlePlanClick);
+    });
   }
 
-  if (isModalClick) {
-    const dashPlans = Array.from(plansRow.querySelectorAll('.plan-box'));
-    const sameAsFirst = dashPlans.length > 0 && dashPlans[0].getAttribute('data-id') === id;
+// --- PLAN CLICK HANDLER ---
+  function handlePlanClick(e) {
+    const plan = e.currentTarget;
+    const id = plan.getAttribute('data-id');
+    const isModalClick = plan.closest('.plan-modal-content');
+    const activeProvider = providerClasses.find(cls => slider.classList.contains(cls));
 
-    // Always select (this works for both modal and dashboard)
-    selectPlanById(id);
+    const dashPlan = plansRow.querySelector(`.plan-box[data-id="${id}"]`);
+    const isDashSelected = dashPlan && dashPlan.classList.contains('selected');
 
-    // Only clone if it's NOT already the first one
-    if (!sameAsFirst) {
-      const cloneForDashboard = plan.cloneNode(true);
-      cloneForDashboard.classList.add(activeProvider);
+    if (isModalClick && isDashSelected) {
+      e.stopPropagation();
+      ModalManager.closeModal('allPlansModal'); 
+      console.log('[DEBUG] handlePlanClick: Reselected same plan, modal closed, ID:', id);
+    } else if (isModalClick) {
+      const dashPlans = Array.from(plansRow.querySelectorAll('.plan-box'));
+      const sameAsFirst = dashPlans.length && dashPlans[0].getAttribute('data-id') === id;
 
-      // CRITICAL: Copy the data-id so future detection works!
-      cloneForDashboard.setAttribute('data-id', id);
-
-      // Add tag using your original logic
-      let subType = '';
-      if (activeProvider === 'mtn') {
-        subType = id.includes('awoof') ? 'awoof' : id.includes('gifting') ? 'gifting' : '';
-      } else if (activeProvider === 'airtel') {
-        subType = id.includes('awoof') ? 'awoof' : id.includes('cg') ? 'cg' : '';
-      } else if (activeProvider === 'glo') {
-        subType = id.includes('cg') ? 'cg' : id.includes('gifting') ? 'gifting' : '';
+      selectPlanById(id);
+      if (!sameAsFirst) {
+        const cloneForDashboard = plan.cloneNode(true);
+        cloneForDashboard.classList.add(activeProvider);
+        plansRow.insertBefore(cloneForDashboard, plansRow.firstChild);
+        const allDashPlans = Array.from(plansRow.querySelectorAll('.plan-box'));
+        if (allDashPlans.length > 2) {
+          plansRow.removeChild(allDashPlans[2]);
+        }
+        cloneForDashboard.addEventListener('click', handlePlanClick);
+        console.log('[DEBUG] handlePlanClick: Cloned modal plan to dashboard, ID:', id);
+      } else {
+        dashPlans[0].classList.add('selected', activeProvider);
+        console.log('[DEBUG] handlePlanClick: Selected first dashboard plan, no cloning needed, ID:', id);
       }
-
-      if (subType && activeProvider !== 'ninemobile') {
-        const tag = document.createElement('span');
-        tag.className = 'plan-type-tag';
-        tag.textContent = subType.charAt(0).toUpperCase() + subType.slice(1);
-        cloneForDashboard.appendChild(tag);
-      }
-
-      // Insert at the beginning — YOUR RULE
-      plansRow.insertBefore(cloneForDashboard, plansRow.firstChild);
-
-      // Remove the 3rd box — YOUR RULE
-      const allDashPlans = Array.from(plansRow.querySelectorAll('.plan-box'));
-      if (allDashPlans.length > 2) {
-        plansRow.removeChild(allDashPlans[2]);
-      }
-
-      // Re-attach click listener
-      cloneForDashboard.addEventListener('click', handlePlanClick);
+      saveUserState();
+      saveCurrentAppState();
+      ModalManager.closeModal('allPlansModal'); 
+    } else {
+      selectPlanById(id);
     }
-
-    // Save & close
-    saveUserState();
-    saveCurrentAppState();
-    ModalManager.closeModal('allPlansModal');
-  } 
-  else {
-    // Dashboard click
-    selectPlanById(id);
   }
-}
   // --- UPDATE CONTACT/CANCEL BUTTON ---
   function updateContactOrCancel() {
     if (phoneInput.value.length > 0) {
