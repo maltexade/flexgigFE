@@ -80,6 +80,5 @@ export const getPlans = async (provider, category = null) => {
 
 // Load cache immediately when app starts
 loadCachedPlans();
-// Add this at the very bottom of src/utils/dataPlans.js
+
 window.getAllPlans = getAllPlans;
-window.forceRefreshPlans = forceRefreshPlans;
