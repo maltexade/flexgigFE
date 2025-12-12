@@ -22,8 +22,20 @@ export const loadCachedPlans = () => {
 // Fetch latest from your Supabase backend
 export const fetchPlans = async () => {
   try {
-    const res = await fetch('/api/dataPlans');
-    if (!res.ok) throw new Error('Network error');
+    const base = (window.__SEC_API_BASE || 'https://api.flexgig.com.ng').replace(/\/+$/, '');
+    const url = `${base}/api/dataPlans`;
+
+    const res = await fetch(url, {
+      method: 'GET',
+      credentials: 'include', // Important if you use cookies
+      headers: {
+        'Accept': 'application/json',
+      },
+      cache: 'no-store'
+    });
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
     const fresh = await res.json();
 
     const latestUpdate = fresh.reduce((max, p) => 
@@ -38,7 +50,7 @@ export const fetchPlans = async () => {
       return fresh;
     }
   } catch (err) {
-    console.warn('Using cached plans (offline)', err.message);
+    console.warn('Using cached/offline plans', err.message || err);
   }
   return plansCache;
 };
