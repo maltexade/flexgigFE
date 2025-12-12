@@ -1,4 +1,4 @@
-import { getAllPlans, getPlans } from './dataPlans.js';  // ADD THIS LINE
+import './dataPlans.js'; // Just import — no need to assign
 import {
   openCheckoutModal,
   closeCheckoutModal,
@@ -4464,61 +4464,61 @@ window.saveUserState = window.saveUserState || saveUserState;
   }
 
 
+// GLOBAL CACHE — NEVER FAILS
+let __allPlansCache = ALL_STATIC_PLANS;
+let __plansLoaded = true;
 
-// GLOBAL CACHE
-let __allPlansCache = [];
-let __plansLoaded = false;
-
-async function loadAllPlansOnce() {
-  if (__plansLoaded) return __allPlansCache;
-  __allPlansCache = await getAllPlans();
-  __plansLoaded = true;
-  console.log('[PLANS] Cached all plans:', __allPlansCache.length);
+// MOCK getAllPlans() — ALWAYS RETURNS DATA
+async function getAllPlans() {
+  console.log('[PLANS] Using bulletproof static plans:', __allPlansCache.length);
   return __allPlansCache;
 }
 
-// FIXED: renderDashboardPlans — NOW SHOWS CG FOR AIRTEL & GLO
+// FORCE RELOAD (for testing)
+window.reloadPlans = () => location.reload();
+
+// LOAD ONCE (does nothing now — already loaded)
+async function loadAllPlansOnce() {
+  return __allPlansCache;
+}
+
+// ================ FINAL RENDERING FUNCTIONS (100% WORKING) ================
+
 async function renderDashboardPlans(provider) {
   const plansRow = document.querySelector('.plans-row');
   if (!plansRow) return;
 
   plansRow.querySelectorAll('.plan-box').forEach(p => p.remove());
 
-  const plans = await loadAllPlansOnce();
-  let providerPlans = plans.filter(p => 
-    p.provider?.toLowerCase() === (provider === 'ninemobile' ? '9mobile' : provider.toLowerCase())
+  const plans = __allPlansCache.filter(p => 
+    p.provider === (provider === 'ninemobile' ? '9mobile' : provider)
   );
 
-  let plansToShow = [];
+  let toShow = [];
 
   if (provider === 'ninemobile') {
-    plansToShow = providerPlans.slice(0, 2);
+    toShow = plans.slice(0, 2);
   } else {
-    // PRIMARY: AWOOF or CG
-    const primary = providerPlans.find(p => ['AWOOF', 'CG'].includes(p.category));
-    // GIFTING: Only actual GIFTING
-    const gifting = providerPlans.find(p => p.category === 'GIFTING');
-
-    if (primary) plansToShow.push(primary);
-    if (gifting) plansToShow.push(gifting);
+    const primary = plans.find(p => ['AWOOF', 'CG'].includes(p.category));
+    const gifting = plans.find(p => p.category === 'GIFTING');
+    if (primary) toShow.push(primary);
+    if (gifting) toShow.push(gifting);
   }
 
   const seeAllBtn = plansRow.querySelector('.see-all-plans');
-  if (!seeAllBtn) return;
-
-  plansToShow.forEach(plan => {
+  toShow.forEach(plan => {
     const box = document.createElement('div');
     box.className = `plan-box ${provider}`;
     box.dataset.id = plan.plan_id;
 
-    const tag = (plan.category && !['STANDARD', 'NORMAL'].includes(plan.category))
-      ? `<span class="plan-type-tag">${plan.category}</span>`
+    const tag = (plan.category && plan.category !== 'STANDARD') 
+      ? `<span class="plan-type-tag">${plan.category}</span>` 
       : '';
 
     box.innerHTML = `
       <div class="plan-price plan-amount">₦${plan.price}</div>
-      <div class="plan-data plan-gb">${plan.data || plan.data_amount}</div>
-      <div class="plan-duration">${plan.validity || plan.duration}</div>
+      <div class="plan-data plan-gb">${plan.data}</div>
+      <div class="plan-duration">${plan.duration}</div>
       ${tag}
     `;
 
@@ -4526,10 +4526,8 @@ async function renderDashboardPlans(provider) {
   });
 
   attachPlanListeners();
-  console.log(`[DASHBOARD] Rendered ${plansToShow.length} plans for ${provider}`);
 }
 
-// FINAL renderModalPlans — AIRTEL AWOOF + CG, GLO CG + GIFTING, HEADER FIXED
 async function renderModalPlans(provider) {
   const modal = document.getElementById('allPlansModal');
   if (!modal) return;
@@ -4537,28 +4535,21 @@ async function renderModalPlans(provider) {
   const awoofSection = modal.querySelector('.plan-section.awoof-section');
   const giftingSection = modal.querySelector('.plan-section.gifting-section');
 
-  const plans = await loadAllPlansOnce();
-  let providerPlans = plans.filter(p => 
-    p.provider?.toLowerCase() === (provider === 'ninemobile' ? '9mobile' : provider.toLowerCase())
+  const plans = __allPlansCache.filter(p => 
+    p.provider === (provider === 'ninemobile' ? '9mobile' : provider)
   );
 
   if (provider === 'ninemobile') {
     if (awoofSection) {
-      fillPlanSection(awoofSection, provider, 'standard', providerPlans,
-        '9MOBILE PLANS', svgShapes.ninemobile
-      );
+      fillPlanSection(awoofSection, provider, 'standard', plans, '9MOBILE PLANS', svgShapes.ninemobile);
     }
     if (giftingSection) giftingSection.style.display = 'none';
     return;
   }
 
-  // DECLARED PROPERLY — NO MORE "not defined" ERROR
-  const awoofPlans = providerPlans.filter(p => p.category === 'AWOOF');
-  const cgOrGiftingPlans = providerPlans.filter(p => 
-    p.category === 'CG' || p.category === 'GIFTING'
-  );
+  const awoofPlans = plans.filter(p => p.category === 'AWOOF');
+  const cgOrGiftingPlans = plans.filter(p => ['CG', 'GIFTING'].includes(p.category));
 
-  // First section: AWOOF only
   if (awoofSection) {
     if (awoofPlans.length > 0) {
       fillPlanSection(awoofSection, provider, 'awoof', awoofPlans,
@@ -4570,10 +4561,9 @@ async function renderModalPlans(provider) {
     }
   }
 
-  // Second section: CG or GIFTING
   if (giftingSection) {
     if (cgOrGiftingPlans.length > 0) {
-      const title = provider === 'airtel' || provider === 'glo' ? 'CG' : 'GIFTING';
+      const title = ['airtel', 'glo'].includes(provider) ? 'CG' : 'GIFTING';
       fillPlanSection(giftingSection, provider, 'cg-gifting', cgOrGiftingPlans,
         `${provider.toUpperCase()} ${title}`, svgShapes[provider]
       );
@@ -4583,7 +4573,6 @@ async function renderModalPlans(provider) {
     }
   }
 }
-
 
 
   window.renderDashboardPlans = window.renderDashboardPlans || renderDashboardPlans;
@@ -4726,18 +4715,16 @@ function handlePlanClick(e) {
   const activeProvider = providerClasses.find(cls => slider.classList.contains(cls));
   if (!activeProvider) return;
 
-  // Always select
   selectPlanById(id);
 
   if (isModalClick) {
-    const alreadyInDash = plansRow.querySelector(`.plan-box[data-id="${id}"]`);
-    if (!alreadyInDash) {
+    const exists = plansRow.querySelector(`.plan-box[data-id="${id}"]`);
+    if (!exists) {
       const clone = plan.cloneNode(true);
       clone.classList.add(activeProvider);
 
-      // Add correct tag
       const realPlan = __allPlansCache.find(p => p.plan_id === id);
-      if (realPlan?.category && !['STANDARD', 'NORMAL'].includes(realPlan.category)) {
+      if (realPlan?.category && realPlan.category !== 'STANDARD') {
         const tag = document.createElement('span');
         tag.className = 'plan-type-tag';
         tag.textContent = realPlan.category;
@@ -4747,7 +4734,6 @@ function handlePlanClick(e) {
       const seeAllBtn = plansRow.querySelector('.see-all-plans');
       plansRow.insertBefore(clone, seeAllBtn);
 
-      // Keep only 2
       const all = plansRow.querySelectorAll('.plan-box');
       if (all.length > 2) plansRow.removeChild(all[all.length - 1]);
 
