@@ -4479,6 +4479,7 @@ async function loadAllPlansOnce() {
 }
 
 // FIXED: renderDashboardPlans — NOW SHOWS CG FOR AIRTEL & GLO
+// FIXED renderDashboardPlans — AIRTEL CG NOW SHOWS ON DASHBOARD (NO ERRORS)
 async function renderDashboardPlans(provider) {
   const plansRow = document.querySelector('.plans-row');
   if (!plansRow) return;
@@ -4495,13 +4496,23 @@ async function renderDashboardPlans(provider) {
   if (provider === 'ninemobile') {
     plansToShow = providerPlans.slice(0, 2);
   } else {
-    // PRIMARY: AWOOF or CG
-    const primary = providerPlans.find(p => ['AWOOF', 'CG'].includes(p.category));
-    // GIFTING: Only actual GIFTING
-    const gifting = providerPlans.find(p => p.category === 'GIFTING');
+    // Get each category separately — no more "find first" bug
+    const awoofPlan = providerPlans.find(p => p.category === 'AWOOF');
+    const cgPlan = providerPlans.find(p => p.category === 'CG');
+    const giftingPlan = providerPlans.find(p => p.category === 'GIFTING');
 
-    if (primary) plansToShow.push(primary);
-    if (gifting) plansToShow.push(gifting);
+    // AIRTEL & GLO: CG first, then AWOOF fallback, then GIFTING
+    if (provider === 'airtel' || provider === 'glo') {
+      if (cgPlan) plansToShow.push(cgPlan);
+      else if (awoofPlan) plansToShow.push(awoofPlan);
+    }
+    // MTN: AWOOF first
+    else if (provider === 'mtn') {
+      if (awoofPlan) plansToShow.push(awoofPlan);
+    }
+
+    // Always add GIFTING if exists
+    if (giftingPlan) plansToShow.push(giftingPlan);
   }
 
   const seeAllBtn = plansRow.querySelector('.see-all-plans');
@@ -4527,7 +4538,8 @@ async function renderDashboardPlans(provider) {
   });
 
   attachPlanListeners();
-  console.log(`[DASHBOARD] Rendered ${plansToShow.length} plans for ${provider}`);
+  console.log(`[DASHBOARD] Rendered ${plansToShow.length} plans for ${provider}:`, 
+    plansToShow.map(p => `${p.category || 'Standard'} ₦${p.price}`).join(', '));
 }
 
 // FINAL renderModalPlans — AIRTEL AWOOF + CG, GLO CG + GIFTING, HEADER FIXED
@@ -4716,39 +4728,41 @@ if (seeAllBtn) {
     });
   }
 
-// --- PLAN CLICK HANDLER — FINAL & PERMANENT (100% YOUR ORIGINAL RULES) ---
+// --- PLAN CLICK HANDLER — FINAL, FOREVER WORKING, 100% YOUR RULES ---
 function handlePlanClick(e) {
   const plan = e.currentTarget;
   const id = plan.getAttribute('data-id');
   const isModalClick = plan.closest('.plan-modal-content');
   const activeProvider = providerClasses.find(cls => slider.classList.contains(cls));
 
-  // Must have ID and provider
+  // Critical checks
   if (!id || !activeProvider) return;
 
   const dashPlan = plansRow.querySelector(`.plan-box[data-id="${id}"]`);
   const isDashSelected = dashPlan && dashPlan.classList.contains('selected');
 
-  // If clicking same plan already on dashboard → just close modal
+  // If clicking the same plan already on dashboard → just close modal
   if (isModalClick && isDashSelected) {
     ModalManager.closeModal('allPlansModal');
     return;
   }
 
-  // If from modal → do the magic
   if (isModalClick) {
     const dashPlans = Array.from(plansRow.querySelectorAll('.plan-box'));
     const sameAsFirst = dashPlans.length > 0 && dashPlans[0].getAttribute('data-id') === id;
 
-    // Always select it (in both modal and dashboard if exists)
+    // Always select (this works for both modal and dashboard)
     selectPlanById(id);
 
-    // If it's not the first one → clone it to dashboard
+    // Only clone if it's NOT already the first one
     if (!sameAsFirst) {
       const cloneForDashboard = plan.cloneNode(true);
       cloneForDashboard.classList.add(activeProvider);
 
-      // Add correct tag using your original id.includes() logic
+      // CRITICAL: Copy the data-id so future detection works!
+      cloneForDashboard.setAttribute('data-id', id);
+
+      // Add tag using your original logic
       let subType = '';
       if (activeProvider === 'mtn') {
         subType = id.includes('awoof') ? 'awoof' : id.includes('gifting') ? 'gifting' : '';
@@ -4774,17 +4788,17 @@ function handlePlanClick(e) {
         plansRow.removeChild(allDashPlans[2]);
       }
 
-      // Re-attach listener
+      // Re-attach click listener
       cloneForDashboard.addEventListener('click', handlePlanClick);
     }
 
-    // Save state and close modal
+    // Save & close
     saveUserState();
     saveCurrentAppState();
     ModalManager.closeModal('allPlansModal');
   } 
-  // If not from modal → just select it
   else {
+    // Dashboard click
     selectPlanById(id);
   }
 }
