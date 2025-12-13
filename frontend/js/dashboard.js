@@ -4278,7 +4278,7 @@ function formatNigeriaNumber(phone, isInitialDigit = false, isPaste = false) {
   }
 
   function isProviderSelected() {
-    return !!providerClasses.find(cls => slider.classList.contains(cls));
+    return !!providerClasses.find(cls => plansRow.classList.contains(cls));
   }
 
   function isPlanSelected() {
@@ -4286,7 +4286,7 @@ function formatNigeriaNumber(phone, isInitialDigit = false, isPaste = false) {
   }
 
   function saveUserState() {
-  const activeProvider = providerClasses.find(cls => slider.classList.contains(cls));
+  const activeProvider = providerClasses.find(cls => plansRow.classList.contains(cls));
   const selectedPlan = plansRow.querySelector('.plan-box.selected'); // ← MOVED INSIDE!
   const phoneNumber = phoneInput.value;
   const rawNumber = normalizePhone(phoneNumber);
@@ -4685,7 +4685,7 @@ if (seeAllBtn) {
     // Your old logic — runs right after ModalManager starts opening
     setTimeout(() => {
       const dashSelected = plansRow.querySelector('.plan-box.selected');
-      const activeProvider = providerClasses.find(cls => slider.classList.contains(cls));
+      const activeProvider = providerClasses.find(cls => plansRow.classList.contains(cls));
 
       allPlansModalContent.scrollTop = 0;
 
@@ -4728,7 +4728,7 @@ const selectedPlanByProvider = {};
 
 function selectPlanById(id) {
   const activeProvider =
-    providerClasses.find(cls => slider.classList.contains(cls));
+    providerClasses.find(cls => plansRow.classList.contains(cls));
 
   if (!id || !activeProvider) return;
 
@@ -4816,7 +4816,7 @@ function handlePlanClick(e) {
   const id = plan.dataset.id;
   const isModalClick = !!plan.closest('.plan-modal-content');
   const activeProvider =
-    providerClasses.find(cls => slider.classList.contains(cls));
+    providerClasses.find(cls => plansRow.classList.contains(cls));
 
   if (!id || !activeProvider) return;
 
