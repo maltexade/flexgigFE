@@ -4732,7 +4732,16 @@ function selectPlanById(id) {
   const activeProvider =
     providerClasses.find(cls => slider.classList.contains(cls));
 
-  if (!id || !activeProvider) return;
+  if (!id || !activeProvider) {
+  console.warn('[PLAN CLICK BLOCKED]', {
+    id,
+    activeProvider,
+    plan,
+    classes: [...plan.classList]
+  });
+  return;
+}
+
 
   console.log(
     '%c[SELECT] START',
@@ -4819,9 +4828,21 @@ function handlePlanClick(e) {
   const id = plan.dataset.id;
   const isModalClick = !!plan.closest('.plan-modal-content');
   const activeProvider =
-    providerClasses.find(cls => slider.classList.contains(cls));
+  plan.dataset.provider ||
+  providerClasses.find(cls => plan.classList.contains(cls)) ||
+  providerClasses.find(cls => slider.classList.contains(cls));
 
-  if (!id || !activeProvider) return;
+
+  if (!id || !activeProvider) {
+  console.warn('[PLAN CLICK BLOCKED]', {
+    id,
+    activeProvider,
+    plan,
+    classes: [...plan.classList]
+  });
+  return;
+}
+
 
   // Ensure provider binding
   plan.dataset.provider = activeProvider;
