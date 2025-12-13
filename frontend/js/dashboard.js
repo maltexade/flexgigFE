@@ -4714,6 +4714,7 @@ if (seeAllBtn) {
     console.log('[RAW LOG] Dashboard plan IDs:', dashboardPlanIDs);
     console.log('[RAW LOG] Modal plan IDs:', modalPlanIDs);
   }
+  window.logPlanIDs = window.logPlanIDs || logPlanIDs;
 
 
 /* =========================================================
@@ -4809,6 +4810,7 @@ function attachPlanListeners(root = document) {
 
   console.log('[DEBUG] attachPlanListeners attached');
 }
+window.attachPlanListeners = window.attachPlanListeners || attachPlanListeners;
 
 /* ---------- PLAN CLICK HANDLER ---------- */
 
@@ -4882,6 +4884,7 @@ function handlePlanClick(e) {
     ModalManager.closeModal('allPlansModal');
   }
 }
+window.handlePlanClick = window.handlePlanClick || handlePlanClick;
 
 /* ---------- PROVIDER SWITCH HOOK ---------- */
 
