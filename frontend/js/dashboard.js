@@ -4764,6 +4764,7 @@ function selectPlanById(id) {
   saveCurrentAppState();
   console.log('%c[SELECT] SELECT COMPLETE', 'color:blue;font-size:16px');
 }
+window.selectPlanById = window.selectPlanById || selectPlanById;
 
 // FINAL attachPlanListeners — WITH DEBUG LOGS, SELECTION WORKS FOREVER
   // --- ATTACH PLAN LISTENERS ---
