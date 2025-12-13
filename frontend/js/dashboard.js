@@ -4715,106 +4715,194 @@ if (seeAllBtn) {
   }
 
 
-// FINAL selectPlanById — WITH FULL DEBUG LOGS, SELECTION WORKS 100%
-function selectPlanById(id) {
-  console.log('%c[SELECT] Starting selectPlanById for ID:', 'color:blue;font-weight:bold', id);
+/* =========================================================
+   PLAN SELECTION — PROVIDER SAFE (FINAL)
+   ========================================================= */
 
-  document.querySelectorAll('.plan-box.selected').forEach(p => {
-    p.classList.remove('selected', 'mtn', 'airtel', 'glo', 'ninemobile');
-    console.log('[SELECT] Removed selected from old plan');
+/* ---------- SHARED STATE ---------- */
+
+// Track last selected plan per provider
+const selectedPlanByProvider = {};
+
+/* ---------- SELECT PLAN BY ID ---------- */
+
+function selectPlanById(id) {
+  const activeProvider =
+    providerClasses.find(cls => slider.classList.contains(cls));
+
+  if (!id || !activeProvider) return;
+
+  console.log(
+    '%c[SELECT] START',
+    'color:blue;font-weight:bold',
+    { id, activeProvider }
+  );
+
+  // Clear selection ONLY for this provider
+  document.querySelectorAll(
+    `.plan-box.selected[data-provider="${activeProvider}"]`
+  ).forEach(p => {
+    p.classList.remove('selected', activeProvider);
+    console.log('[SELECT] Cleared:', p.dataset.id);
   });
 
-  const activeProvider = providerClasses.find(cls => slider.classList.contains(cls));
-  console.log('[SELECT] Active provider:', activeProvider);
+  // Save state
+  selectedPlanByProvider[activeProvider] = id;
 
-  const dashPlan = plansRow.querySelector(`.plan-box[data-id="${id}"]`);
+  // Dashboard plan
+  const dashPlan = plansRow.querySelector(
+    `.plan-box[data-id="${id}"][data-provider="${activeProvider}"]`
+  );
+
   if (dashPlan) {
     dashPlan.classList.add('selected', activeProvider);
-    console.log('[SELECT] Added selected to dashboard plan:', id, dashPlan.textContent.trim());
+    console.log('[SELECT] Dashboard selected:', id);
   } else {
-    console.log('[SELECT] No dashboard plan found for ID:', id);
+    console.warn('[SELECT] Dashboard plan missing:', id);
   }
 
-  const modalPlan = allPlansModal.querySelector(`.plan-box[data-id="${id}"]`);
+  // Modal plan
+  const modalPlan = allPlansModal.querySelector(
+    `.plan-box[data-id="${id}"][data-provider="${activeProvider}"]`
+  );
+
   if (modalPlan) {
     modalPlan.classList.add('selected', activeProvider);
-    console.log('[SELECT] Added selected to modal plan:', id, modalPlan.textContent.trim());
+    console.log('[SELECT] Modal selected:', id);
   } else {
-    console.log('[SELECT] No modal plan found for ID:', id);
+    console.warn('[SELECT] Modal plan missing:', id);
   }
 
-  // Update plan-amount to plan-price for selected
+  // Price styling
   document.querySelectorAll('.plan-box').forEach(p => {
     const amount = p.querySelector('.plan-amount');
-    if (amount) {
-      if (p.classList.contains('selected') && !p.closest('.plan-modal-content')) {
-        amount.classList.add('plan-price');
-        console.log('[SELECT] Added plan-price to selected dashboard plan');
-      } else {
-        amount.classList.remove('plan-price');
-      }
-      if (p.closest('.plan-modal-content')) {
-        amount.classList.add('plan-amount');
-      }
+    if (!amount) return;
+
+    if (
+      p.classList.contains('selected') &&
+      p.dataset.provider === activeProvider &&
+      !p.closest('.plan-modal-content')
+    ) {
+      amount.classList.add('plan-price');
+    } else {
+      amount.classList.remove('plan-price');
     }
   });
 
-  updateContinueState();
-  saveUserState();
-  saveCurrentAppState();
-  console.log('%c[SELECT] SELECT COMPLETE', 'color:blue;font-size:16px');
+  updateContinueState?.();
+  saveUserState?.();
+  saveCurrentAppState?.();
+
+  console.log('%c[SELECT] COMPLETE', 'color:blue;font-size:15px');
 }
+
 window.selectPlanById = window.selectPlanById || selectPlanById;
 
-// FINAL attachPlanListeners — WITH DEBUG LOGS, SELECTION WORKS FOREVER
-  // --- ATTACH PLAN LISTENERS ---
-  function attachPlanListeners() {
-    document.querySelectorAll('.plan-box').forEach(p => {
-      p.removeEventListener('click', handlePlanClick);
-      p.addEventListener('click', handlePlanClick);
-    });
+/* ---------- ATTACH PLAN LISTENERS ---------- */
+
+function attachPlanListeners(root = document) {
+  root.querySelectorAll('.plan-box').forEach(p => {
+    p.removeEventListener('click', handlePlanClick);
+    p.addEventListener('click', handlePlanClick);
+  });
+
+  console.log('[DEBUG] attachPlanListeners attached');
+}
+
+/* ---------- PLAN CLICK HANDLER ---------- */
+
+function handlePlanClick(e) {
+  const plan = e.currentTarget;
+  const id = plan.dataset.id;
+  const isModalClick = !!plan.closest('.plan-modal-content');
+  const activeProvider =
+    providerClasses.find(cls => slider.classList.contains(cls));
+
+  if (!id || !activeProvider) return;
+
+  // Ensure provider binding
+  plan.dataset.provider = activeProvider;
+
+  console.log(
+    '%c[CLICK]',
+    'color:green;font-weight:bold',
+    { id, activeProvider, isModalClick }
+  );
+
+  const dashPlan = plansRow.querySelector(
+    `.plan-box[data-id="${id}"][data-provider="${activeProvider}"]`
+  );
+
+  const isDashSelected = dashPlan?.classList.contains('selected');
+
+  // Reselect same plan from modal
+  if (isModalClick && isDashSelected) {
+    e.stopPropagation();
+    ModalManager.closeModal('allPlansModal');
+    console.log('[CLICK] Reselected — modal closed');
+    return;
   }
 
-// --- PLAN CLICK HANDLER ---
-  function handlePlanClick(e) {
-    const plan = e.currentTarget;
-    const id = plan.getAttribute('data-id');
-    const isModalClick = plan.closest('.plan-modal-content');
-    const activeProvider = providerClasses.find(cls => slider.classList.contains(cls));
+  // Save selection
+  selectedPlanByProvider[activeProvider] = id;
 
-    const dashPlan = plansRow.querySelector(`.plan-box[data-id="${id}"]`);
-    const isDashSelected = dashPlan && dashPlan.classList.contains('selected');
+  // Select
+  selectPlanById(id);
 
-    if (isModalClick && isDashSelected) {
-      e.stopPropagation();
-      ModalManager.closeModal('allPlansModal'); 
-      console.log('[DEBUG] handlePlanClick: Reselected same plan, modal closed, ID:', id);
-    } else if (isModalClick) {
-      const dashPlans = Array.from(plansRow.querySelectorAll('.plan-box'));
-      const sameAsFirst = dashPlans.length && dashPlans[0].getAttribute('data-id') === id;
+  // Clone from modal if needed
+  if (isModalClick && !dashPlan) {
+    const clone = plan.cloneNode(true);
+    clone.dataset.id = id;
+    clone.dataset.provider = activeProvider;
+    clone.classList.add(activeProvider);
 
-      selectPlanById(id);
-      if (!sameAsFirst) {
-        const cloneForDashboard = plan.cloneNode(true);
-        cloneForDashboard.classList.add(activeProvider);
-        plansRow.insertBefore(cloneForDashboard, plansRow.firstChild);
-        const allDashPlans = Array.from(plansRow.querySelectorAll('.plan-box'));
-        if (allDashPlans.length > 2) {
-          plansRow.removeChild(allDashPlans[2]);
-        }
-        cloneForDashboard.addEventListener('click', handlePlanClick);
-        console.log('[DEBUG] handlePlanClick: Cloned modal plan to dashboard, ID:', id);
-      } else {
-        dashPlans[0].classList.add('selected', activeProvider);
-        console.log('[DEBUG] handlePlanClick: Selected first dashboard plan, no cloning needed, ID:', id);
-      }
-      saveUserState();
-      saveCurrentAppState();
-      ModalManager.closeModal('allPlansModal'); 
-    } else {
-      selectPlanById(id);
+    clone.addEventListener('click', handlePlanClick);
+    plansRow.insertBefore(clone, plansRow.firstChild);
+
+    console.log('[CLICK] Cloned to dashboard:', id);
+
+    // Keep max 2 dashboard plans per provider
+    const providerDashPlans = Array.from(
+      plansRow.querySelectorAll(
+        `.plan-box[data-provider="${activeProvider}"]`
+      )
+    );
+
+    if (providerDashPlans.length > 2) {
+      plansRow.removeChild(providerDashPlans[2]);
+      console.log('[CLICK] Removed extra dashboard plan');
     }
   }
+
+  saveUserState?.();
+  saveCurrentAppState?.();
+
+  if (isModalClick) {
+    ModalManager.closeModal('allPlansModal');
+  }
+}
+
+/* ---------- PROVIDER SWITCH HOOK ---------- */
+
+const originalSelectProvider = selectProvider;
+
+selectProvider = function (providerClass) {
+  originalSelectProvider(providerClass);
+
+  const lastId = selectedPlanByProvider[providerClass];
+  if (lastId) {
+    setTimeout(() => selectPlanById(lastId), 50);
+  }
+
+  setTimeout(() => attachPlanListeners(), 100);
+
+  console.log('[PROVIDER] Switched to:', providerClass);
+};
+
+/* ---------- INITIALIZE ---------- */
+
+attachPlanListeners();
+
   // --- UPDATE CONTACT/CANCEL BUTTON ---
   function updateContactOrCancel() {
     if (phoneInput.value.length > 0) {
