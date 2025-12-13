@@ -4464,22 +4464,32 @@ window.saveUserState = window.saveUserState || saveUserState;
   }
 
 
-
-// GLOBAL CACHE
-
+// ==========================================
+// REWRITTEN: loadAllPlansOnce (with better error handling)
+// ==========================================
 let __allPlansCache = [];
 let __plansLoaded = false;
 
 async function loadAllPlansOnce() {
-  if (__plansLoaded) return __allPlansCache;
-  __allPlansCache = await getAllPlans();
-  __plansLoaded = true;
-  console.log('[PLANS] Cached all plans:', __allPlansCache.length);
-  return __allPlansCache;
+  if (__plansLoaded) {
+    console.log('[PLANS] Using cached plans:', __allPlansCache.length);
+    return __allPlansCache;
+  }
+  
+  try {
+    __allPlansCache = await getAllPlans();
+    __plansLoaded = true;
+    console.log('[PLANS] Cached all plans:', __allPlansCache.length);
+    return __allPlansCache;
+  } catch (error) {
+    console.error('[PLANS] Failed to load plans:', error);
+    return [];
+  }
 }
 
-// FIXED: renderDashboardPlans — NOW SHOWS CG FOR AIRTEL & GLO
-// FINAL renderDashboardPlans — AIRTEL SHOWS AWOOF + CG, FULL DEBUG LOGS
+// ==========================================
+// REWRITTEN: renderDashboardPlans (FIXED - adds data-provider)
+// ==========================================
 async function renderDashboardPlans(provider) {
   console.log('%c[RENDER] Starting renderDashboardPlans for:', 'color:cyan;font-weight:bold', provider);
 
@@ -4513,7 +4523,7 @@ async function renderDashboardPlans(provider) {
 
     console.log('[RENDER] Categories found →', { awoof: !!awoof, cg: !!cg, gifting: !!gifting });
 
-    // AIRTEL: Show AWOOF + CG (your rule — both if exist)
+    // AIRTEL: Show AWOOF + CG
     if (provider === 'airtel') {
       if (awoof) {
         plansToShow.push(awoof);
@@ -4563,6 +4573,9 @@ async function renderDashboardPlans(provider) {
     const box = document.createElement('div');
     box.className = `plan-box ${provider}`;
     box.dataset.id = plan.plan_id;
+    
+    // 🔥 FIX #1: ADD data-provider attribute
+    box.dataset.provider = provider;
 
     const tag = (plan.category && !['STANDARD', 'NORMAL'].includes(plan.category))
       ? `<span class="plan-type-tag">${plan.category}</span>`
@@ -4576,16 +4589,20 @@ async function renderDashboardPlans(provider) {
     `;
 
     plansRow.insertBefore(box, seeAllBtn);
-    console.log(`[RENDER] Added plan ${i + 1}: ${plan.category || 'Standard'} ₦${plan.price}`);
+    console.log(`[RENDER] Added plan ${i + 1}: ${plan.category || 'Standard'} ₦${plan.price} [data-provider="${provider}"]`);
   });
 
   // Force re-attach listeners
   attachPlanListeners();
-  console.log('%c[DASHBOARD] RENDER COMPLETE — SELECTION SHOULD WORK', 'color:gold;font-size:16px');
+  console.log('%c[RENDER] Dashboard render complete - data-provider set on all plans', 'color:lime;font-weight:bold');
 }
 
-// FINAL renderModalPlans — AIRTEL AWOOF + CG, GLO CG + GIFTING, HEADER FIXED
+// ==========================================
+// REWRITTEN: renderModalPlans (FIXED - adds data-provider)
+// ==========================================
 async function renderModalPlans(provider) {
+  console.log('%c[RENDER MODAL] Starting for:', 'color:purple;font-weight:bold', provider);
+  
   const modal = document.getElementById('allPlansModal');
   if (!modal) return;
 
@@ -4604,10 +4621,10 @@ async function renderModalPlans(provider) {
       );
     }
     if (giftingSection) giftingSection.style.display = 'none';
+    console.log('[RENDER MODAL] 9mobile sections rendered');
     return;
   }
 
-  // DECLARED PROPERLY — NO MORE "not defined" ERROR
   const awoofPlans = providerPlans.filter(p => p.category === 'AWOOF');
   const cgOrGiftingPlans = providerPlans.filter(p => 
     p.category === 'CG' || p.category === 'GIFTING'
@@ -4620,6 +4637,7 @@ async function renderModalPlans(provider) {
         `${provider.toUpperCase()} AWOOF`, svgShapes[provider]
       );
       awoofSection.style.display = 'block';
+      console.log(`[RENDER MODAL] AWOOF section: ${awoofPlans.length} plans`);
     } else {
       awoofSection.style.display = 'none';
     }
@@ -4633,12 +4651,63 @@ async function renderModalPlans(provider) {
         `${provider.toUpperCase()} ${title}`, svgShapes[provider]
       );
       giftingSection.style.display = 'block';
+      console.log(`[RENDER MODAL] ${title} section: ${cgOrGiftingPlans.length} plans`);
     } else {
       giftingSection.style.display = 'none';
     }
   }
+  
+  console.log('%c[RENDER MODAL] Complete - all modal plans have data-provider', 'color:lime;font-weight:bold');
 }
 
+// ==========================================
+// REWRITTEN: fillPlanSection (FIXED - adds data-provider)
+// ==========================================
+function fillPlanSection(sectionEl, provider, subType, plans, title, svg) {
+  sectionEl.setAttribute('data-provider', provider);
+  const grid = sectionEl.querySelector('.plans-grid');
+  if (!grid) return;
+
+  grid.innerHTML = '';
+  
+  plans.forEach((plan, index) => {
+    const box = document.createElement('div');
+    box.className = `plan-box ${provider}`;
+    box.dataset.id = plan.plan_id;
+    
+    // 🔥 FIX #2: ADD data-provider attribute to modal plans
+    box.dataset.provider = provider;
+
+    box.innerHTML = `
+      <div class="plan-amount">₦${plan.price}</div>
+      <div class="plan-data">${plan.data || plan.data_amount}</div>
+      <div class="plan-days">${plan.validity || plan.duration}</div>
+    `;
+
+    grid.appendChild(box);
+    console.log(`[FILL SECTION] Added modal plan ${index + 1}: ${plan.plan_id} [data-provider="${provider}"]`);
+  });
+
+  const header = sectionEl.querySelector('.section-header');
+  if (header) {
+    header.querySelector('svg')?.remove();
+    header.insertAdjacentHTML('afterbegin', svg);
+    const h2 = header.querySelector('h2');
+    if (h2) h2.textContent = title;
+  }
+  
+  console.log(`[FILL SECTION] ${title}: ${plans.length} plans added with data-provider="${provider}"`);
+}
+
+// Make functions globally available
+window.renderDashboardPlans = renderDashboardPlans;
+window.renderModalPlans = renderModalPlans;
+window.fillPlanSection = fillPlanSection;
+window.loadAllPlansOnce = loadAllPlansOnce;
+
+console.log('%c✅ FIXED FUNCTIONS LOADED', 'color:lime;font-size:16px;font-weight:bold');
+console.log('%c✅ All plans now have data-provider attribute', 'color:lime;font-weight:bold');
+console.log('%c✅ Modal clicks should now work!', 'color:lime;font-weight:bold');
 
 
   window.renderDashboardPlans = window.renderDashboardPlans || renderDashboardPlans;
@@ -4650,34 +4719,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 // helper: fill a modal section
 // --- FILL PLAN SECTION (FIXED) ---
-function fillPlanSection(sectionEl, provider, subType, plans, title, svg) {
-  sectionEl.setAttribute('data-provider', provider);
-  const grid = sectionEl.querySelector('.plans-grid');
-  if (!grid) return;
 
-  grid.innerHTML = '';
-  plans.forEach(plan => {
-    const box = document.createElement('div');
-    box.className = `plan-box ${provider}`;
-    box.dataset.id = plan.plan_id;
-
-    box.innerHTML = `
-      <div class="plan-amount">₦${plan.price}</div>
-      <div class="plan-data">${plan.data || plan.data_amount}</div>
-      <div class="plan-days">${plan.validity || plan.duration}</div>
-    `;
-
-    grid.appendChild(box);
-  });
-
-  const header = sectionEl.querySelector('.section-header');
-  if (header) {
-    header.querySelector('svg')?.remove();
-    header.insertAdjacentHTML('afterbegin', svg);
-    const h2 = header.querySelector('h2');
-    if (h2) h2.textContent = title;
-  }
-}
 const seeAllBtn = document.querySelector('.see-all-plans');
 if (seeAllBtn) {
   seeAllBtn.addEventListener('click', () => {
