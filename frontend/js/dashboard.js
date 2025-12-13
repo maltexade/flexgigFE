@@ -4828,21 +4828,19 @@ function handlePlanClick(e) {
   const id = plan.dataset.id;
   const isModalClick = !!plan.closest('.plan-modal-content');
   const activeProvider =
-  plan.dataset.provider ||
-  providerClasses.find(cls => plan.classList.contains(cls)) ||
-  providerClasses.find(cls => slider.classList.contains(cls));
-
+    plan.dataset.provider ||
+    providerClasses.find(cls => plan.classList.contains(cls)) ||
+    providerClasses.find(cls => slider.classList.contains(cls));
 
   if (!id || !activeProvider) {
-  console.warn('[PLAN CLICK BLOCKED]', {
-    id,
-    activeProvider,
-    plan,
-    classes: [...plan.classList]
-  });
-  return;
-}
-
+    console.warn('[PLAN CLICK BLOCKED]', {
+      id,
+      activeProvider,
+      plan,
+      classes: [...plan.classList]
+    });
+    return;
+  }
 
   // Ensure provider binding
   plan.dataset.provider = activeProvider;
@@ -4859,7 +4857,7 @@ function handlePlanClick(e) {
 
   const isDashSelected = dashPlan?.classList.contains('selected');
 
-  // Reselect same plan from modal
+  // Reselect same plan from modal - just close
   if (isModalClick && isDashSelected) {
     e.stopPropagation();
     ModalManager.closeModal('allPlansModal');
@@ -4870,15 +4868,15 @@ function handlePlanClick(e) {
   // Save selection
   selectedPlanByProvider[activeProvider] = id;
 
-  // Select
+  // Select the plan (handles both dashboard and modal selection)
   selectPlanById(id);
 
-  // Clone from modal if needed
+  // Clone from modal to dashboard if needed
   if (isModalClick && !dashPlan) {
     const clone = plan.cloneNode(true);
     clone.dataset.id = id;
     clone.dataset.provider = activeProvider;
-    clone.classList.add(activeProvider);
+    clone.classList.add(activeProvider, 'selected');
 
     clone.addEventListener('click', handlePlanClick);
     plansRow.insertBefore(clone, plansRow.firstChild);
@@ -4893,8 +4891,12 @@ function handlePlanClick(e) {
     );
 
     if (providerDashPlans.length > 2) {
-      plansRow.removeChild(providerDashPlans[2]);
-      console.log('[CLICK] Removed extra dashboard plan');
+      // Remove the oldest (last) plan
+      const toRemove = providerDashPlans[providerDashPlans.length - 1];
+      if (toRemove !== clone) { // Don't remove the one we just added
+        plansRow.removeChild(toRemove);
+        console.log('[CLICK] Removed extra dashboard plan');
+      }
     }
   }
 
