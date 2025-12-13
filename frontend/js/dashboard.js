@@ -4642,6 +4642,7 @@ async function renderModalPlans(provider) {
 
 
   window.renderDashboardPlans = window.renderDashboardPlans || renderDashboardPlans;
+  window.renderModalPlans = window.renderModalPlans || renderModalPlans;
 
 // Preload plans on page load → switching becomes INSTANT
 document.addEventListener('DOMContentLoaded', () => {
