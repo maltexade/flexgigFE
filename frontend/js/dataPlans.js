@@ -2,7 +2,7 @@
 
 let plansCache = [];
 let cacheUpdatedAt = null;
-const CACHE_KEY = 'cached_data_plans_v5';  // v4 so it clears old cache
+const CACHE_KEY = 'cached_data_plans_v7';  // v4 so it clears old cache
 
 // Load cached plans instantly (offline-first)
 export const loadCachedPlans = () => {
@@ -20,6 +20,7 @@ export const loadCachedPlans = () => {
 };
 
 // Fetch latest from your Supabase backend
+// dataPlans.js – Updated fetchPlans (permanent fix)
 export const fetchPlans = async () => {
   try {
     const base = (window.__SEC_API_BASE || 'https://api.flexgig.com.ng').replace(/\/+$/, '');
@@ -31,41 +32,52 @@ export const fetchPlans = async () => {
       headers: {
         'Accept': 'application/json',
       },
-      cache: 'no-store'
+      cache: 'no-store'  // Prevent browser-level caching
     });
 
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
     const fresh = await res.json();
 
-    // FIX 1: Properly find the latest updated_at using Date objects
+    // Properly calculate the latest updated_at using Date objects
     const latestUpdate = fresh.reduce((maxDate, p) => {
       if (!p.updated_at) return maxDate;
-      const currentDate = new Date(p.updated_at);
-      return (!maxDate || currentDate > maxDate) ? currentDate : maxDate;
+      const current = new Date(p.updated_at);
+      return maxDate === null || current > maxDate ? current : maxDate;
     }, null);
 
     const latestUpdateStr = latestUpdate ? latestUpdate.toISOString() : null;
 
-    // FIX 2: Compare properly (both as ISO strings or Dates)
-    const cacheDate = cacheUpdatedAt ? new Date(cacheUpdatedAt) : null;
-    const shouldUpdate = latestUpdate && (!cacheDate || latestUpdate > cacheDate);
+    // Compare properly
+    const cachedDate = cacheUpdatedAt ? new Date(cacheUpdatedAt) : null;
+    const hasNewerData = latestUpdate && (!cachedDate || latestUpdate > cachedDate);
 
-    if (shouldUpdate) {
+    if (hasNewerData) {
       plansCache = fresh;
-      cacheUpdatedAt = latestUpdateStr;  // Store as ISO string
-      localStorage.setItem(CACHE_KEY, JSON.stringify({ 
-        plans: fresh, 
-        updatedAt: latestUpdateStr 
+      cacheUpdatedAt = latestUpdateStr;
+
+      // Save to localStorage
+      localStorage.setItem(CACHE_KEY, JSON.stringify({
+        plans: fresh,
+        updatedAt: latestUpdateStr
       }));
-      console.log('Data plans updated from server');
+
+      console.log('✅ Data plans updated from server (newer data detected)');
+      
+      // Trigger UI update without reload (more on this below)
+      dispatchPlansUpdateEvent();
+
       return fresh;
+    } else {
+      console.log('No new data – using existing cache');
     }
   } catch (err) {
-    console.warn('Using cached/offline plans', err.message || err);
+    console.warn('Failed to fetch plans, using cache', err);
   }
+
   return plansCache;
 };
+window.fetchPlans = window.fetchPlans || fetchPlans;
 
 // Get all active plans
 export const getAllPlans = async () => {
@@ -79,6 +91,7 @@ export const getPlansByProvider = async (provider) => {
   const all = await getAllPlans();
   return all.filter(p => p.provider.toLowerCase() === provider.toLowerCase());
 };
+window.getPlansByProvider = window.getPlansByProvider || getPlansByProvider;
 
 // Get specific category (AWOOF, CG, GIFTING, etc.)
 export const getPlans = async (provider, category = null) => {
@@ -89,8 +102,14 @@ export const getPlans = async (provider, category = null) => {
   }
   return result.sort((a, b) => Number(a.price) - Number(b.price));
 };
+window.getPlans = window.getPlans || getPlans;
 
 // Load cache immediately when app starts
 loadCachedPlans();
 
 window.getAllPlans = getAllPlans;
+
+// Dispatch a custom event so your UI components can react instantly
+const dispatchPlansUpdateEvent = () => {
+  window.dispatchEvent(new Event('plansUpdated'));
+};

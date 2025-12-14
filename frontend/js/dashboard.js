@@ -1,4 +1,6 @@
-import { getAllPlans, getPlans } from './dataPlans.js';  // ADD THIS LINE
+// dashboard.js
+
+import { getAllPlans, getPlans, fetchPlans } from './dataPlans.js';  // ADD THIS LINE
 import {
   openCheckoutModal,
   closeCheckoutModal,
@@ -2431,6 +2433,87 @@ function updateLocalStorageFromUser(user) {
   }
 }
 
+
+// === SMOOTH PLAN AUTO-REFRESH SYSTEM ===
+(function setupPlanAutoRefresh() {
+  let pollInterval = null;
+
+  // Dispatch event when plans update (your dataPlans.js already does this)
+  const dispatchPlansUpdate = () => {
+    window.dispatchEvent(new Event('plansUpdated'));
+    console.log('✅ Plans updated — UI refreshed');
+  };
+
+  // Background polling
+  const startPolling = () => {
+    if (pollInterval) clearInterval(pollInterval);
+
+    pollInterval = setInterval(async () => {
+      try {
+        const fresh = await fetchPlans(); // This has the fixed cache logic
+        if (fresh && fresh.length > 0) {
+          // Only refresh UI if we're on a relevant screen
+          const activeProvider = providerClasses.find(cls => 
+            document.querySelector(`.provider-box.${cls}.active`)
+          );
+          if (activeProvider) {
+            await renderDashboardPlans(activeProvider);
+            await renderModalPlans(activeProvider);
+            attachPlanListeners();
+            logPlanIDs();
+
+            // Restore selection if possible
+            const lastSelected = selectedPlanByProvider[activeProvider];
+            if (lastSelected) {
+              setTimeout(() => selectPlanById(lastSelected), 100);
+            }
+          }
+          dispatchPlansUpdate();
+        }
+      } catch (err) {
+        console.warn('Plan poll failed', err);
+      }
+    }, 45_000); // Every 45 seconds — perfect balance
+  };
+
+  // Refresh when tab becomes visible (catches admin updates while user was away)
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      console.log('Tab visible → checking for plan updates');
+      fetchPlans().then(() => {
+        const activeProvider = providerClasses.find(cls => 
+          document.querySelector(`.provider-box.${cls}.active`)
+        );
+        if (activeProvider) {
+          renderDashboardPlans(activeProvider);
+          renderModalPlans(activeProvider);
+          attachPlanListeners();
+        }
+      });
+    }
+  });
+
+  // Start polling on load
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', startPolling);
+  } else {
+    startPolling();
+  }
+
+  // Listen for manual updates (e.g., from your debug console)
+  window.addEventListener('plansUpdated', () => {
+    const activeProvider = providerClasses.find(cls => 
+      document.querySelector(`.provider-box.${cls}.active`)
+    );
+    if (activeProvider) {
+      renderDashboardPlans(activeProvider);
+      renderModalPlans(activeProvider);
+      attachPlanListeners();
+    }
+  });
+
+  console.log('🚀 Plan auto-refresh system active (45s polling + visibility)');
+})();
 
 
 
