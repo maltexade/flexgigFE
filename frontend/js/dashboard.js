@@ -4947,7 +4947,10 @@ window.selectPlanById = window.selectPlanById || selectPlanById;
     const isModalClick = plan.closest('.plan-modal-content');
     const activeProvider = providerClasses.find(cls => slider.classList.contains(cls));
 
-    const dashPlan = plansRow.querySelector(`.plan-box[data-id="${id}"]`);
+    const dashPlan = plansRow.querySelector(
+  `.plan-box[data-id="${id}"].${activeProvider}`
+);
+
     const isDashSelected = dashPlan && dashPlan.classList.contains('selected');
 
     if (isModalClick && isDashSelected) {
