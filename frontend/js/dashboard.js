@@ -4604,7 +4604,8 @@ async function renderDashboardPlans(provider) {
   console.log('[RENDER] Total loaded plans:', plans.length);
 
   const providerPlans = plans.filter(p => 
-    p.provider?.toLowerCase() === (provider === 'ninemobile' ? '9mobile' : provider.toLowerCase())
+    p.provider?.toLowerCase() === (provider === 'ninemobile' ? '9mobile' : provider.toLowerCase()) &&
+    p.active === true
   );
   console.log(`[RENDER] Found ${providerPlans.length} plans for ${provider}`);
 
@@ -4708,7 +4709,8 @@ async function renderModalPlans(provider) {
 
   const plans = await loadAllPlansOnce();
   let providerPlans = plans.filter(p => 
-    p.provider?.toLowerCase() === (provider === 'ninemobile' ? '9mobile' : provider.toLowerCase())
+    p.provider?.toLowerCase() === (provider === 'ninemobile' ? '9mobile' : provider.toLowerCase()) &&
+    p.active === true
   );
 
   // 9MOBILE - Show all plans in first section
