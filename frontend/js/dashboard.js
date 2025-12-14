@@ -586,6 +586,83 @@ function inGraceWindow() {
   return ts && (Date.now() - ts) < REAUTH_GRACE_SECONDS * 1000;
 }
 
+// === FRESH PLAN FETCH ON LOAD (PLACE ABOVE onDashboardLoad) ===
+(function ensureFreshPlansOnLoad() {
+  const CACHE_KEY = 'cached_data_plans_v8'; // Match your current version
+
+  async function fetchAndCacheFreshPlans() {
+    try {
+      console.log('%c[PLANS] Fetching fresh plans on load...', 'color:cyan');
+
+      const response = await fetch('https://api.flexgig.com.ng/api/dataPlans', {
+        method: 'GET',
+        credentials: 'include',
+        headers: {
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        },
+        cache: 'no-store'
+      });
+
+      if (!response.ok) {
+        console.warn('[PLANS] Failed to fetch fresh plans:', response.status);
+        return;
+      }
+
+      const freshPlans = await response.json();
+      console.log(`[PLANS] Fetched ${freshPlans.length} fresh plans`);
+
+      // Update cache with proper structure
+      const latestUpdate = freshPlans.reduce((max, p) => 
+        p.updated_at && p.updated_at > max ? p.updated_at : max, ''
+      );
+
+      localStorage.setItem(CACHE_KEY, JSON.stringify({
+        plans: freshPlans,
+        updatedAt: latestUpdate
+      }));
+
+      // Update in-memory cache if variables exist
+      if (typeof plansCache !== 'undefined') plansCache = freshPlans;
+      if (typeof cacheUpdatedAt !== 'undefined') cacheUpdatedAt = latestUpdate;
+
+      console.log('[PLANS] Cache updated with fresh data');
+
+      // Refresh UI if provider is already active
+      const activeProvider = ['mtn', 'airtel', 'glo', 'ninemobile'].find(p => 
+        document.querySelector(`.provider-box.${p}.active`)
+      );
+
+      if (activeProvider && typeof renderDashboardPlans === 'function') {
+        renderDashboardPlans(activeProvider);
+        renderModalPlans(activeProvider);
+        attachPlanListeners();
+        console.log(`[PLANS] UI refreshed for ${activeProvider.toUpperCase()}`);
+      }
+
+    } catch (err) {
+      console.warn('[PLANS] Fresh fetch failed (will use cache):', err);
+    }
+  }
+
+  // Run on load
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', fetchAndCacheFreshPlans);
+  } else {
+    fetchAndCacheFreshPlans();
+  }
+
+  // Also run when tab becomes visible (user returns)
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      console.log('[PLANS] Tab visible — checking for updates');
+      fetchAndCacheFreshPlans();
+    }
+  });
+
+  console.log('🚀 Fresh plan fetch system active (on load + visibility)');
+})();
+
 
 // Call this as early as practical (before container paints) - e.g., in onDashboardLoad() before manageDashboardCards() if possible.
 async function renderDashboardCardsFromState({ preferServer = true } = {}) {
@@ -17681,122 +17758,7 @@ try { if (!window.disableBiometrics) window.disableBiometrics = disableBiometric
 
 })();
 
-// Ensure modal reappears on reload/back-forward (pageshow) and on visibility changes.
-// Put near the bottom of dashboard.js (after initCrossTabReauth / bootstrap)
-// REPLACEMENT SNIPPET: Replace the existing attachPageshowRecheck() block in dashboard.js
-// Root cause: the previous pageshow re-check attempted to call `showReauthModalLocal`
-// which is scoped inside the cross-tab IIFE and not exposed globally. On reload that
-// left the reauth modal hidden. This snippet uses the exposed APIs (window.__reauth / fgReauth)
-// and falls back to legacy functions if necessary.
 
-(function attachPageshowRecheck_fixed(){
-  const LOCAL_KEY = 'fg_reauth_required_v1';
-
-  async function recheckShow() {
-    try {
-      const raw = localStorage.getItem(LOCAL_KEY);
-      if (!raw) return;
-      let obj = null;
-      try { obj = JSON.parse(raw); } catch (e) { obj = { token: raw, ts: Date.now(), reason: 'unknown' }; }
-
-      console.debug('pageshow/visibility recheck: re-opening reauth modal (found local key)', obj);
-
-      // Prefer the exported reauth API if available
-      if (window.__reauth && typeof window.__reauth.showReauthModal === 'function') {
-        try {
-          // call showReauthModal in a best-effort way; it accepts either a context string or options
-          await window.__reauth.showReauthModal('reauth');
-          return;
-        } catch (e) {
-          console.warn('window.__reauth.showReauthModal failed', e);
-        }
-      }
-
-      // Fallback: ask canonical cross-tab module to show (best-effort)
-      if (window.fgReauth && typeof window.fgReauth.requireReauth === 'function') {
-        try {
-          window.fgReauth.requireReauth(obj.reason || 'pageshow');
-          return;
-        } catch (e) {
-          console.warn('window.fgReauth.requireReauth failed', e);
-        }
-      }
-
-      // Last fallback: if a local helper was somehow left in scope, call it
-      if (typeof showReauthModalLocal === 'function') {
-        try {
-          showReauthModalLocal({ fromStorageObj: obj });
-          return;
-        } catch (e) {
-          console.warn('showReauthModalLocal call failed', e);
-        }
-      }
-
-      // If none are available, leave a debug message (no destructive action)
-      console.warn('No reauth-show API available on pageshow. Reauth modal could not be re-opened automatically.');
-    } catch (err) {
-      console.error('pageshow recheck error', err);
-    }
-  }
-
-  window.addEventListener('pageshow', recheckShow, { passive: true });
-  window.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') recheckShow();
-  }, { passive: true });
-})();
-
-// Event listeners for card updates
-window.addEventListener('pin-status-changed', function() {
-  console.log('[DEBUG] pin-status-changed: Refreshing dashboard cards');
-  manageDashboardCards();
-});
-
-window.addEventListener('profile-status-changed', function() {
-  console.log('[DEBUG] profile-status-changed: Refreshing dashboard cards');
-  manageDashboardCards();
-});
-
-window.addEventListener('storage', function(e) {
-  if (e.key === 'hasPin' || e.key === 'profileCompleted') {
-    console.log('[DEBUG] storage event: Refreshing dashboard cards');
-    manageDashboardCards();
-  }
-});
-
-
-// MAKE THE SWITCH CLICKABLE — toggles the eye exactly like clicking an eye
-document.getElementById('balanceSwitch')?.addEventListener('click', (e) => {
-  e.preventDefault();
-  e.stopImmediatePropagation();
-
-  // Just click any eye — your nuclear handler will do ALL the work perfectly
-  const anyEye = document.querySelector('.balance-eye-toggle');
-  if (anyEye) {
-    anyEye.click(); // This triggers __NUCLEAR_EYE_HANDLER → switch auto-updates
-  }
-});
-// COUNT-UP ON RELOAD WHEN EYE IS OPEN (premium feel)
-function triggerCountUpOnReload() {
-  // Only run once per page load
-  if (window.countUpTriggered) return;
-  window.countUpTriggered = true;
-
-  // Wait until balance is fully loaded and eye is open
-  const startCountUp = () => {
-    if (window.isBalanceMasked || !window.currentDisplayedBalance) return;
-
-    // Force a fake "from 0" update → triggers your existing animation
-    window.updateAllBalances(0);
-    setTimeout(() => {
-      window.updateAllBalances(window.currentDisplayedBalance, true); // true = skipAnimation? NO → we WANT animation
-    }, 80);
-  };
-
-  // Run now + safety delays
-  setTimeout(startCountUp, 100);
-  setTimeout(startCountUp, 300);
-  setTimeout(startCountUp, 600);
-}
 
 updateContinueState();
 
