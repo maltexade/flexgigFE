@@ -1,8 +1,8 @@
-// src/utils/dataPlans.js  ← NEW & FINAL VERSION (2025 READY)
+//dataPlans.js
 
 let plansCache = [];
 let cacheUpdatedAt = null;
-const CACHE_KEY = 'cached_data_plans_v4';  // v4 so it clears old cache
+const CACHE_KEY = 'cached_data_plans_v5';  // v4 so it clears old cache
 
 // Load cached plans instantly (offline-first)
 export const loadCachedPlans = () => {
@@ -27,7 +27,7 @@ export const fetchPlans = async () => {
 
     const res = await fetch(url, {
       method: 'GET',
-      credentials: 'include', // Important if you use cookies
+      credentials: 'include',
       headers: {
         'Accept': 'application/json',
       },
@@ -38,14 +38,26 @@ export const fetchPlans = async () => {
 
     const fresh = await res.json();
 
-    const latestUpdate = fresh.reduce((max, p) => 
-      p.updated_at && p.updated_at > max ? p.updated_at : max, ''
-    );
+    // FIX 1: Properly find the latest updated_at using Date objects
+    const latestUpdate = fresh.reduce((maxDate, p) => {
+      if (!p.updated_at) return maxDate;
+      const currentDate = new Date(p.updated_at);
+      return (!maxDate || currentDate > maxDate) ? currentDate : maxDate;
+    }, null);
 
-    if (latestUpdate && latestUpdate !== cacheUpdatedAt) {
+    const latestUpdateStr = latestUpdate ? latestUpdate.toISOString() : null;
+
+    // FIX 2: Compare properly (both as ISO strings or Dates)
+    const cacheDate = cacheUpdatedAt ? new Date(cacheUpdatedAt) : null;
+    const shouldUpdate = latestUpdate && (!cacheDate || latestUpdate > cacheDate);
+
+    if (shouldUpdate) {
       plansCache = fresh;
-      cacheUpdatedAt = latestUpdate;
-      localStorage.setItem(CACHE_KEY, JSON.stringify({ plans: fresh, updatedAt: latestUpdate }));
+      cacheUpdatedAt = latestUpdateStr;  // Store as ISO string
+      localStorage.setItem(CACHE_KEY, JSON.stringify({ 
+        plans: fresh, 
+        updatedAt: latestUpdateStr 
+      }));
       console.log('Data plans updated from server');
       return fresh;
     }
