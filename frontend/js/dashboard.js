@@ -4722,6 +4722,7 @@ async function renderModalPlans(provider) {
   }
   
   console.log('%c[RENDER MODAL] Complete - sections configured for', 'color:lime;font-weight:bold', provider);
+  attachPlanListeners();
 }
 
 // ==========================================
@@ -4998,19 +4999,6 @@ window.handlePlanClick = window.handlePlanClick || handlePlanClick;
 
 /* ---------- RE-ATTACH LISTENERS AFTER RENDERS ---------- */
 
-// Make sure listeners are attached after modal renders
-const originalRenderModalPlans = window.renderModalPlans;
-window.renderModalPlans = async function(provider) {
-  await originalRenderModalPlans(provider);
-  // Re-attach listeners to modal plans
-  attachPlanListeners(allPlansModal);
-  console.log('[RENDER MODAL] Listeners re-attached to modal plans');
-};
-
-console.log('%c✅ OLD SCRIPT LOGIC RESTORED', 'color:lime;font-size:16px;font-weight:bold');
-console.log('✓ Matches old script exactly');
-console.log('✓ Mobile touch events fixed');
-console.log('✓ Should work on all devices now');
 
 
 /* ---------- PROVIDER SWITCH HOOK ---------- */
