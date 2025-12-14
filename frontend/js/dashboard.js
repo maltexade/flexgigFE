@@ -4942,39 +4942,41 @@ window.selectPlanById = window.selectPlanById || selectPlanById;
 
   // --- PLAN CLICK HANDLER ---
   function handlePlanClick(e) {
-  const plan = e.currentTarget;
-  const id = plan.getAttribute('data-id');
+  const plan =
+    e.currentTarget?.classList?.contains('plan-box')
+      ? e.currentTarget
+      : e.target.closest('.plan-box');
+
+  if (!plan) return;
+
+  const id = String(plan.getAttribute('data-id') || '').trim();
+
+  const activeProvider =
+    plan.dataset.provider ||
+    providerClasses.find(cls => slider.classList.contains(cls));
+
   const isModalClick = !!plan.closest('.plan-modal-content');
-  const activeProvider = providerClasses.find(cls =>
-    slider.classList.contains(cls)
-  );
 
-  const planKey = `${activeProvider}::${id}`;
-
-  // 🔎 Find dashboard plan with SAME provider + id
+  // 🔥 PROVIDER-AWARE dashboard lookup (THIS IS THE FIX)
   const dashPlan = Array.from(
     plansRow.querySelectorAll('.plan-box')
   ).find(p =>
     p.getAttribute('data-id') === id &&
-    p.classList.contains(activeProvider)
+    p.dataset.provider === activeProvider
   );
 
   const isDashSelected =
-    dashPlan && dashPlan.classList.contains('selected');
+    !!(dashPlan && dashPlan.classList.contains('selected'));
 
-  /* -------------------------------------------------- */
-  /* Reselect same plan from modal → just close modal   */
-  /* -------------------------------------------------- */
+  /* ------------------ Reselect guard ------------------ */
   if (isModalClick && isDashSelected) {
     e.stopPropagation();
     ModalManager.closeModal('allPlansModal');
-    console.log('[DEBUG] Reselect detected → modal closed:', planKey);
+    console.log('[FIXED] Reselect detected → modal closed:', id, activeProvider);
     return;
   }
 
-  /* -------------------------------------------------- */
-  /* Modal → Dashboard selection flow                   */
-  /* -------------------------------------------------- */
+  /* ------------------ Modal click ------------------ */
   if (isModalClick) {
     selectPlanById(id);
 
@@ -4982,66 +4984,49 @@ window.selectPlanById = window.selectPlanById || selectPlanById;
       plansRow.querySelectorAll('.plan-box')
     );
 
+    const first = dashPlans[0];
     const sameAsFirst =
-      dashPlans.length &&
-      dashPlans[0].getAttribute('data-id') === id &&
-      dashPlans[0].classList.contains(activeProvider);
+      first &&
+      first.getAttribute('data-id') === id &&
+      first.dataset.provider === activeProvider;
 
     if (!sameAsFirst) {
       const cloneForDashboard = plan.cloneNode(true);
-      cloneForDashboard.classList.add(activeProvider);
 
-      // --- subtype tags (provider-safe) ---
+      // clean provider classes
+      cloneForDashboard.classList.remove(...providerClasses);
+      cloneForDashboard.classList.add(activeProvider);
+      cloneForDashboard.dataset.provider = activeProvider;
+
+      // subtype tags (skip ninemobile)
       let subType = '';
-      if (activeProvider === 'mtn') {
-        subType = id.includes('awoof')
-          ? 'awoof'
-          : id.includes('gifting')
-          ? 'gifting'
-          : '';
-      } else if (activeProvider === 'airtel') {
-        subType = id.includes('awoof')
-          ? 'awoof'
-          : id.includes('cg')
-          ? 'cg'
-          : '';
-      } else if (activeProvider === 'glo') {
-        subType = id.includes('cg')
-          ? 'cg'
-          : id.includes('gifting')
-          ? 'gifting'
-          : '';
-      }
+      if (activeProvider === 'mtn')
+        subType = id.includes('awoof') ? 'awoof' : id.includes('gifting') ? 'gifting' : '';
+      else if (activeProvider === 'airtel')
+        subType = id.includes('awoof') ? 'awoof' : id.includes('cg') ? 'cg' : '';
+      else if (activeProvider === 'glo')
+        subType = id.includes('cg') ? 'cg' : id.includes('gifting') ? 'gifting' : '';
+
+      cloneForDashboard.querySelector('.plan-type-tag')?.remove();
 
       if (subType && activeProvider !== 'ninemobile') {
-        cloneForDashboard
-          .querySelector('.plan-type-tag')
-          ?.remove();
-
         const tag = document.createElement('span');
         tag.className = 'plan-type-tag';
-        tag.textContent =
-          subType.charAt(0).toUpperCase() + subType.slice(1);
-
+        tag.textContent = subType[0].toUpperCase() + subType.slice(1);
         cloneForDashboard.appendChild(tag);
       }
 
       plansRow.insertBefore(cloneForDashboard, plansRow.firstChild);
 
-      // keep only 2 dashboard plans
-      const allDashPlans = Array.from(
-        plansRow.querySelectorAll('.plan-box')
-      );
-      if (allDashPlans.length > 2) {
-        plansRow.removeChild(allDashPlans[2]);
-      }
+      const allDashPlans = plansRow.querySelectorAll('.plan-box');
+      if (allDashPlans.length > 2) plansRow.removeChild(allDashPlans[2]);
 
       cloneForDashboard.addEventListener('click', handlePlanClick);
 
-      console.log('[DEBUG] Modal → Dashboard clone:', planKey);
+      console.log('[FIXED] Modal → Dashboard clone:', id, activeProvider);
     } else {
-      dashPlans[0].classList.add('selected', activeProvider);
-      console.log('[DEBUG] First dashboard plan reused:', planKey);
+      first.classList.add('selected');
+      console.log('[FIXED] First dashboard reused:', id, activeProvider);
     }
 
     saveUserState();
@@ -5050,14 +5035,22 @@ window.selectPlanById = window.selectPlanById || selectPlanById;
     return;
   }
 
-  /* -------------------------------------------------- */
-  /* Dashboard click                                   */
-  /* -------------------------------------------------- */
+  /* ------------------ Dashboard click ------------------ */
   selectPlanById(id);
 }
 
 
 window.handlePlanClick = window.handlePlanClick || handlePlanClick;
+document.addEventListener(
+  'click',
+  e => {
+    const plan = e.target.closest('.plan-box');
+    if (!plan) return;
+    handlePlanClick(e);
+    e.stopImmediatePropagation();
+  },
+  true
+);
 
 
 
