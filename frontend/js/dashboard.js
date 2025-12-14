@@ -599,7 +599,6 @@ function inGraceWindow() {
         credentials: 'include',
         headers: {
           'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache'
         },
         cache: 'no-store'
       });
