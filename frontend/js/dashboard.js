@@ -4710,8 +4710,6 @@ console.log('%c✅ All plans now have data-provider attribute', 'color:lime;font
 console.log('%c✅ Modal clicks should now work!', 'color:lime;font-weight:bold');
 
 
-  window.renderDashboardPlans = window.renderDashboardPlans || renderDashboardPlans;
-  window.renderModalPlans = window.renderModalPlans || renderModalPlans;
 
 // Preload plans on page load → switching becomes INSTANT
 document.addEventListener('DOMContentLoaded', () => {
@@ -4720,12 +4718,12 @@ document.addEventListener('DOMContentLoaded', () => {
 // helper: fill a modal section
 // --- FILL PLAN SECTION (FIXED) ---
 
+
 const seeAllBtn = document.querySelector('.see-all-plans');
 if (seeAllBtn) {
   seeAllBtn.addEventListener('click', () => {
     ModalManager.openModal('allPlansModal');
 
-    // Your old logic — runs right after ModalManager starts opening
     setTimeout(() => {
       const dashSelected = plansRow.querySelector('.plan-box.selected');
       const activeProvider = providerClasses.find(cls => slider.classList.contains(cls));
@@ -4737,13 +4735,30 @@ if (seeAllBtn) {
       if (giftingSection) giftingSection.style.display = activeProvider === 'ninemobile' ? 'none' : 'block';
       if (awoofSection) awoofSection.style.display = 'block';
 
+      // Highlight selected plan in modal
       if (dashSelected) {
         const id = dashSelected.getAttribute('data-id');
-        allPlansModal.querySelectorAll('.plan-box.selected').forEach(p => p.classList.remove('selected'));
+        
+        // Clear all modal selections first
+        allPlansModal.querySelectorAll('.plan-box.selected').forEach(p => {
+          p.classList.remove('selected', ...providerClasses);
+        });
+        
+        // Find and select in modal
         const modalPlan = allPlansModal.querySelector(`.plan-box[data-id="${id}"]`);
         if (modalPlan) {
-          modalPlan.classList.add('selected');
-          setTimeout(() => modalPlan.scrollIntoView({ behavior: 'smooth', block: 'center' }), 150);
+          modalPlan.classList.add('selected', activeProvider);
+          
+          // Auto-scroll to selected plan
+          setTimeout(() => {
+            modalPlan.scrollIntoView({ 
+              behavior: 'smooth', 
+              block: 'center',
+              inline: 'nearest'
+            });
+          }, 150);
+          
+          console.log('[MODAL] Auto-scrolled to selected plan:', id);
         }
       }
     }, 300);
@@ -4867,7 +4882,7 @@ window.attachPlanListeners = window.attachPlanListeners || attachPlanListeners;
 
 function handlePlanClick(e) {
   const plan = e.currentTarget;
-  const id = plan.dataset.id;
+  const id = plan.dataset.id || plan.getAttribute('data-id');
   const isModalClick = !!plan.closest('.plan-modal-content');
   const activeProvider =
     plan.dataset.provider ||
@@ -4893,10 +4908,7 @@ function handlePlanClick(e) {
     { id, activeProvider, isModalClick }
   );
 
-  const dashPlan = plansRow.querySelector(
-    `.plan-box[data-id="${id}"][data-provider="${activeProvider}"]`
-  );
-
+  const dashPlan = plansRow.querySelector(`.plan-box[data-id="${id}"]`);
   const isDashSelected = dashPlan?.classList.contains('selected');
 
   // Reselect same plan from modal - just close
@@ -4910,45 +4922,77 @@ function handlePlanClick(e) {
   // Save selection
   selectedPlanByProvider[activeProvider] = id;
 
-  // Select the plan (handles both dashboard and modal selection)
-  selectPlanById(id);
-
-  // Clone from modal to dashboard if needed
-  if (isModalClick && !dashPlan) {
-    const clone = plan.cloneNode(true);
-    clone.dataset.id = id;
-    clone.dataset.provider = activeProvider;
-    clone.classList.add(activeProvider, 'selected');
-
-    clone.addEventListener('click', handlePlanClick);
-    plansRow.insertBefore(clone, plansRow.firstChild);
-
-    console.log('[CLICK] Cloned to dashboard:', id);
-
-    // Keep max 2 dashboard plans per provider
-    const providerDashPlans = Array.from(
-      plansRow.querySelectorAll(
-        `.plan-box[data-provider="${activeProvider}"]`
-      )
-    );
-
-    if (providerDashPlans.length > 2) {
-      // Remove the oldest (last) plan
-      const toRemove = providerDashPlans[providerDashPlans.length - 1];
-      if (toRemove !== clone) { // Don't remove the one we just added
-        plansRow.removeChild(toRemove);
-        console.log('[CLICK] Removed extra dashboard plan');
-      }
-    }
-  }
-
-  saveUserState?.();
-  saveCurrentAppState?.();
-
+  // MODAL CLICK - Use old script logic
   if (isModalClick) {
+    // Check if same as FIRST dashboard plan
+    const dashPlans = Array.from(plansRow.querySelectorAll('.plan-box'));
+    const sameAsFirst = dashPlans.length && dashPlans[0].getAttribute('data-id') === id;
+
+    console.log('[CLICK] Same as first?', sameAsFirst);
+
+    // Select the plan first
+    selectPlanById(id);
+
+    // Clone if NOT same as first
+    if (!sameAsFirst) {
+      console.log('[CLICK] Cloning to dashboard...');
+
+      const clone = plan.cloneNode(true);
+      clone.dataset.id = id;
+      clone.dataset.provider = activeProvider;
+      clone.classList.add(activeProvider);
+
+      // Add plan-type-tag based on ID
+      let subType = '';
+      if (activeProvider === 'mtn') {
+        subType = id.includes('awoof') ? 'awoof' : id.includes('gifting') ? 'gifting' : '';
+      } else if (activeProvider === 'airtel') {
+        subType = id.includes('awoof') ? 'awoof' : id.includes('cg') ? 'cg' : '';
+      } else if (activeProvider === 'glo') {
+        subType = id.includes('cg') ? 'cg' : id.includes('gifting') ? 'gifting' : '';
+      }
+
+      if (subType && activeProvider !== 'ninemobile') {
+        // Remove existing tag first
+        const existingTag = clone.querySelector('.plan-type-tag');
+        if (existingTag) existingTag.remove();
+
+        const tag = document.createElement('span');
+        tag.className = 'plan-type-tag';
+        tag.textContent = subType.charAt(0).toUpperCase() + subType.slice(1);
+        clone.appendChild(tag);
+      }
+
+      // Insert at first position
+      plansRow.insertBefore(clone, plansRow.firstChild);
+
+      // Keep only 2 plans
+      const allDashPlans = Array.from(plansRow.querySelectorAll('.plan-box'));
+      if (allDashPlans.length > 2) {
+        plansRow.removeChild(allDashPlans[2]);
+        console.log('[CLICK] Removed 3rd plan');
+      }
+
+      // Attach listener to clone
+      clone.addEventListener('click', handlePlanClick);
+
+      console.log('[CLICK] Cloned to dashboard:', id);
+    } else {
+      // Just select the first plan
+      dashPlans[0].classList.add('selected', activeProvider);
+      console.log('[CLICK] Selected first plan (no clone needed)');
+    }
+
+    saveUserState?.();
+    saveCurrentAppState?.();
     ModalManager.closeModal('allPlansModal');
   }
+  // DASHBOARD CLICK - just select
+  else {
+    selectPlanById(id);
+  }
 }
+window.handlePlanClick = handlePlanClick;
 window.handlePlanClick = window.handlePlanClick || handlePlanClick;
 
 /* ---------- PROVIDER SWITCH HOOK ---------- */
