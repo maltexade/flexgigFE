@@ -4928,6 +4928,16 @@ function selectPlanById(id) {
 
 window.selectPlanById = window.selectPlanById || selectPlanById;
 
+/* ---------- ATTACH PLAN LISTENERS (MOBILE-FRIENDLY) ---------- */
+
+function attachPlanListeners() {
+    document.querySelectorAll('.plan-box').forEach(p => {
+      p.removeEventListener('click', handlePlanClick);
+      p.addEventListener('click', handlePlanClick);
+    });
+  }
+window.attachPlanListeners = attachPlanListeners;
+
 /* ---------- PLAN CLICK HANDLER (FIXED - MATCHES OLD SCRIPT) ---------- */
 
 function handlePlanClick(e) {
@@ -5014,27 +5024,7 @@ function handlePlanClick(e) {
 }
 window.handlePlanClick = handlePlanClick;
 
-/* ---------- ATTACH PLAN LISTENERS (MOBILE-FRIENDLY) ---------- */
 
-function attachPlanListeners(root = document) {
-  root.querySelectorAll('.plan-box').forEach(p => {
-    // Remove old listeners
-    p.removeEventListener('click', handlePlanClick);
-    p.removeEventListener('touchend', handlePlanClick);
-    
-    // Add new listeners
-    p.addEventListener('click', handlePlanClick);
-    // For mobile - add touchend with passive flag
-    p.addEventListener('touchend', (e) => {
-      // Prevent double firing on mobile
-      e.preventDefault();
-      handlePlanClick(e);
-    });
-  });
-
-  console.log('[DEBUG] attachPlanListeners attached (mobile + desktop)');
-}
-window.attachPlanListeners = attachPlanListeners;
 
 /* ---------- RE-ATTACH LISTENERS AFTER RENDERS ---------- */
 
