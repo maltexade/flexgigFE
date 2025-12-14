@@ -4544,56 +4544,44 @@ window.saveUserState = window.saveUserState || saveUserState;
 
 
 // ==========================================
-// FINAL: loadAllPlansOnce — ALWAYS PRIORITIZES FRESH DATA
+// FIXED loadAllPlansOnce — ALWAYS USES FRESHEST DATA
 // ==========================================
 let __allPlansCache = [];
 let __plansLoaded = false;
-let __lastCacheCheck = 0;
 
-async function loadAllPlansOnce(forceRefresh = false) {
-  const CACHE_KEY = 'cached_data_plans_v6'; // Match your current key
+async function loadAllPlansOnce() {
+  const CACHE_KEY = 'cached_data_plans_v10';
 
-  // Always check localStorage for fresh cache (but not too often)
-  const now = Date.now();
-  if (forceRefresh || now - __lastCacheCheck > 5000) { // Check every 5s max
-    __lastCacheCheck = now;
-
-    try {
-      const cachedStr = localStorage.getItem(CACHE_KEY);
-      if (cachedStr) {
-        const cached = JSON.parse(cachedStr);
-        if (cached.plans && Array.isArray(cached.plans)) {
-          // Update in-memory cache if we have fresh data
-          if (__allPlansCache.length === 0 || 
-              cached.updatedAt > (__allPlansCache[0]?.updated_at || '')) {
-            __allPlansCache = cached.plans;
-            __plansLoaded = true;
-            console.log('[PLANS] Updated from fresh localStorage cache:', __allPlansCache.length);
-          }
-        }
+  // 1. ALWAYS check localStorage first — this is the source of truth now
+  try {
+    const saved = localStorage.getItem(CACHE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (parsed.plans && Array.isArray(parsed.plans)) {
+        __allPlansCache = parsed.plans;
+        __plansLoaded = true;
+        console.log('[PLANS] Using FRESH plans from localStorage:', __allPlansCache.length);
+        return __allPlansCache;
       }
-    } catch (e) {
-      console.warn('[PLANS] Cache parse error:', e);
+    }
+  } catch (e) {
+    console.warn('[PLANS] localStorage cache invalid', e);
+  }
+
+  // 2. Only if no localStorage cache → fall back to server
+  if (__allPlansCache.length === 0) {
+    try {
+      console.log('[PLANS] No local cache — fetching from server');
+      const fresh = await fetchPlans(); // This updates localStorage too
+      __allPlansCache = fresh;
+      __plansLoaded = true;
+    } catch (err) {
+      console.warn('[PLANS] Server fetch failed', err);
     }
   }
 
-  // If we have plans (from cache or previous), return them
-  if (__plansLoaded && __allPlansCache.length > 0) {
-    console.log('[PLANS] Using in-memory plans:', __allPlansCache.length);
-    return __allPlansCache;
-  }
-
-  // Final fallback: fetch from server via getAllPlans()
-  try {
-    console.log('[PLANS] No valid cache — fetching from server...');
-    __allPlansCache = await getAllPlans();
-    __plansLoaded = true;
-    console.log('[PLANS] Fetched from server:', __allPlansCache.length);
-    return __allPlansCache;
-  } catch (error) {
-    console.error('[PLANS] Failed to load plans:', error);
-    return __allPlansCache; // return whatever we have
-  }
+  console.log('[PLANS] Final plans used:', __allPlansCache.length);
+  return __allPlansCache;
 }
 
 // ==========================================
