@@ -588,7 +588,7 @@ function inGraceWindow() {
 
 // === FRESH PLAN FETCH ON LOAD (PLACE ABOVE onDashboardLoad) ===
 (function ensureFreshPlansOnLoad() {
-  const CACHE_KEY = 'cached_data_plans_v10'; // Match your current version
+  const CACHE_KEY = 'cached_data_plans_v11'; // Match your current version
 
   async function fetchAndCacheFreshPlans() {
     try {
