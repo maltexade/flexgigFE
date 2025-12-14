@@ -588,7 +588,7 @@ function inGraceWindow() {
 
 // === FRESH PLAN FETCH ON LOAD (PLACE ABOVE onDashboardLoad) ===
 (function ensureFreshPlansOnLoad() {
-  const CACHE_KEY = 'cached_data_plans_v9'; // Match your current version
+  const CACHE_KEY = 'cached_data_plans_v10'; // Match your current version
 
   async function fetchAndCacheFreshPlans() {
     try {
@@ -4542,26 +4542,57 @@ window.saveUserState = window.saveUserState || saveUserState;
   }
 
 
+
 // ==========================================
-// REWRITTEN: loadAllPlansOnce (with better error handling)
+// FINAL: loadAllPlansOnce — ALWAYS PRIORITIZES FRESH DATA
 // ==========================================
 let __allPlansCache = [];
 let __plansLoaded = false;
+let __lastCacheCheck = 0;
 
-async function loadAllPlansOnce() {
-  if (__plansLoaded) {
-    console.log('[PLANS] Using cached plans:', __allPlansCache.length);
+async function loadAllPlansOnce(forceRefresh = false) {
+  const CACHE_KEY = 'cached_data_plans_v6'; // Match your current key
+
+  // Always check localStorage for fresh cache (but not too often)
+  const now = Date.now();
+  if (forceRefresh || now - __lastCacheCheck > 5000) { // Check every 5s max
+    __lastCacheCheck = now;
+
+    try {
+      const cachedStr = localStorage.getItem(CACHE_KEY);
+      if (cachedStr) {
+        const cached = JSON.parse(cachedStr);
+        if (cached.plans && Array.isArray(cached.plans)) {
+          // Update in-memory cache if we have fresh data
+          if (__allPlansCache.length === 0 || 
+              cached.updatedAt > (__allPlansCache[0]?.updated_at || '')) {
+            __allPlansCache = cached.plans;
+            __plansLoaded = true;
+            console.log('[PLANS] Updated from fresh localStorage cache:', __allPlansCache.length);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[PLANS] Cache parse error:', e);
+    }
+  }
+
+  // If we have plans (from cache or previous), return them
+  if (__plansLoaded && __allPlansCache.length > 0) {
+    console.log('[PLANS] Using in-memory plans:', __allPlansCache.length);
     return __allPlansCache;
   }
-  
+
+  // Final fallback: fetch from server via getAllPlans()
   try {
+    console.log('[PLANS] No valid cache — fetching from server...');
     __allPlansCache = await getAllPlans();
     __plansLoaded = true;
-    console.log('[PLANS] Cached all plans:', __allPlansCache.length);
+    console.log('[PLANS] Fetched from server:', __allPlansCache.length);
     return __allPlansCache;
   } catch (error) {
     console.error('[PLANS] Failed to load plans:', error);
-    return [];
+    return __allPlansCache; // return whatever we have
   }
 }
 

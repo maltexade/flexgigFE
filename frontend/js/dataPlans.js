@@ -2,7 +2,7 @@
 
 let plansCache = [];
 let cacheUpdatedAt = null;
-const CACHE_KEY = 'cached_data_plans_v9';  // v4 so it clears old cache
+const CACHE_KEY = 'cached_data_plans_v10';  
 
 // Load cached plans instantly (offline-first)
 export const loadCachedPlans = () => {
