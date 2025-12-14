@@ -4942,65 +4942,121 @@ window.selectPlanById = window.selectPlanById || selectPlanById;
 
   // --- PLAN CLICK HANDLER ---
   function handlePlanClick(e) {
-    const plan = e.currentTarget;
-    const id = plan.getAttribute('data-id');
-    const isModalClick = plan.closest('.plan-modal-content');
-    const activeProvider = providerClasses.find(cls => slider.classList.contains(cls));
+  const plan = e.currentTarget;
+  const id = plan.getAttribute('data-id');
+  const isModalClick = !!plan.closest('.plan-modal-content');
+  const activeProvider = providerClasses.find(cls =>
+    slider.classList.contains(cls)
+  );
 
-    const dashPlan = plansRow.querySelector(
-  `.plan-box[data-id="${id}"].${activeProvider}`
-);
+  const planKey = `${activeProvider}::${id}`;
 
-    const isDashSelected = dashPlan && dashPlan.classList.contains('selected');
+  // 🔎 Find dashboard plan with SAME provider + id
+  const dashPlan = Array.from(
+    plansRow.querySelectorAll('.plan-box')
+  ).find(p =>
+    p.getAttribute('data-id') === id &&
+    p.classList.contains(activeProvider)
+  );
 
-    if (isModalClick && isDashSelected) {
-      e.stopPropagation();
-      ModalManager.closeModal('allPlansModal'); 
-      console.log('[DEBUG] handlePlanClick: Reselected same plan, modal closed, ID:', id);
-    } else if (isModalClick) {
-      const dashPlans = Array.from(plansRow.querySelectorAll('.plan-box'));
-      const sameAsFirst = dashPlans.length && dashPlans[0].getAttribute('data-id') === id;
-      selectPlanById(id);
-      if (!sameAsFirst) {
-        const cloneForDashboard = plan.cloneNode(true);
-        cloneForDashboard.classList.add(activeProvider);
-        let subType = '';
-        if (activeProvider === 'mtn') {
-          subType = id.includes('awoof') ? 'awoof' : id.includes('gifting') ? 'gifting' : '';
-        } else if (activeProvider === 'airtel') {
-          subType = id.includes('awoof') ? 'awoof' : id.includes('cg') ? 'cg' : '';
-        } else if (activeProvider === 'glo') {
-          subType = id.includes('cg') ? 'cg' : id.includes('gifting') ? 'gifting' : '';
-        }
+  const isDashSelected =
+    dashPlan && dashPlan.classList.contains('selected');
 
-        if (subType && activeProvider !== 'ninemobile') {
-        // Remove existing tag if any
-        const existingTag = cloneForDashboard.querySelector('.plan-type-tag');
-        if (existingTag) existingTag.remove();
-        
+  /* -------------------------------------------------- */
+  /* Reselect same plan from modal → just close modal   */
+  /* -------------------------------------------------- */
+  if (isModalClick && isDashSelected) {
+    e.stopPropagation();
+    ModalManager.closeModal('allPlansModal');
+    console.log('[DEBUG] Reselect detected → modal closed:', planKey);
+    return;
+  }
+
+  /* -------------------------------------------------- */
+  /* Modal → Dashboard selection flow                   */
+  /* -------------------------------------------------- */
+  if (isModalClick) {
+    selectPlanById(id);
+
+    const dashPlans = Array.from(
+      plansRow.querySelectorAll('.plan-box')
+    );
+
+    const sameAsFirst =
+      dashPlans.length &&
+      dashPlans[0].getAttribute('data-id') === id &&
+      dashPlans[0].classList.contains(activeProvider);
+
+    if (!sameAsFirst) {
+      const cloneForDashboard = plan.cloneNode(true);
+      cloneForDashboard.classList.add(activeProvider);
+
+      // --- subtype tags (provider-safe) ---
+      let subType = '';
+      if (activeProvider === 'mtn') {
+        subType = id.includes('awoof')
+          ? 'awoof'
+          : id.includes('gifting')
+          ? 'gifting'
+          : '';
+      } else if (activeProvider === 'airtel') {
+        subType = id.includes('awoof')
+          ? 'awoof'
+          : id.includes('cg')
+          ? 'cg'
+          : '';
+      } else if (activeProvider === 'glo') {
+        subType = id.includes('cg')
+          ? 'cg'
+          : id.includes('gifting')
+          ? 'gifting'
+          : '';
+      }
+
+      if (subType && activeProvider !== 'ninemobile') {
+        cloneForDashboard
+          .querySelector('.plan-type-tag')
+          ?.remove();
+
         const tag = document.createElement('span');
         tag.className = 'plan-type-tag';
-        tag.textContent = subType.charAt(0).toUpperCase() + subType.slice(1);
+        tag.textContent =
+          subType.charAt(0).toUpperCase() + subType.slice(1);
+
         cloneForDashboard.appendChild(tag);
       }
-        plansRow.insertBefore(cloneForDashboard, plansRow.firstChild);
-        const allDashPlans = Array.from(plansRow.querySelectorAll('.plan-box'));
-        if (allDashPlans.length > 2) {
-          plansRow.removeChild(allDashPlans[2]);
-        }
-        cloneForDashboard.addEventListener('click', handlePlanClick);
-        console.log('[DEBUG] handlePlanClick: Cloned modal plan to dashboard, ID:', id);
-      } else {
-        dashPlans[0].classList.add('selected', activeProvider);
-        console.log('[DEBUG] handlePlanClick: Selected first dashboard plan, no cloning needed, ID:', id);
+
+      plansRow.insertBefore(cloneForDashboard, plansRow.firstChild);
+
+      // keep only 2 dashboard plans
+      const allDashPlans = Array.from(
+        plansRow.querySelectorAll('.plan-box')
+      );
+      if (allDashPlans.length > 2) {
+        plansRow.removeChild(allDashPlans[2]);
       }
-      saveUserState();
-      saveCurrentAppState();
-      ModalManager.closeModal('allPlansModal'); 
+
+      cloneForDashboard.addEventListener('click', handlePlanClick);
+
+      console.log('[DEBUG] Modal → Dashboard clone:', planKey);
     } else {
-      selectPlanById(id);
+      dashPlans[0].classList.add('selected', activeProvider);
+      console.log('[DEBUG] First dashboard plan reused:', planKey);
     }
+
+    saveUserState();
+    saveCurrentAppState();
+    ModalManager.closeModal('allPlansModal');
+    return;
   }
+
+  /* -------------------------------------------------- */
+  /* Dashboard click                                   */
+  /* -------------------------------------------------- */
+  selectPlanById(id);
+}
+
+
 window.handlePlanClick = window.handlePlanClick || handlePlanClick;
 
 
