@@ -4598,7 +4598,7 @@ async function renderDashboardPlans(provider) {
 }
 
 // ==========================================
-// REWRITTEN: renderModalPlans (FIXED - adds data-provider)
+// FIX 2: GLO GIFTING section fix - renderModalPlans
 // ==========================================
 async function renderModalPlans(provider) {
   console.log('%c[RENDER MODAL] Starting for:', 'color:purple;font-weight:bold', provider);
@@ -4614,50 +4614,114 @@ async function renderModalPlans(provider) {
     p.provider?.toLowerCase() === (provider === 'ninemobile' ? '9mobile' : provider.toLowerCase())
   );
 
+  // 9MOBILE - Show all plans in first section
   if (provider === 'ninemobile') {
     if (awoofSection) {
       fillPlanSection(awoofSection, provider, 'standard', providerPlans,
         '9MOBILE PLANS', svgShapes.ninemobile
       );
+      awoofSection.style.display = 'block';
     }
-    if (giftingSection) giftingSection.style.display = 'none';
+    if (giftingSection) {
+      giftingSection.style.display = 'none';
+    }
     console.log('[RENDER MODAL] 9mobile sections rendered');
     return;
   }
 
+  // Filter plans by category
   const awoofPlans = providerPlans.filter(p => p.category === 'AWOOF');
-  const cgOrGiftingPlans = providerPlans.filter(p => 
-    p.category === 'CG' || p.category === 'GIFTING'
-  );
+  const cgPlans = providerPlans.filter(p => p.category === 'CG');
+  const giftingPlans = providerPlans.filter(p => p.category === 'GIFTING');
 
-  // First section: AWOOF only
-  if (awoofSection) {
-    if (awoofPlans.length > 0) {
-      fillPlanSection(awoofSection, provider, 'awoof', awoofPlans,
-        `${provider.toUpperCase()} AWOOF`, svgShapes[provider]
-      );
-      awoofSection.style.display = 'block';
-      console.log(`[RENDER MODAL] AWOOF section: ${awoofPlans.length} plans`);
-    } else {
-      awoofSection.style.display = 'none';
+  console.log(`[RENDER MODAL] ${provider.toUpperCase()} categories:`, {
+    awoof: awoofPlans.length,
+    cg: cgPlans.length,
+    gifting: giftingPlans.length
+  });
+
+  // MTN: AWOOF + GIFTING
+  if (provider === 'mtn') {
+    if (awoofSection) {
+      if (awoofPlans.length > 0) {
+        fillPlanSection(awoofSection, provider, 'awoof', awoofPlans,
+          'MTN AWOOF', svgShapes[provider]
+        );
+        awoofSection.style.display = 'block';
+      } else {
+        awoofSection.style.display = 'none';
+      }
+    }
+
+    if (giftingSection) {
+      if (giftingPlans.length > 0) {
+        fillPlanSection(giftingSection, provider, 'gifting', giftingPlans,
+          'MTN GIFTING', svgShapes[provider]
+        );
+        giftingSection.style.display = 'block';
+      } else {
+        giftingSection.style.display = 'none';
+      }
     }
   }
+  // AIRTEL: AWOOF + CG
+  else if (provider === 'airtel') {
+    if (awoofSection) {
+      if (awoofPlans.length > 0) {
+        fillPlanSection(awoofSection, provider, 'awoof', awoofPlans,
+          'AIRTEL AWOOF', svgShapes[provider]
+        );
+        awoofSection.style.display = 'block';
+      } else {
+        awoofSection.style.display = 'none';
+      }
+    }
 
-  // Second section: CG or GIFTING
-  if (giftingSection) {
-    if (cgOrGiftingPlans.length > 0) {
-      const title = provider === 'airtel' || provider === 'glo' ? 'CG' : 'GIFTING';
-      fillPlanSection(giftingSection, provider, 'cg-gifting', cgOrGiftingPlans,
-        `${provider.toUpperCase()} ${title}`, svgShapes[provider]
-      );
-      giftingSection.style.display = 'block';
-      console.log(`[RENDER MODAL] ${title} section: ${cgOrGiftingPlans.length} plans`);
-    } else {
-      giftingSection.style.display = 'none';
+    if (giftingSection) {
+      if (cgPlans.length > 0) {
+        fillPlanSection(giftingSection, provider, 'cg', cgPlans,
+          'AIRTEL CG', svgShapes[provider]
+        );
+        giftingSection.style.display = 'block';
+      } else {
+        giftingSection.style.display = 'none';
+      }
+    }
+  }
+  // GLO: CG + GIFTING (FIXED!)
+  else if (provider === 'glo') {
+    if (awoofSection) {
+      if (cgPlans.length > 0) {
+        fillPlanSection(awoofSection, provider, 'cg', cgPlans,
+          'GLO CG', svgShapes[provider]
+        );
+        awoofSection.style.display = 'block';
+      } else if (awoofPlans.length > 0) {
+        // Fallback to AWOOF if no CG
+        fillPlanSection(awoofSection, provider, 'awoof', awoofPlans,
+          'GLO AWOOF', svgShapes[provider]
+        );
+        awoofSection.style.display = 'block';
+      } else {
+        awoofSection.style.display = 'none';
+      }
+    }
+
+    // GLO GIFTING in second section
+    if (giftingSection) {
+      if (giftingPlans.length > 0) {
+        fillPlanSection(giftingSection, provider, 'gifting', giftingPlans,
+          'GLO GIFTING', svgShapes[provider]
+        );
+        giftingSection.style.display = 'block';
+        console.log('[RENDER MODAL] GLO GIFTING section rendered with', giftingPlans.length, 'plans');
+      } else {
+        giftingSection.style.display = 'none';
+      }
     }
   }
   
-  console.log('%c[RENDER MODAL] Complete - all modal plans have data-provider', 'color:lime;font-weight:bold');
+  console.log('%c[RENDER MODAL] Complete - sections configured for', 'color:lime;font-weight:bold', provider);
 }
 
 // ==========================================
@@ -4864,20 +4928,32 @@ function selectPlanById(id) {
 
 window.selectPlanById = window.selectPlanById || selectPlanById;
 
-/* ---------- ATTACH PLAN LISTENERS ---------- */
-
+// ==========================================
+// FIX 3: Ensure mobile touch events work
+// ==========================================
 function attachPlanListeners(root = document) {
   root.querySelectorAll('.plan-box').forEach(p => {
+    // Remove all event listeners
     p.removeEventListener('click', handlePlanClick);
+    p.removeEventListener('touchend', handlePlanClick);
+    
+    // Add both click and touchend for mobile
     p.addEventListener('click', handlePlanClick);
+    p.addEventListener('touchend', handlePlanClick, { passive: true });
   });
 
-  console.log('[DEBUG] attachPlanListeners attached');
+  console.log('[DEBUG] attachPlanListeners attached (mobile-friendly)');
 }
+
+console.log('%c✅ MOBILE & GLO FIXES APPLIED', 'color:lime;font-size:16px;font-weight:bold');
+console.log('✓ Mobile touch events enabled');
+console.log('✓ GLO GIFTING section fixed');
+console.log('✓ Removed e.stopPropagation() that blocked mobile');
 window.attachPlanListeners = window.attachPlanListeners || attachPlanListeners;
 
-/* ---------- PLAN CLICK HANDLER ---------- */
-
+// ==========================================
+// FIX 1: Mobile-friendly handlePlanClick
+// ==========================================
 function handlePlanClick(e) {
   const plan = e.currentTarget;
   const id = plan.dataset.id || plan.getAttribute('data-id');
@@ -4909,12 +4985,11 @@ function handlePlanClick(e) {
   const dashPlan = plansRow.querySelector(`.plan-box[data-id="${id}"]`);
   const isDashSelected = dashPlan?.classList.contains('selected');
 
-  // Reselect same plan from modal - just close
+  // Reselect same plan from modal - just close (MOBILE FIX: Don't stop propagation)
   if (isModalClick && isDashSelected) {
-    e.stopPropagation();
     ModalManager.closeModal('allPlansModal');
     console.log('[CLICK] Reselected — modal closed');
-    return;
+    return; // Return early without e.stopPropagation()
   }
 
   // Save selection
@@ -4990,6 +5065,7 @@ function handlePlanClick(e) {
     selectPlanById(id);
   }
 }
+
 window.handlePlanClick = window.handlePlanClick || handlePlanClick;
 
 /* ---------- PROVIDER SWITCH HOOK ---------- */
