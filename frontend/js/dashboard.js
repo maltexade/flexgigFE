@@ -4969,12 +4969,17 @@ window.selectPlanById = window.selectPlanById || selectPlanById;
         } else if (activeProvider === 'glo') {
           subType = id.includes('cg') ? 'cg' : id.includes('gifting') ? 'gifting' : '';
         }
+
         if (subType && activeProvider !== 'ninemobile') {
-          const tag = document.createElement('span');
-          tag.className = 'plan-type-tag';
-          tag.textContent = subType.charAt(0).toUpperCase() + subType.slice(1);
-          cloneForDashboard.appendChild(tag);
-        }
+        // Remove existing tag if any
+        const existingTag = cloneForDashboard.querySelector('.plan-type-tag');
+        if (existingTag) existingTag.remove();
+        
+        const tag = document.createElement('span');
+        tag.className = 'plan-type-tag';
+        tag.textContent = subType.charAt(0).toUpperCase() + subType.slice(1);
+        cloneForDashboard.appendChild(tag);
+      }
         plansRow.insertBefore(cloneForDashboard, plansRow.firstChild);
         const allDashPlans = Array.from(plansRow.querySelectorAll('.plan-box'));
         if (allDashPlans.length > 2) {
