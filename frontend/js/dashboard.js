@@ -4717,8 +4717,6 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 // helper: fill a modal section
 // --- FILL PLAN SECTION (FIXED) ---
-
-
 const seeAllBtn = document.querySelector('.see-all-plans');
 if (seeAllBtn) {
   seeAllBtn.addEventListener('click', () => {
@@ -4992,7 +4990,6 @@ function handlePlanClick(e) {
     selectPlanById(id);
   }
 }
-window.handlePlanClick = handlePlanClick;
 window.handlePlanClick = window.handlePlanClick || handlePlanClick;
 
 /* ---------- PROVIDER SWITCH HOOK ---------- */
