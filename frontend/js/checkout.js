@@ -252,9 +252,14 @@ function openCheckoutModal(data) {
       dataAmount: data.dataAmount || 'N/A',
       validity: data.validity || '30 Days',
       price: parseFloat(data.price) || 0,
-      number: data.number,
+
+      // 👇 BOTH versions stored
+      number: data.number, // formatted (UI)
+      rawNumber: data.rawNumber || data.number.replace(/\s/g, ''), // clean (API)
+
       planType: data.planType || 'GIFTING'
     };
+
     console.log('[checkout] Using explicitly passed data (recommended)');
   } else {
     // FALLBACK: Old fragile gathering (keep for legacy, but log warning)
@@ -270,7 +275,6 @@ function openCheckoutModal(data) {
 
   // Store and populate modal
   checkoutData = checkoutInfo;
-  // ... rest of your modal code
 
 
   // Get modal and elements
@@ -461,160 +465,117 @@ async function triggerCheckoutAuth() {
 }
 
 /**
- * Processes the payment
- * @returns {Promise<Object>} Payment result
+ * Processes the real payment via backend
  */
 async function processPayment() {
-  console.log('[checkout] Processing payment');
-
   if (!checkoutData) {
     throw new Error('No checkout data available');
   }
 
-  // Use consistent balance source
-  const currentBalance = getAvailableBalance();
-  const purchasePrice = parseFloat(checkoutData.price) || 0;
-  
-  if (currentBalance < purchasePrice) {
-    throw new Error('Insufficient balance');
-  }
-
-  // Prepare payload
   const payload = {
-    provider: checkoutData.provider,
-    planId: checkoutData.planId,
-    planName: checkoutData.planName,
-    dataAmount: checkoutData.dataAmount,
-    validity: checkoutData.validity,
-    planType: checkoutData.planType,
-    number: checkoutData.number,
-    price: checkoutData.price,
-    timestamp: Date.now()
+    plan_id: checkoutData.planId,
+    phone: checkoutData.rawNumber || checkoutData.number.replace(/\s/g, ''), // raw 11-digit
+    provider: checkoutData.provider.toLowerCase(), // mtn, airtel, glo, 9mobile
   };
 
-  // Call backend or simulate
-  if (typeof window.processCheckoutPayment === 'function') {
-    console.log('[checkout] Using backend payment processor');
-    return await window.processCheckoutPayment(payload);
-  } else {
-    // Simulate payment
-    console.log('[checkout] Simulating payment:', payload);
-    await new Promise(r => setTimeout(r, 1500));
-    
-    // Update balance in state and DOM if possible
-    const newBalance = currentBalance - purchasePrice;
-    const state = getUserState();
-    state.balance = newBalance;
-    try {
-      localStorage.setItem('userState', JSON.stringify(state));
-    } catch (e) {
-      console.error('[checkout] Error saving state:', e);
-    }
+  console.log('[checkout] Sending to backend:', payload);
 
-    // Update DOM balance
-    const balanceReal = document.querySelector('.balance-real');
-    if (balanceReal) {
-      balanceReal.textContent = `₦${newBalance.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-    }
-
-    // Add to transaction history
-    const transaction = {
-      id: 'TXN-' + Date.now(),
-      type: 'data',
-      provider: checkoutData.provider,
-      amount: checkoutData.price,
-      number: checkoutData.number,
-      plan: `${checkoutData.dataAmount} / ${checkoutData.validity}`,
-      status: 'completed',
-      date: new Date().toISOString()
-    };
-
-    try {
-      const transactions = JSON.parse(localStorage.getItem('transactions') || '[]');
-      transactions.unshift(transaction);
-      localStorage.setItem('transactions', JSON.stringify(transactions));
-
-      // Update recent purchases
-      const recentPurchases = JSON.parse(localStorage.getItem('recentPurchases') || '[]');
-      recentPurchases.unshift({
-        provider: checkoutData.provider,
-        plan: `${checkoutData.dataAmount} / ${checkoutData.validity}`,
-        number: checkoutData.number,
-        price: checkoutData.price,
-        date: Date.now()
-      });
-      if (recentPurchases.length > 5) recentPurchases.pop();
-      localStorage.setItem('recentPurchases', JSON.stringify(recentPurchases));
-    } catch (e) {
-      console.error('[checkout] Error saving transaction:', e);
-    }
-
-    return { ok: true, txId: transaction.id };
+  const token = localStorage.getItem('token'); // or however you store JWT
+  if (!token) {
+    throw new Error('Authentication token missing');
   }
+
+  const response = await fetch('https://api.flexgig.com.ng/api/purchase-data', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload),
+    credentials: 'include',
+  });
+
+  const result = await response.json();
+
+  if (!response.ok) {
+    // Handle known errors
+    if (result.error === 'insufficient_balance') {
+      throw new Error(`Insufficient balance: ₦${result.current_balance?.toLocaleString() || '0'}`);
+    }
+    if (result.error === 'delivery_failed') {
+      // Money was refunded
+      throw new Error('Data delivery failed. Amount has been refunded.');
+    }
+    throw new Error(result.error || result.message || 'Payment failed');
+  }
+
+  // SUCCESS
+  console.log('[checkout] Payment success:', result);
+
+  // Update balance in UI (backend already updated DB)
+  window.updateAllBalances?.(result.new_balance);
+
+  // Optional: refresh transactions
+  if (typeof renderTransactions === 'function') {
+    setTimeout(renderTransactions, 500);
+  }
+
+  return { ok: true, new_balance: result.new_balance };
 }
 
 /**
- * Pay button click handler
+ * Pay button click handler - UPDATED FOR REAL BACKEND
  */
 async function onPayClicked(ev) {
   console.log('[checkout] Pay button clicked');
-  
+
   const payBtn = document.getElementById('payBtn');
   if (!payBtn || payBtn.disabled) return;
 
-  const origText = payBtn.textContent;
+  const originalText = payBtn.textContent;
   payBtn.disabled = true;
-  payBtn.classList.remove('active');
   payBtn.textContent = 'Processing...';
 
   try {
-    // Step 1: Authentication
-    const authOk = await triggerCheckoutAuth();
-    
-    if (!authOk) {
-      payBtn.disabled = false;
-      payBtn.classList.add('active');
-      payBtn.textContent = origText;
-      return;
+    // Step 1: Require authentication (biometric or PIN)
+    const authSuccess = await triggerCheckoutAuth();
+    if (!authSuccess) {
+      throw new Error('Authentication required');
     }
 
-    // Step 2: Process payment
+    // Step 2: Call real backend
     const result = await processPayment();
 
     if (result && result.ok) {
-      safeNotify('Payment successful! ✓', 'success');
-      
-      // Refresh dashboard if function exists
-      if (typeof window.refreshDashboard === 'function') {
-        setTimeout(() => {
-          try {
-            window.refreshDashboard();
-          } catch (e) {
-            console.warn('[checkout] Error refreshing dashboard:', e);
-          }
-        }, 300);
-      }
-      
-      // Dispatch event for other parts of app
-      try {
-        window.dispatchEvent(new CustomEvent('paymentSuccess', { detail: result }));
-      } catch (e) {
-        console.warn('[checkout] Error dispatching event:', e);
-      }
-      
-      // Close modal
+      safeNotify('Data purchased successfully! ✓', 'success');
+
+      // Optional: play success sound, confetti, etc.
+
+      // Close modal after short delay
       setTimeout(() => closeCheckoutModal(), 800);
-    } else {
-      throw new Error(result?.message || 'Payment failed');
     }
 
   } catch (err) {
-    console.error('[checkout] Payment error:', err);
-    safeNotify(err.message || 'Payment failed', 'error');
-    
+    console.error('[checkout] Payment failed:', err);
+
+    let message = err.message || 'Purchase failed. Please try again.';
+
+    // Special handling for known cases
+    if (err.message.includes('Insufficient')) {
+      message = err.message;
+    } else if (err.message.includes('refunded')) {
+      message = err.message;
+      // Optionally refresh balance to show refund
+      if (typeof window.refreshDashboard === 'function') {
+        window.refreshDashboard();
+      }
+    }
+
+    safeNotify(message, 'error');
+  } finally {
+    // Always re-enable button
     payBtn.disabled = false;
-    payBtn.classList.add('active');
-    payBtn.textContent = origText;
+    payBtn.textContent = originalText;
   }
 }
 
