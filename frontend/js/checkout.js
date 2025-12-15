@@ -318,6 +318,7 @@ function resetCheckoutUI() {
 }
 
 // Add local transaction (same as your old mock)
+// Add local transaction (safe version — no ReferenceError)
 function addLocalTransaction(info) {
   let subType = 'GIFTING';
   if (info.provider.toLowerCase() === 'mtn' && info.planId.toLowerCase().includes('awoof')) subType = 'AWOOF';
@@ -337,12 +338,37 @@ function addLocalTransaction(info) {
     status: 'success'
   };
 
-  if (typeof transactions !== 'undefined') transactions.unshift(transaction);
-  if (typeof recentTransactions !== 'undefined') recentTransactions.unshift(transaction);
-  localStorage.setItem('recentTransactions', JSON.stringify(recentTransactions.slice(0, 50)));
+  // Safely get or create recentTransactions from localStorage
+  let recentTransactions = [];
+  try {
+    const stored = localStorage.getItem('recentTransactions');
+    if (stored) recentTransactions = JSON.parse(stored);
+  } catch (e) {
+    console.warn('[checkout] Failed to parse recentTransactions from storage', e);
+  }
 
-  if (typeof renderTransactions === 'function') renderTransactions();
-  if (typeof renderRecentTransactions === 'function') renderRecentTransactions();
+  // Add new transaction
+  recentTransactions.unshift(transaction);
+
+  // Keep only last 50
+  if (recentTransactions.length > 50) recentTransactions = recentTransactions.slice(0, 50);
+
+  // Save back
+  try {
+    localStorage.setItem('recentTransactions', JSON.stringify(recentTransactions));
+  } catch (e) {
+    console.warn('[checkout] Failed to save recentTransactions', e);
+  }
+
+  // Trigger UI update if functions exist
+  if (typeof window.renderRecentTransactions === 'function') {
+    window.renderRecentTransactions();
+  }
+  if (typeof window.renderTransactions === 'function') {
+    window.renderTransactions();
+  }
+
+  console.log('[checkout] Local transaction added:', transaction);
 }
 
 // ==================== AUTHENTICATION WITH DEDICATED PIN MODAL ====================
