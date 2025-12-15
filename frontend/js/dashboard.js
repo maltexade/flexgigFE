@@ -5832,13 +5832,75 @@ updateContinueState();
 phoneInput.maxLength = 13;  // 11 digits + 2 spaces in formatted value
 
   // --- CONTINUE BUTTON CLICK ---
-  continueBtn.addEventListener('click', () => {
-    if (!continueBtn.disabled) {
-      window.openCheckoutModal();
-      saveCurrentAppState()
-      console.log('[DEBUG] continueBtn: Opening checkout modal');
-    }
-  });
+  continueBtn.addEventListener('click', async () => {
+  if (continueBtn.disabled) return;
+
+  console.log('%c[CHECKOUT] Continue clicked — preparing data', 'color:cyan;font-weight:bold');
+
+  // 1. Get active provider
+  const activeProviderClass = providerClasses.find(cls => slider.classList.contains(cls));
+  if (!activeProviderClass) {
+    safeNotify('Please select a network provider', 'error');
+    return;
+  }
+
+  const providerDisplay = activeProviderClass === 'ninemobile' ? '9MOBILE' : activeProviderClass.toUpperCase();
+
+  // 2. Get selected plan
+  const selectedPlanBox = plansRow.querySelector('.plan-box.selected');
+  if (!selectedPlanBox) {
+    safeNotify('Please select a data plan', 'error');
+    return;
+  }
+
+  const planId = selectedPlanBox.dataset.id;
+  if (!planId) {
+    safeNotify('Invalid plan selected', 'error');
+    return;
+  }
+
+  // 3. Get phone number
+  const rawPhone = normalizePhone(phoneInput.value);
+  if (!rawPhone || rawPhone.length !== 11) {
+    safeNotify('Please enter a valid phone number', 'error');
+    return;
+  }
+
+  const formattedPhone = formatNigeriaNumber(rawPhone).value;
+
+  // 4. Find full plan details from cache
+  const allPlans = await loadAllPlansOnce();
+  const fullPlan = allPlans.find(p => 
+    p.plan_id === planId && 
+    p.provider?.toLowerCase() === (activeProviderClass === 'ninemobile' ? '9mobile' : activeProviderClass)
+  );
+
+  if (!fullPlan) {
+    console.error('[CHECKOUT] Plan not found in cache:', planId, activeProviderClass);
+    safeNotify('Plan details not available. Please try again.', 'error');
+    return;
+  }
+
+  // 5. Build complete checkout data
+  const checkoutData = {
+    provider: providerDisplay,
+    planId: fullPlan.plan_id,
+    planName: `${fullPlan.data || fullPlan.data_amount} ${fullPlan.category || ''}`.trim(),
+    dataAmount: fullPlan.data || fullPlan.data_amount || 'N/A',
+    validity: fullPlan.validity || fullPlan.duration || '30 Days',
+    price: Number(fullPlan.price),
+    number: formattedPhone,
+    rawNumber: rawPhone,
+    planType: fullPlan.category || 'GIFTING'
+  };
+
+  console.log('%c[CHECKOUT] Opening modal with FULL data', 'color:lime;font-weight:bold', checkoutData);
+
+
+
+  // 7. Open modal with data → most reliable path
+  window.openCheckoutModal(checkoutData);
+});
 
   // --- MODAL EVENT LISTENERS ---
  

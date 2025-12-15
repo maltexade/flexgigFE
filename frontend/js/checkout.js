@@ -241,21 +241,37 @@ function getAvailableBalance() {
 function openCheckoutModal(data) {
   console.log('[checkout] Opening modal with data:', data);
   
-  // If no data provided, try to gather from DOM
-  if (!data || typeof data !== 'object') {
-    console.log('[checkout] No data provided, gathering from DOM...');
-    data = gatherCheckoutData();
+  let checkoutInfo;
+
+  // PRIORITY 1: Use explicitly passed data (new reliable path)
+  if (data && data.provider && data.planId && data.price && data.number) {
+    checkoutInfo = {
+      provider: data.provider.toUpperCase(),
+      planId: data.planId,
+      planName: data.planName || `${data.dataAmount} Plan`,
+      dataAmount: data.dataAmount || 'N/A',
+      validity: data.validity || '30 Days',
+      price: parseFloat(data.price) || 0,
+      number: data.number,
+      planType: data.planType || 'GIFTING'
+    };
+    console.log('[checkout] Using explicitly passed data (recommended)');
+  } else {
+    // FALLBACK: Old fragile gathering (keep for legacy, but log warning)
+    console.warn('[checkout] No data passed — falling back to DOM scraping');
+    checkoutInfo = gatherCheckoutData();
   }
-  
-  // Validate required data
-  if (!data || !data.provider || !data.planId || !data.price || !data.number) {
-    console.error('[checkout] Invalid or missing checkout data:', data);
-    safeNotify('Missing checkout information. Please select a plan and enter phone number.', 'error');
+
+  if (!checkoutInfo || !checkoutInfo.provider || !checkoutInfo.price || !checkoutInfo.number) {
+    console.error('[checkout] Invalid checkout data:', checkoutInfo);
+    safeNotify('Missing checkout information. Please try again.', 'error');
     return;
   }
 
-  // Store checkout data
-  checkoutData = data;
+  // Store and populate modal
+  checkoutData = checkoutInfo;
+  // ... rest of your modal code
+
 
   // Get modal and elements
   const modal = document.getElementById('checkoutModal');
