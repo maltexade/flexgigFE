@@ -330,7 +330,7 @@ async function triggerCheckoutAuthWithDedicatedModal() {
   });
 }
 
-// ==================== REAL PAYMENT PROCESSING ====================
+// ==================== REAL PAYMENT PROCESSING (WITH LOADER) ====================
 async function processPayment() {
   if (!checkoutData) {
     throw new Error('No checkout data available');
@@ -349,37 +349,44 @@ async function processPayment() {
     throw new Error('Authentication token missing');
   }
 
-  const response = await fetch('https://api.flexgig.com.ng/api/purchase-data', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`,
-    },
-    body: JSON.stringify(payload),
-    credentials: 'include',
+  // Wrap the entire backend call in withLoader
+  return await withLoader(async () => {
+    const response = await fetch('https://api.flexgig.com.ng/api/purchase-data', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+      credentials: 'include',
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      if (result.error === 'insufficient_balance') {
+        throw new Error(`Insufficient balance: ₦${result.current_balance?.toLocaleString() || '0'}`);
+      }
+      if (result.error === 'delivery_failed') {
+        throw new Error('Data delivery failed. Amount has been refunded.');
+      }
+      throw new Error(result.error || result.message || 'Payment failed');
+    }
+
+    console.log('[checkout] Payment success:', result);
+
+    // Optional: Update balance if backend returns new_balance
+    if (result.new_balance !== undefined) {
+      window.updateAllBalances?.(result.new_balance);
+    }
+
+    // Refresh transactions if needed
+    if (typeof renderTransactions === 'function') {
+      setTimeout(renderTransactions, 500);
+    }
+
+    return { ok: true, new_balance: result.new_balance };
   });
-
-  const result = await response.json();
-
-  if (!response.ok) {
-    if (result.error === 'insufficient_balance') {
-      throw new Error(`Insufficient balance: ₦${result.current_balance?.toLocaleString() || '0'}`);
-    }
-    if (result.error === 'delivery_failed') {
-      throw new Error('Data delivery failed. Amount has been refunded.');
-    }
-    throw new Error(result.error || result.message || 'Payment failed');
-  }
-
-  console.log('[checkout] Payment success:', result);
-
-  window.updateAllBalances?.(result.new_balance);
-
-  if (typeof renderTransactions === 'function') {
-    setTimeout(renderTransactions, 500);
-  }
-
-  return { ok: true, new_balance: result.new_balance };
 }
 
 // ==================== MAIN PAY BUTTON HANDLER ====================
@@ -448,10 +455,16 @@ async function onPayClicked(ev) {
   }
 
   function updateInputs() {
-    inputs.forEach((input, i) => {
-      input.value = currentPin[i] ? '•' : '';
-    });
-  }
+  inputs.forEach((input, i) => {
+    if (currentPin[i]) {
+      input.classList.add('filled');
+      input.value = '';  // Keep empty — we hide text completely
+    } else {
+      input.classList.remove('filled');
+      input.value = '';
+    }
+  });
+}
 
   function resetPin() {
     currentPin = '';
@@ -490,6 +503,33 @@ async function onPayClicked(ev) {
       updateInputs();
     });
   }
+    // === LAPTOP / PHYSICAL KEYBOARD SUPPORT ===
+  document.addEventListener('keydown', (e) => {
+    if (modal.classList.contains('hidden')) return; // Only when modal is open
+
+    // Allow digits 0-9
+    if (/^[0-9]$/.test(e.key)) {
+      e.preventDefault(); // Prevent default input behavior
+      if (currentPin.length < 4) {
+        currentPin += e.key;
+        updateInputs();
+        if (currentPin.length === 4) {
+          setTimeout(() => verifyPin(currentPin), 300);
+        }
+      }
+    }
+    // Backspace to delete last digit
+    else if (e.key === 'Backspace') {
+      e.preventDefault();
+      currentPin = currentPin.slice(0, -1);
+      updateInputs();
+    }
+    // Escape to close modal (cancel)
+    else if (e.key === 'Escape') {
+      hideCheckoutPinModal();
+      if (window._checkoutPinResolve) window._checkoutPinResolve(false);
+    }
+  });
 
   // Biometric
   if (biometricBtn) {

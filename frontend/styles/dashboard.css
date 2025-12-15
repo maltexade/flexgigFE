@@ -5037,6 +5037,23 @@ p:has(.balance-real, .balance-masked) {
   caret-color: transparent;  /* no blinking cursor */
 }
 
+.checkout-pin-inputs input.checkout-pin-digit {
+  text-align: center;
+  font-size: 0;                          /* completely hide any text or dot */
+  color: transparent;                    /* invisible text */
+  caret-color: transparent;              /* no blinking cursor */
+  -webkit-appearance: none;
+  appearance: none;
+  outline: none;
+}
+
+
+/* Filled state — solid yellow like your old one */
+.checkout-pin-inputs input.checkout-pin-digit.filled {
+  background: rgb(255, 227, 12);         /* bright yellow fill */
+  border-color: rgb(255, 227, 12);
+}
+
 .checkout-forgot-pin {
   text-align: center;
   margin-bottom: 24px;
