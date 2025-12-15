@@ -588,7 +588,7 @@ function inGraceWindow() {
 
 // === FRESH PLAN FETCH ON LOAD (PLACE ABOVE onDashboardLoad) ===
 (function ensureFreshPlansOnLoad() {
-  const CACHE_KEY = 'cached_data_plans_v11'; // Match your current version
+  const CACHE_KEY = 'cached_data_plans_v12'; // Match your current version
 
   async function fetchAndCacheFreshPlans() {
     try {
@@ -4550,7 +4550,7 @@ let __allPlansCache = [];
 let __plansLoaded = false;
 
 async function loadAllPlansOnce() {
-  const CACHE_KEY = 'cached_data_plans_v10';
+  const CACHE_KEY = 'cached_data_plans_v12';
 
   // 1. ALWAYS check localStorage first — this is the source of truth now
   try {
