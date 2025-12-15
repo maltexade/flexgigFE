@@ -4935,6 +4935,8 @@ if (seeAllBtn) {
   }
   window.logPlanIDs = window.logPlanIDs || logPlanIDs;
 
+  // Track last selected plan per provider
+const selectedPlanByProvider = {};
 
 function selectPlanById(id) {
   const activeProvider = providerClasses.find(cls => slider.classList.contains(cls));
