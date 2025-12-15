@@ -8,7 +8,7 @@ console.log('[checkout] Module loaded 🛒');
 'use strict';
 
 // ==================== STATE ====================
-let checkoutData = null;
+let checkoutData = null; // Stores current checkout information
 
 // ==================== PROVIDER SVG SHAPES ====================
 const svgShapes = {
@@ -24,7 +24,7 @@ function gatherCheckoutData() {
   try {
     const state = getUserState();
 
-    // === PROVIDER ===
+    // Provider (keep your existing logic)
     let selectedProvider = document.querySelector('.provider-box.selected');
     if (!selectedProvider) {
       const slider = document.querySelector('.slider');
@@ -47,7 +47,7 @@ function gatherCheckoutData() {
       return null;
     }
 
-    // === PHONE NUMBER ===
+    // Phone
     const phoneInput = document.getElementById('phone-input');
     const number = phoneInput?.value.trim() || '';
     if (!number || number.length < 10) {
@@ -55,7 +55,7 @@ function gatherCheckoutData() {
       return null;
     }
 
-    // === SELECTED PLAN (REAL DATA FROM data-plan-id) ===
+    // Plan — use real data-plan-id
     let selectedPlan = state.selectedPlan;
 
     if (!selectedPlan) {
@@ -71,7 +71,7 @@ function gatherCheckoutData() {
       }
     }
 
-    // Fallback to last saved real plan
+    // Fallback to last saved
     if (!selectedPlan || !selectedPlan.planId) {
       try {
         const saved = localStorage.getItem('lastSelectedPlan');
@@ -111,23 +111,56 @@ function gatherCheckoutData() {
   }
 }
 
-// ==================== UTILITIES ====================
+// ==================== DOM READY ====================
+function domReady(cb) {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', cb);
+  } else cb();
+}
+
+// ==================== UTILITY FUNCTIONS ====================
 const safeNotify = (msg, type = 'info') => {
-  if (typeof window.notify === 'function') window.notify(msg, type);
-  else console.log('[notify]', type, msg);
+  if (typeof window.notify === 'function') {
+    return window.notify(msg, type);
+  } else if (typeof notify === 'function') {
+    return notify(msg, type);
+  }
+  console.log('[notify]', type, msg);
 };
 
 const getUserState = () => {
   try {
-    return JSON.parse(localStorage.getItem('userState') || '{}');
+    const state = localStorage.getItem('userState');
+    return state ? JSON.parse(state) : {};
   } catch (e) {
+    console.error('[checkout] Error parsing userState:', e);
     return {};
   }
 };
 
+const hasPin = () => {
+  try {
+    const state = getUserState();
+    return !!(state.pin && state.pin.length === 4);
+  } catch (e) {
+    return false;
+  }
+};
+
+const isProfileComplete = () => {
+  try {
+    const state = getUserState();
+    return !!(state.fullName && state.username && state.phoneNumber);
+  } catch (e) {
+    return false;
+  }
+};
+
 function getAvailableBalance() {
-  const el = document.querySelector('.balance-real');
-  if (el) return parseFloat(el.textContent.replace(/[₦,\s]/g, '')) || 0;
+  const balanceReal = document.querySelector('.balance-real');
+  if (balanceReal && balanceReal.textContent) {
+    return parseFloat(balanceReal.textContent.replace(/[₦,\s]/g, '')) || 0;
+  }
   const state = getUserState();
   return parseFloat(state.balance) || 0;
 }
@@ -138,70 +171,153 @@ function saveSelectedPlan(plan) {
   localStorage.setItem('userState', JSON.stringify(state));
   localStorage.setItem('lastSelectedPlan', JSON.stringify(plan));
 }
+window.saveSelectedPlan = saveSelectedPlan;
 
-// ==================== MODAL FUNCTIONS ====================
-function openCheckoutModal(passedData) {
-  let info = passedData && passedData.planId ? passedData : gatherCheckoutData();
-  if (!info) return;
+// ==================== CHECKOUT MODAL FUNCTIONS ====================
+function openCheckoutModal(data) {
+  console.log('[checkout] Opening modal with data:', data);
+  
+  let checkoutInfo;
 
-  checkoutData = info;
-
-  const modal = document.getElementById('checkoutModal');
-  if (!modal) return;
-
-  // Populate modal
-  document.getElementById('checkout-price')?.textContent = `₦${info.price.toLocaleString('en-NG', { minimumFractionDigits: 2 })}`;
-
-  document.getElementById('checkout-service')?.textContent = 'Mobile Data';
-
-  const providerEl = document.getElementById('checkout-provider');
-  if (providerEl) {
-    const key = info.provider.toLowerCase() === '9mobile' ? 'ninemobile' : info.provider.toLowerCase();
-    providerEl.innerHTML = (svgShapes[key] || '') + ' ' + info.provider;
+  if (data && data.provider && data.planId && data.price && data.number) {
+    checkoutInfo = {
+      provider: data.provider.toUpperCase(),
+      planId: data.planId,
+      planName: data.planName || `${data.dataAmount} Plan`,
+      dataAmount: data.dataAmount || 'N/A',
+      validity: data.validity || '30 Days',
+      price: parseFloat(data.price) || 0,
+      number: data.number,
+      rawNumber: data.rawNumber || data.number.replace(/\s/g, ''),
+      planType: data.planType || 'GIFTING'
+    };
+    console.log('[checkout] Using explicitly passed data (recommended)');
+  } else {
+    console.warn('[checkout] No data passed — falling back to DOM scraping');
+    checkoutInfo = gatherCheckoutData();
   }
 
-  document.getElementById('checkout-phone')?.textContent = info.number;
-  document.getElementById('checkout-data')?.textContent = `${info.dataAmount} / ${info.validity}`;
+  if (!checkoutInfo || !checkoutInfo.provider || !checkoutInfo.price || !checkoutInfo.number) {
+    console.error('[checkout] Invalid checkout data:', checkoutInfo);
+    safeNotify('Missing checkout information. Please try again.', 'error');
+    return;
+  }
 
-  modal.querySelectorAll('.info-row:last-child .value').forEach(el => {
-    el.textContent = `₦${info.price.toLocaleString('en-NG', { minimumFractionDigits: 2 })}`;
-  });
+  checkoutData = checkoutInfo;
 
-  document.getElementById('checkout-balance')?.textContent = `₦${getAvailableBalance().toLocaleString('en-NG', { minimumFractionDigits: 2 })}`;
+  const modal = document.getElementById('checkoutModal');
+  const payBtn = document.getElementById('payBtn');
+  
+  if (!modal) {
+    console.error('[checkout] Modal not found');
+    safeNotify('Checkout modal not available', 'error');
+    return;
+  }
 
-  modal.style.display = 'flex';
-  modal.classList.add('active');
-  document.body.classList.add('modal-open');
-  history.pushState({ modal: 'checkout' }, '', location.href);
+  try {
+        const priceEl = document.getElementById('checkout-price');
+    if (priceEl) priceEl.textContent = `₦${checkoutInfo.price.toLocaleString('en-NG', { minimumFractionDigits: 2 })}`;
+
+    const serviceEl = document.getElementById('checkout-service');
+    if (serviceEl) serviceEl.textContent = 'Mobile Data';
+
+    const providerEl = document.getElementById('checkout-provider');
+    if (providerEl) {
+      let providerKey = checkoutInfo.provider.toLowerCase() === '9mobile' ? 'ninemobile' : checkoutInfo.provider.toLowerCase();
+      const svg = svgShapes[providerKey] || '';
+      providerEl.innerHTML = svg + ' ' + checkoutInfo.provider;
+    }
+
+    const phoneEl = document.getElementById('checkout-phone');
+    if (phoneEl) phoneEl.textContent = checkoutInfo.number;
+
+    const dataEl = document.getElementById('checkout-data');
+    if (dataEl) dataEl.textContent = `${checkoutInfo.dataAmount} / ${checkoutInfo.validity}`;
+
+    const amountEls = modal.querySelectorAll('.info-row:last-child .value');
+    amountEls.forEach(el => {
+      el.textContent = `₦${checkoutInfo.price.toLocaleString('en-NG', { minimumFractionDigits: 2 })}`;
+    });
+
+    const balance = getAvailableBalance();
+    const balanceEl = document.getElementById('checkout-balance');
+    if (balanceEl) balanceEl.textContent = `₦${balance.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+    if (payBtn) {
+      payBtn.disabled = false;
+      payBtn.classList.add('active');
+    }
+
+    modal.style.display = 'flex';
+    modal.classList.add('active');
+    modal.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('modal-open');
+    
+    history.pushState({ popup: true, modal: 'checkout' }, '', location.href);
+    
+    console.log('[checkout] Modal opened successfully');
+    
+  } catch (err) {
+    console.error('[checkout] Error populating modal:', err);
+    safeNotify('Failed to load checkout details', 'error');
+  }
 }
 
 function closeCheckoutModal() {
   const modal = document.getElementById('checkoutModal');
   if (!modal) return;
 
-  modal.classList.remove('active');
-  modal.style.display = 'none';
-  document.body.classList.remove('modal-open');
-  checkoutData = null;
+  try {
+    modal.classList.remove('active');
+    modal.style.display = 'none';
+    modal.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('modal-open');
+    
+    checkoutData = null;
 
-  if (history.state?.modal === 'checkout') history.back();
+    if (history.state && history.state.popup && history.state.modal === 'checkout') {
+      history.back();
+    }
+  } catch (err) {
+    console.error('[checkout] Error closing modal:', err);
+  }
 }
 
-// Clear UI after successful purchase
+// Reset UI after successful purchase (fixed version)
 function resetCheckoutUI() {
-  document.getElementById('phone-input')?.value = '';
-  document.querySelectorAll('.plan-box.selected').forEach(el => el.classList.remove('selected'));
-  document.querySelectorAll('.provider-box.selected').forEach(el => el.classList.remove('selected'));
-  document.querySelector('.provider-box.mtn')?.classList.add('selected'); // default to MTN
+  // Clear phone input
+  const phoneInput = document.getElementById('phone-input');
+  if (phoneInput) phoneInput.value = '';
 
-  // Clear saved plan
-  const state = getUserState();
-  delete state.selectedPlan;
-  localStorage.setItem('userState', JSON.stringify(state));
-  localStorage.removeItem('lastSelectedPlan');
+  // Remove 'selected' from all plan boxes
+  document.querySelectorAll('.plan-box.selected').forEach(el => {
+    if (el) el.classList.remove('selected');
+  });
+
+  // Remove 'selected' from all provider boxes
+  document.querySelectorAll('.provider-box.selected').forEach(el => {
+    if (el) el.classList.remove('selected');
+  });
+
+  // Re-select MTN as default provider
+  const mtnProvider = document.querySelector('.provider-box.mtn');
+  if (mtnProvider) mtnProvider.classList.add('selected');
+
+  // Clear selected plan from localStorage properly
+  try {
+    const rawState = localStorage.getItem('userState');
+    if (rawState) {
+      const state = JSON.parse(rawState);
+      delete state.selectedPlan;
+      localStorage.setItem('userState', JSON.stringify(state));
+    }
+    localStorage.removeItem('lastSelectedPlan');
+  } catch (err) {
+    console.warn('[checkout] Failed to clear selected plan from storage:', err);
+  }
 }
 
-// Add transaction locally (replicates your old mock behavior)
+// Add local transaction (same as your old mock)
 function addLocalTransaction(info) {
   let subType = 'GIFTING';
   if (info.provider.toLowerCase() === 'mtn' && info.planId.toLowerCase().includes('awoof')) subType = 'AWOOF';
@@ -221,7 +337,6 @@ function addLocalTransaction(info) {
     status: 'success'
   };
 
-  // Assuming these globals exist in dashboard.js
   if (typeof transactions !== 'undefined') transactions.unshift(transaction);
   if (typeof recentTransactions !== 'undefined') recentTransactions.unshift(transaction);
   localStorage.setItem('recentTransactions', JSON.stringify(recentTransactions.slice(0, 50)));
@@ -230,54 +345,79 @@ function addLocalTransaction(info) {
   if (typeof renderRecentTransactions === 'function') renderRecentTransactions();
 }
 
-// ==================== AUTH & PAYMENT ====================
+// ==================== AUTHENTICATION WITH DEDICATED PIN MODAL ====================
 async function triggerCheckoutAuthWithDedicatedModal() {
-  return new Promise(resolve => {
-    window._checkoutPinResolve = resolve;
+  return new Promise((resolve) => {
+    window._checkoutPinResolve = (success) => {
+      delete window._checkoutPinResolve;
+      resolve(success);
+    };
+
     if (typeof window.showCheckoutPinModal === 'function') {
       window.showCheckoutPinModal();
     } else {
+      console.error('[checkout] showCheckoutPinModal not available');
       resolve(false);
     }
   });
 }
 
+// ==================== REAL PAYMENT PROCESSING (WITH LOADER) ====================
 async function processPayment() {
-  if (!checkoutData) throw new Error('No checkout data');
+  if (!checkoutData) {
+    throw new Error('No checkout data available');
+  }
 
   const payload = {
     plan_id: checkoutData.planId,
-    phone: checkoutData.rawNumber,
-    provider: checkoutData.provider.toLowerCase()
+    phone: checkoutData.rawNumber || checkoutData.number.replace(/\s/g, ''),
+    provider: checkoutData.provider.toLowerCase(),
   };
 
+  console.log('[checkout] Sending to backend:', payload);
+
+  // No need to manually handle token - it's in HttpOnly cookie
   return await withLoader(async () => {
-    const res = await fetch('https://api.flexgig.com.ng/api/purchase-data', {
+    const response = await fetch('https://api.flexgig.com.ng/api/purchase-data', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        // Remove Authorization header completely
+      },
       body: JSON.stringify(payload),
-      credentials: 'include'
+      credentials: 'include',  // This sends the cookie automatically
     });
 
-    const result = await res.json();
+    const result = await response.json();
 
-    if (!res.ok) {
-      if (result.error === 'insufficient_balance') throw new Error(`Insufficient balance: ₦${result.current_balance || '0'}`);
-      if (result.error === 'delivery_failed') throw new Error('Data delivery failed. Amount refunded.');
-      throw new Error(result.message || 'Purchase failed');
+    if (!response.ok) {
+      if (result.error === 'insufficient_balance') {
+        throw new Error(`Insufficient balance: ₦${result.current_balance?.toLocaleString() || '0'}`);
+      }
+      if (result.error === 'delivery_failed') {
+        throw new Error('Data delivery failed. Amount has been refunded.');
+      }
+      throw new Error(result.error || result.message || 'Payment failed');
     }
+
+    console.log('[checkout] Payment success:', result);
 
     if (result.new_balance !== undefined) {
       window.updateAllBalances?.(result.new_balance);
     }
 
-    if (typeof renderTransactions === 'function') setTimeout(renderTransactions, 500);
+    if (typeof renderTransactions === 'function') {
+      setTimeout(renderTransactions, 500);
+    }
 
     return { ok: true, new_balance: result.new_balance };
   });
 }
 
-async function onPayClicked() {
+// ==================== MAIN PAY BUTTON HANDLER ====================
+async function onPayClicked(ev) {
+  console.log('[checkout] Pay button clicked');
+
   const payBtn = document.getElementById('payBtn');
   if (!payBtn || payBtn.disabled) return;
 
@@ -287,24 +427,28 @@ async function onPayClicked() {
 
   try {
     checkoutData = gatherCheckoutData();
-    if (!checkoutData) throw new Error('Invalid data');
+    if (!checkoutData) throw new Error('Invalid checkout data');
 
-    const authOk = await triggerCheckoutAuthWithDedicatedModal();
-    if (!authOk) {
-      safeNotify('Purchase cancelled', 'info');
-      return;
-    }
-
+    const authSuccess = await triggerCheckoutAuthWithDedicatedModal();
+if (!authSuccess) {
+  safeNotify('Purchase cancelled', 'info');
+  return;  // Just exit gracefully
+}
     const result = await processPayment();
-    if (result.ok) {
+
+        if (result && result.ok) {
       addLocalTransaction(checkoutData);
       resetCheckoutUI();
       safeNotify('Data purchased successfully! ✓', 'success');
-      setTimeout(closeCheckoutModal, 800);
+      setTimeout(() => closeCheckoutModal(), 800);
     }
   } catch (err) {
-    console.error('[checkout] Error:', err);
-    safeNotify(err.message || 'Purchase failed', 'error');
+    console.error('[checkout] Payment failed:', err);
+    let message = err.message || 'Purchase failed. Please try again.';
+    if (err.message?.includes('Insufficient')) message = err.message;
+    if (err.message?.includes('refunded')) message = err.message;
+
+    safeNotify(message, 'error');
   } finally {
     payBtn.disabled = false;
     payBtn.textContent = originalText;
@@ -340,16 +484,16 @@ async function onPayClicked() {
   }
 
   function updateInputs() {
-    inputs.forEach((input, i) => {
-      if (currentPin[i]) {
-        input.classList.add('filled');
-        input.value = '';  // Keep empty — we hide text completely
-      } else {
-        input.classList.remove('filled');
-        input.value = '';
-      }
-    });
-  }
+  inputs.forEach((input, i) => {
+    if (currentPin[i]) {
+      input.classList.add('filled');
+      input.value = '';  // Keep empty — we hide text completely
+    } else {
+      input.classList.remove('filled');
+      input.value = '';
+    }
+  });
+}
 
   function resetPin() {
     currentPin = '';
@@ -388,13 +532,13 @@ async function onPayClicked() {
       updateInputs();
     });
   }
-
-  // Keyboard support
+    // === LAPTOP / PHYSICAL KEYBOARD SUPPORT ===
   document.addEventListener('keydown', (e) => {
-    if (modal.classList.contains('hidden')) return;
+    if (modal.classList.contains('hidden')) return; // Only when modal is open
 
+    // Allow digits 0-9
     if (/^[0-9]$/.test(e.key)) {
-      e.preventDefault();
+      e.preventDefault(); // Prevent default input behavior
       if (currentPin.length < 4) {
         currentPin += e.key;
         updateInputs();
@@ -402,11 +546,15 @@ async function onPayClicked() {
           setTimeout(() => verifyPin(currentPin), 300);
         }
       }
-    } else if (e.key === 'Backspace') {
+    }
+    // Backspace to delete last digit
+    else if (e.key === 'Backspace') {
       e.preventDefault();
       currentPin = currentPin.slice(0, -1);
       updateInputs();
-    } else if (e.key === 'Escape') {
+    }
+    // Escape to close modal (cancel)
+    else if (e.key === 'Escape') {
       hideCheckoutPinModal();
       if (window._checkoutPinResolve) window._checkoutPinResolve(false);
     }
@@ -414,22 +562,23 @@ async function onPayClicked() {
 
   // Biometric
   if (biometricBtn) {
-    biometricBtn.addEventListener('click', async () => {
-      try {
-        const result = await (verifyBiometrics?.() || startAuthentication?.() || { success: false });
-        if (result && result.success) {
-          hideCheckoutPinModal();
-          if (window._checkoutPinResolve) {
-            window._checkoutPinResolve(true);
-          }
-        } else {
-          safeNotify('Biometric authentication failed', 'error');
+  biometricBtn.addEventListener('click', async () => {
+    try {
+      const result = await (verifyBiometrics?.() || startAuthentication?.() || { success: false });
+      if (result && result.success) {
+        hideCheckoutPinModal();
+        // Only resolve — do not call processPayment here
+        if (window._checkoutPinResolve) {
+          window._checkoutPinResolve(true);
         }
-      } catch (err) {
-        safeNotify('Biometric error', 'error');
+      } else {
+        safeNotify('Biometric authentication failed', 'error');
       }
-    });
-  }
+    } catch (err) {
+      safeNotify('Biometric error', 'error');
+    }
+  });
+}
 
   // Forgot PIN
   if (forgotLink) {
@@ -458,33 +607,38 @@ async function onPayClicked() {
 
   // PIN verification
   async function verifyPin(pin) {
-    return await withLoader(async () => {
-      try {
-        const res = await fetch('https://api.flexgig.com.ng/api/verify-pin', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          credentials: 'include',
-          body: JSON.stringify({ pin })
-        });
+  return await withLoader(async () => {
+    try {
+      const token = localStorage.getItem('token') || '';
+      const res = await fetch('https://api.flexgig.com.ng/api/verify-pin', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        credentials: 'include',
+        body: JSON.stringify({ pin })
+      });
 
-        if (res.ok) {
-          hideCheckoutPinModal();
-          if (window._checkoutPinResolve) {
-            window._checkoutPinResolve(true);
-          }
-        } else {
-          const data = await res.json().catch(() => ({}));
-          safeNotify(data.message || 'Invalid PIN. Please try again.', 'error');
-          resetPin();
+      if (res.ok) {
+        hideCheckoutPinModal();
+        // DO NOT call processPayment() here
+        // Just resolve success — the main flow will handle payment
+        if (window._checkoutPinResolve) {
+          window._checkoutPinResolve(true);
         }
-      } catch (err) {
-        safeNotify('PIN verification failed. Check your connection.', 'error');
+      } else {
+        const data = await res.json().catch(() => ({}));
+        safeNotify(data.message || 'Invalid PIN. Please try again.', 'error');
         resetPin();
+        // Do NOT resolve — let user try again
       }
-    });
-  }
+    } catch (err) {
+      safeNotify('PIN verification failed. Check your connection.', 'error');
+      resetPin();
+    }
+  });
+}
 
   window.showCheckoutPinModal = showCheckoutPinModal;
   window.hideCheckoutPinModal = hideCheckoutPinModal;
@@ -494,29 +648,44 @@ async function onPayClicked() {
 domReady(() => {
   console.log('[checkout] Initializing');
 
+  const modal = document.getElementById('checkoutModal');
+  if (!modal) {
+    console.warn('[checkout] Modal not found');
+    return;
+  }
+
   const payBtn = document.getElementById('payBtn');
   if (payBtn) {
+    payBtn.removeEventListener('click', onPayClicked);
     payBtn.addEventListener('click', onPayClicked);
   }
 
-  const closeBtns = document.querySelectorAll('#checkoutModal [data-close], #checkoutModal .close-btn');
-  closeBtns.forEach(btn => btn.addEventListener('click', closeCheckoutModal));
-
-  document.getElementById('checkoutModal')?.addEventListener('click', e => {
-    if (e.target.id === 'checkoutModal') closeCheckoutModal();
+  const closeBtns = modal.querySelectorAll('[data-close], .close-btn');
+  closeBtns.forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      closeCheckoutModal();
+    });
   });
 
-  window.addEventListener('popstate', () => {
-    if (document.getElementById('checkoutModal')?.classList.contains('active')) {
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) {
       closeCheckoutModal();
     }
   });
+
+  window.addEventListener('popstate', (e) => {
+    if (modal.classList.contains('active')) {
+      closeCheckoutModal();
+    }
+  });
+
+  console.log('[checkout] Initialized ✓');
 });
 
 // ==================== EXPORTS ====================
 window.openCheckoutModal = openCheckoutModal;
 window.closeCheckoutModal = closeCheckoutModal;
 window.gatherCheckoutData = gatherCheckoutData;
-window.saveSelectedPlan = saveSelectedPlan;
 
 export { openCheckoutModal, closeCheckoutModal, onPayClicked, gatherCheckoutData };
