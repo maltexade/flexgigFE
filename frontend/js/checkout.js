@@ -20,28 +20,20 @@ const svgShapes = {
 };
 
 // ==================== HELPER: GATHER CHECKOUT DATA ====================
-/**
- * Gathers checkout data from current dashboard state
- * @returns {Object|null} Checkout data object or null if incomplete
- */
 function gatherCheckoutData() {
   try {
     const state = getUserState();
     
-    // Get selected provider - check both .provider-box.selected and the slider
     let selectedProvider = document.querySelector('.provider-box.selected');
     
-    // If no selected provider box, check for slider position
     if (!selectedProvider) {
       const slider = document.querySelector('.slider');
       if (slider) {
-        // The slider has classes like 'slider mtn' - extract the provider
         const sliderClasses = slider.className.split(' ');
         const providerClass = sliderClasses.find(c => 
           ['mtn', 'airtel', 'glo', 'ninemobile'].includes(c.toLowerCase())
         );
         if (providerClass) {
-          // Find the corresponding provider box
           selectedProvider = document.querySelector(`.provider-box.${providerClass}`);
         }
       }
@@ -53,13 +45,11 @@ function gatherCheckoutData() {
       return null;
     }
     
-    // Extract provider name from classes
     const providerClasses = selectedProvider.className.split(' ');
     let provider = providerClasses.find(c => 
       ['mtn', 'airtel', 'glo', 'ninemobile'].includes(c.toLowerCase())
     );
     
-    // Handle 9mobile special case
     if (provider === 'ninemobile') {
       provider = '9mobile';
     }
@@ -70,7 +60,6 @@ function gatherCheckoutData() {
       return null;
     }
 
-    // Get phone number
     const phoneInput = document.getElementById('phone-input');
     const number = phoneInput ? phoneInput.value.trim() : '';
     
@@ -80,31 +69,26 @@ function gatherCheckoutData() {
       return null;
     }
 
-    // Validate phone number format (basic check)
     if (number.length < 10) {
       console.warn('[checkout] Invalid phone number:', number);
       safeNotify('Please enter a valid phone number', 'error');
       return null;
     }
 
-    // Get selected plan from userState first
     let selectedPlan = state.selectedPlan;
     
-    // If not in state, try to find from the plan boxes on dashboard
     if (!selectedPlan) {
       const planBoxes = document.querySelectorAll('.plan-box');
       for (const box of planBoxes) {
         if (box.classList.contains('selected') || box.style.border || box.style.outline) {
-          // Try to extract plan data from the plan box
-          // Assuming structure: div[0]=price, div[1]=dataAmount, div[2]=validity
           const planDivs = box.querySelectorAll('div');
           if (planDivs.length >= 3) {
             selectedPlan = {
-              planId: `${provider}-${Date.now()}`, // Generate temp ID
+              planId: `${provider}-${Date.now()}`,
               dataAmount: planDivs[1].textContent || 'N/A',
               validity: planDivs[2].textContent || '30 Days',
               price: planDivs[0].textContent || '0',
-              type: 'GIFTING' // Default, adjust based on dashboard logic if needed
+              type: 'GIFTING'
             };
           }
           break;
@@ -112,7 +96,6 @@ function gatherCheckoutData() {
       }
     }
 
-    // If still no plan, check localStorage for last selected plan
     if (!selectedPlan) {
       try {
         const lastPlan = localStorage.getItem('lastSelectedPlan');
@@ -130,10 +113,8 @@ function gatherCheckoutData() {
       return null;
     }
 
-    // Parse price - handle both string and number formats
     let price = selectedPlan.price;
     if (typeof price === 'string') {
-      // Remove ₦, commas, and other non-numeric characters except decimal point
       price = price.replace(/[₦,\s]/g, '').replace(/[^\d.]/g, '');
       price = parseFloat(price);
     }
@@ -145,7 +126,6 @@ function gatherCheckoutData() {
       return null;
     }
 
-    // Build checkout data
     const checkoutInfo = {
       provider: provider.toUpperCase(),
       planId: selectedPlan.planId || selectedPlan.id || `${provider}-${Date.now()}`,
@@ -154,6 +134,7 @@ function gatherCheckoutData() {
       validity: selectedPlan.validity || '30 Days',
       price: price,
       number: number,
+      rawNumber: number.replace(/\s/g, ''),
       planType: selectedPlan.type || 'GIFTING'
     };
 
@@ -212,38 +193,21 @@ const isProfileComplete = () => {
   }
 };
 
-// ==================== HELPER: GET BALANCE FROM DOM OR STATE ====================
 function getAvailableBalance() {
-  // Prefer DOM if visible and available
   const balanceReal = document.querySelector('.balance-real');
   if (balanceReal && balanceReal.textContent) {
     return parseFloat(balanceReal.textContent.replace(/[₦,\s]/g, '')) || 0;
   }
-  // Fallback to state
   const state = getUserState();
   return parseFloat(state.balance) || 0;
 }
 
 // ==================== CHECKOUT MODAL FUNCTIONS ====================
-
-/**
- * Opens the checkout modal with provided data
- * @param {Object} data - Checkout data (optional - will gather from DOM if not provided)
- * @param {string} data.provider - Network provider (MTN, AIRTEL, etc)
- * @param {string} data.planId - Plan identifier
- * @param {string} data.planName - Display name of the plan
- * @param {string} data.dataAmount - Data amount (e.g., "2GB")
- * @param {string} data.validity - Plan validity (e.g., "30 Days")
- * @param {number} data.price - Price in Naira
- * @param {string} data.number - Recipient phone number
- * @param {string} data.planType - Type of plan (AWOOF, GIFTING, etc)
- */
 function openCheckoutModal(data) {
   console.log('[checkout] Opening modal with data:', data);
   
   let checkoutInfo;
 
-  // PRIORITY 1: Use explicitly passed data (new reliable path)
   if (data && data.provider && data.planId && data.price && data.number) {
     checkoutInfo = {
       provider: data.provider.toUpperCase(),
@@ -252,17 +216,12 @@ function openCheckoutModal(data) {
       dataAmount: data.dataAmount || 'N/A',
       validity: data.validity || '30 Days',
       price: parseFloat(data.price) || 0,
-
-      // 👇 BOTH versions stored
-      number: data.number, // formatted (UI)
-      rawNumber: data.rawNumber || data.number.replace(/\s/g, ''), // clean (API)
-
+      number: data.number,
+      rawNumber: data.rawNumber || data.number.replace(/\s/g, ''),
       planType: data.planType || 'GIFTING'
     };
-
     console.log('[checkout] Using explicitly passed data (recommended)');
   } else {
-    // FALLBACK: Old fragile gathering (keep for legacy, but log warning)
     console.warn('[checkout] No data passed — falling back to DOM scraping');
     checkoutInfo = gatherCheckoutData();
   }
@@ -273,11 +232,8 @@ function openCheckoutModal(data) {
     return;
   }
 
-  // Store and populate modal
   checkoutData = checkoutInfo;
 
-
-  // Get modal and elements
   const modal = document.getElementById('checkoutModal');
   const payBtn = document.getElementById('payBtn');
   
@@ -287,17 +243,13 @@ function openCheckoutModal(data) {
     return;
   }
 
-  // Populate modal with dynamic data
   try {
-    // Price (main display)
     const priceEl = document.getElementById('checkout-price');
     if (priceEl) priceEl.textContent = `₦${parseFloat(data.price).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-    // Service name (always "Mobile Data")
     const serviceEl = document.getElementById('checkout-service');
     if (serviceEl) serviceEl.textContent = 'Mobile Data';
 
-    // Provider with SVG icon
     const providerEl = document.getElementById('checkout-provider');
     if (providerEl) {
       let providerKey = data.provider.toLowerCase();
@@ -306,38 +258,31 @@ function openCheckoutModal(data) {
       providerEl.innerHTML = svg + ' ' + data.provider;
     }
 
-    // Phone number
     const phoneEl = document.getElementById('checkout-phone');
     if (phoneEl) phoneEl.textContent = data.number;
 
-    // Data bundle with duration (no price here)
     const dataEl = document.getElementById('checkout-data');
     if (dataEl) dataEl.textContent = `${data.dataAmount || data.planName || 'N/A'} / ${data.validity || 'N/A'}`;
 
-    // Amount (duplicate in info section)
     const amountEls = modal.querySelectorAll('.info-row:last-child .value');
     amountEls.forEach(el => {
       el.textContent = `₦${parseFloat(data.price).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     });
 
-    // Available balance from DOM or state
     const balance = getAvailableBalance();
     const balanceEl = document.getElementById('checkout-balance');
     if (balanceEl) balanceEl.textContent = `₦${balance.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-    // Enable pay button
     if (payBtn) {
       payBtn.disabled = false;
       payBtn.classList.add('active');
     }
 
-    // Show modal
     modal.style.display = 'flex';
     modal.classList.add('active');
     modal.setAttribute('aria-hidden', 'false');
     document.body.classList.add('modal-open');
     
-    // Push state for back button
     history.pushState({ popup: true, modal: 'checkout' }, '', location.href);
     
     console.log('[checkout] Modal opened successfully');
@@ -348,9 +293,6 @@ function openCheckoutModal(data) {
   }
 }
 
-/**
- * Closes the checkout modal
- */
 function closeCheckoutModal() {
   const modal = document.getElementById('checkoutModal');
   if (!modal) return;
@@ -361,10 +303,8 @@ function closeCheckoutModal() {
     modal.setAttribute('aria-hidden', 'true');
     document.body.classList.remove('modal-open');
     
-    // Clear checkout data
     checkoutData = null;
 
-    // Handle history
     if (history.state && history.state.popup && history.state.modal === 'checkout') {
       history.back();
     }
@@ -373,100 +313,24 @@ function closeCheckoutModal() {
   }
 }
 
-/**
- * Triggers biometric authentication if enabled, otherwise falls back to PIN
- * @returns {Promise<boolean>} Success status
- */
-async function triggerCheckoutAuth() {
-  console.log('[checkout] Triggering authentication');
+// ==================== AUTHENTICATION WITH DEDICATED PIN MODAL ====================
+async function triggerCheckoutAuthWithDedicatedModal() {
+  return new Promise((resolve) => {
+    window._checkoutPinResolve = (success) => {
+      delete window._checkoutPinResolve;
+      resolve(success);
+    };
 
-  // Check if profile is complete
-  if (!isProfileComplete()) {
-    safeNotify('Please complete your profile first', 'error');
-    // Try to open update profile modal if available
-    try {
-      const updateProfileModal = document.getElementById('updateProfileModal');
-      if (updateProfileModal && typeof window.openUpdateProfileModal === 'function') {
-        setTimeout(() => window.openUpdateProfileModal(), 500);
-      }
-    } catch (e) {
-      console.warn('[checkout] Could not open profile modal:', e);
+    if (typeof window.showCheckoutPinModal === 'function') {
+      window.showCheckoutPinModal();
+    } else {
+      console.error('[checkout] showCheckoutPinModal not available');
+      resolve(false);
     }
-    return false;
-  }
-
-  // Check if PIN is set
-  if (!hasPin()) {
-    safeNotify('Please set up your PIN first', 'error');
-    // Try to open PIN setup modal
-    try {
-      const pinModal = document.getElementById('pinModal');
-      if (pinModal) {
-        setTimeout(() => {
-          closeCheckoutModal();
-          pinModal.classList.remove('hidden');
-          pinModal.setAttribute('aria-hidden', 'false');
-        }, 500);
-      }
-    } catch (e) {
-      console.warn('[checkout] Could not open PIN modal:', e);
-    }
-    return false;
-  }
-
-  // Check biometric settings
-  let bioSettings = {};
-  try {
-    bioSettings = JSON.parse(localStorage.getItem('biometricSettings') || '{}');
-  } catch (e) {
-    console.warn('[checkout] Error parsing biometric settings:', e);
-  }
-  
-  const bioForTx = bioSettings.enabled && bioSettings.forTransactions;
-
-  if (bioForTx && typeof window.triggerBiometric === 'function') {
-    console.log('[checkout] Attempting biometric authentication');
-    try {
-      const bioResult = await window.triggerBiometric('authenticate', 'Confirm your purchase');
-      if (bioResult && bioResult.success) {
-        console.log('[checkout] Biometric authentication successful');
-        return true;
-      } else {
-        console.log('[checkout] Biometric failed, falling back to PIN');
-      }
-    } catch (err) {
-      console.error('[checkout] Biometric error:', err);
-    }
-  }
-
-  // Fallback to PIN verification
-  console.log('[checkout] Using PIN authentication');
-  if (typeof window.openReauthModal === 'function') {
-    return new Promise((resolve) => {
-      // Set callback for reauth modal
-      window._reauthCallback = (success) => {
-        console.log('[checkout] PIN verification result:', success);
-        delete window._reauthCallback;
-        resolve(success);
-      };
-      
-      try {
-        window.openReauthModal();
-      } catch (e) {
-        console.error('[checkout] Error opening reauth modal:', e);
-        resolve(false);
-      }
-    });
-  }
-
-  // If no auth method available, show a simple confirm
-  console.warn('[checkout] No auth method available, using confirm dialog');
-  return confirm('Confirm this purchase?');
+  });
 }
 
-/**
- * Processes the real payment via backend
- */
+// ==================== REAL PAYMENT PROCESSING ====================
 async function processPayment() {
   if (!checkoutData) {
     throw new Error('No checkout data available');
@@ -474,13 +338,13 @@ async function processPayment() {
 
   const payload = {
     plan_id: checkoutData.planId,
-    phone: checkoutData.rawNumber || checkoutData.number.replace(/\s/g, ''), // raw 11-digit
-    provider: checkoutData.provider.toLowerCase(), // mtn, airtel, glo, 9mobile
+    phone: checkoutData.rawNumber || checkoutData.number.replace(/\s/g, ''),
+    provider: checkoutData.provider.toLowerCase(),
   };
 
   console.log('[checkout] Sending to backend:', payload);
 
-  const token = localStorage.getItem('token'); // or however you store JWT
+  const token = localStorage.getItem('token');
   if (!token) {
     throw new Error('Authentication token missing');
   }
@@ -498,24 +362,19 @@ async function processPayment() {
   const result = await response.json();
 
   if (!response.ok) {
-    // Handle known errors
     if (result.error === 'insufficient_balance') {
       throw new Error(`Insufficient balance: ₦${result.current_balance?.toLocaleString() || '0'}`);
     }
     if (result.error === 'delivery_failed') {
-      // Money was refunded
       throw new Error('Data delivery failed. Amount has been refunded.');
     }
     throw new Error(result.error || result.message || 'Payment failed');
   }
 
-  // SUCCESS
   console.log('[checkout] Payment success:', result);
 
-  // Update balance in UI (backend already updated DB)
   window.updateAllBalances?.(result.new_balance);
 
-  // Optional: refresh transactions
   if (typeof renderTransactions === 'function') {
     setTimeout(renderTransactions, 500);
   }
@@ -523,9 +382,7 @@ async function processPayment() {
   return { ok: true, new_balance: result.new_balance };
 }
 
-/**
- * Pay button click handler - UPDATED FOR REAL BACKEND
- */
+// ==================== MAIN PAY BUTTON HANDLER ====================
 async function onPayClicked(ev) {
   console.log('[checkout] Pay button clicked');
 
@@ -537,47 +394,188 @@ async function onPayClicked(ev) {
   payBtn.textContent = 'Processing...';
 
   try {
-    // Step 1: Require authentication (biometric or PIN)
-    const authSuccess = await triggerCheckoutAuth();
-    if (!authSuccess) {
-      throw new Error('Authentication required');
-    }
+    checkoutData = gatherCheckoutData();
+    if (!checkoutData) throw new Error('Invalid checkout data');
 
-    // Step 2: Call real backend
+    const authSuccess = await triggerCheckoutAuthWithDedicatedModal();
+    if (!authSuccess) throw new Error('Authentication cancelled or failed');
+
     const result = await processPayment();
 
     if (result && result.ok) {
       safeNotify('Data purchased successfully! ✓', 'success');
-
-      // Optional: play success sound, confetti, etc.
-
-      // Close modal after short delay
       setTimeout(() => closeCheckoutModal(), 800);
     }
-
   } catch (err) {
     console.error('[checkout] Payment failed:', err);
-
     let message = err.message || 'Purchase failed. Please try again.';
-
-    // Special handling for known cases
-    if (err.message.includes('Insufficient')) {
-      message = err.message;
-    } else if (err.message.includes('refunded')) {
-      message = err.message;
-      // Optionally refresh balance to show refund
-      if (typeof window.refreshDashboard === 'function') {
-        window.refreshDashboard();
-      }
-    }
+    if (err.message?.includes('Insufficient')) message = err.message;
+    if (err.message?.includes('refunded')) message = err.message;
 
     safeNotify(message, 'error');
   } finally {
-    // Always re-enable button
     payBtn.disabled = false;
     payBtn.textContent = originalText;
   }
 }
+
+// ==================== DEDICATED CHECKOUT PIN MODAL LOGIC ====================
+(function() {
+  const modal = document.getElementById('checkout-pin-modal');
+  if (!modal) {
+    console.warn('[checkout-pin] Modal element not found');
+    return;
+  }
+
+  const inputs = modal.querySelectorAll('.checkout-pin-digit');
+  const biometricBtn = document.getElementById('checkout-biometric-btn');
+  const deleteBtn = document.getElementById('checkout-delete-btn');
+  const forgotLink = document.getElementById('checkout-forgot-pin-link');
+  const closeBtn = modal.querySelector('.checkout-close-btn');
+
+  let currentPin = '';
+
+  function isBiometricEnabledForTx() {
+    return localStorage.getItem('biometricForTx') === 'true' ||
+           localStorage.getItem('biometricForCheckout') === 'true' ||
+           localStorage.getItem('biometricForTransactions') === 'true';
+  }
+
+  function updateBiometricButton() {
+    if (biometricBtn) {
+      biometricBtn.style.display = isBiometricEnabledForTx() ? 'flex' : 'none';
+    }
+  }
+
+  function updateInputs() {
+    inputs.forEach((input, i) => {
+      input.value = currentPin[i] ? '•' : '';
+    });
+  }
+
+  function resetPin() {
+    currentPin = '';
+    updateInputs();
+  }
+
+  function showCheckoutPinModal() {
+    modal.classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+    updateBiometricButton();
+    resetPin();
+    inputs[0]?.focus();
+  }
+
+  function hideCheckoutPinModal() {
+    modal.classList.add('hidden');
+    document.body.style.overflow = '';
+    resetPin();
+  }
+
+  // Keypad
+  modal.querySelectorAll('[data-digit]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (currentPin.length >= 4) return;
+      currentPin += btn.dataset.digit;
+      updateInputs();
+      if (currentPin.length === 4) {
+        setTimeout(() => verifyPin(currentPin), 300);
+      }
+    });
+  });
+
+  if (deleteBtn) {
+    deleteBtn.addEventListener('click', () => {
+      currentPin = currentPin.slice(0, -1);
+      updateInputs();
+    });
+  }
+
+  // Biometric
+  if (biometricBtn) {
+    biometricBtn.addEventListener('click', async () => {
+      try {
+        const result = await (verifyBiometrics?.() || startAuthentication?.() || { success: false });
+        if (result && result.success) {
+          hideCheckoutPinModal();
+          try {
+            await processPayment();
+            if (window._checkoutPinResolve) window._checkoutPinResolve(true);
+          } catch (err) {
+            safeNotify(err.message || 'Purchase failed after biometric', 'error');
+            if (window._checkoutPinResolve) window._checkoutPinResolve(false);
+          }
+        } else {
+          safeNotify('Biometric authentication failed', 'error');
+        }
+      } catch (err) {
+        safeNotify('Biometric error', 'error');
+      }
+    });
+  }
+
+  // Forgot PIN
+  if (forgotLink) {
+    forgotLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      hideCheckoutPinModal();
+      if (typeof openForgetPinFlow === 'function') openForgetPinFlow();
+      if (window._checkoutPinResolve) window._checkoutPinResolve(false);
+    });
+  }
+
+  // Close
+  if (closeBtn) {
+    closeBtn.addEventListener('click', () => {
+      hideCheckoutPinModal();
+      if (window._checkoutPinResolve) window._checkoutPinResolve(false);
+    });
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !modal.classList.contains('hidden')) {
+      hideCheckoutPinModal();
+      if (window._checkoutPinResolve) window._checkoutPinResolve(false);
+    }
+  });
+
+  // PIN verification
+  async function verifyPin(pin) {
+    try {
+      const token = localStorage.getItem('token') || '';
+      const res = await fetch('https://api.flexgig.com.ng/api/verify-pin', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        credentials: 'include',
+        body: JSON.stringify({ pin })
+      });
+
+      if (res.ok) {
+        hideCheckoutPinModal();
+        try {
+          await processPayment();
+          if (window._checkoutPinResolve) window._checkoutPinResolve(true);
+        } catch (err) {
+          safeNotify(err.message || 'Purchase failed after PIN', 'error');
+          if (window._checkoutPinResolve) window._checkoutPinResolve(false);
+        }
+      } else {
+        const data = await res.json().catch(() => ({}));
+        safeNotify(data.message || 'Invalid PIN', 'error');
+        resetPin();
+      }
+    } catch (err) {
+      safeNotify('PIN verification failed', 'error');
+      resetPin();
+    }
+  }
+
+  window.showCheckoutPinModal = showCheckoutPinModal;
+  window.hideCheckoutPinModal = hideCheckoutPinModal;
+})();
 
 // ==================== INITIALIZATION ====================
 domReady(() => {
@@ -589,14 +587,12 @@ domReady(() => {
     return;
   }
 
-  // Pay button
   const payBtn = document.getElementById('payBtn');
   if (payBtn) {
     payBtn.removeEventListener('click', onPayClicked);
     payBtn.addEventListener('click', onPayClicked);
   }
 
-  // Close buttons
   const closeBtns = modal.querySelectorAll('[data-close], .close-btn');
   closeBtns.forEach(btn => {
     btn.addEventListener('click', (e) => {
@@ -605,14 +601,12 @@ domReady(() => {
     });
   });
 
-  // Modal backdrop click
   modal.addEventListener('click', (e) => {
     if (e.target === modal) {
       closeCheckoutModal();
     }
   });
 
-  // Browser back button
   window.addEventListener('popstate', (e) => {
     if (modal.classList.contains('active')) {
       closeCheckoutModal();
@@ -623,7 +617,6 @@ domReady(() => {
 });
 
 // ==================== EXPORTS ====================
-// Expose functions globally for dashboard.js to use
 window.openCheckoutModal = openCheckoutModal;
 window.closeCheckoutModal = closeCheckoutModal;
 window.gatherCheckoutData = gatherCheckoutData;
