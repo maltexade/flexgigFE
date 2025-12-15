@@ -405,8 +405,10 @@ async function onPayClicked(ev) {
     if (!checkoutData) throw new Error('Invalid checkout data');
 
     const authSuccess = await triggerCheckoutAuthWithDedicatedModal();
-    if (!authSuccess) throw new Error('Authentication cancelled or failed');
-
+if (!authSuccess) {
+  safeNotify('Purchase cancelled', 'info');
+  return;  // Just exit gracefully
+}
     const result = await processPayment();
 
     if (result && result.ok) {
@@ -533,26 +535,23 @@ async function onPayClicked(ev) {
 
   // Biometric
   if (biometricBtn) {
-    biometricBtn.addEventListener('click', async () => {
-      try {
-        const result = await (verifyBiometrics?.() || startAuthentication?.() || { success: false });
-        if (result && result.success) {
-          hideCheckoutPinModal();
-          try {
-            await processPayment();
-            if (window._checkoutPinResolve) window._checkoutPinResolve(true);
-          } catch (err) {
-            safeNotify(err.message || 'Purchase failed after biometric', 'error');
-            if (window._checkoutPinResolve) window._checkoutPinResolve(false);
-          }
-        } else {
-          safeNotify('Biometric authentication failed', 'error');
+  biometricBtn.addEventListener('click', async () => {
+    try {
+      const result = await (verifyBiometrics?.() || startAuthentication?.() || { success: false });
+      if (result && result.success) {
+        hideCheckoutPinModal();
+        // Only resolve — do not call processPayment here
+        if (window._checkoutPinResolve) {
+          window._checkoutPinResolve(true);
         }
-      } catch (err) {
-        safeNotify('Biometric error', 'error');
+      } else {
+        safeNotify('Biometric authentication failed', 'error');
       }
-    });
-  }
+    } catch (err) {
+      safeNotify('Biometric error', 'error');
+    }
+  });
+}
 
   // Forgot PIN
   if (forgotLink) {
@@ -581,7 +580,7 @@ async function onPayClicked(ev) {
 
   // PIN verification
   async function verifyPin(pin) {
-  return await withLoader(async () => {  // <-- ADD THIS
+  return await withLoader(async () => {
     try {
       const token = localStorage.getItem('token') || '';
       const res = await fetch('https://api.flexgig.com.ng/api/verify-pin', {
@@ -596,23 +595,22 @@ async function onPayClicked(ev) {
 
       if (res.ok) {
         hideCheckoutPinModal();
-        try {
-          await processPayment();  // This already has withLoader
-          if (window._checkoutPinResolve) window._checkoutPinResolve(true);
-        } catch (err) {
-          safeNotify(err.message || 'Purchase failed after PIN', 'error');
-          if (window._checkoutPinResolve) window._checkoutPinResolve(false);
+        // DO NOT call processPayment() here
+        // Just resolve success — the main flow will handle payment
+        if (window._checkoutPinResolve) {
+          window._checkoutPinResolve(true);
         }
       } else {
         const data = await res.json().catch(() => ({}));
         safeNotify(data.message || 'Invalid PIN. Please try again.', 'error');
         resetPin();
+        // Do NOT resolve — let user try again
       }
     } catch (err) {
       safeNotify('PIN verification failed. Check your connection.', 'error');
       resetPin();
     }
-  });  // <-- END withLoader
+  });
 }
 
   window.showCheckoutPinModal = showCheckoutPinModal;
