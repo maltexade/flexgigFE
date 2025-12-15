@@ -4937,69 +4937,70 @@ if (seeAllBtn) {
 
 
 /* =========================================================
-   PLAN SELECTION — PROVIDER SAFE (FINAL + FULL DATA SAVE)
+   PLAN SELECTION — PROVIDER SAFE (FINAL)
    ========================================================= */
 
 /* ---------- SHARED STATE ---------- */
+
+// Track last selected plan per provider
 const selectedPlanByProvider = {};
 
 /* ---------- SELECT PLAN BY ID ---------- */
+
 function selectPlanById(id) {
-  const activeProvider = providerClasses.find(cls => slider.classList.contains(cls));
+  const activeProvider =
+    providerClasses.find(cls => slider.classList.contains(cls));
 
   if (!id || !activeProvider) {
-    console.warn('[PLAN CLICK BLOCKED]', { id, activeProvider });
-    return;
-  }
+  console.warn('[PLAN CLICK BLOCKED]', {
+    id,
+    activeProvider,
+    plan,
+    classes: [...plan.classList]
+  });
+  return;
+}
 
-  console.log('%c[SELECT] START', 'color:blue;font-weight:bold', { id, activeProvider });
 
-  // Clear previous selection for this provider
-  document.querySelectorAll(`.plan-box.selected[data-provider="${activeProvider}"]`).forEach(p => {
+  console.log(
+    '%c[SELECT] START',
+    'color:blue;font-weight:bold',
+    { id, activeProvider }
+  );
+
+  // Clear selection ONLY for this provider
+  document.querySelectorAll(
+    `.plan-box.selected[data-provider="${activeProvider}"]`
+  ).forEach(p => {
     p.classList.remove('selected', activeProvider);
     console.log('[SELECT] Cleared:', p.dataset.id);
   });
 
-  // Save ID
+  // Save state
   selectedPlanByProvider[activeProvider] = id;
 
-  // Find the plan element (use dashboard one)
-  const dashPlan = plansRow.querySelector(`.plan-box[data-id="${id}"][data-provider="${activeProvider}"]`);
-  if (!dashPlan) {
-    console.warn('[SELECT] Dashboard plan element not found:', id);
-    return;
+  // Dashboard plan
+  const dashPlan = plansRow.querySelector(
+    `.plan-box[data-id="${id}"][data-provider="${activeProvider}"]`
+  );
+
+  if (dashPlan) {
+    dashPlan.classList.add('selected', activeProvider);
+    console.log('[SELECT] Dashboard selected:', id);
+  } else {
+    console.warn('[SELECT] Dashboard plan missing:', id);
   }
 
-  // Add selected class
-  dashPlan.classList.add('selected', activeProvider);
+  // Modal plan
+  const modalPlan = allPlansModal.querySelector(
+    `.plan-box[data-id="${id}"][data-provider="${activeProvider}"]`
+  );
 
-  // === EXTRACT FULL PLAN DATA FROM THE ELEMENT ===
-  const divs = dashPlan.querySelectorAll('div');
-  const priceText = divs[0]?.textContent?.trim() || '0';
-  const dataAmount = divs[1]?.textContent?.trim() || 'N/A';
-  const validity = divs[2]?.textContent?.trim() || 'N/A';
-
-  const fullPlanData = {
-    planId: id,
-    price: parseFloat(priceText.replace(/[₦,\s]/g, '')) || 0,
-    dataAmount: dataAmount,
-    validity: validity,
-    type: 'GIFTING'  // adjust if you have AWOOF/CG logic
-  };
-
-  console.log('[SELECT] Extracted full plan data:', fullPlanData);
-
-  // === SAVE TO userState AND localStorage ===
-  const state = getUserState();
-  state.selectedPlan = fullPlanData;
-  localStorage.setItem('userState', JSON.stringify(state));
-  localStorage.setItem('lastSelectedPlan', JSON.stringify(fullPlanData));
-
-  // Update modal selection
-  const modalPlan = allPlansModal.querySelector(`.plan-box[data-id="${id}"][data-provider="${activeProvider}"]`);
   if (modalPlan) {
     modalPlan.classList.add('selected', activeProvider);
     console.log('[SELECT] Modal selected:', id);
+  } else {
+    console.warn('[SELECT] Modal plan missing:', id);
   }
 
   // Price styling
@@ -5007,7 +5008,11 @@ function selectPlanById(id) {
     const amount = p.querySelector('.plan-amount');
     if (!amount) return;
 
-    if (p.classList.contains('selected') && p.dataset.provider === activeProvider && !p.closest('.plan-modal-content')) {
+    if (
+      p.classList.contains('selected') &&
+      p.dataset.provider === activeProvider &&
+      !p.closest('.plan-modal-content')
+    ) {
       amount.classList.add('plan-price');
     } else {
       amount.classList.remove('plan-price');
@@ -5018,10 +5023,11 @@ function selectPlanById(id) {
   saveUserState?.();
   saveCurrentAppState?.();
 
-  console.log('%c[SELECT] COMPLETE — Full data saved', 'color:green;font-size:15px');
+  console.log('%c[SELECT] COMPLETE', 'color:blue;font-size:15px');
 }
 
 window.selectPlanById = window.selectPlanById || selectPlanById;
+
 /* ---------- ATTACH PLAN LISTENERS (MOBILE-FRIENDLY) ---------- */
 
   // --- ATTACH PLAN LISTENERS ---
