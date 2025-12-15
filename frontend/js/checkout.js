@@ -344,21 +344,16 @@ async function processPayment() {
 
   console.log('[checkout] Sending to backend:', payload);
 
-  const token = localStorage.getItem('token');
-  if (!token) {
-    throw new Error('Authentication token missing');
-  }
-
-  // Wrap the entire backend call in withLoader
+  // No need to manually handle token - it's in HttpOnly cookie
   return await withLoader(async () => {
     const response = await fetch('https://api.flexgig.com.ng/api/purchase-data', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
+        // Remove Authorization header completely
       },
       body: JSON.stringify(payload),
-      credentials: 'include',
+      credentials: 'include',  // This sends the cookie automatically
     });
 
     const result = await response.json();
@@ -375,12 +370,10 @@ async function processPayment() {
 
     console.log('[checkout] Payment success:', result);
 
-    // Optional: Update balance if backend returns new_balance
     if (result.new_balance !== undefined) {
       window.updateAllBalances?.(result.new_balance);
     }
 
-    // Refresh transactions if needed
     if (typeof renderTransactions === 'function') {
       setTimeout(renderTransactions, 500);
     }
