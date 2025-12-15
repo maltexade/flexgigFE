@@ -581,6 +581,7 @@ async function onPayClicked(ev) {
 
   // PIN verification
   async function verifyPin(pin) {
+  return await withLoader(async () => {  // <-- ADD THIS
     try {
       const token = localStorage.getItem('token') || '';
       const res = await fetch('https://api.flexgig.com.ng/api/verify-pin', {
@@ -596,7 +597,7 @@ async function onPayClicked(ev) {
       if (res.ok) {
         hideCheckoutPinModal();
         try {
-          await processPayment();
+          await processPayment();  // This already has withLoader
           if (window._checkoutPinResolve) window._checkoutPinResolve(true);
         } catch (err) {
           safeNotify(err.message || 'Purchase failed after PIN', 'error');
@@ -604,14 +605,15 @@ async function onPayClicked(ev) {
         }
       } else {
         const data = await res.json().catch(() => ({}));
-        safeNotify(data.message || 'Invalid PIN', 'error');
+        safeNotify(data.message || 'Invalid PIN. Please try again.', 'error');
         resetPin();
       }
     } catch (err) {
-      safeNotify('PIN verification failed', 'error');
+      safeNotify('PIN verification failed. Check your connection.', 'error');
       resetPin();
     }
-  }
+  });  // <-- END withLoader
+}
 
   window.showCheckoutPinModal = showCheckoutPinModal;
   window.hideCheckoutPinModal = hideCheckoutPinModal;
