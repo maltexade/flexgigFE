@@ -7259,7 +7259,6 @@ function __fg_pin_clearAllInputs() {
       ev.preventDefault();
       __fg_pin_log.i('resetPinBtn clicked - redirecting to reset flow');
       __fg_pin_notify('Redirecting to PIN reset flow', 'info');
-      //window.location.href = '/reset-pin.html';
     });
   }
 

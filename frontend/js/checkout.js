@@ -625,6 +625,84 @@ async function onPayClicked(ev) {
       if (window._checkoutPinResolve) window._checkoutPinResolve(false);
     });
   }
+  /* Global Forget PIN Flow — works from checkout, dashboard, anywhere */
+window.openForgetPinFlow = async function openForgetPinFlow() {
+  // Find the link that triggered it (if any) to show "Processing..."
+  const triggerLink = document.activeElement || 
+                      document.querySelector('#checkout-forgot-pin-link') ||
+                      document.querySelector('[href="#forget-pin"]');
+
+  let originalText = '';
+  if (triggerLink) {
+    originalText = triggerLink.textContent;
+    triggerLink.textContent = 'Processing...';
+    triggerLink.classList.add('processing');
+    triggerLink.disabled = true;
+  }
+
+  try {
+    // === RESOLVE EMAIL SMARTLY ===
+    let email = window.currentUser?.email ||
+                window.__SERVER_USER_DATA__?.email ||
+                localStorage.getItem('userEmail') ||
+                localStorage.getItem('email');
+
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      email = prompt('Enter your registered email to receive OTP:');
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+        safeNotify('Valid email required', 'error');
+        return;
+      }
+      email = email.trim().toLowerCase();
+    }
+
+    // === SEND OTP ===
+    const resp = await fetch('https://api.flexgig.com.ng/auth/resend-otp', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email })
+    });
+
+    const result = await resp.json();
+
+    if (!resp.ok) {
+      throw new Error(result.message || result.error?.message || 'Failed to send OTP');
+    }
+
+    safeNotify(`OTP sent to ${email}`, 'success');
+
+    // === OPEN RESET PIN MODAL ===
+    const modal = document.getElementById('resetPinModal');
+    if (modal) {
+      modal.classList.remove('hidden');
+      modal.style.display = 'flex';
+      modal.setAttribute('aria-hidden', 'false');
+      document.body.style.overflow = 'hidden';
+
+      // Pre-fill email if modal has input
+      const emailInput = modal.querySelector('input[type="email"], #reset-pin-email');
+      if (emailInput) emailInput.value = email;
+
+      // Focus first input
+      const firstInput = modal.querySelector('input, button');
+      firstInput?.focus();
+    } else {
+      safeNotify('OTP sent! Please check your email and reset PIN from profile.', 'info');
+    }
+
+  } catch (err) {
+    console.error('openForgetPinFlow error:', err);
+    safeNotify(err.message || 'Failed to start PIN reset', 'error');
+  } finally {
+    // Restore link
+    if (triggerLink) {
+      triggerLink.textContent = originalText || 'Forgot PIN?';
+      triggerLink.classList.remove('processing');
+      triggerLink.disabled = false;
+    }
+  }
+};
 
   // Close
   if (closeBtn) {
