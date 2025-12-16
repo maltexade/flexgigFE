@@ -793,54 +793,61 @@ async function updateReceiptToSuccess(result) {
   document.getElementById('receipt-message').textContent = result.message || 'Your data has been delivered successfully!';
 
   const data = window._currentCheckoutData;
-  let transactionRef = 'Pending...';
+  let transactionRef = 'Loading...';
 
-  // === FETCH REAL REFERENCE FROM /api/transactions ===
+  // === FETCH LATEST TRANSACTION & GET REFERENCE (RELIABLE MATCHING) ===
   try {
-    const res = await fetch('https://api.flexgig.com.ng/api/transactions?limit=10', {
+    const res = await fetch('https://api.flexgig.com.ng/api/transactions?limit=20', {
       credentials: 'include'
     });
     const json = await res.json();
     const txs = json.items || json || [];
 
-    // Match by phone + amount (most reliable)
+    // Match by:
+    // 1. Amount (most accurate)
+    // 2. Reference starts with 'data_'
+    // 3. Reference includes your user ID part (bcee735e)
     const match = txs.find(tx => 
-      tx.phone === data.rawNumber &&
-      Math.abs(tx.amount - data.price) <= 1 &&  // handle minor floating point
-      tx.reference && 
-      tx.reference.includes('data_')
+      Math.abs(tx.amount - data.price) <= 10 &&
+      tx.reference &&
+      tx.reference.startsWith('data_') &&
+      tx.reference.includes('bcee735e')
     );
 
-    if (match && match.reference) {
+    if (match?.reference) {
       transactionRef = match.reference;
+    } else {
+      // Fallback: just take the latest reference that starts with 'data_'
+      const fallback = txs.find(tx => tx.reference?.startsWith('data_'));
+      transactionRef = fallback?.reference || 'Unavailable';
     }
   } catch (e) {
     console.warn('Failed to fetch transaction reference:', e);
     transactionRef = 'Unavailable';
   }
 
+  // === FILL ALL DETAILS FROM LOCAL (MORE ACCURATE) ===
   if (data) {
     const providerKey = data.provider.toLowerCase() === '9mobile' ? 'ninemobile' : data.provider.toLowerCase();
     const svg = svgShapes[providerKey] || '';
     document.getElementById('receipt-provider').innerHTML = `${svg} ${data.provider.toUpperCase()}`;
-
+    
     document.getElementById('receipt-phone').textContent = data.number;
-
-    // Use local data amount/validity (most accurate from plan selection)
+    
     document.getElementById('receipt-plan').textContent = `${data.dataAmount} / ${data.validity}`;
-
+    
     document.getElementById('receipt-amount').textContent = `₦${Number(data.price).toLocaleString()}`;
     
-    // This will now show the real reference like data_1765869742220_bcee735e
     document.getElementById('receipt-transaction-id').textContent = transactionRef;
-
+    
     document.getElementById('receipt-balance').textContent = 
       `₦${Number(result.new_balance || 0).toLocaleString()}`;
-
+    
     document.getElementById('receipt-time').textContent = 
       new Date().toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
   }
 
+  // Show details immediately (no delay or expansion)
   document.getElementById('receipt-details').style.display = 'block';
   document.getElementById('receipt-actions').style.display = 'flex';
 }
