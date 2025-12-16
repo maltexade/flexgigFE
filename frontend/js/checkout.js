@@ -719,6 +719,37 @@ domReady(() => {
   console.log('[checkout] Initialized ✓');
 });
 
+// ==================== SMART RECEIPT SCROLL LOCK ====================
+function lockScrollForReceiptModal(backdropEl, lock = true) {
+  if (!backdropEl) return;
+
+  if (lock) {
+    const scrollY = window.scrollY;
+
+    backdropEl.dataset.scrollY = scrollY;
+
+    document.body.style.position = 'fixed';
+    document.body.style.top = `-${scrollY}px`;
+    document.body.style.left = '0';
+    document.body.style.right = '0';
+    document.body.style.width = '100%';
+    document.body.style.overflow = 'hidden';
+  } else {
+    const scrollY = parseInt(backdropEl.dataset.scrollY || '0', 10);
+
+    document.body.style.position = '';
+    document.body.style.top = '';
+    document.body.style.left = '';
+    document.body.style.right = '';
+    document.body.style.width = '';
+    document.body.style.overflow = '';
+
+    window.scrollTo(0, scrollY);
+    delete backdropEl.dataset.scrollY;
+  }
+}
+
+
 // ==================== SMART RECEIPT MODAL FUNCTIONS ====================
 
 // ==================== SMART RECEIPT MODAL FUNCTIONS ====================
@@ -728,6 +759,11 @@ function showProcessingReceipt(data) {
   if (!backdrop) return console.error('[checkout] Receipt modal not found');
 
   backdrop.classList.remove('hidden');
+    backdrop.setAttribute('aria-hidden', 'false');
+
+
+    lockScrollForReceiptModal(backdrop, true);
+
 
   // Reset to processing
   const icon = document.getElementById('receipt-icon');
@@ -819,16 +855,16 @@ function updateReceiptToFailed(errorMessage) {
 
 // Close & Buy Again handlers (unchanged)
 document.getElementById('receipt-done')?.addEventListener('click', () => {
-  document.getElementById('smart-receipt-backdrop')?.classList.add('hidden');
-});
-
-document.getElementById('receipt-buy-again')?.addEventListener('click', () => {
   const backdrop = document.getElementById('smart-receipt-backdrop');
   backdrop?.classList.add('hidden');
+  backdrop?.setAttribute('aria-hidden', 'true');
 
-  const data = window._currentCheckoutData;
-  if (data) openCheckoutModal(data);
+  // 🔓 UNLOCK SCROLL HERE
+  lockScrollForReceiptModal(backdrop, false);
 });
+
+
+
 
 // ==================== EXPORTS ====================
 window.openCheckoutModal = openCheckoutModal;

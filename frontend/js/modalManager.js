@@ -461,7 +461,6 @@
     checkoutModal: { id: 'checkoutModal', element: null, hasPullHandle: false },
     historyModal: { id: 'historyModal', element: null, hasPullHandle: false },
     addMoneyModal: {id: 'addMoneyModal', element: null, hasPullHandle: true},
-    'smart-receipt-backdrop': {id: 'smart-receipt-backdrop', element: null, hasPullHandle: false}
   };
 
   // ─────────────────────────────────────────────────────────────
@@ -471,7 +470,6 @@ const bottomSheetModals = [
   'addMoneyModal',
   'historyModal',
   'allPlansModal',
-  'smart-receipt-backdrop'
   // add any future bottom sheets here
 ];
 
