@@ -389,6 +389,7 @@ async function triggerCheckoutAuthWithDedicatedModal() {
 }
 
 // ==================== REAL PAYMENT PROCESSING (WITH LOADER) ====================
+// ==================== REAL PAYMENT PROCESSING (NO LOADER OVERLAY) ====================
 async function processPayment() {
   if (!checkoutData) {
     throw new Error('No checkout data available');
@@ -402,46 +403,43 @@ async function processPayment() {
 
   console.log('[checkout] Sending to backend:', payload);
 
-  // No need to manually handle token - it's in HttpOnly cookie
-  return await withLoader(async () => {
-    const response = await fetch('https://api.flexgig.com.ng/api/purchase-data', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        // Remove Authorization header completely
-      },
-      body: JSON.stringify(payload),
-      credentials: 'include',  // This sends the cookie automatically
-    });
-
-    const result = await response.json();
-
-    if (!response.ok) {
-      if (result.error === 'insufficient_balance') {
-        throw new Error(`Insufficient balance: ₦${result.current_balance?.toLocaleString() || '0'}`);
-      }
-      if (result.error === 'delivery_failed') {
-        throw new Error('Data delivery failed. Amount has been refunded.');
-      }
-      throw new Error(result.error || result.message || 'Payment failed');
-    }
-
-    console.log('[checkout] Payment success:', result);
-
-    if (result.new_balance !== undefined) {
-      window.updateAllBalances?.(result.new_balance);
-    }
-
-    if (typeof renderTransactions === 'function') {
-      setTimeout(renderTransactions, 500);
-    }
-
-    return { ok: true, new_balance: result.new_balance };
+  // Fetch without withLoader – receipt modal handles UI
+  const response = await fetch('https://api.flexgig.com.ng/api/purchase-data', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+    credentials: 'include',
   });
+
+  const result = await response.json();
+
+  if (!response.ok) {
+    if (result.error === 'insufficient_balance') {
+      throw new Error(`Insufficient balance: ₦${result.current_balance?.toLocaleString() || '0'}`);
+    }
+    if (result.error === 'delivery_failed') {
+      throw new Error('Data delivery failed. Amount has been refunded.');
+    }
+    throw new Error(result.error || result.message || 'Payment failed');
+  }
+
+  console.log('[checkout] Payment success:', result);
+
+  if (result.new_balance !== undefined) {
+    window.updateAllBalances?.(result.new_balance);
+  }
+
+  if (typeof renderTransactions === 'function') {
+    setTimeout(renderTransactions, 500);
+  }
+
+  return result;  // Return full result for message, reference, etc.
 }
 
 // ==================== MAIN PAY BUTTON HANDLER ====================
-// ==================== MAIN PAY BUTTON HANDLER (UPDATED WITH RECEIPT MODAL) ====================
+// ==================== MAIN PAY BUTTON HANDLER ====================
 async function onPayClicked(ev) {
   console.log('[checkout] Pay button clicked');
 
@@ -462,24 +460,18 @@ async function onPayClicked(ev) {
       return;
     }
 
-    // === SHOW PROCESSING RECEIPT MODAL IMMEDIATELY ===
+    // Show processing receipt immediately
     showProcessingReceipt(checkoutData);
 
     const result = await processPayment();
 
-    if (result && result.ok) {
-      addLocalTransaction(checkoutData);
-      resetCheckoutUI();
+    addLocalTransaction(checkoutData);
+    resetCheckoutUI();
 
-      // === UPDATE TO SUCCESS ===
-      updateReceiptToSuccess({
-        newBalance: result.new_balance,
-        serverMessage: result.message || 'Data purchased successfully!'
-      });
+    // Update to success with full details
+    updateReceiptToSuccess(result);
 
-      // Close checkout modal
-      closeCheckoutModal();
-    }
+    closeCheckoutModal();
 
   } catch (err) {
     console.error('[checkout] Payment failed:', err);
@@ -488,10 +480,9 @@ async function onPayClicked(ev) {
     if (err.message?.includes('Insufficient')) message = err.message;
     if (err.message?.includes('refunded')) message = err.message;
 
-    // === UPDATE TO FAILED ===
+    // Update to failed
     updateReceiptToFailed(message);
 
-    // Close checkout modal
     closeCheckoutModal();
 
   } finally {
@@ -730,13 +721,15 @@ domReady(() => {
 
 // ==================== SMART RECEIPT MODAL FUNCTIONS ====================
 
+// ==================== SMART RECEIPT MODAL FUNCTIONS ====================
+
 function showProcessingReceipt(data) {
   const backdrop = document.getElementById('smart-receipt-backdrop');
-  if (!backdrop) return;
+  if (!backdrop) return console.error('[checkout] Receipt modal not found');
 
   backdrop.classList.remove('hidden');
 
-  // Reset to processing state
+  // Reset to processing
   const icon = document.getElementById('receipt-icon');
   icon.className = 'receipt-icon processing';
   icon.innerHTML = '<div class="spinner"></div>';
@@ -746,17 +739,22 @@ function showProcessingReceipt(data) {
   document.getElementById('receipt-details').style.display = 'none';
   document.getElementById('receipt-actions').style.display = 'none';
 
-  // Store for later
+  // Store data
   window._currentCheckoutData = data;
 }
 
-function updateReceiptToSuccess({ newBalance, serverMessage }) {
+function updateReceiptToSuccess(result) {
   const icon = document.getElementById('receipt-icon');
   icon.className = 'receipt-icon success';
-  icon.innerHTML = '✓';
+  icon.innerHTML = `
+    <svg class="checkmark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 52">
+      <circle class="checkmark__circle" cx="26" cy="26" r="25" fill="none"/>
+      <path class="checkmark__check" fill="none" d="M14.1 27.2l7.1 7.2 16.7-16.8"/>
+    </svg>
+  `;
 
   document.getElementById('receipt-status').textContent = 'Transaction Successful';
-  document.getElementById('receipt-message').textContent = serverMessage || 'Your data has been delivered successfully!';
+  document.getElementById('receipt-message').textContent = result.message || 'Your data has been delivered successfully!';
 
   const data = window._currentCheckoutData;
   if (data) {
@@ -764,9 +762,10 @@ function updateReceiptToSuccess({ newBalance, serverMessage }) {
     const svg = svgShapes[providerKey] || '';
     document.getElementById('receipt-provider').innerHTML = `${svg} ${data.provider.toUpperCase()}`;
     document.getElementById('receipt-phone').textContent = data.number;
-    document.getElementById('receipt-plan').textContent = data.planName || `${data.dataAmount} (${data.validity})`;
+    document.getElementById('receipt-plan').textContent = `${data.dataAmount} / ${data.validity}`;
     document.getElementById('receipt-amount').textContent = `₦${Number(data.price).toLocaleString()}`;
-    document.getElementById('receipt-balance').textContent = `₦${Number(newBalance || 0).toLocaleString()}`;
+    document.getElementById('receipt-transaction-id').textContent = result.reference || result.transaction_id || 'N/A';
+    document.getElementById('receipt-balance').textContent = `₦${Number(result.new_balance || 0).toLocaleString()}`;
     document.getElementById('receipt-time').textContent = new Date().toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
   }
 
@@ -777,16 +776,23 @@ function updateReceiptToSuccess({ newBalance, serverMessage }) {
 function updateReceiptToFailed(errorMessage) {
   const icon = document.getElementById('receipt-icon');
   icon.className = 'receipt-icon failed';
-  icon.innerHTML = '✕';
+  icon.innerHTML = `
+    <svg class="cross" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 52">
+      <circle class="cross__circle" cx="26" cy="26" r="25" fill="none"/>
+      <path class="cross__path" fill="none" d="M16 16 36 36"/>
+      <path class="cross__path" fill="none" d="M16 36 36 16"/>
+    </svg>
+  `;
 
   document.getElementById('receipt-status').textContent = 'Transaction Failed';
   document.getElementById('receipt-message').textContent = errorMessage;
 
+  document.getElementById('receipt-details').style.display = 'none';  // Hide details on failure
   document.getElementById('receipt-actions').style.display = 'flex';
   document.getElementById('receipt-buy-again').textContent = 'Try Again';
 }
 
-// Close receipt modal
+// Close & Buy Again handlers (unchanged)
 document.getElementById('receipt-done')?.addEventListener('click', () => {
   document.getElementById('smart-receipt-backdrop')?.classList.add('hidden');
 });
