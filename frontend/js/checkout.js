@@ -620,7 +620,6 @@ async function onPayClicked(ev) {
   if (forgotLink) {
     forgotLink.addEventListener('click', (e) => {
       e.preventDefault();
-      hideCheckoutPinModal();
       if (typeof openForgetPinFlow === 'function') openForgetPinFlow();
       if (window._checkoutPinResolve) window._checkoutPinResolve(false);
     });
