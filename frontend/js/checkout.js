@@ -674,6 +674,7 @@ window.openForgetPinFlow = async function openForgetPinFlow() {
     // === OPEN RESET PIN MODAL ===
     const modal = document.getElementById('resetPinModal');
     if (modal) {
+      hideCheckoutPinModal();
       modal.classList.remove('hidden');
       modal.style.display = 'flex';
       modal.setAttribute('aria-hidden', 'false');
