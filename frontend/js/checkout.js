@@ -469,7 +469,7 @@ async function onPayClicked(ev) {
     resetCheckoutUI();
 
     // Update to success with full details
-    updateReceiptToSuccess(result);
+    await updateReceiptToSuccess(result);
 
     closeCheckoutModal();
 
@@ -541,7 +541,7 @@ async function onPayClicked(ev) {
     document.body.style.overflow = 'hidden';
     updateBiometricButton();
     resetPin();
-    inputs[0]?.focus();
+    // inputs[0]?.focus();
   }
 
   function hideCheckoutPinModal() {
@@ -779,7 +779,7 @@ function showProcessingReceipt(data) {
   window._currentCheckoutData = data;
 }
 
-function updateReceiptToSuccess(result) {
+async function updateReceiptToSuccess(result) {
   const icon = document.getElementById('receipt-icon');
   icon.className = 'receipt-icon success';
   icon.innerHTML = `
@@ -793,6 +793,32 @@ function updateReceiptToSuccess(result) {
   document.getElementById('receipt-message').textContent = result.message || 'Your data has been delivered successfully!';
 
   const data = window._currentCheckoutData;
+  let transactionRef = 'Pending...';
+
+  // === FETCH REAL REFERENCE FROM /api/transactions ===
+  try {
+    const res = await fetch('https://api.flexgig.com.ng/api/transactions?limit=10', {
+      credentials: 'include'
+    });
+    const json = await res.json();
+    const txs = json.items || json || [];
+
+    // Match by phone + amount (most reliable)
+    const match = txs.find(tx => 
+      tx.phone === data.rawNumber &&
+      Math.abs(tx.amount - data.price) <= 1 &&  // handle minor floating point
+      tx.reference && 
+      tx.reference.includes('data_')
+    );
+
+    if (match && match.reference) {
+      transactionRef = match.reference;
+    }
+  } catch (e) {
+    console.warn('Failed to fetch transaction reference:', e);
+    transactionRef = 'Unavailable';
+  }
+
   if (data) {
     const providerKey = data.provider.toLowerCase() === '9mobile' ? 'ninemobile' : data.provider.toLowerCase();
     const svg = svgShapes[providerKey] || '';
@@ -800,28 +826,13 @@ function updateReceiptToSuccess(result) {
 
     document.getElementById('receipt-phone').textContent = data.number;
 
-    // Extract data amount & validity from server description or fallback to local
-    let dataAmount = 'N/A';
-    let validity = 'N/A';
-    if (result.description) {
-      const match = result.description.match(/Success:\s*(.+)/);
-      if (match) {
-        const parts = match[1].trim().split(' ');
-        dataAmount = parts[0]; // e.g., 200GB
-        validity = parts.slice(1).join(' '); // e.g., (120 Days) or just empty
-      }
-    }
-    // Fallback to local data if server doesn't have it
-    if (dataAmount === 'N/A') dataAmount = data.dataAmount || 'N/A';
-    if (validity === 'N/A') validity = data.validity || '';
-
-    document.getElementById('receipt-plan').textContent = `${dataAmount} / ${validity}`;
+    // Use local data amount/validity (most accurate from plan selection)
+    document.getElementById('receipt-plan').textContent = `${data.dataAmount} / ${data.validity}`;
 
     document.getElementById('receipt-amount').textContent = `₦${Number(data.price).toLocaleString()}`;
-
-    // Real Transaction ID from server
-    document.getElementById('receipt-transaction-id').textContent = 
-      result.reference || 'N/A';
+    
+    // This will now show the real reference like data_1765869742220_bcee735e
+    document.getElementById('receipt-transaction-id').textContent = transactionRef;
 
     document.getElementById('receipt-balance').textContent = 
       `₦${Number(result.new_balance || 0).toLocaleString()}`;

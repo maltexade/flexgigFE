@@ -5149,6 +5149,7 @@ p:has(.balance-real, .balance-masked) {
   justify-content: center;
   z-index: 999999;
   animation: fadeIn 0.3s ease;
+  backdrop-filter: blur(20px);
 }
 
 #smart-receipt-modal {
@@ -5220,7 +5221,7 @@ p:has(.balance-real, .balance-masked) {
 .receipt-row:last-child { border: none; margin-bottom: 0; padding-bottom: 0; }
 
 .receipt-label { color: #666; }
-.receipt-value { font-weight: 600; text-align: right; color: #000; }
+.receipt-value { font-weight: 600; text-align: right; color: #fff; }
 
 .provider-logo {
   display: flex;
