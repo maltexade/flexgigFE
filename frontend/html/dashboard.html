@@ -1399,6 +1399,50 @@
   </div>
 </div>
 
+<!-- Smart Transaction Receipt Modal -->
+<div id="smart-receipt-backdrop" class="smart-receipt-backdrop hidden">
+  <div id="smart-receipt-modal">
+    <div class="receipt-header">
+      <div class="receipt-icon processing" id="receipt-icon">
+        <div class="spinner"></div>
+      </div>
+      <div class="receipt-status" id="receipt-status">Processing Transaction</div>
+      <div class="receipt-message" id="receipt-message">
+        Please wait while we deliver your data...
+      </div>
+    </div>
+
+    <div class="receipt-details" id="receipt-details">
+      <div class="provider-logo" id="receipt-provider"></div>
+      <div class="receipt-row">
+        <span class="receipt-label">Phone Number</span>
+        <span class="receipt-value" id="receipt-phone"></span>
+      </div>
+      <div class="receipt-row">
+        <span class="receipt-label">Data Plan</span>
+        <span class="receipt-value" id="receipt-plan"></span>
+      </div>
+      <div class="receipt-row">
+        <span class="receipt-label">Amount Paid</span>
+        <span class="receipt-value" id="receipt-amount"></span>
+      </div>
+      <div class="receipt-row">
+        <span class="receipt-label">New Balance</span>
+        <span class="receipt-value" id="receipt-balance"></span>
+      </div>
+      <div class="receipt-row">
+        <span class="receipt-label">Time</span>
+        <span class="receipt-value" id="receipt-time"></span>
+      </div>
+    </div>
+
+    <div class="receipt-actions" id="receipt-actions">
+      <button class="receipt-btn secondary" id="receipt-buy-again">Buy Again</button>
+      <button class="receipt-btn primary" id="receipt-done">Done</button>
+    </div>
+  </div>
+</div>
+
 
 
 

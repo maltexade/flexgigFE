@@ -441,6 +441,7 @@ async function processPayment() {
 }
 
 // ==================== MAIN PAY BUTTON HANDLER ====================
+// ==================== MAIN PAY BUTTON HANDLER (UPDATED WITH RECEIPT MODAL) ====================
 async function onPayClicked(ev) {
   console.log('[checkout] Pay button clicked');
 
@@ -456,25 +457,43 @@ async function onPayClicked(ev) {
     if (!checkoutData) throw new Error('Invalid checkout data');
 
     const authSuccess = await triggerCheckoutAuthWithDedicatedModal();
-if (!authSuccess) {
-  safeNotify('Purchase cancelled', 'info');
-  return;  // Just exit gracefully
-}
+    if (!authSuccess) {
+      safeNotify('Purchase cancelled', 'info');
+      return;
+    }
+
+    // === SHOW PROCESSING RECEIPT MODAL IMMEDIATELY ===
+    showProcessingReceipt(checkoutData);
+
     const result = await processPayment();
 
-        if (result && result.ok) {
+    if (result && result.ok) {
       addLocalTransaction(checkoutData);
       resetCheckoutUI();
-      safeNotify('Data purchased successfully! ✓', 'success');
-      setTimeout(() => closeCheckoutModal(), 800);
+
+      // === UPDATE TO SUCCESS ===
+      updateReceiptToSuccess({
+        newBalance: result.new_balance,
+        serverMessage: result.message || 'Data purchased successfully!'
+      });
+
+      // Close checkout modal
+      closeCheckoutModal();
     }
+
   } catch (err) {
     console.error('[checkout] Payment failed:', err);
+
     let message = err.message || 'Purchase failed. Please try again.';
     if (err.message?.includes('Insufficient')) message = err.message;
     if (err.message?.includes('refunded')) message = err.message;
 
-    safeNotify(message, 'error');
+    // === UPDATE TO FAILED ===
+    updateReceiptToFailed(message);
+
+    // Close checkout modal
+    closeCheckoutModal();
+
   } finally {
     payBtn.disabled = false;
     payBtn.textContent = originalText;
@@ -707,6 +726,77 @@ domReady(() => {
   });
 
   console.log('[checkout] Initialized ✓');
+});
+
+// ==================== SMART RECEIPT MODAL FUNCTIONS ====================
+
+function showProcessingReceipt(data) {
+  const backdrop = document.getElementById('smart-receipt-backdrop');
+  if (!backdrop) return;
+
+  backdrop.classList.remove('hidden');
+
+  // Reset to processing state
+  const icon = document.getElementById('receipt-icon');
+  icon.className = 'receipt-icon processing';
+  icon.innerHTML = '<div class="spinner"></div>';
+
+  document.getElementById('receipt-status').textContent = 'Processing Transaction';
+  document.getElementById('receipt-message').textContent = 'Please wait while we deliver your data...';
+  document.getElementById('receipt-details').style.display = 'none';
+  document.getElementById('receipt-actions').style.display = 'none';
+
+  // Store for later
+  window._currentCheckoutData = data;
+}
+
+function updateReceiptToSuccess({ newBalance, serverMessage }) {
+  const icon = document.getElementById('receipt-icon');
+  icon.className = 'receipt-icon success';
+  icon.innerHTML = '✓';
+
+  document.getElementById('receipt-status').textContent = 'Transaction Successful';
+  document.getElementById('receipt-message').textContent = serverMessage || 'Your data has been delivered successfully!';
+
+  const data = window._currentCheckoutData;
+  if (data) {
+    const providerKey = data.provider.toLowerCase() === '9mobile' ? 'ninemobile' : data.provider.toLowerCase();
+    const svg = svgShapes[providerKey] || '';
+    document.getElementById('receipt-provider').innerHTML = `${svg} ${data.provider.toUpperCase()}`;
+    document.getElementById('receipt-phone').textContent = data.number;
+    document.getElementById('receipt-plan').textContent = data.planName || `${data.dataAmount} (${data.validity})`;
+    document.getElementById('receipt-amount').textContent = `₦${Number(data.price).toLocaleString()}`;
+    document.getElementById('receipt-balance').textContent = `₦${Number(newBalance || 0).toLocaleString()}`;
+    document.getElementById('receipt-time').textContent = new Date().toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
+  }
+
+  document.getElementById('receipt-details').style.display = 'block';
+  document.getElementById('receipt-actions').style.display = 'flex';
+}
+
+function updateReceiptToFailed(errorMessage) {
+  const icon = document.getElementById('receipt-icon');
+  icon.className = 'receipt-icon failed';
+  icon.innerHTML = '✕';
+
+  document.getElementById('receipt-status').textContent = 'Transaction Failed';
+  document.getElementById('receipt-message').textContent = errorMessage;
+
+  document.getElementById('receipt-actions').style.display = 'flex';
+  document.getElementById('receipt-buy-again').textContent = 'Try Again';
+}
+
+// Close receipt modal
+document.getElementById('receipt-done')?.addEventListener('click', () => {
+  document.getElementById('smart-receipt-backdrop')?.classList.add('hidden');
+});
+
+document.getElementById('receipt-buy-again')?.addEventListener('click', () => {
+  const backdrop = document.getElementById('smart-receipt-backdrop');
+  backdrop?.classList.add('hidden');
+
+  const data = window._currentCheckoutData;
+  if (data) openCheckoutModal(data);
 });
 
 // ==================== EXPORTS ====================
