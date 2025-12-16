@@ -761,12 +761,37 @@ function updateReceiptToSuccess(result) {
     const providerKey = data.provider.toLowerCase() === '9mobile' ? 'ninemobile' : data.provider.toLowerCase();
     const svg = svgShapes[providerKey] || '';
     document.getElementById('receipt-provider').innerHTML = `${svg} ${data.provider.toUpperCase()}`;
+
     document.getElementById('receipt-phone').textContent = data.number;
-    document.getElementById('receipt-plan').textContent = `${data.dataAmount} / ${data.validity}`;
+
+    // Extract data amount & validity from server description or fallback to local
+    let dataAmount = 'N/A';
+    let validity = 'N/A';
+    if (result.description) {
+      const match = result.description.match(/Success:\s*(.+)/);
+      if (match) {
+        const parts = match[1].trim().split(' ');
+        dataAmount = parts[0]; // e.g., 200GB
+        validity = parts.slice(1).join(' '); // e.g., (120 Days) or just empty
+      }
+    }
+    // Fallback to local data if server doesn't have it
+    if (dataAmount === 'N/A') dataAmount = data.dataAmount || 'N/A';
+    if (validity === 'N/A') validity = data.validity || '';
+
+    document.getElementById('receipt-plan').textContent = `${dataAmount} / ${validity}`;
+
     document.getElementById('receipt-amount').textContent = `₦${Number(data.price).toLocaleString()}`;
-    document.getElementById('receipt-transaction-id').textContent = result.reference || result.transaction_id || 'N/A';
-    document.getElementById('receipt-balance').textContent = `₦${Number(result.new_balance || 0).toLocaleString()}`;
-    document.getElementById('receipt-time').textContent = new Date().toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
+
+    // Real Transaction ID from server
+    document.getElementById('receipt-transaction-id').textContent = 
+      result.reference || 'N/A';
+
+    document.getElementById('receipt-balance').textContent = 
+      `₦${Number(result.new_balance || 0).toLocaleString()}`;
+
+    document.getElementById('receipt-time').textContent = 
+      new Date().toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
   }
 
   document.getElementById('receipt-details').style.display = 'block';
