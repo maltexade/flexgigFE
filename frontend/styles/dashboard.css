@@ -5141,6 +5141,8 @@ p:has(.balance-real, .balance-masked) {
 .smart-receipt-backdrop {
   position: fixed;
   inset: 0;
+  height: 100%;
+  width: 100%;
   background: rgba(0,0,0,0.6);
   display: flex;
   align-items: center;
@@ -5150,7 +5152,7 @@ p:has(.balance-real, .balance-masked) {
 }
 
 #smart-receipt-modal {
-  background: white;
+  background: var(--bg);
   border-radius: 20px;
   width: 100%;
   max-width: 420px;
@@ -5199,13 +5201,13 @@ p:has(.balance-real, .balance-masked) {
 .receipt-message {
   font-size: 16px;
   color: #666;
-  margin: 10px 0 30px;
+  margin: 10px 0 10px;
 }
 
 .receipt-details {
-  background: #f8f9fa;
-  padding: 30px;
-  font-size: 15px;
+  background: #151515;
+  padding: 10px 30px 10px 30px;
+  font-size: 14px;
 }
 
 .receipt-row {
@@ -5213,13 +5215,12 @@ p:has(.balance-real, .balance-masked) {
   justify-content: space-between;
   margin-bottom: 18px;
   padding-bottom: 14px;
-  border-bottom: 1px solid #eee;
 }
 
 .receipt-row:last-child { border: none; margin-bottom: 0; padding-bottom: 0; }
 
 .receipt-label { color: #666; }
-.receipt-value { font-weight: 600; text-align: right; }
+.receipt-value { font-weight: 600; text-align: right; color: #000; }
 
 .provider-logo {
   display: flex;
