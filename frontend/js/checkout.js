@@ -570,31 +570,42 @@ async function onPayClicked(ev) {
   }
     // === LAPTOP / PHYSICAL KEYBOARD SUPPORT ===
   document.addEventListener('keydown', (e) => {
-    if (modal.classList.contains('hidden')) return; // Only when modal is open
+  // Only when PIN modal is open
+  if (modal.classList.contains('hidden')) return;
 
-    // Allow digits 0-9
-    if (/^[0-9]$/.test(e.key)) {
-      e.preventDefault(); // Prevent default input behavior
-      if (currentPin.length < 4) {
-        currentPin += e.key;
-        updateInputs();
-        if (currentPin.length === 4) {
-          setTimeout(() => verifyPin(currentPin), 300);
-        }
+  // 🚫 IGNORE normal form inputs (VERY IMPORTANT)
+  const target = e.target;
+  if (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target.isContentEditable
+  ) {
+    // Allow phone input & others to behave normally
+    return;
+  }
+
+  // Allow digits 0–9 ONLY for PIN modal
+  if (/^[0-9]$/.test(e.key)) {
+    e.preventDefault();
+    if (currentPin.length < 4) {
+      currentPin += e.key;
+      updateInputs();
+      if (currentPin.length === 4) {
+        setTimeout(() => verifyPin(currentPin), 300);
       }
     }
-    // Backspace to delete last digit
-    else if (e.key === 'Backspace') {
-      e.preventDefault();
-      currentPin = currentPin.slice(0, -1);
-      updateInputs();
-    }
-    // Escape to close modal (cancel)
-    else if (e.key === 'Escape') {
-      hideCheckoutPinModal();
-      if (window._checkoutPinResolve) window._checkoutPinResolve(false);
-    }
-  });
+  }
+  else if (e.key === 'Backspace') {
+    e.preventDefault();
+    currentPin = currentPin.slice(0, -1);
+    updateInputs();
+  }
+  else if (e.key === 'Escape') {
+    hideCheckoutPinModal();
+    if (window._checkoutPinResolve) window._checkoutPinResolve(false);
+  }
+});
+
 
   // Biometric
   if (biometricBtn) {
@@ -781,6 +792,14 @@ function showProcessingReceipt(data) {
 
 async function updateReceiptToSuccess(result) {
   const icon = document.getElementById('receipt-icon');
+  const modal = document.getElementById('smart-receipt-modal');
+  const details = document.getElementById('receipt-details');
+  const actions = document.getElementById('receipt-actions');
+
+  // Start expansion animation
+  modal.classList.add('expanding');
+
+  // Set success state first
   icon.className = 'receipt-icon success';
   icon.innerHTML = `
     <svg class="checkmark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 52">
@@ -793,58 +812,70 @@ async function updateReceiptToSuccess(result) {
   document.getElementById('receipt-message').textContent = result.message || 'Your data has been delivered successfully!';
 
   const data = window._currentCheckoutData;
-  let transactionRef = 'Pending...';
+  let transactionRef = 'Processing...';
 
-  // === FETCH REAL REFERENCE FROM /api/transactions ===
-  try {
-    const res = await fetch('https://api.flexgig.com.ng/api/transactions?limit=10', {
-      credentials: 'include'
-    });
-    const json = await res.json();
-    const txs = json.items || json || [];
+  // === FETCH REFERENCE WITH RETRY ===
+  const fetchReference = async () => {
+    try {
+      const res = await fetch('https://api.flexgig.com.ng/api/transactions?limit=15', {
+        credentials: 'include'
+      });
+      const json = await res.json();
+      const txs = json.items || json || [];
 
-    // Match by phone + amount (most reliable)
-    const match = txs.find(tx => 
-      tx.phone === data.rawNumber &&
-      Math.abs(tx.amount - data.price) <= 1 &&  // handle minor floating point
-      tx.reference && 
-      tx.reference.includes('data_')
-    );
+      const match = txs.find(tx => 
+        tx.phone === data.rawNumber &&
+        Math.abs(tx.amount - data.price) <= 10 &&
+        tx.reference?.includes('data_')
+      );
 
-    if (match && match.reference) {
-      transactionRef = match.reference;
+      return match?.reference || null;
+    } catch (e) {
+      console.warn('Fetch failed:', e);
+      return null;
     }
-  } catch (e) {
-    console.warn('Failed to fetch transaction reference:', e);
-    transactionRef = 'Unavailable';
+  };
+
+  // First attempt
+  let ref = await fetchReference();
+  
+  // If not found, wait 1.5s and try again
+  if (!ref) {
+    await new Promise(r => setTimeout(r, 1500));
+    ref = await fetchReference();
   }
 
+  transactionRef = ref || 'Unavailable';
+
+  // === POPULATE ALL DETAILS ===
   if (data) {
     const providerKey = data.provider.toLowerCase() === '9mobile' ? 'ninemobile' : data.provider.toLowerCase();
     const svg = svgShapes[providerKey] || '';
     document.getElementById('receipt-provider').innerHTML = `${svg} ${data.provider.toUpperCase()}`;
-
     document.getElementById('receipt-phone').textContent = data.number;
-
-    // Use local data amount/validity (most accurate from plan selection)
     document.getElementById('receipt-plan').textContent = `${data.dataAmount} / ${data.validity}`;
-
     document.getElementById('receipt-amount').textContent = `₦${Number(data.price).toLocaleString()}`;
-    
-    // This will now show the real reference like data_1765869742220_bcee735e
     document.getElementById('receipt-transaction-id').textContent = transactionRef;
-
-    document.getElementById('receipt-balance').textContent = 
-      `₦${Number(result.new_balance || 0).toLocaleString()}`;
-
-    document.getElementById('receipt-time').textContent = 
-      new Date().toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
+    document.getElementById('receipt-balance').textContent = `₦${Number(result.new_balance || 0).toLocaleString()}`;
+    document.getElementById('receipt-time').textContent = new Date().toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
   }
+  document.getElementById('receipt-status').style.opacity = '0';
+document.getElementById('receipt-message').style.opacity = '0';
 
-  document.getElementById('receipt-details').style.display = 'block';
-  document.getElementById('receipt-actions').style.display = 'flex';
+setTimeout(() => {
+  document.getElementById('receipt-status').style.opacity = '1';
+  document.getElementById('receipt-message').style.opacity = '1';
+  document.getElementById('receipt-status').style.transition = 'opacity 0.4s 0.3s';
+  document.getElementById('receipt-message').style.transition = 'opacity 0.4s 0.4s';
+}, 400);
+
+  // Show details & actions after animation
+  setTimeout(() => {
+    details.style.display = 'block';
+    actions.style.display = 'flex';
+    modal.classList.remove('expanding');
+  }, 600); // Matches checkmark animation duration
 }
-
 function updateReceiptToFailed(errorMessage) {
   const icon = document.getElementById('receipt-icon');
   icon.className = 'receipt-icon failed';

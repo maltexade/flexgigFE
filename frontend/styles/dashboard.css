@@ -5147,7 +5147,7 @@ p:has(.balance-real, .balance-masked) {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 999999;
+  z-index: 99999;
   animation: fadeIn 0.3s ease;
   backdrop-filter: blur(20px);
 }
@@ -5160,6 +5160,13 @@ p:has(.balance-real, .balance-masked) {
   overflow: hidden;
   box-shadow: 0 20px 60px rgba(0,0,0,0.3);
   animation: slideUp 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  transition: all 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  transform: scale(0.95);
+  opacity: 0.9;
+}
+#smart-receipt-modal.expanding {
+  transform: scale(1);
+  opacity: 1;
 }
 
 .receipt-header {
@@ -5208,7 +5215,7 @@ p:has(.balance-real, .balance-masked) {
 .receipt-details {
   background: #151515;
   padding: 10px 30px 10px 30px;
-  font-size: 14px;
+  font-size: 15px;
 }
 
 .receipt-row {
@@ -5279,13 +5286,15 @@ p:has(.balance-real, .balance-masked) {
   stroke: #fff;
   fill: none;
   animation: stroke 0.6s cubic-bezier(0.65, 0, 0.45, 1) forwards;
+    stroke-dasharray: 166;
+  stroke-dashoffset: 166;
 }
 
 .checkmark__check {
   transform-origin: 50% 50%;
   stroke-dasharray: 48;
   stroke-dashoffset: 48;
-  animation: stroke 0.3s cubic-bezier(0.65, 0, 0.45, 1) 0.8s forwards;
+  animation: stroke 0.4s cubic-bezier(0.65, 0, 0.45, 1) 0.6s forwards;
 }
 
 /* Animated X SVG */
@@ -5324,3 +5333,12 @@ p:has(.balance-real, .balance-masked) {
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes slideUp { from { transform: translateY(60px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+.checkout-pin-digit {
+  position: absolute;
+  left: -9999px;
+  opacity: 0;
+  pointer-events: none;
+  width: 1px;
+  height: 1px;
+}
