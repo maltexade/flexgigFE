@@ -5201,111 +5201,111 @@ async function findPlanById(planId, provider) {
     p.provider.toLowerCase() === provider.toLowerCase()
   );
 }
-  // Full triggerCheckoutReauth - call this from your checkout flow
-async function triggerCheckoutReauth() {
-  console.log('triggerCheckoutReauth called');
-  try {
-    const reauthStatus = await shouldReauth();
-    console.log('triggerCheckoutReauth: reauthStatus', reauthStatus);
+//   // Full triggerCheckoutReauth - call this from your checkout flow
+// async function triggerCheckoutReauth() {
+//   console.log('triggerCheckoutReauth called');
+//   try {
+//     const reauthStatus = await shouldReauth();
+//     console.log('triggerCheckoutReauth: reauthStatus', reauthStatus);
 
-    if (!reauthStatus.needsReauth) {
-      console.log('triggerCheckoutReauth: no reauth needed for checkout');
-      return { success: true };
-    }
+//     if (!reauthStatus.needsReauth) {
+//       console.log('triggerCheckoutReauth: no reauth needed for checkout');
+//       return { success: true };
+//     }
 
-    if (reauthStatus.method === 'biometric') {
-  const session = await safeCall(getSession) || {};
-  const uid = session.user ? (session.user.uid || session.user.id) : null;
-  if (!uid) {
-    console.warn('triggerCheckoutReauth: no uid, opening modal for PIN/fallback');
-    await showReauthModal('checkout');
-    return { success: false, requiresModal: true };
-  }
+//     if (reauthStatus.method === 'biometric') {
+//   const session = await safeCall(getSession) || {};
+//   const uid = session.user ? (session.user.uid || session.user.id) : null;
+//   if (!uid) {
+//     console.warn('triggerCheckoutReauth: no uid, opening modal for PIN/fallback');
+//     await showReauthModal('checkout');
+//     return { success: false, requiresModal: true };
+//   }
 
-  // Client-side guard: ensure biometrics enabled globally and for transactions
-  const isBiometricsEnabled = localStorage.getItem('biometricsEnabled') === 'true';
-  const bioTxEnabled = localStorage.getItem('biometricForTx') === 'true';
-  if (!isBiometricsEnabled || !bioTxEnabled) {
-    // fallback to modal / PIN flow
-    await showReauthModal('checkout');
-    return { success: false, requiresModal: true, error: 'biometrics-disabled-for-transaction' };
-  }
+//   // Client-side guard: ensure biometrics enabled globally and for transactions
+//   const isBiometricsEnabled = localStorage.getItem('biometricsEnabled') === 'true';
+//   const bioTxEnabled = localStorage.getItem('biometricForTx') === 'true';
+//   if (!isBiometricsEnabled || !bioTxEnabled) {
+//     // fallback to modal / PIN flow
+//     await showReauthModal('checkout');
+//     return { success: false, requiresModal: true, error: 'biometrics-disabled-for-transaction' };
+//   }
 
-  // Use 'transaction' so it matches your shouldReauth/server checks
-  const { success, result, error } = await verifyBiometrics(uid, 'transaction');
-  if (success) {
-    console.log('triggerCheckoutReauth: biometric success for checkout');
-    return { success: true, result };
-  }
-  console.log('triggerCheckoutReauth: biometric failed for checkout, opening modal');
-  await showReauthModal('checkout');
-  return { success: false, requiresModal: true, error };
-}
-
-
-    // PIN path: show modal (will handle the PIN flow)
-    await showReauthModal('checkout');
-    return { success: false, requiresModal: true };
-  } catch (err) {
-    console.error('triggerCheckoutReauth error:', err);
-    await showReauthModal('checkout');
-    return { success: false, requiresModal: true, error: err.message };
-  }
-}
+//   // Use 'transaction' so it matches your shouldReauth/server checks
+//   const { success, result, error } = await verifyBiometrics(uid, 'transaction');
+//   if (success) {
+//     console.log('triggerCheckoutReauth: biometric success for checkout');
+//     return { success: true, result };
+//   }
+//   console.log('triggerCheckoutReauth: biometric failed for checkout, opening modal');
+//   await showReauthModal('checkout');
+//   return { success: false, requiresModal: true, error };
+// }
 
 
-  // --- RENDER CHECKOUT MODAL ---
-  function renderCheckoutModal() {
-  const state = JSON.parse(localStorage.getItem('userState') || '{}');
-  const { provider, planId, number } = state;
-  if (!provider || !planId || !number) {
-    console.log('[DEBUG] renderCheckoutModal: Missing required state:', { provider, planId, number });
-    return;
-  }
+//     // PIN path: show modal (will handle the PIN flow)
+//     await showReauthModal('checkout');
+//     return { success: false, requiresModal: true };
+//   } catch (err) {
+//     console.error('triggerCheckoutReauth error:', err);
+//     await showReauthModal('checkout');
+//     return { success: false, requiresModal: true, error: err.message };
+//   }
+// }
 
-  const plan = findPlanById(planId, provider);
-  if (!plan) {
-    console.log('[DEBUG] renderCheckoutModal: No plan found for ID:', planId);
-    return;
-  }
 
-  const phoneEl = document.getElementById('checkout-phone');
-  const priceEl = document.getElementById('checkout-price');
-  const dataEl = document.getElementById('checkout-data');
-  const providerEl = document.getElementById('checkout-provider');
-  const payBtn = document.getElementById('payBtn');
+//   // --- RENDER CHECKOUT MODAL ---
+//   function renderCheckoutModal() {
+//   const state = JSON.parse(localStorage.getItem('userState') || '{}');
+//   const { provider, planId, number } = state;
+//   if (!provider || !planId || !number) {
+//     console.log('[DEBUG] renderCheckoutModal: Missing required state:', { provider, planId, number });
+//     return;
+//   }
 
-  if (phoneEl) {
-    const rawNumber = normalizePhone(number); // Ensure raw number is valid
-    const formattedNumber = formatNigeriaNumber(rawNumber).value; // Get formatted number
-    if (!rawNumber || rawNumber.length !== 11 || !formattedNumber) {
-      console.warn('[WARN] renderCheckoutModal: Invalid number - Raw:', rawNumber, 'Formatted:', formattedNumber, 'Original:', number);
-      phoneEl.textContent = ''; // Fallback to empty if invalid
-    } else {
-      phoneEl.textContent = formattedNumber;
-      // Inline styles to prevent cutoff of 13-character formatted number
-      phoneEl.style.whiteSpace = 'nowrap';
-      phoneEl.style.overflow = 'visible';
-      phoneEl.style.textOverflow = 'initial';
-      phoneEl.style.maxWidth = 'none';
-      phoneEl.style.width = 'auto';
-      phoneEl.style.display = 'inline-block';
-      console.log('[DEBUG] renderCheckoutModal: Phone number set:', formattedNumber, 'Length:', formattedNumber.length, 'Raw:', rawNumber);
-    }
-  }
-  if (priceEl) priceEl.textContent = `₦${plan.price}`;
-  if (dataEl) dataEl.textContent = `${plan.data} (${plan.duration})`;
-  if (providerEl) {
-    const displayName = provider === 'ninemobile' ? '9mobile' : provider.charAt(0).toUpperCase() + provider.slice(1);
-    providerEl.innerHTML = `${svgShapes[provider]} ${displayName}`;
-    console.log('[DEBUG] renderCheckoutModal: Provider set with SVG:', displayName);
-  }
-  if (payBtn) {
-    payBtn.disabled = false;
-    payBtn.classList.add('active');
-  }
-  console.log('[DEBUG] renderCheckoutModal: Rendered for provider:', provider, 'planId:', planId, 'number:', number);
-}
+//   const plan = findPlanById(planId, provider);
+//   if (!plan) {
+//     console.log('[DEBUG] renderCheckoutModal: No plan found for ID:', planId);
+//     return;
+//   }
+
+//   const phoneEl = document.getElementById('checkout-phone');
+//   const priceEl = document.getElementById('checkout-price');
+//   const dataEl = document.getElementById('checkout-data');
+//   const providerEl = document.getElementById('checkout-provider');
+//   const payBtn = document.getElementById('payBtn');
+
+//   if (phoneEl) {
+//     const rawNumber = normalizePhone(number); // Ensure raw number is valid
+//     const formattedNumber = formatNigeriaNumber(rawNumber).value; // Get formatted number
+//     if (!rawNumber || rawNumber.length !== 11 || !formattedNumber) {
+//       console.warn('[WARN] renderCheckoutModal: Invalid number - Raw:', rawNumber, 'Formatted:', formattedNumber, 'Original:', number);
+//       phoneEl.textContent = ''; // Fallback to empty if invalid
+//     } else {
+//       phoneEl.textContent = formattedNumber;
+//       // Inline styles to prevent cutoff of 13-character formatted number
+//       phoneEl.style.whiteSpace = 'nowrap';
+//       phoneEl.style.overflow = 'visible';
+//       phoneEl.style.textOverflow = 'initial';
+//       phoneEl.style.maxWidth = 'none';
+//       phoneEl.style.width = 'auto';
+//       phoneEl.style.display = 'inline-block';
+//       console.log('[DEBUG] renderCheckoutModal: Phone number set:', formattedNumber, 'Length:', formattedNumber.length, 'Raw:', rawNumber);
+//     }
+//   }
+//   if (priceEl) priceEl.textContent = `₦${plan.price}`;
+//   if (dataEl) dataEl.textContent = `${plan.data} (${plan.duration})`;
+//   if (providerEl) {
+//     const displayName = provider === 'ninemobile' ? '9mobile' : provider.charAt(0).toUpperCase() + provider.slice(1);
+//     providerEl.innerHTML = `${svgShapes[provider]} ${displayName}`;
+//     console.log('[DEBUG] renderCheckoutModal: Provider set with SVG:', displayName);
+//   }
+//   if (payBtn) {
+//     payBtn.disabled = false;
+//     payBtn.classList.add('active');
+//   }
+//   console.log('[DEBUG] renderCheckoutModal: Rendered for provider:', provider, 'planId:', planId, 'number:', number);
+// }
 
   // // --- OPEN CHECKOUT MODAL ---
   // function openCheckoutModal() {
@@ -5818,7 +5818,7 @@ phoneInput.maxLength = 13;  // 11 digits + 2 spaces in formatted value
   // 1. Get active provider
   const activeProviderClass = providerClasses.find(cls => slider.classList.contains(cls));
   if (!activeProviderClass) {
-    safeNotify('Please select a network provider', 'error');
+    showToast('Please select a network provider', 'error');
     return;
   }
 
@@ -5827,20 +5827,20 @@ phoneInput.maxLength = 13;  // 11 digits + 2 spaces in formatted value
   // 2. Get selected plan
   const selectedPlanBox = plansRow.querySelector('.plan-box.selected');
   if (!selectedPlanBox) {
-    safeNotify('Please select a data plan', 'error');
+    showToast('Please select a data plan', 'error');
     return;
   }
 
   const planId = selectedPlanBox.dataset.id;
   if (!planId) {
-    safeNotify('Invalid plan selected', 'error');
+    showToast('Invalid plan selected', 'error');
     return;
   }
 
   // 3. Get phone number
   const rawPhone = normalizePhone(phoneInput.value);
   if (!rawPhone || rawPhone.length !== 11) {
-    safeNotify('Please enter a valid phone number', 'error');
+    showToast('Please enter a valid phone number', 'error');
     return;
   }
 
@@ -5855,7 +5855,7 @@ phoneInput.maxLength = 13;  // 11 digits + 2 spaces in formatted value
 
   if (!fullPlan) {
     console.error('[CHECKOUT] Plan not found in cache:', planId, activeProviderClass);
-    safeNotify('Plan details not available. Please try again.', 'error');
+    showToast('Plan details not available. Please try again.', 'error');
     return;
   }
 
@@ -6233,13 +6233,13 @@ viewAllLink.addEventListener('click', (e) => {
   // Initialize recent transactions
  renderRecentTransactions();
 
-   payBtn.disabled = true;
- payBtn.textContent = 'Processing...';
- setTimeout(() => {
-   // Payment logic
-    payBtn.disabled = false;
-    payBtn.textContent = 'Pay';
-  }, 1000); 
+//    payBtn.disabled = true;
+//  payBtn.textContent = 'Processing...';
+//  setTimeout(() => {
+//    // Payment logic
+//     payBtn.disabled = false;
+//     payBtn.textContent = 'Pay';
+//   }, 1000); 
   // // --- ADD MONEY HANDLER ---
   // const addMoneyBtn = document.querySelector('.card.add-money1');
   // addMoneyBtn.addEventListener('click', () => {
@@ -6413,6 +6413,7 @@ viewAllLink.addEventListener('click', (e) => {
   // return the element in case caller wants to manipulate it (optional)
   return toast;
 }
+window.showToast = showToast;
 
 
     // ---------------------
@@ -7745,23 +7746,23 @@ async function updateStoredPin(uid, newPin) {
     }
   }
 
-  // Initialize checkout PIN verification
-  function initCheckoutPin() {
-    if (payBtn) {
-      payBtn.addEventListener('click', async () => {
-        const info = await getUid();
-        if (!info || !info.uid) {
-          notify('You must be signed in to proceed with payment', 'error');
-          return;
-        }
-        await window.checkPinExists((hasPin) => {
-          if (hasPin) {
-            window.ModalManager.openModal('pinVerifyModal');
-          }
-        }, 'checkout');
-      });
-    }
-  }
+  // // Initialize checkout PIN verification
+  // function initCheckoutPin() {
+  //   if (payBtn) {
+  //     payBtn.addEventListener('click', async () => {
+  //       const info = await getUid();
+  //       if (!info || !info.uid) {
+  //         notify('You must be signed in to proceed with payment', 'error');
+  //         return;
+  //       }
+  //       await window.checkPinExists((hasPin) => {
+  //         if (hasPin) {
+  //           window.ModalManager.openModal('pinVerifyModal');
+  //         }
+  //       }, 'checkout');
+  //     });
+  //   }
+  // }
 
   // Initialize inactivity handling
   // function initInactivity() {

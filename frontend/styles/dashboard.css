@@ -5107,10 +5107,16 @@ p:has(.balance-real, .balance-masked) {
 
 
 .checkout-biometric-btn {
-  background: transparent !important;
-  border-radius: 0 !important;
-  grid-column: 2;
+  width: 64px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
 }
+
+
 
 .checkout-delete-btn {
   border: none !important;

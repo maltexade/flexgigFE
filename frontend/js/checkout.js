@@ -36,14 +36,14 @@ function gatherCheckoutData() {
     }
 
     if (!selectedProvider) {
-      safeNotify('Please select a network provider', 'error');
+      showToast('Please select a network provider', 'error');
       return null;
     }
 
     let provider = ['mtn', 'airtel', 'glo', 'ninemobile'].find(p => selectedProvider.classList.contains(p));
     if (provider === 'ninemobile') provider = '9mobile';
     if (!provider) {
-      safeNotify('Invalid provider selected', 'error');
+      showToast('Invalid provider selected', 'error');
       return null;
     }
 
@@ -51,7 +51,7 @@ function gatherCheckoutData() {
     const phoneInput = document.getElementById('phone-input');
     const number = phoneInput?.value.trim() || '';
     if (!number || number.length < 10) {
-      safeNotify('Please enter a valid phone number', 'error');
+      showToast('Please enter a valid phone number', 'error');
       return null;
     }
 
@@ -80,12 +80,12 @@ function gatherCheckoutData() {
     }
 
     if (!selectedPlan || !selectedPlan.planId) {
-      safeNotify('Please select a data plan', 'error');
+      showToast('Please select a data plan', 'error');
       return null;
     }
 
     if (selectedPlan.price <= 0) {
-      safeNotify('Invalid plan price', 'error');
+      showToast('Invalid plan price', 'error');
       return null;
     }
 
@@ -106,7 +106,7 @@ function gatherCheckoutData() {
 
   } catch (err) {
     console.error('[checkout] Error gathering data:', err);
-    safeNotify('Failed to prepare checkout', 'error');
+    showToast('Failed to prepare checkout', 'error');
     return null;
   }
 }
@@ -119,7 +119,7 @@ function domReady(cb) {
 }
 
 // ==================== UTILITY FUNCTIONS ====================
-const safeNotify = (msg, type = 'info') => {
+const showToast = (msg, type = 'info') => {
   if (typeof window.notify === 'function') {
     return window.notify(msg, type);
   } else if (typeof notify === 'function') {
@@ -199,7 +199,7 @@ function openCheckoutModal(data) {
 
   if (!checkoutInfo || !checkoutInfo.provider || !checkoutInfo.price || !checkoutInfo.number) {
     console.error('[checkout] Invalid checkout data:', checkoutInfo);
-    safeNotify('Missing checkout information. Please try again.', 'error');
+    showToast('Missing checkout information. Please try again.', 'error');
     return;
   }
 
@@ -210,7 +210,7 @@ function openCheckoutModal(data) {
   
   if (!modal) {
     console.error('[checkout] Modal not found');
-    safeNotify('Checkout modal not available', 'error');
+    showToast('Checkout modal not available', 'error');
     return;
   }
 
@@ -259,7 +259,7 @@ function openCheckoutModal(data) {
     
   } catch (err) {
     console.error('[checkout] Error populating modal:', err);
-    safeNotify('Failed to load checkout details', 'error');
+    showToast('Failed to load checkout details', 'error');
   }
 }
 
@@ -456,7 +456,7 @@ async function onPayClicked(ev) {
 
     const authSuccess = await triggerCheckoutAuthWithDedicatedModal();
     if (!authSuccess) {
-      safeNotify('Purchase cancelled', 'info');
+      showToast('Purchase cancelled', 'info');
       return;
     }
 
@@ -536,13 +536,40 @@ async function onPayClicked(ev) {
     updateInputs();
   }
 
-  function showCheckoutPinModal() {
-    modal.classList.remove('hidden');
-    document.body.style.overflow = 'hidden';
-    updateBiometricButton();
-    resetPin();
-    // inputs[0]?.focus();
+function showCheckoutPinModal() {
+  modal.classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+  updateBiometricButton();
+  resetPin();
+
+  // === NEW: AUTO-TRIGGER BIOMETRIC IF ENABLED ===
+  if (isBiometricEnabledForTx()) {
+    // Small delay to ensure modal is visible (better UX)
+    setTimeout(async () => {
+      try {
+        const result = await (verifyBiometrics?.() || startAuthentication?.() || { success: false });
+        if (result && result.success) {
+          hideCheckoutPinModal();
+          if (window._checkoutPinResolve) {
+            window._checkoutPinResolve(true);  // Auth success → proceed to payment
+          }
+        } else {
+          // Biometric failed/cancelled → fall back to PIN entry
+          showToast('Use your PIN to complete purchase', 'info');
+          // Focus first input for smooth fallback
+          inputs[0]?.focus();
+        }
+      } catch (err) {
+        console.warn('[checkout-pin] Biometric error:', err);
+        showToast('Biometric unavailable. Enter PIN', 'info');
+        inputs[0]?.focus();
+      }
+    }, 400); // Slight delay for modal animation
+  } else {
+    // Biometric off → normal PIN flow
+    inputs[0]?.focus();
   }
+}
 
   function hideCheckoutPinModal() {
     modal.classList.add('hidden');
@@ -608,10 +635,10 @@ async function onPayClicked(ev) {
           window._checkoutPinResolve(true);
         }
       } else {
-        safeNotify('Biometric authentication failed', 'error');
+        showToast('Biometric authentication failed', 'error');
       }
     } catch (err) {
-      safeNotify('Biometric error', 'error');
+      showToast('Biometric error', 'error');
     }
   });
 }
@@ -672,7 +699,7 @@ window.openForgetPinFlow = async function openForgetPinFlow() {
         throw new Error(result.message || 'Failed to send OTP');
       }
 
-      safeNotify(`OTP sent to ${email}`, 'success');
+      showToast(`OTP sent to ${email}`, 'success');
 
       // === OPEN RESET PIN MODAL ===
       const modal = document.getElementById('resetPinModal');
@@ -690,7 +717,7 @@ window.openForgetPinFlow = async function openForgetPinFlow() {
 
         modal.querySelector('input, button')?.focus();
       } else {
-        safeNotify(
+        showToast(
           'OTP sent! Please check your email and reset PIN from profile.',
           'info'
         );
@@ -698,7 +725,7 @@ window.openForgetPinFlow = async function openForgetPinFlow() {
 
     } catch (err) {
       console.error('openForgetPinFlow error:', err);
-      safeNotify(err.message || 'Failed to start PIN reset', 'error');
+      showToast(err.message || 'Failed to start PIN reset', 'error');
       throw err; // ⬅ ensures loader closes properly
     } finally {
       if (triggerLink) {
@@ -750,12 +777,12 @@ window.openForgetPinFlow = async function openForgetPinFlow() {
         }
       } else {
         const data = await res.json().catch(() => ({}));
-        safeNotify(data.message || 'Invalid PIN. Please try again.', 'error');
+        showToast(data.message || 'Invalid PIN. Please try again.', 'error');
         resetPin();
         // Do NOT resolve — let user try again
       }
     } catch (err) {
-      safeNotify('PIN verification failed. Check your connection.', 'error');
+      showToast('PIN verification failed. Check your connection.', 'error');
       resetPin();
     }
   });
