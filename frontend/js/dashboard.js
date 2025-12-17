@@ -14499,6 +14499,7 @@ async function registerBiometrics() {
   });
 }
 
+window.registerBiometrics = window.registerBiometrics || registerBiometrics;
 
 
 /* -----------------------
@@ -14563,6 +14564,8 @@ async function disableBiometrics() {
 
   return { success: true };
 }
+
+window.disableBiometrics = window.disableBiometrics || disableBiometrics;
 
 
 /* -----------------------
