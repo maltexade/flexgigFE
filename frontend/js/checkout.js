@@ -19,28 +19,6 @@ const svgShapes = {
   receive: `<svg class="bank-icon" width="25" height="25" viewBox="0 0 24 24" fill="none"><path d="M4 9v9h16V9l-8-5-8 5zm4 4h8v2H8v-2zm0 4h4v2H8v-2z" fill="#00cc00" stroke="#fff" stroke-width="1"/></svg>`
 };
 
-// Pre-warm biometric authentication to eliminate cold-start delay
-async function warmUpBiometrics() {
-  if (!isBiometricEnabledForTx()) return;
-
-  try {
-    // This calls the same WebAuthn API but with "silent" preference
-    // It will either succeed quickly (if already warm) or start warming up the system
-    const result = await (verifyBiometrics?.() || startAuthentication?.() || { success: false });
-
-    // We EXPECT this to fail or be cancelled — that's fine!
-    // The goal is just to wake up the secure enclave
-    if (result?.success) {
-      console.log('[biometric] Warm-up succeeded unexpectedly (already authenticated?)');
-    } else {
-      console.log('[biometric] Warm-up complete (system ready, prompt cancelled as expected)');
-    }
-  } catch (err) {
-    // Totally normal — user hasn't interacted yet, or system is just warming
-    console.log('[biometric] Warm-up triggered (cold start avoided on next call)');
-  }
-}
-
 // ==================== HELPER: GATHER CHECKOUT DATA ====================
 function gatherCheckoutData() {
   try {
@@ -278,7 +256,6 @@ function openCheckoutModal(data) {
     history.pushState({ popup: true, modal: 'checkout' }, '', location.href);
     
     console.log('[checkout] Modal opened successfully');
-    setTimeout(warmUpBiometrics, 300);
     
   } catch (err) {
     console.error('[checkout] Error populating modal:', err);
@@ -476,6 +453,7 @@ async function onPayClicked(ev) {
 
   try {
     checkoutData = gatherCheckoutData();
+    if (navigator.vibrate) navigator.vibrate(30); // Subtle feedback while waiting
     if (!checkoutData) throw new Error('Invalid checkout data');
 
     const authSuccess = await triggerCheckoutAuthWithDedicatedModal();
@@ -649,7 +627,7 @@ async function handleBiometricAuth() {
 
   try {
     if (biometricBtn) {
-      biometricBtn.textContent = 'Authenticating...';
+      biometricBtn.textContent = '';
       biometricBtn.disabled = true;
     }
 
