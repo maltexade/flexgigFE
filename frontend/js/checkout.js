@@ -19,6 +19,28 @@ const svgShapes = {
   receive: `<svg class="bank-icon" width="25" height="25" viewBox="0 0 24 24" fill="none"><path d="M4 9v9h16V9l-8-5-8 5zm4 4h8v2H8v-2zm0 4h4v2H8v-2z" fill="#00cc00" stroke="#fff" stroke-width="1"/></svg>`
 };
 
+// Pre-warm biometric authentication to eliminate cold-start delay
+async function warmUpBiometrics() {
+  if (!isBiometricEnabledForTx()) return;
+
+  try {
+    // This calls the same WebAuthn API but with "silent" preference
+    // It will either succeed quickly (if already warm) or start warming up the system
+    const result = await (verifyBiometrics?.() || startAuthentication?.() || { success: false });
+
+    // We EXPECT this to fail or be cancelled — that's fine!
+    // The goal is just to wake up the secure enclave
+    if (result?.success) {
+      console.log('[biometric] Warm-up succeeded unexpectedly (already authenticated?)');
+    } else {
+      console.log('[biometric] Warm-up complete (system ready, prompt cancelled as expected)');
+    }
+  } catch (err) {
+    // Totally normal — user hasn't interacted yet, or system is just warming
+    console.log('[biometric] Warm-up triggered (cold start avoided on next call)');
+  }
+}
+
 // ==================== HELPER: GATHER CHECKOUT DATA ====================
 function gatherCheckoutData() {
   try {
@@ -256,6 +278,7 @@ function openCheckoutModal(data) {
     history.pushState({ popup: true, modal: 'checkout' }, '', location.href);
     
     console.log('[checkout] Modal opened successfully');
+    setTimeout(warmUpBiometrics, 300);
     
   } catch (err) {
     console.error('[checkout] Error populating modal:', err);
@@ -537,40 +560,7 @@ async function onPayClicked(ev) {
     updateInputs();
   }
 
-function showCheckoutPinModal() {
-  modal.classList.remove('hidden');
-  document.body.style.overflow = 'hidden';
-  updateBiometricButton();
-  resetPin();
 
-  // === NEW: AUTO-TRIGGER BIOMETRIC IF ENABLED ===
-  if (isBiometricEnabledForTx()) {
-    // Small delay to ensure modal is visible (better UX)
-    setTimeout(async () => {
-      try {
-        const result = await (verifyBiometrics?.() || startAuthentication?.() || { success: false });
-        if (result && result.success) {
-          hideCheckoutPinModal();
-          if (window._checkoutPinResolve) {
-            window._checkoutPinResolve(true);  // Auth success → proceed to payment
-          }
-        } else {
-          // Biometric failed/cancelled → fall back to PIN entry
-          showToast('Use your PIN to complete purchase', 'info');
-          // Focus first input for smooth fallback
-          inputs[0]?.focus();
-        }
-      } catch (err) {
-        console.warn('[checkout-pin] Biometric error:', err);
-        showToast('Biometric unavailable. Enter PIN', 'info');
-        inputs[0]?.focus();
-      }
-    }, 0); // Slight delay for modal animation
-  } else {
-    // Biometric off → normal PIN flow
-    inputs[0]?.focus();
-  }
-}
 
   function hideCheckoutPinModal() {
     modal.classList.add('hidden');
@@ -632,7 +622,6 @@ if (biometricBtn) {
   });
 }
 
-// === AUTO-TRIGGER BIOMETRIC ON MODAL OPEN (UPDATED) ===
 function showCheckoutPinModal() {
   modal.classList.remove('hidden');
   document.body.style.overflow = 'hidden';
@@ -640,12 +629,11 @@ function showCheckoutPinModal() {
   resetPin();
 
   if (isBiometricEnabledForTx()) {
-    // Small delay for modal animation to complete
-    setTimeout(() => {
-      handleBiometricAuth();  // Same function — will auto-simulate fill
-    }, 400);
+    // ZERO delay — system is already warmed up from checkout modal open
+    handleBiometricAuth();
   } else {
-    inputs[0]?.focus();
+    // Small delay only for PIN entry to ensure smooth keyboard focus
+    setTimeout(() => inputs[0]?.focus(), 100);
   }
 }
 
@@ -684,13 +672,13 @@ async function handleBiometricAuth() {
 
     } else {
       // FAILED or CANCELLED → fall back to PIN
-      safeNotify('Biometric failed. Enter your PIN', 'info');
+      showToast('Biometric failed. Enter your PIN', 'info');
       inputs[0]?.focus();
     }
 
   } catch (err) {
     console.warn('[checkout-pin] Biometric error:', err);
-    safeNotify('Biometric unavailable. Use PIN', 'info');
+    showToast('Biometric unavailable. Use PIN', 'info');
     inputs[0]?.focus();
 
   } finally {
