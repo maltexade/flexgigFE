@@ -402,6 +402,7 @@ async function processPayment() {
   };
 
   console.log('[checkout] Sending to backend:', payload);
+  showToast('Processing', 'info');
 
   // Fetch without withLoader – receipt modal handles UI
   const response = await fetch('https://api.flexgig.com.ng/api/purchase-data', {
@@ -564,7 +565,7 @@ function showCheckoutPinModal() {
         showToast('Biometric unavailable. Enter PIN', 'info');
         inputs[0]?.focus();
       }
-    }, 400); // Slight delay for modal animation
+    }, 0); // Slight delay for modal animation
   } else {
     // Biometric off → normal PIN flow
     inputs[0]?.focus();
@@ -624,25 +625,82 @@ function showCheckoutPinModal() {
   });
 
   // Biometric
-  if (biometricBtn) {
+// === BIOMETRIC AUTH HANDLER (UPDATED) ===
+if (biometricBtn) {
   biometricBtn.addEventListener('click', async () => {
-    try {
-      const result = await (verifyBiometrics?.() || startAuthentication?.() || { success: false });
-      if (result && result.success) {
-        hideCheckoutPinModal();
-        // Only resolve — do not call processPayment here
-        if (window._checkoutPinResolve) {
-          window._checkoutPinResolve(true);
-        }
-      } else {
-        showToast('Biometric authentication failed', 'error');
-      }
-    } catch (err) {
-      showToast('Biometric error', 'error');
-    }
+    await handleBiometricAuth();  // Reuse the same function for button and auto-trigger
   });
 }
 
+// === AUTO-TRIGGER BIOMETRIC ON MODAL OPEN (UPDATED) ===
+function showCheckoutPinModal() {
+  modal.classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+  updateBiometricButton();
+  resetPin();
+
+  if (isBiometricEnabledForTx()) {
+    // Small delay for modal animation to complete
+    setTimeout(() => {
+      handleBiometricAuth();  // Same function — will auto-simulate fill
+    }, 400);
+  } else {
+    inputs[0]?.focus();
+  }
+}
+
+// === SHARED BIOMETRIC AUTH FUNCTION ===
+async function handleBiometricAuth() {
+  try {
+    // Show subtle loading state on biometric button (optional but nice)
+    const originalText = biometricBtn.textContent;
+    biometricBtn.textContent = 'Authenticating...';
+    biometricBtn.disabled = true;
+
+    const result = await (verifyBiometrics?.() || startAuthentication?.() || { success: false });
+
+    if (result && result.success) {
+      // SUCCESS: Simulate PIN entry visually + resolve auth
+      console.log('[checkout-pin] Biometric success → simulating PIN fill');
+
+      // Use fast fill-all for instant feedback (best for biometric)
+      const simulated = await simulatePinEntry({
+        stagger: 0,         // 0 = fill all at once
+        fillAll: true,      // explicit flag
+        expectedCount: 4
+      });
+
+      if (simulated) {
+        console.log('[checkout-pin] PIN dots filled visually after biometric');
+      } else {
+        console.warn('[checkout-pin] simulatePinEntry failed — but continuing anyway');
+      }
+
+      // Close modal and proceed to payment
+      hideCheckoutPinModal();
+      if (window._checkoutPinResolve) {
+        window._checkoutPinResolve(true);
+      }
+
+    } else {
+      // FAILED or CANCELLED → fall back to PIN
+      safeNotify('Biometric failed. Enter your PIN', 'info');
+      inputs[0]?.focus();
+    }
+
+  } catch (err) {
+    console.warn('[checkout-pin] Biometric error:', err);
+    safeNotify('Biometric unavailable. Use PIN', 'info');
+    inputs[0]?.focus();
+
+  } finally {
+    // Restore button
+    if (biometricBtn) {
+      biometricBtn.textContent = originalText || 'Use Biometrics';
+      biometricBtn.disabled = false;
+    }
+  }
+}
   // Forgot PIN
   if (forgotLink) {
     forgotLink.addEventListener('click', (e) => {
