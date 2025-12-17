@@ -16974,7 +16974,7 @@ async function verifyBiometrics(uid, context = 'reauth') {
     return { success: false, error: err.message };
   }
 }
-
+window.verifyBiometrics = window.verifyBiometrics = verifyBiometrics;
 
 // 🔹 Improved simulatePinEntry with verbose debug logs and Promise-based completion
 // ---- REPLACE existing simulatePinEntry(...) with this improved version ----
@@ -17100,7 +17100,7 @@ function simulatePinEntry(opts = {}) {
 }
 
 
-
+window.simulatePinEntry = window.simulatePinEntry || simulatePinEntry;
 
 
 
