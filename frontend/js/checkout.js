@@ -6,6 +6,29 @@
 console.log('[checkout] Module loaded 🛒');
 
 'use strict';
+// ==================== BIOMETRIC WARMUP ====================
+let biometricWarmPromise = null;
+
+function warmUpBiometrics() {
+  if (biometricWarmPromise) return biometricWarmPromise;
+
+  biometricWarmPromise = (async () => {
+    try {
+      if (window.PublicKeyCredential) {
+        await navigator.credentials.get({
+          publicKey: {
+            challenge: new Uint8Array(32),
+            timeout: 1,
+            userVerification: 'preferred'
+          }
+        }).catch(() => {});
+      }
+    } catch (_) {}
+  })();
+
+  return biometricWarmPromise;
+}
+window.warmUpBiometrics = window.warmUpBiometrics || warmUpBiometrics;
 
 // ==================== STATE ====================
 let checkoutData = null; // Stores current checkout information
@@ -110,22 +133,7 @@ function gatherCheckoutData() {
     return null;
   }
 }
-let biometricWarmPromise = null;
 
-function warmUpBiometrics() {
-  if (biometricWarmPromise) return biometricWarmPromise;
-
-  biometricWarmPromise = (async () => {
-    try {
-      // Silent, no-UI warm-up
-      await (navigator.credentials?.get
-        ? Promise.resolve()
-        : Promise.resolve());
-    } catch (_) {}
-  })();
-
-  return biometricWarmPromise;
-}
 
 
 // ==================== DOM READY ====================
