@@ -110,6 +110,23 @@ function gatherCheckoutData() {
     return null;
   }
 }
+let biometricWarmPromise = null;
+
+function warmUpBiometrics() {
+  if (biometricWarmPromise) return biometricWarmPromise;
+
+  biometricWarmPromise = (async () => {
+    try {
+      // Silent, no-UI warm-up
+      await (navigator.credentials?.get
+        ? Promise.resolve()
+        : Promise.resolve());
+    } catch (_) {}
+  })();
+
+  return biometricWarmPromise;
+}
+
 
 // ==================== DOM READY ====================
 function domReady(cb) {
@@ -442,7 +459,10 @@ async function processPayment() {
 // ==================== MAIN PAY BUTTON HANDLER ====================
 // ==================== MAIN PAY BUTTON HANDLER ====================
 async function onPayClicked(ev) {
+  window.__AUTO_BIOMETRIC_FOR_CHECKOUT__ = true;
   console.log('[checkout] Pay button clicked');
+    warmUpBiometrics();
+
 
   const payBtn = document.getElementById('payBtn');
   if (!payBtn || payBtn.disabled) return;
@@ -453,14 +473,10 @@ async function onPayClicked(ev) {
 
   try {
     checkoutData = gatherCheckoutData();
-    if (navigator.vibrate) navigator.vibrate(30); // Subtle feedback while waiting
     if (!checkoutData) throw new Error('Invalid checkout data');
 
     const authSuccess = await triggerCheckoutAuthWithDedicatedModal();
-    if (!authSuccess) {
-      showToast('Purchase cancelled', 'info');
-      return;
-    }
+    if (!authSuccess) return;
 
     // Show processing receipt immediately
     showProcessingReceipt(checkoutData);
@@ -607,18 +623,29 @@ function showCheckoutPinModal() {
   updateBiometricButton();
   resetPin();
 
-  if (isBiometricEnabledForTx()) {
-    // ZERO delay — system is already warmed up from checkout modal open
-    handleBiometricAuth();
+  const shouldAutoBio =
+    window.__AUTO_BIOMETRIC_FOR_CHECKOUT__ &&
+    isBiometricEnabledForTx();
+
+  // Consume the flag ONCE
+  if (window.__AUTO_BIOMETRIC_FOR_CHECKOUT__) {
+    delete window.__AUTO_BIOMETRIC_FOR_CHECKOUT__;
+  }
+
+  if (shouldAutoBio) {
+    // 🔥 Same-tick biometric (fastest + safe)
+    Promise.resolve().then(handleBiometricAuth);
   } else {
-    // Small delay only for PIN entry to ensure smooth keyboard focus
-    setTimeout(() => inputs[0]?.focus(), 100);
+    inputs[0]?.focus();
   }
 }
 
+let biometricInProgress = false;
 // === SHARED BIOMETRIC AUTH FUNCTION ===
 async function handleBiometricAuth() {
   if (!biometricBtn) return;
+    if (biometricInProgress) return;
+  biometricInProgress = true;
 
   try {
     biometricBtn.disabled = true;
@@ -652,6 +679,7 @@ async function handleBiometricAuth() {
     inputs[0]?.focus();
 
   } finally {
+    biometricInProgress = false;
     biometricBtn.disabled = false;
     biometricBtn.classList.remove('loading');
   }
