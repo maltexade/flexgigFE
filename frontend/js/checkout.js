@@ -620,39 +620,31 @@ function showCheckoutPinModal() {
 async function handleBiometricAuth() {
   if (!biometricBtn) return;
 
-  let originalText = 'Use Biometrics'; // Default fallback
-  if (biometricBtn) {
-    originalText = biometricBtn.textContent || originalText;
-  }
-
   try {
-    if (biometricBtn) {
-      biometricBtn.textContent = '';
-      biometricBtn.disabled = true;
-    }
+    biometricBtn.disabled = true;
+    biometricBtn.classList.add('loading'); // optional visual state
 
-    const result = await (verifyBiometrics?.() || startAuthentication?.() || { success: false });
+    const result =
+      await (verifyBiometrics?.() ||
+             startAuthentication?.() ||
+             { success: false });
 
-    if (result && result.success) {
+    if (result?.success) {
       console.log('[checkout-pin] Biometric success → simulating PIN fill');
 
-      const simulated = await simulatePinEntry({
+      await simulatePinEntry({
         stagger: 0,
         fillAll: true,
         expectedCount: 4
       });
 
-      if (!simulated) {
-        console.warn('[checkout-pin] simulatePinEntry failed — but continuing');
-      }
-
       hideCheckoutPinModal();
-      if (window._checkoutPinResolve) window._checkoutPinResolve(true);
-
-    } else {
-      showToast('Biometric failed or cancelled. Enter your PIN', 'info');
-      inputs[0]?.focus();
+      window._checkoutPinResolve?.(true);
+      return;
     }
+
+    showToast('Biometric failed or cancelled. Enter your PIN', 'info');
+    inputs[0]?.focus();
 
   } catch (err) {
     console.warn('[checkout-pin] Biometric error:', err);
@@ -660,12 +652,11 @@ async function handleBiometricAuth() {
     inputs[0]?.focus();
 
   } finally {
-    if (biometricBtn) {
-      biometricBtn.textContent = originalText;
-      biometricBtn.disabled = false;
-    }
+    biometricBtn.disabled = false;
+    biometricBtn.classList.remove('loading');
   }
 }
+
   // Forgot PIN
   if (forgotLink) {
     forgotLink.addEventListener('click', (e) => {

@@ -10338,16 +10338,16 @@ function __sec_maybeDisableParentIfChildrenOff() {
 async function reconcileBiometricState() {
   __sec_log.d('reconcileBiometricState entry');
 
-  // Find credentialId from any possible key
+  // find a credentialId if present (several possible keys)
   const cred = (
     localStorage.getItem('credentialId') ||
     localStorage.getItem('webauthn-cred-id') ||
     localStorage.getItem('webauthn_cred') ||
     localStorage.getItem('__sec_credentialId') ||
     ''
-  ).trim();
+  );
 
-  // Quick local rule: no credential → biometrics not available
+  // Quick local-only rule: if no local credential at all, treat as NOT available.
   if (!cred) {
     __sec_log.i('reconcile: no local credential found — clearing biometric flags');
     try {
@@ -10358,68 +10358,88 @@ async function reconcileBiometricState() {
       localStorage.setItem('biometricForLogin', 'false');
       localStorage.setItem('biometricForTx', 'false');
     } catch (e) { __sec_log.e('reconcile: local clear failed', e); }
-
+    // Update UI to off
     if (__sec_parentSwitch) __sec_setChecked(__sec_parentSwitch, false);
-    if (__sec_bioOptions) {
-      __sec_bioOptions.classList.remove('show');
-      __sec_bioOptions.hidden = true;
-    }
+    if (__sec_bioOptions) { __sec_bioOptions.classList.remove('show'); __sec_bioOptions.hidden = true; }
     return;
   }
 
-  // We have a local credential — try to validate with server
+  // If we have a local credential, confirm server still recognizes it
   try {
-    __sec_log.d('reconcile: have local cred, attempting to get session/userId', { credSample: cred.slice(0, 20) });
+    __sec_log.d('reconcile: have local cred, will check server only if we can resolve userId', { credentialIdSample: (cred && cred.slice ? cred.slice(0,20) : cred) });
 
-    // Safely get user ID from session (fallback if getSession not ready)
-    let userId = null;
-    if (typeof getSession === 'function') {
+    // Helper: safely call getSession with timeout
+    const safeGetSessionUserId = async (timeoutMs = 800) => {
+      if (typeof getSession !== 'function') return null;
       try {
-        const session = await Promise.race([
-          getSession(),
-          new Promise(resolve => setTimeout(() => resolve(null), 3000)) // 3s timeout
-        ]);
-        userId = session?.uid || session?.user?.uid || session?.user?.id || null;
+        const p = (async () => {
+          try {
+            const s = await getSession();
+            return s && s.user && (s.user.id || s.user.uid || null);
+          } catch (e) { return null; }
+        })();
+        const t = new Promise(r => setTimeout(() => r(null), timeoutMs));
+        return await Promise.race([p, t]);
       } catch (e) {
-        __sec_log.w('reconcile: getSession failed or timed out', e);
+        __sec_log.w('safeGetSessionUserId error', e);
+        return null;
       }
-    }
+    };
 
-    if (!userId) {
-      __sec_log.i('reconcile: no userId available yet — preserving current biometric state');
-      // Don't clear anything — just restore UI from localStorage
-      const enabled = localStorage.getItem('biometricsEnabled') === 'true';
-      const useForLogin = localStorage.getItem('biometricForLogin') === 'true';
-      const useForTx = localStorage.getItem('biometricForTx') === 'true';
-
-      if (enabled && (useForLogin || useForTx)) {
-        if (__sec_parentSwitch) __sec_setChecked(__sec_parentSwitch, true);
-        if (__sec_bioOptions) __sec_revealChildrenNoAnimate();
-      } else {
-        if (__sec_parentSwitch) __sec_setChecked(__sec_parentSwitch, false);
-        if (__sec_bioOptions) {
-          __sec_bioOptions.classList.remove('show');
-          __sec_bioOptions.hidden = true;
+    // Try to obtain userId (short wait). If none, do NOT call server.
+    const resolvedUserId = await getOrCreateSessionPromise(); // wait up to 4000ms for session
+    if (!resolvedUserId) {
+      // 🔥 FIX: Don't clear flags when userId unavailable - it's just a timing issue!
+      // The user's biometric settings should persist across reloads.
+      __sec_log.i('reconcile: no userId available after short wait — skipping server check but preserving existing flags');
+      
+      // Just restore the UI from existing localStorage (don't modify flags)
+      try {
+        const existingBiomEnabled = localStorage.getItem('biometricsEnabled') === 'true';
+        const existingBioLogin = localStorage.getItem('biometricForLogin') === 'true';
+        const existingBioTx = localStorage.getItem('biometricForTx') === 'true';
+        
+        __sec_log.d('reconcile: preserving existing state', { 
+          existingBiomEnabled, 
+          existingBioLogin, 
+          existingBioTx 
+        });
+        
+        // Restore UI based on existing flags
+        if (existingBiomEnabled && (existingBioLogin || existingBioTx)) {
+          if (__sec_parentSwitch) __sec_setChecked(__sec_parentSwitch, true);
+          if (__sec_bioOptions) {
+            __sec_revealChildrenNoAnimate();
+            if (__sec_bioLogin) __sec_setChecked(__sec_bioLogin, existingBioLogin);
+            if (__sec_bioTx) __sec_setChecked(__sec_bioTx, existingBioTx);
+          }
+        } else {
+          if (__sec_parentSwitch) __sec_setChecked(__sec_parentSwitch, false);
+          if (__sec_bioOptions) { 
+            __sec_bioOptions.classList.remove('show'); 
+            __sec_bioOptions.hidden = true; 
+          }
         }
+      } catch (e) { 
+        __sec_log.e('reconcile: UI restore failed', e); 
       }
-      return; // Wait for next reconcile when session is ready
+      
+      return; // skip server call (will validate on next attempt when userId is available)
     }
 
-    // We have userId — validate credential with server
-    __sec_log.d('reconcile: calling /webauthn/auth/options with userId and cred');
+    // We have a userId — call the server with both credentialId and userId
+    __sec_log.d('reconcile: resolved userId, calling /webauthn/auth/options', { userIdSample: resolvedUserId && resolvedUserId.slice ? resolvedUserId.slice(0,12) : resolvedUserId });
     const apiBase = (window.__SEC_API_BASE || (typeof API_BASE !== 'undefined' ? API_BASE : ''));
-    const res = await fetch(apiBase + '/webauthn/auth/options', {
+    const res = await (typeof window.__origFetch !== 'undefined' ? window.__origFetch : fetch)(apiBase + '/webauthn/auth/options', {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ credentialId: cred, userId })
+      body: JSON.stringify({ credentialId: cred, userId: resolvedUserId })
     });
-
-    const text = await res.text().catch(() => '');
-    
+    const text = await res.text().catch(()=> '');
     if (!res.ok) {
-      __sec_log.w('reconcile: server rejected credential — clearing flags', { status: res.status, response: text });
-      // Clear all biometric flags
+      __sec_log.w('reconcile: /webauthn/auth/options returned non-ok — clearing flags', { status: res.status, textSample: (text||'').slice(0,300) });
+      // Clear local flags and UI (server rejected the credential)
       try {
         localStorage.setItem(__sec_KEYS.biom, '0');
         localStorage.setItem('biometricsEnabled', 'false');
@@ -10427,40 +10447,48 @@ async function reconcileBiometricState() {
         localStorage.setItem(__sec_KEYS.bioTx, '0');
         localStorage.setItem('biometricForLogin', 'false');
         localStorage.setItem('biometricForTx', 'false');
-      } catch (e) { __sec_log.e('reconcile: clear failed', e); }
-
+      } catch (e) { __sec_log.e('reconcile: persist clear failed', e); }
       if (__sec_parentSwitch) __sec_setChecked(__sec_parentSwitch, false);
-      if (__sec_bioOptions) {
-        __sec_bioOptions.classList.remove('show');
-        __sec_bioOptions.hidden = true;
-      }
-      return;
+      if (__sec_bioOptions) { __sec_bioOptions.classList.remove('show'); __sec_bioOptions.hidden = true; }
+      // If server gave useful JSON error, rethrow for logging; otherwise throw generic error
+      try { throw new Error(text || `HTTP ${res.status}`); } catch(e) { throw e; }
     }
 
-    // Success! Server recognizes the credential
-    __sec_log.i('reconcile: server confirmed credential — enabling biometrics');
+    // success -> server validated credential: mark enabled
+    const opts = text ? JSON.parse(text) : {};
+    __sec_log.i('reconcile: server confirmed credential - marking biometrics enabled', { allowCount: opts.allowCredentials ? opts.allowCredentials.length : 0 });
     try {
       localStorage.setItem(__sec_KEYS.biom, '1');
       localStorage.setItem('biometricsEnabled', 'true');
-
-      // Only enable children if not explicitly set by user
-      if (localStorage.getItem('biometricForLogin') === null) {
+      if (typeof restoreBiometricUI === 'function') restoreBiometricUI();
+      if (typeof safeCall === 'function' && typeof notify === 'function') {
+        safeCall(notify, 'Fingerprint set up successfully!', 'success');
+      }
+      
+      // 🔥 FIX: Only set children to 'true' if they're currently unset (null)
+      // Don't override explicit user choices!
+      const currentLogin = localStorage.getItem('biometricForLogin');
+      const currentTx = localStorage.getItem('biometricForTx');
+      
+      if (currentLogin === null) {
         localStorage.setItem(__sec_KEYS.bioLogin, '1');
         localStorage.setItem('biometricForLogin', 'true');
       }
-      if (localStorage.getItem('biometricForTx') === null) {
+      if (currentTx === null) {
         localStorage.setItem(__sec_KEYS.bioTx, '1');
         localStorage.setItem('biometricForTx', 'true');
       }
-
-      if (typeof restoreBiometricUI === 'function') restoreBiometricUI();
-    } catch (e) { __sec_log.e('reconcile: persist failed', e); }
-
+    } catch (e) { __sec_log.e('reconcile: persist enabled flags failed', e); }
+    
     if (__sec_parentSwitch) __sec_setChecked(__sec_parentSwitch, true);
-    if (__sec_bioOptions) __sec_revealChildrenNoAnimate();
-
+    if (__sec_bioOptions) {
+      __sec_revealChildrenNoAnimate();
+      if (__sec_bioLogin) __sec_setChecked(__sec_bioLogin, localStorage.getItem('biometricForLogin') === 'true');
+      if (__sec_bioTx) __sec_setChecked(__sec_bioTx, localStorage.getItem('biometricForTx') === 'true');
+    }
   } catch (err) {
     __sec_log.w('reconcileBiometricState error', err);
+    // flags/UI already cleared in error flows above
   }
 }
 
