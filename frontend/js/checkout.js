@@ -611,7 +611,8 @@ function showCheckoutPinModal() {
 
   // Always show PIN keypad first
   // User must tap biometric button manually
-  setTimeout(() => inputs[0]?.focus(), 100);
+  inputs[0]?.focus();
+
 }
 
 let biometricInProgress = false;
@@ -639,18 +640,13 @@ try {
 
 
     if (result?.success) {
-      console.log('[checkout-pin] Biometric success → simulating PIN fill');
+  console.log('[checkout-pin] Biometric success');
 
-      await simulatePinEntry({
-        stagger: 0,
-        fillAll: true,
-        expectedCount: 4
-      });
+  hideCheckoutPinModal();
+  window._checkoutPinResolve?.(true);
+  return;
+}
 
-      hideCheckoutPinModal();
-      window._checkoutPinResolve?.(true);
-      return;
-    }
 
     showToast('Biometric failed or cancelled. Enter your PIN', 'info');
     inputs[0]?.focus();
