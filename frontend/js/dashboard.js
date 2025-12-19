@@ -154,11 +154,7 @@ async function warmBiometricOptions(userId, context = 'reauth') {
 
 window.warmBiometricOptions = window.warmBiometricOptions || warmBiometricOptions;
 
-requestIdleCallback(async () => {
-  const session = await safeCall(getSession);
-  const uid = session?.user?.id || session?.user?.uid;
-  if (uid) warmBiometricOptions(uid);
-}, { timeout: 1500 });
+
 
 
 // ==========================================
