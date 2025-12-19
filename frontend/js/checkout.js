@@ -32,18 +32,18 @@ window.warmUpBiometrics = window.warmUpBiometrics || warmUpBiometrics;
 let preFetchedOptions = null;
 let preFetchTime = 0;
 
+// Dynamically fetch auth options (with userId from session)
 async function preFetchAuthOptionsCheck() {
   try {
-    // Dynamically get current user UID from session (same as your dashboard.js does)
     let userId = null;
 
-    // First try global session object if available
+    // Try fast sources first
     if (window.currentUser?.uid) {
       userId = window.currentUser.uid;
     } else if (window.__SERVER_USER_DATA__?.uid) {
       userId = window.__SERVER_USER_DATA__.uid;
     } else {
-      // Fallback: call /api/session (fast, cached in your app)
+      // Fallback to session API
       const resp = await fetch('https://api.flexgig.com.ng/api/session', {
         credentials: 'include'
       });
@@ -60,7 +60,7 @@ async function preFetchAuthOptionsCheck() {
 
     const credentialId = localStorage.getItem('credentialId');
     if (!credentialId) {
-      console.warn('[biometric] No credentialId in storage — skipping pre-fetch');
+      console.warn('[biometric] No credentialId — skipping pre-fetch');
       return;
     }
 
@@ -697,11 +697,12 @@ function showCheckoutPinModal() {
   setTimeout(() => inputs[0]?.focus(), 100);
 }
 
+
 let biometricInProgress = false;
+
 // === SHARED BIOMETRIC AUTH FUNCTION ===
 async function handleBiometricAuth() {
-  if (!biometricBtn) return;
-    if (biometricInProgress) return;
+  if (!biometricBtn || biometricInProgress) return;
   biometricInProgress = true;
 
   try {
@@ -710,38 +711,71 @@ async function handleBiometricAuth() {
     biometricBtn.textContent = 'Verifying...';
     if (navigator.vibrate) navigator.vibrate(50);
 
+    // Get stored credentialId
+    const credentialId = localStorage.getItem('credentialId');
+    if (!credentialId) {
+      showToast('No biometric setup found. Use PIN', 'info');
+      inputs[0]?.focus();
+      return;
+    }
+
+    // Convert base64 credentialId to ArrayBuffer
+    let idBuffer;
+    try {
+      idBuffer = Uint8Array.from(atob(credentialId), c => c.charCodeAt(0)).buffer;
+    } catch (e) {
+      console.warn('[biometric] Invalid credentialId format');
+      showToast('Biometric error. Use PIN', 'info');
+      inputs[0]?.focus();
+      return;
+    }
+
     let publicKeyOptions;
 
     if (preFetchedOptions && (Date.now() - preFetchTime < 60000)) {
       publicKeyOptions = preFetchedOptions;
-      console.log('[biometric] Using pre-fetched options — instant!');
+      console.log('[biometric] Using pre-fetched options — faster!');
     } else {
-      // Fallback fetch if expired
-      await preFetchAuthOptionsCheck(); // Re-fetch
+      await preFetchAuthOptionsCheck();
       publicKeyOptions = preFetchedOptions;
     }
 
-    if (!publicKeyOptions) throw new Error('No options available');
+    if (!publicKeyOptions) throw new Error('No auth options available');
+
+    // CRITICAL: Add allowCredentials to force direct biometric (no passkey selector)
+    publicKeyOptions.allowCredentials = [{
+      type: 'public-key',
+      id: idBuffer,
+      transports: ['internal'] // Platform authenticator (Face ID / Touch ID / Fingerprint)
+    }];
+
+    // Encourage biometric over fallback
+    publicKeyOptions.userVerification = 'preferred';
 
     const credential = await navigator.credentials.get({
       publicKey: publicKeyOptions
     });
 
     if (credential) {
+      console.log('[biometric] Success!');
       await simulatePinEntry({ stagger: 0, fillAll: true, expectedCount: 4 });
       hideCheckoutPinModal();
       window._checkoutPinResolve?.(true);
+    } else {
+      showToast('Biometric cancelled. Enter PIN', 'info');
+      inputs[0]?.focus();
     }
 
   } catch (err) {
-    showToast('Biometric failed. Use PIN', 'info');
+    console.warn('[biometric] Error:', err);
+    showToast('Biometric unavailable. Use PIN', 'info');
     inputs[0]?.focus();
   } finally {
+    biometricInProgress = false;
     biometricBtn.disabled = false;
     biometricBtn.textContent = 'Use Face ID / Fingerprint';
   }
 }
-
   // Forgot PIN
   if (forgotLink) {
     forgotLink.addEventListener('click', (e) => {
