@@ -121,18 +121,26 @@ window.saveCurrentAppState = saveCurrentAppState;
 // 1️⃣ Biometric warm function
 // ---------------------------
 const BIOMETRIC_TTL = 60_000; // safe short-lived TTL (~1 min)
+const CACHE_KEY = '__cachedAuthOptions';
 
 async function warmBiometricOptions(userId, context = 'reauth', options = {}) {
   const now = Date.now();
 
-  // Use cached options if valid and not forcing
+  // Load cached options from localStorage
+  let cached = null;
+  try {
+    cached = JSON.parse(localStorage.getItem(CACHE_KEY));
+  } catch {}
+
   if (
     !options.force &&
-    window.__cachedAuthOptions &&
-    now - window.__cachedAuthOptionsFetchedAt < BIOMETRIC_TTL
+    cached &&
+    now - cached.fetchedAt < BIOMETRIC_TTL
   ) {
-    console.log('[biometric] Using cached options');
-    return window.__cachedAuthOptions;
+    console.log('[biometric] Using cached options from localStorage');
+    window.__cachedAuthOptions = cached.opts;
+    window.__cachedAuthOptionsFetchedAt = cached.fetchedAt;
+    return cached.opts;
   }
 
   const credentialId =
@@ -155,8 +163,14 @@ async function warmBiometricOptions(userId, context = 'reauth', options = {}) {
     if (!res.ok) throw new Error('Biometric warmup failed');
 
     const opts = await res.json();
+
+    // Store in both window and localStorage
     window.__cachedAuthOptions = opts;
     window.__cachedAuthOptionsFetchedAt = Date.now();
+    localStorage.setItem(CACHE_KEY, JSON.stringify({
+      opts,
+      fetchedAt: Date.now()
+    }));
 
     console.log('[biometric] Options warmed for user', userId);
     return opts;
@@ -172,7 +186,8 @@ window.warmBiometricOptions = window.warmBiometricOptions || warmBiometricOption
 // 2️⃣ Pre-warm on Pay click (supports dynamic buttons)
 // ---------------------------
 document.addEventListener('click', async e => {
-  const btn = e.target.closest('.payBtn');
+  // Support both ID and class selector
+  const btn = e.target.closest('#payBtn, .pay-btn');
   if (!btn) return;
 
   console.log('[biometric] Pay clicked — warming options...');
@@ -203,6 +218,7 @@ document.addEventListener('click', async e => {
     console.error('[biometric] Warm failed', err);
   }
 });
+
 
 
 
