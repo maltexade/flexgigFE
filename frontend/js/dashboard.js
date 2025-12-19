@@ -16922,13 +16922,18 @@ if (isCacheValid) {
     //   body: JSON.stringify({ userId, credentialId: storedId, context })
     // });
 
-    if (!optRes.ok) {
-      const errText = await optRes.text();
-      console.error('[verifyBiometrics] Options fetch failed', optRes.status, errText);
-      throw new Error(`Options fetch failed: ${errText}`);
-    }
+    // At this point, we already have fresh options
+const publicKey = structuredClone(publicKeys);
 
-    const publicKey = await optRes.json();
+if (!publicKey || !publicKey.challenge) {
+  throw new Error('Invalid WebAuthn options received');
+}
+
+console.log('[verifyBiometrics] Options ready', {
+  challenge: publicKey.challenge?.slice?.(0, 10) + '...',
+  allowCredCount: publicKey.allowCredentials?.length || 0
+});
+
     console.log('[verifyBiometrics] Fresh options received', { challenge: publicKey.challenge?.slice?.(0, 10) + '...', allowCredCount: publicKey.allowCredentials?.length || 0 });
 
     // Convert base64url to buffers (using your fromBase64Url helper)
