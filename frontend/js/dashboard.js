@@ -16891,12 +16891,31 @@ window.__biometricInFlight = true;
 
   try {
     // Resolve userId if not provided
-    let userId = uid;
-    if (!userId) {
-      const session = await safeCall(getSession);
-      userId = session?.user?.id || session?.user?.uid;
-      if (!userId) throw new Error('No user ID available');
+    // 🔹 Resolve userId from parameter, cache, or server
+let userId = uid;
+
+if (!userId) {
+  try {
+    const cached = localStorage.getItem('userData');
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      userId = parsed.uid || parsed.user?.id || parsed.user?.uid;
+      console.log('[verifyBiometrics] Using UID from cache:', userId);
     }
+  } catch (err) {
+    console.warn('[verifyBiometrics] Failed to read cached UID', err);
+  }
+}
+
+if (!userId) {
+  // Only fallback to getSession if cache fails
+  const session = await safeCall(getSession);
+  userId = session?.user?.id || session?.user?.uid;
+  console.log('[verifyBiometrics] Fallback UID from getSession:', userId);
+}
+
+if (!userId) throw new Error('No user ID available for biometric verification');
+
 
     // Always invalidate cache for fresh challenge (fix stale prefetch issue)
 const now = Date.now();
