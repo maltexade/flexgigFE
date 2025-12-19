@@ -117,42 +117,7 @@ openModal: (() => {
 }
 window.saveCurrentAppState = saveCurrentAppState;
 
-const BIOMETRIC_TTL = 60_000; // 55 seconds safe window
 
-async function warmBiometricOptions(userId, context = 'reauth') {
-  if (
-    window.__cachedAuthOptions &&
-    Date.now() - window.__cachedAuthOptionsFetchedAt < BIOMETRIC_TTL
-  ) {
-    return window.__cachedAuthOptions;
-  }
-
-  const credentialId =
-    localStorage.getItem('credentialId') ||
-    localStorage.getItem('webauthn-cred-id');
-
-  if (!credentialId) return null;
-
-  const res = await fetch(`${window.__SEC_API_BASE}/webauthn/auth/options`, {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userId, credentialId, context })
-  });
-
-  if (!res.ok) throw new Error('Biometric warmup failed');
-
-  const opts = await res.json();
-
-  window.__cachedAuthOptions = opts;
-  window.__cachedAuthOptionsFetchedAt = Date.now();
-
-  console.log('[biometric] Options warmed');
-
-  return opts;
-}
-
-window.warmBiometricOptions = window.warmBiometricOptions || warmBiometricOptions;
 
 requestIdleCallback(async () => {
   const session = await safeCall(getSession);
