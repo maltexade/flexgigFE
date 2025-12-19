@@ -615,12 +615,8 @@ function showCheckoutPinModal() {
 
 }
 
-let biometricInProgress = false;
 // === SHARED BIOMETRIC AUTH FUNCTION ===
 async function handleBiometricAuth() {
-  if (!biometricBtn) return;
-    if (biometricInProgress) return;
-  biometricInProgress = true;
 
   try {
     biometricBtn.disabled = true;
@@ -657,7 +653,6 @@ try {
     inputs[0]?.focus();
 
   } finally {
-    biometricInProgress = false;
     biometricBtn.disabled = false;
     biometricBtn.classList.remove('loading');
   }

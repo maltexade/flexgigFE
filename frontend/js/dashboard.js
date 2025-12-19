@@ -16930,6 +16930,13 @@ if (btn) {
 // Updated verifyBiometrics function
 // ----- Updated implementation with proper reauth flow -----
 async function verifyBiometrics(uid, context = 'reauth') {
+  if (window.__biometricInFlight) {
+  console.warn('[verifyBiometrics] Blocked: biometric already in flight');
+  throw new Error('Biometric already in progress');
+}
+
+window.__biometricInFlight = true;
+
   console.log('%c[verifyBiometrics] Called (always fresh)', 'color:#0ff;font-weight:bold');
 
   try {
@@ -17081,10 +17088,16 @@ console.log('[verifyBiometrics] Options ready', {
     if (typeof notify === 'function') {
       notify(`Biometric error: ${err.message}`, 'error');
     }
+    
     // Fallback to PIN view
     switchViews(false);  // Show PIN
     return { success: false, error: err.message };
+    
   }
+  finally {
+  window.__biometricInFlight = false;
+}
+
 }
 window.verifyBiometrics = window.verifyBiometrics = verifyBiometrics;
 
