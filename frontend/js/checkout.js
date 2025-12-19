@@ -6,30 +6,6 @@
 console.log('[checkout] Module loaded 🛒');
 
 'use strict';
-// ==================== BIOMETRIC WARMUP ====================
-let biometricWarmPromise = null;
-
-function warmUpBiometrics() {
-  if (biometricWarmPromise) return biometricWarmPromise;
-
-  biometricWarmPromise = (async () => {
-    try {
-      if (window.PublicKeyCredential) {
-        await navigator.credentials.get({
-          publicKey: {
-            challenge: new Uint8Array(32),
-            timeout: 1,
-            userVerification: 'preferred'
-          }
-        }).catch(() => {});
-      }
-    } catch (_) {}
-  })();
-
-  return biometricWarmPromise;
-}
-window.warmUpBiometrics = window.warmUpBiometrics || warmUpBiometrics;
-
 
 
 // ==================== STATE ====================
@@ -578,7 +554,8 @@ async function onPayClicked(ev) {
       currentPin += btn.dataset.digit;
       updateInputs();
       if (currentPin.length === 4) {
-        setTimeout(() => verifyPin(currentPin), 300);
+        verifyPin(currentPin);
+
       }
     });
   });
@@ -600,7 +577,8 @@ async function onPayClicked(ev) {
         currentPin += e.key;
         updateInputs();
         if (currentPin.length === 4) {
-          setTimeout(() => verifyPin(currentPin), 300);
+          verifyPin(currentPin);
+
         }
       }
     }
@@ -647,10 +625,18 @@ async function handleBiometricAuth() {
     biometricBtn.disabled = true;
     biometricBtn.classList.add('loading'); // optional visual state
 
-    const result =
-      await (verifyBiometrics?.() ||
-             startAuthentication?.() ||
-             { success: false });
+    let result = { success: false };
+
+try {
+  if (typeof verifyBiometrics === 'function') {
+    result = await verifyBiometrics();
+  } else if (typeof startAuthentication === 'function') {
+    result = await startAuthentication();
+  }
+} catch (e) {
+  console.warn('[checkout-pin] Biometric failed:', e);
+}
+
 
     if (result?.success) {
       console.log('[checkout-pin] Biometric success → simulating PIN fill');

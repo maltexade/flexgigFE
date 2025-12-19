@@ -117,6 +117,49 @@ openModal: (() => {
 }
 window.saveCurrentAppState = saveCurrentAppState;
 
+const BIOMETRIC_TTL = 55_000; // 55 seconds safe window
+
+async function warmBiometricOptions(userId, context = 'reauth') {
+  if (
+    window.__cachedAuthOptions &&
+    Date.now() - window.__cachedAuthOptionsFetchedAt < BIOMETRIC_TTL
+  ) {
+    return window.__cachedAuthOptions;
+  }
+
+  const credentialId =
+    localStorage.getItem('credentialId') ||
+    localStorage.getItem('webauthn-cred-id');
+
+  if (!credentialId) return null;
+
+  const res = await fetch(`${window.__SEC_API_BASE}/webauthn/auth/options`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId, credentialId, context })
+  });
+
+  if (!res.ok) throw new Error('Biometric warmup failed');
+
+  const opts = await res.json();
+
+  window.__cachedAuthOptions = opts;
+  window.__cachedAuthOptionsFetchedAt = Date.now();
+
+  console.log('[biometric] Options warmed');
+
+  return opts;
+}
+
+window.warmBiometricOptions = window.warmBiometricOptions || warmBiometricOptions;
+
+requestIdleCallback(async () => {
+  const session = await safeCall(getSession);
+  const uid = session?.user?.id || session?.user?.uid;
+  if (uid) warmBiometricOptions(uid);
+}, { timeout: 1500 });
+
 
 // ==========================================
 // 🔧 PRODUCTION-READY MOBILE DEBUG CONSOLE
@@ -16851,8 +16894,21 @@ async function verifyBiometrics(uid, context = 'reauth') {
     }
 
     // Always invalidate cache for fresh challenge (fix stale prefetch issue)
-    window.__cachedAuthOptions = null;
-    window.__cachedAuthOptionsFetchedAt = 0;
+const now = Date.now();
+const isCacheValid =
+  window.__cachedAuthOptions &&
+  now - window.__cachedAuthOptionsFetchedAt < BIOMETRIC_TTL;
+
+let publicKeys;
+
+if (isCacheValid) {
+  console.log('[verifyBiometrics] Using warmed options');
+  publicKeys = structuredClone(window.__cachedAuthOptions);
+} else {
+  console.log('[verifyBiometrics] Cache expired → fetching fresh');
+  publicKeys = await warmBiometricOptions(userId, context);
+}
+
     console.log('[verifyBiometrics] Cache invalidated—fetching fresh options');
 
     // Fetch fresh options (include credentialId for specific allowCredentials)
