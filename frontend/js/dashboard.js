@@ -118,16 +118,20 @@ openModal: (() => {
 window.saveCurrentAppState = saveCurrentAppState;
 
 // ---------------------------
-// 1️⃣ Ensure warmBiometricOptions exists
+// 1️⃣ Biometric warm function
 // ---------------------------
 const BIOMETRIC_TTL = 60_000; // safe short-lived TTL (~1 min)
 
-async function warmBiometricOptions(userId, context = 'reauth') {
+async function warmBiometricOptions(userId, context = 'reauth', options = {}) {
   const now = Date.now();
+
+  // Use cached options if valid and not forcing
   if (
+    !options.force &&
     window.__cachedAuthOptions &&
     now - window.__cachedAuthOptionsFetchedAt < BIOMETRIC_TTL
   ) {
+    console.log('[biometric] Using cached options');
     return window.__cachedAuthOptions;
   }
 
@@ -135,56 +139,70 @@ async function warmBiometricOptions(userId, context = 'reauth') {
     localStorage.getItem('credentialId') ||
     localStorage.getItem('webauthn-cred-id');
 
-  if (!credentialId) return null;
+  if (!credentialId) {
+    console.warn('[biometric] Cannot warm — no stored credential ID');
+    return null;
+  }
 
-  const res = await fetch(`${window.__SEC_API_BASE}/webauthn/auth/options`, {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userId, credentialId, context })
-  });
+  try {
+    const res = await fetch(`${window.__SEC_API_BASE}/webauthn/auth/options`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, credentialId, context })
+    });
 
-  if (!res.ok) throw new Error('Biometric warmup failed');
+    if (!res.ok) throw new Error('Biometric warmup failed');
 
-  const opts = await res.json();
-  window.__cachedAuthOptions = opts;
-  window.__cachedAuthOptionsFetchedAt = Date.now();
+    const opts = await res.json();
+    window.__cachedAuthOptions = opts;
+    window.__cachedAuthOptionsFetchedAt = Date.now();
 
-  console.log('[biometric] Options warmed for user', userId);
-  return opts;
+    console.log('[biometric] Options warmed for user', userId);
+    return opts;
+  } catch (err) {
+    console.error('[biometric] Warm failed', err);
+    return null;
+  }
 }
 
 window.warmBiometricOptions = window.warmBiometricOptions || warmBiometricOptions;
 
 // ---------------------------
-// 2️⃣ Attach pre-warm to Pay button
+// 2️⃣ Pre-warm on Pay click (supports dynamic buttons)
 // ---------------------------
-const payBtn = document.querySelector('.payBtn'); // adjust selector
-if (payBtn) {
-  payBtn.addEventListener('click', async () => {
-    console.log('[biometric] Pay clicked — warming options...');
-    try {
-      const uid = (() => {
-        const cached = localStorage.getItem('userData');
-        if (!cached) return null;
-        try {
-          const parsed = JSON.parse(cached);
-          return parsed.uid || parsed.user?.id || parsed.user?.uid;
-        } catch { return null; }
-      })();
+document.addEventListener('click', async e => {
+  const btn = e.target.closest('.payBtn');
+  if (!btn) return;
 
-      if (!uid) return console.warn('[biometric] Cannot warm — no UID');
-      await warmBiometricOptions(uid, 'reauth'); // fetch fresh challenge
-      console.log('[biometric] Options pre-warmed, ready for biometric prompt');
-    } catch (err) {
-      console.error('[biometric] Warm failed', err);
+  console.log('[biometric] Pay clicked — warming options...');
+
+  try {
+    // Resolve UID from cache
+    let uid = null;
+    const cached = localStorage.getItem('userData');
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        uid = parsed.uid || parsed.user?.id || parsed.user?.uid;
+        console.log('[biometric] UID from cache:', uid);
+      } catch (err) {
+        console.warn('[biometric] Failed to parse cached userData', err);
+      }
     }
-  });
-}
 
+    if (!uid) {
+      console.warn('[biometric] Cannot warm — no UID available');
+      return;
+    }
 
-window.warmBiometricOptions = window.warmBiometricOptions || warmBiometricOptions;
-
+    // Force a fresh warm regardless of TTL
+    await warmBiometricOptions(uid, 'reauth', { force: true });
+    console.log('[biometric] Options pre-warmed, ready for biometric prompt');
+  } catch (err) {
+    console.error('[biometric] Warm failed', err);
+  }
+});
 
 
 
