@@ -117,12 +117,16 @@ openModal: (() => {
 }
 window.saveCurrentAppState = saveCurrentAppState;
 
-const BIOMETRIC_TTL = 60_000; // 55 seconds safe window
+// ---------------------------
+// 1️⃣ Ensure warmBiometricOptions exists
+// ---------------------------
+const BIOMETRIC_TTL = 60_000; // safe short-lived TTL (~1 min)
 
 async function warmBiometricOptions(userId, context = 'reauth') {
+  const now = Date.now();
   if (
     window.__cachedAuthOptions &&
-    Date.now() - window.__cachedAuthOptionsFetchedAt < BIOMETRIC_TTL
+    now - window.__cachedAuthOptionsFetchedAt < BIOMETRIC_TTL
   ) {
     return window.__cachedAuthOptions;
   }
@@ -143,14 +147,41 @@ async function warmBiometricOptions(userId, context = 'reauth') {
   if (!res.ok) throw new Error('Biometric warmup failed');
 
   const opts = await res.json();
-
   window.__cachedAuthOptions = opts;
   window.__cachedAuthOptionsFetchedAt = Date.now();
 
-  console.log('[biometric] Options warmed');
-
+  console.log('[biometric] Options warmed for user', userId);
   return opts;
 }
+
+window.warmBiometricOptions = window.warmBiometricOptions || warmBiometricOptions;
+
+// ---------------------------
+// 2️⃣ Attach pre-warm to Pay button
+// ---------------------------
+const payBtn = document.querySelector('.payBtn'); // adjust selector
+if (payBtn) {
+  payBtn.addEventListener('click', async () => {
+    console.log('[biometric] Pay clicked — warming options...');
+    try {
+      const uid = (() => {
+        const cached = localStorage.getItem('userData');
+        if (!cached) return null;
+        try {
+          const parsed = JSON.parse(cached);
+          return parsed.uid || parsed.user?.id || parsed.user?.uid;
+        } catch { return null; }
+      })();
+
+      if (!uid) return console.warn('[biometric] Cannot warm — no UID');
+      await warmBiometricOptions(uid, 'reauth'); // fetch fresh challenge
+      console.log('[biometric] Options pre-warmed, ready for biometric prompt');
+    } catch (err) {
+      console.error('[biometric] Warm failed', err);
+    }
+  });
+}
+
 
 window.warmBiometricOptions = window.warmBiometricOptions || warmBiometricOptions;
 
