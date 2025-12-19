@@ -117,7 +117,42 @@ openModal: (() => {
 }
 window.saveCurrentAppState = saveCurrentAppState;
 
+const BIOMETRIC_TTL = 60_000; // 55 seconds safe window
 
+async function warmBiometricOptions(userId, context = 'reauth') {
+  if (
+    window.__cachedAuthOptions &&
+    Date.now() - window.__cachedAuthOptionsFetchedAt < BIOMETRIC_TTL
+  ) {
+    return window.__cachedAuthOptions;
+  }
+
+  const credentialId =
+    localStorage.getItem('credentialId') ||
+    localStorage.getItem('webauthn-cred-id');
+
+  if (!credentialId) return null;
+
+  const res = await fetch(`${window.__SEC_API_BASE}/webauthn/auth/options`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId, credentialId, context })
+  });
+
+  if (!res.ok) throw new Error('Biometric warmup failed');
+
+  const opts = await res.json();
+
+  window.__cachedAuthOptions = opts;
+  window.__cachedAuthOptionsFetchedAt = Date.now();
+
+  console.log('[biometric] Options warmed');
+
+  return opts;
+}
+
+window.warmBiometricOptions = window.warmBiometricOptions || warmBiometricOptions;
 
 requestIdleCallback(async () => {
   const session = await safeCall(getSession);
@@ -16848,17 +16883,20 @@ async function prefetchAuthOptionsFor(uid, context = 'reauth') {
   console.log('[biometric] Options pre-warmed, ready for instant prompt');
 })();
 
-const btn = document.querySelector('.checkout-biometric-btn'); // your button
+const btn = document.querySelector('.checkout-biometric-btn');
 if (btn) {
   btn.addEventListener('click', async () => {
     try {
+      // Only fetch session once
       const session = await safeCall(getSession);
       const uid = session?.user?.id || session?.user?.uid;
       if (!uid) throw new Error('No UID');
 
+      // Warm options (will return cached if still valid)
       const opts = await warmBiometricOptions(uid, 'checkout');
-      const publicKey = structuredClone(opts);
+      if (!opts) throw new Error('No biometric options');
 
+      const publicKey = structuredClone(opts);
       publicKey.challenge = fromBase64Url(publicKey.challenge);
       if (Array.isArray(publicKey.allowCredentials)) {
         publicKey.allowCredentials = publicKey.allowCredentials.map(c => ({
@@ -16873,12 +16911,16 @@ if (btn) {
       const assertion = await navigator.credentials.get({ publicKey });
       console.log('[biometric] Assertion:', assertion);
 
-      // You can then send this to your verify API like in verifyBiometrics()
+      // Send assertion to verify API
+      // await verifyBiometrics(uid, 'checkout'); // optional wrapper
     } catch (err) {
       console.error('[biometric] Error:', err);
+      // fallback to PIN if needed
+      switchViews(false);
     }
   });
 }
+
 
 
 
