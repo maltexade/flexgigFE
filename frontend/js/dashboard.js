@@ -16873,6 +16873,47 @@ async function prefetchAuthOptionsFor(uid, context = 'reauth') {
   }
 })();
 
+(async () => {
+  const session = await safeCall(getSession);
+  const uid = session?.user?.id || session?.user?.uid;
+  if (!uid) return;
+
+  // Pre-warm biometric options
+  await warmBiometricOptions(uid, 'checkout');
+  console.log('[biometric] Options pre-warmed, ready for instant prompt');
+})();
+
+const btn = document.querySelector('.checkout-biometric-btn'); // your button
+if (btn) {
+  btn.addEventListener('click', async () => {
+    try {
+      const session = await safeCall(getSession);
+      const uid = session?.user?.id || session?.user?.uid;
+      if (!uid) throw new Error('No UID');
+
+      const opts = await warmBiometricOptions(uid, 'checkout');
+      const publicKey = structuredClone(opts);
+
+      publicKey.challenge = fromBase64Url(publicKey.challenge);
+      if (Array.isArray(publicKey.allowCredentials)) {
+        publicKey.allowCredentials = publicKey.allowCredentials.map(c => ({
+          ...c,
+          id: fromBase64Url(c.id)
+        }));
+      }
+      publicKey.userVerification = 'required';
+      publicKey.timeout = 60000;
+
+      console.log('[biometric] Prompting now...');
+      const assertion = await navigator.credentials.get({ publicKey });
+      console.log('[biometric] Assertion:', assertion);
+
+      // You can then send this to your verify API like in verifyBiometrics()
+    } catch (err) {
+      console.error('[biometric] Error:', err);
+    }
+  });
+}
 
 
 
