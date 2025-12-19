@@ -9,87 +9,28 @@ console.log('[checkout] Module loaded 🛒');
 // ==================== BIOMETRIC WARMUP ====================
 let biometricWarmPromise = null;
 
-async function warmUpBiometrics() {
+function warmUpBiometrics() {
   if (biometricWarmPromise) return biometricWarmPromise;
 
   biometricWarmPromise = (async () => {
     try {
-      await navigator.credentials.get({
-        publicKey: {
-          challenge: new Uint8Array(32), // Dummy
-          timeout: 1, // Fail immediately — no prompt
-          userVerification: 'discouraged'
-        }
-      });
-    } catch (_) {} // Expected fail
-    console.log('[biometric] Enclave warmed silently');
+      if (window.PublicKeyCredential) {
+        await navigator.credentials.get({
+          publicKey: {
+            challenge: new Uint8Array(32),
+            timeout: 1,
+            userVerification: 'preferred'
+          }
+        }).catch(() => {});
+      }
+    } catch (_) {}
   })();
 
   return biometricWarmPromise;
 }
 window.warmUpBiometrics = window.warmUpBiometrics || warmUpBiometrics;
 
-let preFetchedOptions = null;
-let preFetchTime = 0;
 
-// Dynamically fetch auth options (with userId from session)
-async function preFetchAuthOptionsCheck() {
-  try {
-    let userId = null;
-
-    // Try fast sources first
-    if (window.currentUser?.uid) {
-      userId = window.currentUser.uid;
-    } else if (window.__SERVER_USER_DATA__?.uid) {
-      userId = window.__SERVER_USER_DATA__.uid;
-    } else {
-      // Fallback to session API
-      const resp = await fetch('https://api.flexgig.com.ng/api/session', {
-        credentials: 'include'
-      });
-      if (resp.ok) {
-        const session = await resp.json();
-        userId = session.uid || session.user?.uid || null;
-      }
-    }
-
-    if (!userId) {
-      console.warn('[biometric] No userId found for pre-fetch');
-      return;
-    }
-
-    const credentialId = localStorage.getItem('credentialId');
-    if (!credentialId) {
-      console.warn('[biometric] No credentialId — skipping pre-fetch');
-      return;
-    }
-
-    const resp = await fetch('https://api.flexgig.com.ng/webauthn/auth/options', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        credentialId,
-        userId,
-        context: 'reauth'
-      })
-    });
-
-    if (!resp.ok) {
-      const text = await resp.text().catch(() => '');
-      throw new Error(`Pre-fetch failed: ${resp.status} ${text}`);
-    }
-
-    preFetchedOptions = await resp.json();
-    preFetchTime = Date.now();
-    console.log('[biometric] Pre-fetched auth options for user:', userId);
-
-  } catch (err) {
-    console.warn('[biometric] Pre-fetch error:', err);
-    preFetchedOptions = null;
-  }
-}
-window.preFetchAuthOptionsCheck = window.preFetchAuthOptionsCheck || preFetchAuthOptionsCheck;
 
 // ==================== STATE ====================
 let checkoutData = null; // Stores current checkout information
@@ -690,92 +631,56 @@ function showCheckoutPinModal() {
   updateBiometricButton();
   resetPin();
 
-  // Pre-fetch options + warm enclave (both silent)
-  preFetchAuthOptionsCheck();
-  warmUpBiometrics();
-
+  // Always show PIN keypad first
+  // User must tap biometric button manually
   setTimeout(() => inputs[0]?.focus(), 100);
 }
 
-
 let biometricInProgress = false;
-
 // === SHARED BIOMETRIC AUTH FUNCTION ===
 async function handleBiometricAuth() {
-  if (!biometricBtn || biometricInProgress) return;
+  if (!biometricBtn) return;
+    if (biometricInProgress) return;
   biometricInProgress = true;
 
   try {
-    // Instant feedback
     biometricBtn.disabled = true;
-    biometricBtn.textContent = 'Verifying...';
-    if (navigator.vibrate) navigator.vibrate(50);
+    biometricBtn.classList.add('loading'); // optional visual state
 
-    // Get stored credentialId
-    const credentialId = localStorage.getItem('credentialId');
-    if (!credentialId) {
-      showToast('No biometric setup found. Use PIN', 'info');
-      inputs[0]?.focus();
-      return;
-    }
+    const result =
+      await (verifyBiometrics?.() ||
+             startAuthentication?.() ||
+             { success: false });
 
-    // Convert base64 credentialId to ArrayBuffer
-    let idBuffer;
-    try {
-      idBuffer = Uint8Array.from(atob(credentialId), c => c.charCodeAt(0)).buffer;
-    } catch (e) {
-      console.warn('[biometric] Invalid credentialId format');
-      showToast('Biometric error. Use PIN', 'info');
-      inputs[0]?.focus();
-      return;
-    }
+    if (result?.success) {
+      console.log('[checkout-pin] Biometric success → simulating PIN fill');
 
-    let publicKeyOptions;
+      await simulatePinEntry({
+        stagger: 0,
+        fillAll: true,
+        expectedCount: 4
+      });
 
-    if (preFetchedOptions && (Date.now() - preFetchTime < 60000)) {
-      publicKeyOptions = preFetchedOptions;
-      console.log('[biometric] Using pre-fetched options — faster!');
-    } else {
-      await preFetchAuthOptionsCheck();
-      publicKeyOptions = preFetchedOptions;
-    }
-
-    if (!publicKeyOptions) throw new Error('No auth options available');
-
-    // CRITICAL: Add allowCredentials to force direct biometric (no passkey selector)
-    publicKeyOptions.allowCredentials = [{
-      type: 'public-key',
-      id: idBuffer,
-      transports: ['internal'] // Platform authenticator (Face ID / Touch ID / Fingerprint)
-    }];
-
-    // Encourage biometric over fallback
-    publicKeyOptions.userVerification = 'preferred';
-
-    const credential = await navigator.credentials.get({
-      publicKey: publicKeyOptions
-    });
-
-    if (credential) {
-      console.log('[biometric] Success!');
-      await simulatePinEntry({ stagger: 0, fillAll: true, expectedCount: 4 });
       hideCheckoutPinModal();
       window._checkoutPinResolve?.(true);
-    } else {
-      showToast('Biometric cancelled. Enter PIN', 'info');
-      inputs[0]?.focus();
+      return;
     }
 
-  } catch (err) {
-    console.warn('[biometric] Error:', err);
-    showToast('Biometric unavailable. Use PIN', 'info');
+    showToast('Biometric failed or cancelled. Enter your PIN', 'info');
     inputs[0]?.focus();
+
+  } catch (err) {
+    console.warn('[checkout-pin] Biometric error:', err);
+    showToast('Biometric unavailable. Use your PIN', 'info');
+    inputs[0]?.focus();
+
   } finally {
     biometricInProgress = false;
     biometricBtn.disabled = false;
-    biometricBtn.textContent = 'Use Face ID / Fingerprint';
+    biometricBtn.classList.remove('loading');
   }
 }
+
   // Forgot PIN
   if (forgotLink) {
     forgotLink.addEventListener('click', (e) => {
