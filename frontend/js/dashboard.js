@@ -117,7 +117,7 @@ openModal: (() => {
 }
 window.saveCurrentAppState = saveCurrentAppState;
 
-const BIOMETRIC_TTL = 55_000; // 55 seconds safe window
+const BIOMETRIC_TTL = 60_000; // 55 seconds safe window
 
 async function warmBiometricOptions(userId, context = 'reauth') {
   if (
@@ -16909,18 +16909,18 @@ if (isCacheValid) {
   publicKeys = await warmBiometricOptions(userId, context);
 }
 
-    console.log('[verifyBiometrics] Cache invalidated—fetching fresh options');
+    // console.log('[verifyBiometrics] Cache invalidated—fetching fresh options');
 
-    // Fetch fresh options (include credentialId for specific allowCredentials)
-    const storedId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
-    if (!storedId) throw new Error('No stored credential ID—biometrics not registered?');
+    // // Fetch fresh options (include credentialId for specific allowCredentials)
+    // const storedId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
+    // if (!storedId) throw new Error('No stored credential ID—biometrics not registered?');
 
-    const optRes = await fetch(`${window.__SEC_API_BASE}/webauthn/auth/options`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId, credentialId: storedId, context })
-    });
+    // const optRes = await fetch(`${window.__SEC_API_BASE}/webauthn/auth/options`, {
+    //   method: 'POST',
+    //   credentials: 'include',
+    //   headers: { 'Content-Type': 'application/json' },
+    //   body: JSON.stringify({ userId, credentialId: storedId, context })
+    // });
 
     if (!optRes.ok) {
       const errText = await optRes.text();
