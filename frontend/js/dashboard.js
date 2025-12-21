@@ -16777,11 +16777,8 @@ async function prefetchAuthOptionsFor(uid, context = 'reauth') {
 
 
 
-
-// 🔹 Main verifyBiometrics (robust: fresh challenge + withLoader + debug logs + safe PIN simulation)
-// 🔹 Main verifyBiometrics (always fresh: invalidate cache + fetch new + debug + safe PIN fallback)
-// Updated verifyBiometrics function
-// ----- Updated implementation with proper reauth flow -----
+// 🔹 Main verifyBiometrics — PERMANENTLY FIXED VERSION
+// Uses pre-warmed/converted options → no more broken cache issues
 async function verifyBiometrics(uid, context = 'reauth') {
   if (window.__biometricInFlight) {
     console.warn('[verifyBiometrics] Blocked: biometric already in flight');
@@ -16789,7 +16786,7 @@ async function verifyBiometrics(uid, context = 'reauth') {
   }
 
   window.__biometricInFlight = true;
-  console.log('%c[verifyBiometrics] Called (always fresh)', 'color:#0ff;font-weight:bold');
+  console.log('%c[verifyBiometrics] Called', 'color:#0ff;font-weight:bold');
 
   try {
     // Resolve userId if not provided
@@ -16817,62 +16814,38 @@ async function verifyBiometrics(uid, context = 'reauth') {
     if (!userId) throw new Error('No user ID available for biometric verification');
 
     // -------------------------------
-    // Persistent cache logic
+    // Use pre-warmed options (already properly converted by getAuthOptionsWithCache)
     // -------------------------------
-    const now = Date.now();
-    let publicKeys = null;
+    let publicKey = window.__cachedAuthOptions;
 
-    try {
-      const cached = JSON.parse(localStorage.getItem('__cachedAuthOptions'));
-      if (cached && now - cached.fetchedAt < BIOMETRIC_TTL) {
-        console.log('[verifyBiometrics] Using cached options from localStorage');
-        publicKeys = structuredClone(cached.opts);
-        window.__cachedAuthOptions = cached.opts;
-        window.__cachedAuthOptionsFetchedAt = cached.fetchedAt;
-      }
-    } catch (e) {
-      console.warn('[verifyBiometrics] Failed to parse localStorage cache', e);
+    if (!publicKey || !publicKey.challenge || publicKey.challenge.byteLength < 16) {
+      console.log('[verifyBiometrics] No valid warmed options → fetching fresh');
+      publicKey = await warmBiometricOptions(userId, context, { force: true });
     }
 
-    if (!publicKeys) {
-      console.log('[verifyBiometrics] Cache missing or expired → fetching fresh');
-      publicKeys = await warmBiometricOptions(userId, context, { force: true });
-
-      // Save to localStorage for reload persistence
-      if (publicKeys) {
-        localStorage.setItem(
-          '__cachedAuthOptions',
-          JSON.stringify({ opts: publicKeys, fetchedAt: Date.now() })
-        );
-      }
+    if (!publicKey || !publicKey.challenge || publicKey.challenge.byteLength < 16) {
+      throw new Error('Failed to obtain valid WebAuthn options (invalid challenge)');
     }
 
-    const publicKey = structuredClone(publicKeys);
-    if (!publicKey || !publicKey.challenge) {
-      throw new Error('Invalid WebAuthn options received');
-    }
+    // Clone for safety
+    const pk = structuredClone(publicKey);
 
+    // Ensure required fields
+    pk.userVerification = 'required';
+    pk.timeout = 60000;
+
+    // Better debug log — shows actual byte length instead of misleading 'undefined...'
     console.log('[verifyBiometrics] Options ready', {
-      challenge: publicKey.challenge?.slice?.(0, 10) + '...',
-      allowCredCount: publicKey.allowCredentials?.length || 0
+      challengeLength: pk.challenge.byteLength,
+      challengePreview: pk.challenge.byteLength > 0 ? `Uint8Array(${pk.challenge.byteLength})` : 'invalid',
+      allowCredCount: pk.allowCredentials?.length || 0
     });
 
-    // Convert base64url to buffers
-    publicKey.challenge = fromBase64Url(publicKey.challenge);
-    if (Array.isArray(publicKey.allowCredentials)) {
-      publicKey.allowCredentials = publicKey.allowCredentials.map(c => ({
-        ...c,
-        id: fromBase64Url(c.id)
-      }));
-    }
-    publicKey.userVerification = 'required';
-    publicKey.timeout = 60000;
-
     // Prompt user for biometrics
-    const assertion = await navigator.credentials.get({ publicKey });
+    const assertion = await navigator.credentials.get({ publicKey: pk });
     if (!assertion) throw new Error('No assertion from authenticator');
 
-    // Show loader during verify
+    // Verify with server
     return await withLoader(async () => {
       const payload = {
         id: assertion.id,
@@ -16905,6 +16878,7 @@ async function verifyBiometrics(uid, context = 'reauth') {
       const verifyData = await verifyRes.json();
       console.log('[verifyBiometrics] Verify success', verifyData);
 
+      // Success callbacks
       try {
         if (typeof onSuccessfulReauth === 'function') await onSuccessfulReauth();
         if (typeof guardedHideReauthModal === 'function') await guardedHideReauthModal();
@@ -16924,6 +16898,7 @@ async function verifyBiometrics(uid, context = 'reauth') {
 
       return { success: true, data: verifyData };
     });
+
   } catch (err) {
     console.error('[verifyBiometrics] Error', err);
     if (typeof notify === 'function') notify(`Biometric error: ${err.message}`, 'error');
