@@ -16935,7 +16935,7 @@ async function verifyBiometrics(uid, context = 'reauth') {
   }
 }
 
-window.verifyBiometrics = window.verifyBiometrics = verifyBiometrics;
+window.verifyBiometrics = window.verifyBiometrics || verifyBiometrics;
 
 // 🔹 Improved simulatePinEntry with verbose debug logs and Promise-based completion
 // ---- REPLACE existing simulatePinEntry(...) with this improved version ----
