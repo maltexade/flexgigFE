@@ -182,90 +182,116 @@ async function warmBiometricOptions(userId, context = 'reauth', options = {}) {
 
 window.warmBiometricOptions = window.warmBiometricOptions || warmBiometricOptions;
 // ---------------------------
-// 2️⃣ Pre-warm on Pay click (supports dynamic buttons)
-//     → NOW WITH FULL CACHE CLEAR ON EVERY PAY CLICK
+// 🔄 Checkout Modal Controls Biometric Rewarming
+// Keeps options fresh every 30 seconds while modal is open
 // ---------------------------
-document.addEventListener('click', async e => {
-  // Support both ID and class selector
-  const btn = e.target.closest('#payBtn, .pay-btn');
-  if (!btn) return;
+let biometricRewarmInterval = null;
 
-  console.log('[biometric] Pay clicked — warming options...');
+const checkoutModal = document.getElementById('checkoutModal');
 
+function startModalBiometricRewarming() {
+  if (biometricRewarmInterval) clearInterval(biometricRewarmInterval);
+
+  // Get UID once
+  let uid = null;
   try {
-    // === STEP 1: CLEAR ANY OLD/PENDING/STALE OPTIONS ===
-    // This prevents leftover broken object-type challenges/IDs from persisting
-    window.__cachedAuthOptions = null;
-    window.__cachedAuthOptionsFetchedAt = 0;
-    localStorage.removeItem('__cachedAuthOptions'); // if you still use it anywhere
-
-    if (window.invalidateAuthOptionsCache && typeof window.invalidateAuthOptionsCache === 'function') {
-      window.invalidateAuthOptionsCache();
+    const userData = localStorage.getItem('userData');
+    if (userData) {
+      const parsed = JSON.parse(userData);
+      uid = parsed.uid || parsed.user?.id || parsed.user?.uid;
     }
+  } catch (e) {}
 
-    console.log('[biometric] Cleared old biometric options cache');
+  if (!uid) {
+    console.warn('[modal-rewarm] No user ID found — cannot start rewarming');
+    return;
+  }
 
-    // === STEP 2: Resolve UID from cache ===
-    let uid = null;
-    const cached = localStorage.getItem('userData');
-    if (cached) {
-      try {
-        const parsed = JSON.parse(cached);
-        uid = parsed.uid || parsed.user?.id || parsed.user?.uid;
-        console.log('[biometric] UID from cache:', uid);
-      } catch (err) {
-        console.warn('[biometric] Failed to parse cached userData', err);
-      }
-    }
+  console.log('%c[modal-rewarm] Starting continuous rewarming for checkout modal', 'color:#0b0;font-weight:bold');
 
-    if (!uid) {
-      console.warn('[biometric] Cannot warm — no UID available');
-      return;
-    }
+  const rewarm = async () => {
+    try {
+      // Clear old cache first
+      window.__cachedAuthOptions = null;
+      localStorage.removeItem('__cachedAuthOptions');
 
-    // === STEP 3: Force fresh warm ===
-    await warmBiometricOptions(uid, 'reauth', { force: true });
+      // Fetch fresh
+      const opts = await warmBiometricOptions(uid, 'reauth', { force: true });
+      if (!opts) return;
 
-    // === STEP 4: Safety net — force correct types (Uint8Array) ===
-    if (window.__cachedAuthOptions) {
-      // Fix challenge
-      if (!(window.__cachedAuthOptions.challenge instanceof Uint8Array)) {
-        const converted = fromBase64Url(window.__cachedAuthOptions.challenge);
-        if (converted instanceof ArrayBuffer && converted.byteLength > 0) {
-          window.__cachedAuthOptions.challenge = new Uint8Array(converted);
-          console.log('[biometric] Fixed challenge → Uint8Array');
-        } else {
-          console.error('[biometric] Failed to fix invalid challenge');
+      // Force correct types (Uint8Array)
+      if (window.__cachedAuthOptions) {
+        if (!(window.__cachedAuthOptions.challenge instanceof Uint8Array)) {
+          const buf = fromBase64Url(window.__cachedAuthOptions.challenge);
+          if (buf instanceof ArrayBuffer && buf.byteLength > 0) {
+            window.__cachedAuthOptions.challenge = new Uint8Array(buf);
+          }
+        }
+
+        if (Array.isArray(window.__cachedAuthOptions.allowCredentials)) {
+          window.__cachedAuthOptions.allowCredentials = window.__cachedAuthOptions.allowCredentials
+            .map(c => {
+              if (!c.id) return null;
+              if (!(c.id instanceof Uint8Array)) {
+                const buf = fromBase64Url(c.id);
+                return buf instanceof ArrayBuffer && buf.byteLength > 0
+                  ? { ...c, id: new Uint8Array(buf) }
+                  : null;
+              }
+              return c;
+            })
+            .filter(Boolean);
         }
       }
 
-      // Fix allowCredentials ids
-      if (Array.isArray(window.__cachedAuthOptions.allowCredentials)) {
-        window.__cachedAuthOptions.allowCredentials = window.__cachedAuthOptions.allowCredentials
-          .map(c => {
-            if (!c.id) return null;
-            if (!(c.id instanceof Uint8Array)) {
-              const converted = fromBase64Url(c.id);
-              if (converted instanceof ArrayBuffer && converted.byteLength > 0) {
-                return { ...c, id: new Uint8Array(converted) };
-              }
-              console.warn('[biometric] Skipping invalid credential id');
-              return null;
-            }
-            return c;
-          })
-          .filter(Boolean);
-
-        console.log('[biometric] Fixed credential IDs →', window.__cachedAuthOptions.allowCredentials.length, 'valid');
-      }
+      console.log('[modal-rewarm] Fresh options ready');
+    } catch (err) {
+      console.error('[modal-rewarm] Failed', err);
     }
+  };
 
-    console.log('%c[biometric] Options pre-warmed, fully cleaned and ready!', 'color:#0f0;font-weight:bold');
+  // Initial + every 30 seconds
+  rewarm();
+  biometricRewarmInterval = setInterval(rewarm, 30_000);
+}
 
-  } catch (err) {
-    console.error('[biometric] Warm failed', err);
+function stopModalBiometricRewarming() {
+  if (biometricRewarmInterval) {
+    clearInterval(biometricRewarmInterval);
+    biometricRewarmInterval = null;
+    console.log('[modal-rewarm] Stopped — modal closed');
   }
-});
+}
+
+// ---------------------------
+// Observe modal visibility (aria-hidden + display)
+// ---------------------------
+if (checkoutModal) {
+  const observer = new MutationObserver(() => {
+    const isHidden = checkoutModal.getAttribute('aria-hidden') === 'true';
+    const isDisplayed = window.getComputedStyle(checkoutModal).display !== 'none';
+
+    if (!isHidden && isDisplayed) {
+      startModalBiometricRewarming();
+    } else {
+      stopModalBiometricRewarming();
+    }
+  });
+
+  observer.observe(checkoutModal, {
+    attributes: true,
+    attributeFilter: ['aria-hidden', 'style', 'class']
+  });
+
+  // Check initial state
+  if (checkoutModal.getAttribute('aria-hidden') !== 'true' &&
+      window.getComputedStyle(checkoutModal).display !== 'none') {
+    startModalBiometricRewarming();
+  }
+}
+
+// Also stop when close button clicked (extra safety)
+checkoutModal?.querySelector('.close-btn')?.addEventListener('click', stopModalBiometricRewarming);
 
 
 
