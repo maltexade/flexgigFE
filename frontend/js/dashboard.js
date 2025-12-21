@@ -123,73 +123,32 @@ window.saveCurrentAppState = saveCurrentAppState;
 const BIOMETRIC_TTL = 60_000; // safe short-lived TTL (~1 min)
 const CACHE_KEY = '__cachedAuthOptions';
 
-// Helper: safely convert base64url string → Uint8Array
-function fromBase64Url(base64url) {
-  if (!base64url || typeof base64url !== 'string') {
-    throw new Error('Invalid base64url input');
-  }
-  try {
-    const padded = base64url.replace(/-/g, '+').replace(/_/g, '/');
-    const binary = atob(padded);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i);
-    }
-    return bytes.buffer;
-  } catch (e) {
-    console.error('[webauthn] Invalid base64url:', base64url);
-    throw e;
-  }
-}
-
-// Prepare options for navigator.credentials.get()
-function prepareAuthOptions(rawOpts) {
-  if (!rawOpts || !rawOpts.challenge) {
-    throw new Error('Missing challenge in auth options');
-  }
-
-  const prepared = { ...rawOpts };
-
-  // Convert challenge
-  prepared.challenge = fromBase64Url(rawOpts.challenge);
-
-  // Convert allowCredentials if present
-  if (Array.isArray(rawOpts.allowCredentials) && rawOpts.allowCredentials.length > 0) {
-    prepared.allowCredentials = rawOpts.allowCredentials.map(cred => ({
-      ...cred,
-      id: fromBase64Url(cred.id),
-    }));
-  }
-
-  return prepared;
-}
-
 async function warmBiometricOptions(userId, context = 'reauth', options = {}) {
   const now = Date.now();
-  let cached = null;
 
+  // Load cached options from localStorage
+  let cached = null;
   try {
-    cached = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null');
+    cached = JSON.parse(localStorage.getItem(CACHE_KEY));
   } catch {}
 
-  // Use cache only if not forcing and still valid
-  if (!options.force && cached && (now - cached.fetchedAt < BIOMETRIC_TTL)) {
-    try {
-      const prepared = prepareAuthOptions(cached.opts); // Validate + convert
-      console.log('[biometric] Using VALID cached options');
-      window.__cachedAuthOptions = prepared;
-      window.__cachedAuthOptionsFetchedAt = cached.fetchedAt;
-      return prepared;
-    } catch (err) {
-      console.warn('[biometric] Cached options invalid — refetching', err);
-      // Fall through to fresh fetch
-    }
+  if (
+    !options.force &&
+    cached &&
+    now - cached.fetchedAt < BIOMETRIC_TTL
+  ) {
+    console.log('[biometric] Using cached options from localStorage');
+    window.__cachedAuthOptions = cached.opts;
+    window.__cachedAuthOptionsFetchedAt = cached.fetchedAt;
+    return cached.opts;
   }
 
-  // --- Fresh fetch ---
-  const credentialId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
+  const credentialId =
+    localStorage.getItem('credentialId') ||
+    localStorage.getItem('webauthn-cred-id');
+
   if (!credentialId) {
-    console.warn('[biometric] Cannot warm — no credentialId');
+    console.warn('[biometric] Cannot warm — no stored credential ID');
     return null;
   }
 
@@ -198,39 +157,29 @@ async function warmBiometricOptions(userId, context = 'reauth', options = {}) {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId, credentialId, context }),
+      body: JSON.stringify({ userId, credentialId, context })
     });
 
-    if (!res.ok) {
-      throw new Error(`Server error: ${res.status}`);
-    }
+    if (!res.ok) throw new Error('Biometric warmup failed');
 
-    const rawOpts = await res.json();
+    const opts = await res.json();
 
-    // Validate and prepare immediately
-    const preparedOpts = prepareAuthOptions(rawOpts);
-
-    // Cache the PREPARED version? No — cache raw, prepare on use
-    // Better: cache raw + mark as validated
+    // Store in both window and localStorage
+    window.__cachedAuthOptions = opts;
+    window.__cachedAuthOptionsFetchedAt = Date.now();
     localStorage.setItem(CACHE_KEY, JSON.stringify({
-      opts: rawOpts,           // store raw (strings)
-      fetchedAt: Date.now(),
-      valid: true
+      opts,
+      fetchedAt: Date.now()
     }));
 
-    window.__cachedAuthOptions = preparedOpts;
-    window.__cachedAuthOptionsFetchedAt = Date.now();
-
-    console.log('[biometric] Fresh options warmed and validated');
-    return preparedOpts;
-
+    console.log('[biometric] Options warmed for user', userId);
+    return opts;
   } catch (err) {
-    console.error('[biometric] Warm failed:', err);
-    // Optionally clear bad cache
-    localStorage.removeItem(CACHE_KEY);
+    console.error('[biometric] Warm failed', err);
     return null;
   }
 }
+
 window.warmBiometricOptions = window.warmBiometricOptions || warmBiometricOptions;
 
 // ---------------------------
