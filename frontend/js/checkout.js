@@ -286,7 +286,8 @@ function closeCheckoutModal() {
   }
 }
 
-// Reset UI after successful purchase (ENHANCED & BULLETPROOF)
+// Reset UI after successful purchase — FINAL CLEAN VERSION
+// No .selected class used for providers (slider controls highlight)
 function resetCheckoutUI() {
   console.log('[checkout] Resetting UI after successful transaction');
 
@@ -294,29 +295,34 @@ function resetCheckoutUI() {
   const phoneInput = document.getElementById('phone-input');
   if (phoneInput) {
     phoneInput.value = '';
-    phoneInput.dispatchEvent(new Event('input')); // trigger any listeners
+    phoneInput.dispatchEvent(new Event('input')); // Trigger any validation/listeners
+    console.log('[checkout] Phone input cleared');
   }
 
-  // 2. Deselect all plans
+  // 2. Deselect all plans (remove .selected from plan boxes)
   document.querySelectorAll('.plan-box.selected').forEach(el => {
     el.classList.remove('selected');
   });
+  console.log('[checkout] All plans deselected');
 
-  // 3. Deselect all providers
-  document.querySelectorAll('.provider-box.selected').forEach(el => {
-    el.classList.remove('selected');
-  });
-
-  // 4. Force select MTN as default provider
-  const mtnProvider = document.querySelector('.provider-box.mtn');
-  if (mtnProvider) {
-    mtnProvider.classList.add('selected');
-    console.log('[checkout] MTN provider re-selected as default');
+  // 3. Reset provider visual state — ONLY via slider (no .selected on boxes)
+  const slider = document.querySelector('.slider');
+  if (slider) {
+    // Fully reset slider classes — remove all provider classes
+    slider.classList.remove('mtn', 'airtel', 'glo', 'ninemobile');
+    // Force default to MTN
+    slider.classList.add('mtn');
+    console.log('[checkout] Slider reset to MTN (default provider)');
   } else {
-    console.warn('[checkout] MTN provider box not found');
+    console.warn('[checkout] Slider element not found');
   }
 
-  // 5. Clear any saved plan state
+  // Optional: Clean any leftover .selected from provider boxes (defensive)
+  document.querySelectorAll('.provider-box').forEach(box => {
+    box.classList.remove('selected');
+  });
+
+  // 4. Clear saved state from localStorage
   try {
     const rawState = localStorage.getItem('userState');
     if (rawState) {
@@ -325,19 +331,24 @@ function resetCheckoutUI() {
       delete state.selectedPlanId;
       delete state.provider;
       delete state.number;
+      delete state.phoneNumber;
       localStorage.setItem('userState', JSON.stringify(state));
     }
     localStorage.removeItem('lastSelectedPlan');
+    console.log('[checkout] Saved plan & provider state cleared from storage');
   } catch (err) {
-    console.warn('[checkout] Failed to clear plan state from storage:', err);
+    console.warn('[checkout] Failed to clear state from storage:', err);
   }
 
-  // 6. Optional: Trigger dashboard refresh if needed
+  // 5. Optional: Refresh dashboard if you have a function for it
   if (typeof window.refreshDashboardState === 'function') {
     window.refreshDashboardState();
   }
+  if (typeof window.renderDashboardPlans === 'function') {
+    window.renderDashboardPlans(); // if needed
+  }
 
-  console.log('[checkout] UI fully reset — ready for next purchase');
+  console.log('%c[checkout] UI fully reset — Default provider: MTN, ready for next purchase!', 'color:#0f0;font-weight:bold');
 }
 
 // Add local transaction (same as your old mock)
