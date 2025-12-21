@@ -4273,10 +4273,13 @@ if (!window.prefetchAuthOptions) window.prefetchAuthOptions = async function pre
     const publicKey = await res.json();
 
     try {
-      if (publicKey.challenge && typeof publicKey.challenge === 'string' && typeof window.fromBase64Url === 'function') {
-        const ch = window.fromBase64Url(publicKey.challenge);
-        if (ch) publicKey.challenge = new Uint8Array(ch);
-      }
+      const converted = convertOptionsFromServer(publicKey);
+
+// store only if no lock
+if (!window.__cachedAuthOptionsLock) {
+  cacheAuthOptions(converted);
+}
+
       if (Array.isArray(publicKey.allowCredentials)) {
         publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){
           try {
@@ -16557,233 +16560,7 @@ async function prefetchAuthOptionsFor(uid, context = 'reauth') {
 
 
 
-/* -----------------------
-   Verify Biometrics (new!)
-   - Performs WebAuthn authentication for login or checkout
-   ----------------------- */
-// Full verifyBiometrics - performs navigator.credentials.get + server verify
-/* -----------------------
-   Verify Biometrics (patched)
-   - Ensures all verifications reuse the same credential created by the parent
-   - Prevents browser from prompting for “new passkey”
-   ----------------------- */
-/* -----------------------
-   Verify Biometrics (patched)
-   - Ensures all verifications reuse the same credential created by the parent
-   - Prevents browser from prompting for “new passkey”
-   ----------------------- */
-// 🔹 Verify Biometrics (with fallback for direct prompt)
-// 🔹 Verify Biometrics (fixed for direct fingerprint - conditional mediation + preventSilentAccess)
-// - Uses 'conditional' mediation: auto-direct if possible, prompt otherwise (no null hangs)
-// - Adds preventSilentAccess() for immediate check: forces prompt if no silent possible
-// - Stores credentialId from options for specific calls next time
-// - Respects all existing: discover fallback, 404 retry, conversions, server verify, errors
-// 🔹 Verify Biometrics (fixed - remove preventSilentAccess to avoid hangs)
-// - Uses 'conditional' mediation: auto-direct fingerprint if possible, prompt otherwise
-// - Stores credentialId from options for specific calls next time
-// - Respects all existing: discover fallback, 404 retry, conversions, server verify, errors
-/* -----------------------
-   Verify Biometrics (debug)
-   ----------------------- */
-// ---- verifyBiometrics ----
 
-
-// ===== Prefetch helpers & safe base64 helpers for biometric flow =====
-(function(){
-  if (!window.fromBase64Url) {
-    window.fromBase64Url = function (b64url) {
-      try {
-        if (b64url == null) return new ArrayBuffer(0);
-
-        // Already a buffer or typed array — return its buffer
-        if (b64url instanceof ArrayBuffer) return b64url;
-        if (ArrayBuffer.isView(b64url)) return b64url.buffer;
-
-        // Some servers may send {type:'Buffer', data:[...]}
-        if (typeof b64url === 'object' && Array.isArray(b64url.data)) {
-          return new Uint8Array(b64url.data).buffer;
-        }
-
-        // If it's not a string, don't try to convert — just return it
-        if (typeof b64url !== 'string') {
-          console.warn('[webauthn] fromBase64Url expected string, got', typeof b64url, b64url);
-          return b64url;
-        }
-
-        // Normal string decode path
-        let s = b64url.replace(/-/g, '+').replace(/_/g, '/');
-        while (s.length % 4) s += '=';
-        const str = atob(s);
-        const arr = new Uint8Array(str.length);
-        for (let i = 0; i < str.length; i++) arr[i] = str.charCodeAt(i);
-        return arr.buffer;
-      } catch (err) {
-        console.warn('[webauthn] fromBase64Url error', err, b64url);
-        return new ArrayBuffer(0);
-      }
-    };
-  }
-
-  if (!window.toBase64Url) {
-    window.toBase64Url = function (buffer) {
-      if (!buffer) return '';
-      const bytes = new Uint8Array(buffer);
-      let str = '';
-      for (let i = 0; i < bytes.length; i++) str += String.fromCharCode(bytes[i]);
-      return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-    };
-  }
-
-
-
-
-// ===== WebAuthn session init: cache userId for fast auth/options requests =====
-(function(){
-  (async function initWebAuthnSession(){
-    try {
-      // Try to get session early and cache user id for quick POST body
-      if (typeof getSession === 'function') {
-        var sess = await safeCall(getSession);
-        var uid = sess && sess.user && (sess.user.uid || sess.user.id);
-        if (uid) {
-          window.__webauthn_userId = uid;
-        }
-      }
-      // If we have a uid and a stored cred, prefetch options immediately
-      var stored = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
-      if ((window.__webauthn_userId) && stored) {
-        try { window.prefetchAuthOptions && window.prefetchAuthOptions(); } catch(e){}
-      }
-    } catch (e) {
-      console.warn('[initWebAuthnSession] failed', e);
-    }
-  })();
-})();
-
-
-  window.prefetchAuthOptions = window.prefetchAuthOptions || (async function prefetchAuthOptions() {
-    try {
-      if (window.__prefetchInFlight) return;
-      window.__prefetchInFlight = true;
-
-      const storedId = localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id');
-      if (!storedId) {
-        window.__prefetchInFlight = false;
-        return;
-      }
-
-      const res = await fetch((window.__SEC_API_BASE || API_BASE) + '/webauthn/auth/options', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ credentialId: storedId, userId: (window.__webauthn_userId || null) })
-      });
-
-      if (!res.ok) {
-        console.warn('[prefetchAuthOptions] options fetch not ok', await res.text());
-        window.__prefetchInFlight = false;
-        return;
-      }
-
-      const publicKey = await res.json();
-
-      try {
-        const converted = convertOptionsFromServer(publicKey);
-
-// store only if no lock
-if (!window.__cachedAuthOptionsLock) {
-  cacheAuthOptions(converted);
-}
-
-        if (Array.isArray(publicKey.allowCredentials)) {
-          publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){
-            try {
-              const idVal = (typeof c.id === 'string') ? window.fromBase64Url(c.id) : (ArrayBuffer.isView(c.id) ? c.id.buffer : (c.id instanceof ArrayBuffer ? c.id : null));
-              return {
-                type: c.type || 'public-key',
-                transports: c.transports || ['internal'],
-                id: idVal ? new Uint8Array(idVal) : idVal
-              };
-            } catch (e) {
-              return { type: c.type || 'public-key', transports: c.transports || ['internal'], id: c.id };
-            }
-          });
-        }
-
-      } catch (e) {
-        console.warn('[prefetchAuthOptions] conversion error', e);
-      }
-
-      window.__cachedAuthOptions = publicKey;
-      window.__cachedAuthOptionsFetchedAt = Date.now();
-      console.log('[prefetchAuthOptions] cached auth options ready');
-    } catch (err) {
-      console.warn('[prefetchAuthOptions] failed', err);
-    } finally {
-      window.__prefetchInFlight = false;
-    }
-  });
-
-  try {
-    var bioBtnEl = document.getElementById('bioBtn') || document.querySelector('.biometric-button') || document.querySelector('[data-bio-button]');
-    if (bioBtnEl) {
-      // debounce to avoid multiple in-flight prefetch calls on fast interactions
-      const debouncedPrefetch = (function(){
-        let locked = false;
-        return function(){
-          if (locked) return;
-          locked = true;
-          try {
-            console.log('[prefetchAuthOptions] debounced trigger');
-            window.prefetchAuthOptions && window.prefetchAuthOptions();
-          } catch(e){
-            console.warn('[prefetchAuthOptions] debounced call failed', e);
-          }
-          // keep short lock window to avoid spamming when user mashes button
-          setTimeout(()=> { locked = false; }, 250);
-        };
-      })();
-
-      // bind to a variety of events to be defensive for touch/click/keyboard/fast modal opens
-      ['pointerdown','mouseenter','click','touchstart','focus'].forEach(function(ev){
-        try { bioBtnEl.addEventListener(ev, debouncedPrefetch, { passive: true }); } catch(e){
-          // older browsers may not accept options object
-          try { bioBtnEl.addEventListener(ev, debouncedPrefetch); } catch(err){ /* ignore */ }
-        }
-      });
-
-      // also prefetch when the reauth modal opens (defensive)
-      try {
-        document.addEventListener('modal:reauth:open', function(){ 
-          try {
-            console.log('[prefetchAuthOptions] modal open trigger');
-            window.prefetchAuthOptions && window.prefetchAuthOptions();
-          } catch(e){ console.warn('prefetchAuthOptions on modal open failed', e); }
-        }, { passive: true });
-      } catch(e) {
-        // fallback if addEventListener options not supported
-        try {
-          document.addEventListener('modal:reauth:open', function(){ 
-            try {
-              console.log('[prefetchAuthOptions] modal open trigger');
-              window.prefetchAuthOptions && window.prefetchAuthOptions();
-            } catch(e){ console.warn('prefetchAuthOptions on modal open failed', e); }
-          });
-        } catch(err){}
-      }
-    }
-    if (localStorage.getItem('credentialId') || localStorage.getItem('webauthn-cred-id')) {
-      setTimeout(function(){ 
-        try { 
-          console.log('[prefetchAuthOptions] timed initial prefetch');
-          window.prefetchAuthOptions(); 
-        } catch(e){ console.warn('initial prefetch failed', e); }
-      }, 200);
-    }
-  } catch (e) {
-    console.warn('bindPrefetchToBioBtn error', e);
-  }
-})();
 
 
 
@@ -16956,7 +16733,7 @@ if (Array.isArray(publicKey.allowCredentials)) {
   }
 }
 
-window.verifyBiometrics = window.verifyBiometrics = verifyBiometrics;
+window.verifyBiometrics = window.verifyBiometrics || verifyBiometrics;
 
 // 🔹 Improved simulatePinEntry with verbose debug logs and Promise-based completion
 // ---- REPLACE existing simulatePinEntry(...) with this improved version ----
