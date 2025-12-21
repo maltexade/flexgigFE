@@ -4052,17 +4052,26 @@ const svgShapes = {
       if (!publicKey) return publicKey;
 
       if (publicKey.challenge) {
-        const ch = fromBase64Url(publicKey.challenge);
-        if (ch) publicKey.challenge = new Uint8Array(ch);
-      }
+  // Convert ONLY if it's still a string
+  if (typeof publicKey.challenge === 'string') {
+    const ch = fromBase64Url(publicKey.challenge);
+    if (ch) publicKey.challenge = new Uint8Array(ch);
+  }
+}
+
 
       if (Array.isArray(publicKey.allowCredentials)) {
         publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){
           try {
             let idBuf = null;
             if (typeof c.id === 'string') {
-              idBuf = fromBase64Url(c.id);
-            } else if (c instanceof ArrayBuffer) {
+  idBuf = fromBase64Url(c.id);
+} else if (c.id instanceof Uint8Array) {
+  idBuf = c.id.buffer;
+} else if (c.id instanceof ArrayBuffer) {
+  idBuf = c.id;
+}
+ else if (c instanceof ArrayBuffer) {
               idBuf = c;
             } else if (ArrayBuffer.isView(c.id)) {
               idBuf = c.id.buffer;
@@ -4167,10 +4176,11 @@ const svgShapes = {
 
     // function that handles response parsing + conversion + cache
     const handleSuccess = (opts) => {
-      const converted = convertOptionsFromServer(opts);
-      cacheAuthOptions(converted);
-      try { return JSON.parse(JSON.stringify(converted)); } catch(e){ return converted; }
-    };
+  const converted = convertOptionsFromServer(opts);
+  cacheAuthOptions(converted);
+  return structuredClone(converted);
+};
+
 
     // Primary attempt: if we have userId use '/webauthn/auth/options'
     try {
@@ -16678,10 +16688,13 @@ async function prefetchAuthOptionsFor(uid, context = 'reauth') {
       const publicKey = await res.json();
 
       try {
-        if (publicKey.challenge && typeof publicKey.challenge === 'string') {
-          const ch = window.fromBase64Url(publicKey.challenge);
-          if (ch) publicKey.challenge = new Uint8Array(ch);
-        }
+        const converted = convertOptionsFromServer(publicKey);
+
+// store only if no lock
+if (!window.__cachedAuthOptionsLock) {
+  cacheAuthOptions(converted);
+}
+
         if (Array.isArray(publicKey.allowCredentials)) {
           publicKey.allowCredentials = publicKey.allowCredentials.map(function(c){
             try {
@@ -16783,6 +16796,8 @@ async function prefetchAuthOptionsFor(uid, context = 'reauth') {
 // Updated verifyBiometrics function
 // ----- Updated implementation with proper reauth flow -----
 async function verifyBiometrics(uid, context = 'reauth') {
+  window.__cachedAuthOptionsLock = true;
+
   if (window.__biometricInFlight) {
     console.warn('[verifyBiometrics] Blocked: biometric already in flight');
     throw new Error('Biometric already in progress');
@@ -16839,12 +16854,7 @@ async function verifyBiometrics(uid, context = 'reauth') {
       publicKeys = await warmBiometricOptions(userId, context, { force: true });
 
       // Save to localStorage for reload persistence
-      if (publicKeys) {
-        localStorage.setItem(
-          '__cachedAuthOptions',
-          JSON.stringify({ opts: publicKeys, fetchedAt: Date.now() })
-        );
-      }
+      
     }
 
     const publicKey = structuredClone(publicKeys);
@@ -16858,13 +16868,23 @@ async function verifyBiometrics(uid, context = 'reauth') {
     });
 
     // Convert base64url to buffers
-    publicKey.challenge = fromBase64Url(publicKey.challenge);
-    if (Array.isArray(publicKey.allowCredentials)) {
-      publicKey.allowCredentials = publicKey.allowCredentials.map(c => ({
-        ...c,
-        id: fromBase64Url(c.id)
-      }));
-    }
+    // Ensure challenge is ArrayBuffer (ONLY convert if string)
+if (typeof publicKey.challenge === 'string') {
+  publicKey.challenge = fromBase64Url(publicKey.challenge);
+} else if (publicKey.challenge instanceof Uint8Array) {
+  publicKey.challenge = publicKey.challenge.buffer;
+}
+
+// Ensure allowCredentials ids are ArrayBuffer
+if (Array.isArray(publicKey.allowCredentials)) {
+  publicKey.allowCredentials = publicKey.allowCredentials.map(c => {
+    let id = c.id;
+    if (typeof id === 'string') id = fromBase64Url(id);
+    else if (id instanceof Uint8Array) id = id.buffer;
+    return { ...c, id };
+  });
+}
+
     publicKey.userVerification = 'required';
     publicKey.timeout = 60000;
 
@@ -16932,6 +16952,7 @@ async function verifyBiometrics(uid, context = 'reauth') {
     return { success: false, error: err.message };
   } finally {
     window.__biometricInFlight = false;
+    window.__cachedAuthOptionsLock = false;
   }
 }
 
