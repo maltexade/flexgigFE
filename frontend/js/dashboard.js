@@ -214,6 +214,19 @@ document.addEventListener('click', async e => {
     // Force a fresh warm regardless of TTL
     await warmBiometricOptions(uid, 'reauth', { force: true });
     console.log('[biometric] Options pre-warmed, ready for biometric prompt');
+    // Force proper conversion on warmed options (safety net)
+if (window.__cachedAuthOptions) {
+  if (!(window.__cachedAuthOptions.challenge instanceof Uint8Array)) {
+    window.__cachedAuthOptions.challenge = new Uint8Array(fromBase64Url(window.__cachedAuthOptions.challenge));
+  }
+  if (Array.isArray(window.__cachedAuthOptions.allowCredentials)) {
+    window.__cachedAuthOptions.allowCredentials = window.__cachedAuthOptions.allowCredentials.map(c => ({
+      ...c,
+      id: new Uint8Array(fromBase64Url(c.id))
+    }));
+  }
+}
+console.log('[biometric] Forced proper types on cached options');
   } catch (err) {
     console.error('[biometric] Warm failed', err);
   }
