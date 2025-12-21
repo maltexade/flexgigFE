@@ -16777,8 +16777,9 @@ async function prefetchAuthOptionsFor(uid, context = 'reauth') {
 
 
 
-// 🔹 Main verifyBiometrics — PERMANENTLY FIXED VERSION
-// Uses pre-warmed/converted options → no more broken cache issues
+// 🔹 FINAL PERMANENTLY FIXED verifyBiometrics
+// Ensures correct BufferSource types (Uint8Array) for challenge and credential IDs
+// No more reliance on broken localStorage cache
 async function verifyBiometrics(uid, context = 'reauth') {
   if (window.__biometricInFlight) {
     console.warn('[verifyBiometrics] Blocked: biometric already in flight');
@@ -16814,38 +16815,79 @@ async function verifyBiometrics(uid, context = 'reauth') {
     if (!userId) throw new Error('No user ID available for biometric verification');
 
     // -------------------------------
-    // Use pre-warmed options (already properly converted by getAuthOptionsWithCache)
+    // Use pre-warmed options (from Pay click pre-warm via getAuthOptionsWithCache)
+    // Fall back to fresh fetch if missing/invalid
     // -------------------------------
     let publicKey = window.__cachedAuthOptions;
 
-    if (!publicKey || !publicKey.challenge || publicKey.challenge.byteLength < 16) {
-      console.log('[verifyBiometrics] No valid warmed options → fetching fresh');
+    if (!publicKey || !publicKey.challenge) {
+      console.log('[verifyBiometrics] No valid pre-warmed options → fetching fresh');
       publicKey = await warmBiometricOptions(userId, context, { force: true });
     }
 
-    if (!publicKey || !publicKey.challenge || publicKey.challenge.byteLength < 16) {
-      throw new Error('Failed to obtain valid WebAuthn options (invalid challenge)');
+    if (!publicKey || !publicKey.challenge) {
+      throw new Error('Failed to obtain WebAuthn options from server');
     }
 
-    // Clone for safety
+    // Clone for modification
     const pk = structuredClone(publicKey);
 
-    // Ensure required fields
+    // FORCE challenge to Uint8Array
+    if (!(pk.challenge instanceof Uint8Array)) {
+      console.warn('[verifyBiometrics] Fixing challenge type:', typeof pk.challenge);
+      const converted = fromBase64Url(pk.challenge);
+      if (!(converted instanceof ArrayBuffer) || converted.byteLength === 0) {
+        throw new Error('Invalid challenge: could not convert to valid buffer');
+      }
+      pk.challenge = new Uint8Array(converted);
+    }
+
+    // FORCE allowCredentials[].id to Uint8Array
+    if (Array.isArray(pk.allowCredentials) && pk.allowCredentials.length > 0) {
+      const fixedCreds = [];
+      for (const cred of pk.allowCredentials) {
+        if (!cred.id) {
+          console.warn('[verifyBiometrics] Skipping credential with missing id');
+          continue;
+        }
+        if (!(cred.id instanceof Uint8Array)) {
+          console.warn('[verifyBiometrics] Fixing credential id type:', typeof cred.id);
+          const converted = fromBase64Url(cred.id);
+          if (!(converted instanceof ArrayBuffer) || converted.byteLength === 0) {
+            console.warn('[verifyBiometrics] Skipping invalid credential id');
+            continue;
+          }
+          cred.id = new Uint8Array(converted);
+        }
+        fixedCreds.push(cred);
+      }
+      pk.allowCredentials = fixedCreds;
+
+      if (pk.allowCredentials.length === 0) {
+        throw new Error('No valid registered credentials found');
+      }
+    }
+
+    // Required fields
     pk.userVerification = 'required';
     pk.timeout = 60000;
 
-    // Better debug log — shows actual byte length instead of misleading 'undefined...'
-    console.log('[verifyBiometrics] Options ready', {
+    // Detailed debug log
+    console.log('[verifyBiometrics] Final options ready for prompt', {
       challengeLength: pk.challenge.byteLength,
-      challengePreview: pk.challenge.byteLength > 0 ? `Uint8Array(${pk.challenge.byteLength})` : 'invalid',
-      allowCredCount: pk.allowCredentials?.length || 0
+      challengeType: pk.challenge.constructor.name,
+      allowCredCount: pk.allowCredentials?.length || 0,
+      allowCredIdsValid: pk.allowCredentials?.every(c => c.id instanceof Uint8Array) || false
     });
 
-    // Prompt user for biometrics
+    // Trigger biometric prompt
     const assertion = await navigator.credentials.get({ publicKey: pk });
-    if (!assertion) throw new Error('No assertion from authenticator');
 
-    // Verify with server
+    if (!assertion) {
+      throw new Error('No assertion returned from authenticator');
+    }
+
+    // Server verification
     return await withLoader(async () => {
       const payload = {
         id: assertion.id,
