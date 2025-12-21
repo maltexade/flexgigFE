@@ -181,9 +181,9 @@ async function warmBiometricOptions(userId, context = 'reauth', options = {}) {
 }
 
 window.warmBiometricOptions = window.warmBiometricOptions || warmBiometricOptions;
-
 // ---------------------------
 // 2️⃣ Pre-warm on Pay click (supports dynamic buttons)
+//     → NOW WITH FULL CACHE CLEAR ON EVERY PAY CLICK
 // ---------------------------
 document.addEventListener('click', async e => {
   // Support both ID and class selector
@@ -193,7 +193,19 @@ document.addEventListener('click', async e => {
   console.log('[biometric] Pay clicked — warming options...');
 
   try {
-    // Resolve UID from cache
+    // === STEP 1: CLEAR ANY OLD/PENDING/STALE OPTIONS ===
+    // This prevents leftover broken object-type challenges/IDs from persisting
+    window.__cachedAuthOptions = null;
+    window.__cachedAuthOptionsFetchedAt = 0;
+    localStorage.removeItem('__cachedAuthOptions'); // if you still use it anywhere
+
+    if (window.invalidateAuthOptionsCache && typeof window.invalidateAuthOptionsCache === 'function') {
+      window.invalidateAuthOptionsCache();
+    }
+
+    console.log('[biometric] Cleared old biometric options cache');
+
+    // === STEP 2: Resolve UID from cache ===
     let uid = null;
     const cached = localStorage.getItem('userData');
     if (cached) {
@@ -211,27 +223,49 @@ document.addEventListener('click', async e => {
       return;
     }
 
-    // Force a fresh warm regardless of TTL
+    // === STEP 3: Force fresh warm ===
     await warmBiometricOptions(uid, 'reauth', { force: true });
-    console.log('[biometric] Options pre-warmed, ready for biometric prompt');
-    // Force proper conversion on warmed options (safety net)
-if (window.__cachedAuthOptions) {
-  if (!(window.__cachedAuthOptions.challenge instanceof Uint8Array)) {
-    window.__cachedAuthOptions.challenge = new Uint8Array(fromBase64Url(window.__cachedAuthOptions.challenge));
-  }
-  if (Array.isArray(window.__cachedAuthOptions.allowCredentials)) {
-    window.__cachedAuthOptions.allowCredentials = window.__cachedAuthOptions.allowCredentials.map(c => ({
-      ...c,
-      id: new Uint8Array(fromBase64Url(c.id))
-    }));
-  }
-}
-console.log('[biometric] Forced proper types on cached options');
+
+    // === STEP 4: Safety net — force correct types (Uint8Array) ===
+    if (window.__cachedAuthOptions) {
+      // Fix challenge
+      if (!(window.__cachedAuthOptions.challenge instanceof Uint8Array)) {
+        const converted = fromBase64Url(window.__cachedAuthOptions.challenge);
+        if (converted instanceof ArrayBuffer && converted.byteLength > 0) {
+          window.__cachedAuthOptions.challenge = new Uint8Array(converted);
+          console.log('[biometric] Fixed challenge → Uint8Array');
+        } else {
+          console.error('[biometric] Failed to fix invalid challenge');
+        }
+      }
+
+      // Fix allowCredentials ids
+      if (Array.isArray(window.__cachedAuthOptions.allowCredentials)) {
+        window.__cachedAuthOptions.allowCredentials = window.__cachedAuthOptions.allowCredentials
+          .map(c => {
+            if (!c.id) return null;
+            if (!(c.id instanceof Uint8Array)) {
+              const converted = fromBase64Url(c.id);
+              if (converted instanceof ArrayBuffer && converted.byteLength > 0) {
+                return { ...c, id: new Uint8Array(converted) };
+              }
+              console.warn('[biometric] Skipping invalid credential id');
+              return null;
+            }
+            return c;
+          })
+          .filter(Boolean);
+
+        console.log('[biometric] Fixed credential IDs →', window.__cachedAuthOptions.allowCredentials.length, 'valid');
+      }
+    }
+
+    console.log('%c[biometric] Options pre-warmed, fully cleaned and ready!', 'color:#0f0;font-weight:bold');
+
   } catch (err) {
     console.error('[biometric] Warm failed', err);
   }
 });
-
 
 
 
