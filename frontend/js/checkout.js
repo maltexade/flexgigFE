@@ -286,38 +286,58 @@ function closeCheckoutModal() {
   }
 }
 
-// Reset UI after successful purchase (fixed version)
+// Reset UI after successful purchase (ENHANCED & BULLETPROOF)
 function resetCheckoutUI() {
-  // Clear phone input
+  console.log('[checkout] Resetting UI after successful transaction');
+
+  // 1. Clear phone input
   const phoneInput = document.getElementById('phone-input');
-  if (phoneInput) phoneInput.value = '';
+  if (phoneInput) {
+    phoneInput.value = '';
+    phoneInput.dispatchEvent(new Event('input')); // trigger any listeners
+  }
 
-  // Remove 'selected' from all plan boxes
+  // 2. Deselect all plans
   document.querySelectorAll('.plan-box.selected').forEach(el => {
-    if (el) el.classList.remove('selected');
+    el.classList.remove('selected');
   });
 
-  // Remove 'selected' from all provider boxes
+  // 3. Deselect all providers
   document.querySelectorAll('.provider-box.selected').forEach(el => {
-    if (el) el.classList.remove('selected');
+    el.classList.remove('selected');
   });
 
-  // Re-select MTN as default provider
+  // 4. Force select MTN as default provider
   const mtnProvider = document.querySelector('.provider-box.mtn');
-  if (mtnProvider) mtnProvider.classList.add('selected');
+  if (mtnProvider) {
+    mtnProvider.classList.add('selected');
+    console.log('[checkout] MTN provider re-selected as default');
+  } else {
+    console.warn('[checkout] MTN provider box not found');
+  }
 
-  // Clear selected plan from localStorage properly
+  // 5. Clear any saved plan state
   try {
     const rawState = localStorage.getItem('userState');
     if (rawState) {
       const state = JSON.parse(rawState);
       delete state.selectedPlan;
+      delete state.selectedPlanId;
+      delete state.provider;
+      delete state.number;
       localStorage.setItem('userState', JSON.stringify(state));
     }
     localStorage.removeItem('lastSelectedPlan');
   } catch (err) {
-    console.warn('[checkout] Failed to clear selected plan from storage:', err);
+    console.warn('[checkout] Failed to clear plan state from storage:', err);
   }
+
+  // 6. Optional: Trigger dashboard refresh if needed
+  if (typeof window.refreshDashboardState === 'function') {
+    window.refreshDashboardState();
+  }
+
+  console.log('[checkout] UI fully reset — ready for next purchase');
 }
 
 // Add local transaction (same as your old mock)
