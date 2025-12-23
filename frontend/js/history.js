@@ -1053,13 +1053,11 @@ function renderChunked(groupedMonths) {
 state.items = USE_FAKE_DATA ? allTx : allTx.map(raw => ({
   id: raw.id || raw.reference,
   reference: raw.reference,
-  type: raw.type === 'credit' ? 'credit' : 'debit',
-  amount: raw.amount,
-  description: raw.description || raw.narration || raw.type,
-  time: raw.created_at || raw.time || raw.date,
-  created_at: raw.created_at ? raw.created_at.toISOString() : null,
+  type: raw.type || 'debit',
+  amount: Number(raw.amount || 0),
+  description: raw.description || '',
+  time: raw.time || raw.created_at || raw.date,  // string is fine
   status: raw.status || 'SUCCESS',
-  // ADD THESE — preserve the new fields
   phone: raw.phone || null,
   provider: raw.provider || null,
   plan_id: raw.plan_id || null,
