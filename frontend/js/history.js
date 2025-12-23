@@ -146,18 +146,53 @@ function generateFakeTransactions() {
     }
   }
 
-  function getTxIcon(tx) {
-    const desc = (tx.description || tx.narration || '').toLowerCase();
-    
-    if (desc.includes('opay')) return { cls: 'incoming', img: '/frontend/svg/bank.svg', alt: 'Opay' };
-    if (desc.includes('mtn')) return { cls: 'mtn targets', img: '/frontend/img/mtn.svg', alt: 'MTN' };
-    if (desc.includes('airtel')) return { cls: 'airtel targets', img: '/frontend/svg/airtel-icon.svg', alt: 'Airtel' };
-    if (desc.includes('glo')) return { cls: 'glo targets', img: '/frontend/svg/glo-icon.svg', alt: 'GLO' };
-    if (desc.includes('9mobile') || desc.includes('nine-mobile')) return { cls: 'nine-mobile targets', img: '/frontend/svg/9mobile-icon.svg', alt: '9Mobile' };
-    if (desc.includes('refund')) return { cls: 'refund incoming', img: '/frontend/svg/refund.svg', alt: 'Refund' };
+function getTxIcon(tx) {
+  // Combine description + narration + any possible provider field for broader matching
+  let text = '';
+  if (tx.description) text += tx.description.toLowerCase() + ' ';
+  if (tx.narration) text += tx.narration.toLowerCase() + ' ';
+  if (tx.provider) text += tx.provider.toLowerCase() + ' ';
+  if (tx.service) text += tx.service.toLowerCase() + ' '; // some APIs use 'service'
 
-    return { cls: tx.type === 'credit' ? 'incoming' : 'outgoing', img: '', alt: '' };
+  if (text.includes('opay')) {
+    return { cls: 'incoming', img: '/frontend/svg/bank.svg', alt: 'Opay' };
   }
+  if (text.includes('mtn')) {
+    return { cls: 'mtn targets', img: '/frontend/img/mtn.svg', alt: 'MTN' };
+  }
+  if (text.includes('airtel')) {
+    return { cls: 'airtel targets', img: '/frontend/svg/airtel-icon.svg', alt: 'Airtel' };
+  }
+  if (text.includes('glo')) {
+    return { cls: 'glo targets', img: '/frontend/svg/glo-icon.svg', alt: 'GLO' };
+  }
+  if (text.includes('9mobile') || text.includes('etisalat') || text.includes('nine mobile') || text.includes('nine-mobile')) {
+    return { cls: 'nine-mobile targets', img: '/frontend/svg/9mobile-icon.svg', alt: '9Mobile' };
+  }
+  if (text.includes('refund')) {
+    return { cls: 'refund incoming', img: '/frontend/svg/refund.svg', alt: 'Refund' };
+  }
+
+  // Fallback to credit/debit arrow if no specific icon found
+  return { cls: tx.type === 'credit' ? 'incoming' : 'outgoing', img: '', alt: '' };
+}
+
+  // Add this array to collect any pending waiters
+let preloadWaiters = [];
+
+// Modify the early return in preloadHistoryForInstantOpen():
+if (state.preloadingInProgress) {
+  return new Promise((resolve) => {
+    preloadWaiters.push(resolve);  // Collect the resolver
+  });
+}
+
+// Then add this helper function:
+function resolvePreloadWaiters() {
+  preloadWaiters.forEach(resolve => resolve());
+  preloadWaiters = []; // Clear for next time
+}
+window.resolvePreloadWaiters = resolvePreloadWaiters; // optional for debugging
 
   function groupTransactions(items) {
     const monthMap = new Map();
@@ -259,12 +294,29 @@ function generateFakeTransactions() {
       const amountObj = formatAmountDisplay(tx.amount);
       const formattedDateTime = fmtDateTime(tx.time || tx.created_at);
 
-      const statusRaw = (tx.status || 'success').toString().toLowerCase();
-      const statusText = (tx.status || 'success').toUpperCase();
-      let statusClass = 'success';
-      if (statusRaw.includes('fail') || statusRaw.includes('failed')) statusClass = 'failed';
-      else if (statusRaw.includes('refund')) statusClass = 'refund';
-      else if (statusRaw.includes('pending')) statusClass = 'pending';
+// === STATUS HANDLING (IMPROVED FOR REAL SERVER DATA) ===
+const statusRaw = (tx.status || 'success').toString().toLowerCase().trim();
+let statusClass = 'success';
+let statusText = 'SUCCESS';
+
+if (statusRaw.includes('fail') || statusRaw.includes('failed')) {
+  statusClass = 'failed';
+  statusText = 'FAILED';
+} else if (statusRaw.includes('refund')) {
+  statusClass = 'refund';
+  statusText = 'REFUNDED';
+} else if (statusRaw.includes('pending')) {
+  statusClass = 'pending';
+  statusText = 'PENDING';
+} else if (statusRaw.includes('success') || statusRaw === 'successful' || statusRaw === 'true') {
+  statusClass = 'success';
+  statusText = 'SUCCESS';
+}
+// Any other unknown status → treat as pending/suspicious
+else {
+  statusClass = 'pending';
+  statusText = statusRaw.toUpperCase() || 'UNKNOWN';
+}
 
       item.innerHTML = `
         <div class="tx-icon ${icon.cls}" aria-hidden="true">
@@ -1013,6 +1065,7 @@ function renderChunked(groupedMonths) {
   state.preloaded = true;
   state.done = true;
   state.preloadingInProgress = false;
+  resolvePreloadWaiters();
 
   hide(loadingEl);
   console.log(`[TransactionHistory] PRELOADED ${allTx.length} transactions`);
