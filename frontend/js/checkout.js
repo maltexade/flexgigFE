@@ -286,40 +286,84 @@ function closeCheckoutModal() {
   }
 }
 
-// Reset UI after successful purchase (fixed version)
+// Reset UI after successful purchase (FULL CLEAN RESET TO MTN)
 function resetCheckoutUI() {
-  // Clear phone input
+  console.log('[checkout] Performing full UI reset after successful purchase');
+
+  // 1. Clear phone input
   const phoneInput = document.getElementById('phone-input');
-  if (phoneInput) phoneInput.value = '';
+  if (phoneInput) {
+    phoneInput.value = '';
+    phoneInput.classList.remove('invalid');
+  }
 
-  // Remove 'selected' from all plan boxes
+  // 2. Remove .selected from ALL plan boxes (dashboard + modal)
   document.querySelectorAll('.plan-box.selected').forEach(el => {
-    if (el) el.classList.remove('selected');
+    el.classList.remove('selected', 'mtn', 'airtel', 'glo', 'ninemobile');
   });
 
-  // Remove 'selected' from all provider boxes
-  document.querySelectorAll('.provider-box.selected').forEach(el => {
-    if (el) el.classList.remove('selected');
+  // 3. Remove active/selected from all provider boxes
+  document.querySelectorAll('.provider-box.active, .provider-box.selected').forEach(el => {
+    el.classList.remove('active', 'selected');
   });
 
-  // Re-select MTN as default provider
-  const mtnProvider = document.querySelector('.provider-box.mtn');
-  if (mtnProvider) mtnProvider.classList.add('selected');
+  // 4. Force MTN as the active provider
+  const mtnBox = document.querySelector('.provider-box.mtn');
+  if (mtnBox) {
+    mtnBox.classList.add('active'); // or 'selected' if your CSS uses that
+  }
 
-  // Clear selected plan from localStorage properly
+  // 5. Move slider back to MTN (critical for visual correctness)
+  const slider = document.querySelector('.provider-grid .slider');
+  if (slider && mtnBox) {
+    // Reuse your existing moveSliderTo if available
+    if (typeof moveSliderTo === 'function') {
+      moveSliderTo(mtnBox);
+    }
+    // Fallback: force classes and position
+    slider.className = 'slider mtn';
+    // Optional: force inline styles if needed
+    const boxRect = mtnBox.getBoundingClientRect();
+    const gridRect = mtnBox.parentElement.getBoundingClientRect();
+    const scrollContainer = mtnBox.closest('.provider-grid');
+    const left = boxRect.left - gridRect.left + (scrollContainer?.scrollLeft || 0);
+    slider.style.left = `${left}px`;
+    slider.style.top = `${boxRect.top - gridRect.top}px`;
+    slider.style.width = `${boxRect.width}px`;
+    slider.style.height = `${boxRect.height}px`;
+  }
+
+  // 6. Clear plans row provider classes
+  const plansRow = document.querySelector('.plans-row');
+  if (plansRow) {
+    plansRow.classList.remove('mtn', 'airtel', 'glo', 'ninemobile');
+    plansRow.classList.add('mtn');
+  }
+
+  // 7. Clear any saved plan state to prevent restoreEverything() from re-selecting
   try {
+    // Clear from localStorage
     const rawState = localStorage.getItem('userState');
     if (rawState) {
       const state = JSON.parse(rawState);
       delete state.selectedPlan;
+      delete state.planId;
       localStorage.setItem('userState', JSON.stringify(state));
     }
     localStorage.removeItem('lastSelectedPlan');
-  } catch (err) {
-    console.warn('[checkout] Failed to clear selected plan from storage:', err);
-  }
-}
 
+    // Critical: Clear sessionStorage to stop restoreEverything() from bringing back old plan/phone
+    sessionStorage.removeItem('__fg_app_state_v2');
+  } catch (err) {
+    console.warn('[checkout] Failed to clear storage during reset:', err);
+  }
+
+  // 8. Trigger UI updates
+  if (typeof updateContinueState === 'function') updateContinueState();
+  if (typeof updateContactOrCancel === 'function') updateContactOrCancel();
+
+  console.log('[checkout] Full reset complete — back to fresh MTN state');
+}
 // Add local transaction (same as your old mock)
 // Add local transaction (safe version — no ReferenceError)
 function addLocalTransaction(info) {
