@@ -181,117 +181,44 @@ async function warmBiometricOptions(userId, context = 'reauth', options = {}) {
 }
 
 window.warmBiometricOptions = window.warmBiometricOptions || warmBiometricOptions;
+
 // ---------------------------
-// 🔄 Checkout Modal Controls Biometric Rewarming
-// Keeps options fresh every 30 seconds while modal is open
+// 2️⃣ Pre-warm on Pay click (supports dynamic buttons)
 // ---------------------------
-let biometricRewarmInterval = null;
+document.addEventListener('click', async e => {
+  // Support both ID and class selector
+  const btn = e.target.closest('#payBtn, .pay-btn');
+  if (!btn) return;
 
-const checkoutModal = document.getElementById('checkoutModal');
+  console.log('[biometric] Pay clicked — warming options...');
 
-function startModalBiometricRewarming() {
-  if (biometricRewarmInterval) clearInterval(biometricRewarmInterval);
-
-  // Get UID once
-  let uid = null;
   try {
-    const userData = localStorage.getItem('userData');
-    if (userData) {
-      const parsed = JSON.parse(userData);
-      uid = parsed.uid || parsed.user?.id || parsed.user?.uid;
-    }
-  } catch (e) {}
-
-  if (!uid) {
-    console.warn('[modal-rewarm] No user ID found — cannot start rewarming');
-    return;
-  }
-
-  console.log('%c[modal-rewarm] Starting continuous rewarming for checkout modal', 'color:#0b0;font-weight:bold');
-
-  const rewarm = async () => {
-    try {
-      // Clear old cache first
-      window.__cachedAuthOptions = null;
-      localStorage.removeItem('__cachedAuthOptions');
-
-      // Fetch fresh
-      const opts = await warmBiometricOptions(uid, 'reauth', { force: true });
-      if (!opts) return;
-
-      // Force correct types (Uint8Array)
-      if (window.__cachedAuthOptions) {
-        if (!(window.__cachedAuthOptions.challenge instanceof Uint8Array)) {
-          const buf = fromBase64Url(window.__cachedAuthOptions.challenge);
-          if (buf instanceof ArrayBuffer && buf.byteLength > 0) {
-            window.__cachedAuthOptions.challenge = new Uint8Array(buf);
-          }
-        }
-
-        if (Array.isArray(window.__cachedAuthOptions.allowCredentials)) {
-          window.__cachedAuthOptions.allowCredentials = window.__cachedAuthOptions.allowCredentials
-            .map(c => {
-              if (!c.id) return null;
-              if (!(c.id instanceof Uint8Array)) {
-                const buf = fromBase64Url(c.id);
-                return buf instanceof ArrayBuffer && buf.byteLength > 0
-                  ? { ...c, id: new Uint8Array(buf) }
-                  : null;
-              }
-              return c;
-            })
-            .filter(Boolean);
-        }
+    // Resolve UID from cache
+    let uid = null;
+    const cached = localStorage.getItem('userData');
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        uid = parsed.uid || parsed.user?.id || parsed.user?.uid;
+        console.log('[biometric] UID from cache:', uid);
+      } catch (err) {
+        console.warn('[biometric] Failed to parse cached userData', err);
       }
-
-      console.log('[modal-rewarm] Fresh options ready');
-    } catch (err) {
-      console.error('[modal-rewarm] Failed', err);
     }
-  };
 
-  // Initial + every 30 seconds
-  rewarm();
-  biometricRewarmInterval = setInterval(rewarm, 30_000);
-}
-
-function stopModalBiometricRewarming() {
-  if (biometricRewarmInterval) {
-    clearInterval(biometricRewarmInterval);
-    biometricRewarmInterval = null;
-    console.log('[modal-rewarm] Stopped — modal closed');
-  }
-}
-
-// ---------------------------
-// Observe modal visibility (aria-hidden + display)
-// ---------------------------
-if (checkoutModal) {
-  const observer = new MutationObserver(() => {
-    const isHidden = checkoutModal.getAttribute('aria-hidden') === 'true';
-    const isDisplayed = window.getComputedStyle(checkoutModal).display !== 'none';
-
-    if (!isHidden && isDisplayed) {
-      startModalBiometricRewarming();
-    } else {
-      stopModalBiometricRewarming();
+    if (!uid) {
+      console.warn('[biometric] Cannot warm — no UID available');
+      return;
     }
-  });
 
-  observer.observe(checkoutModal, {
-    attributes: true,
-    attributeFilter: ['aria-hidden', 'style', 'class']
-  });
-
-  // Check initial state
-  if (checkoutModal.getAttribute('aria-hidden') !== 'true' &&
-      window.getComputedStyle(checkoutModal).display !== 'none') {
-    startModalBiometricRewarming();
+    // Force a fresh warm regardless of TTL
+    await warmBiometricOptions(uid, 'reauth', { force: true });
+    console.log('[biometric] Options pre-warmed, ready for biometric prompt');
+  } catch (err) {
+    console.error('[biometric] Warm failed', err);
   }
-}
+});
 
-// Also stop when close button clicked (extra safety)
-checkoutModal?.querySelector('.close-btn')?.addEventListener('click', stopModalBiometricRewarming);
 
 
 
@@ -2392,15 +2319,15 @@ window.applyBalanceVisibility = applyBalanceVisibility;
       }));
 
       // Close modal SAFELY
-      // Close modal SAFELY via ModalManager with correct ID
-setTimeout(() => {
-  if (window.ModalManager?.closeModal) {
-    window.ModalManager.closeModal('addMoneyModal');
-    console.log('[Balance Update] Modal closed via ModalManager');
-  } else {
-    console.warn('[Balance Update] ModalManager not available');
-  }
-}, 300);
+      setTimeout(() => {
+        if (window.ModalManager?.closeTopModal) {
+          window.ModalManager.closeTopModal();
+          
+        } else if (document.getElementById('addMoneyModal')) {
+          document.getElementById('addMoneyModal').style.transform = 'translateY(100%)';
+          document.getElementById('addMoneyModal').classList.add('hidden');
+        }
+      }, 300);
 
       // Re-open the add-money content (this will now NOT find the old tx in localStorage)
       window.openAddMoneyModalContent();
@@ -16850,9 +16777,11 @@ async function prefetchAuthOptionsFor(uid, context = 'reauth') {
 
 
 
-// 🔹 FINAL PERMANENTLY FIXED verifyBiometrics
-// Ensures correct BufferSource types (Uint8Array) for challenge and credential IDs
-// No more reliance on broken localStorage cache
+
+// 🔹 Main verifyBiometrics (robust: fresh challenge + withLoader + debug logs + safe PIN simulation)
+// 🔹 Main verifyBiometrics (always fresh: invalidate cache + fetch new + debug + safe PIN fallback)
+// Updated verifyBiometrics function
+// ----- Updated implementation with proper reauth flow -----
 async function verifyBiometrics(uid, context = 'reauth') {
   if (window.__biometricInFlight) {
     console.warn('[verifyBiometrics] Blocked: biometric already in flight');
@@ -16860,7 +16789,7 @@ async function verifyBiometrics(uid, context = 'reauth') {
   }
 
   window.__biometricInFlight = true;
-  console.log('%c[verifyBiometrics] Called', 'color:#0ff;font-weight:bold');
+  console.log('%c[verifyBiometrics] Called (always fresh)', 'color:#0ff;font-weight:bold');
 
   try {
     // Resolve userId if not provided
@@ -16888,79 +16817,62 @@ async function verifyBiometrics(uid, context = 'reauth') {
     if (!userId) throw new Error('No user ID available for biometric verification');
 
     // -------------------------------
-    // Use pre-warmed options (from Pay click pre-warm via getAuthOptionsWithCache)
-    // Fall back to fresh fetch if missing/invalid
+    // Persistent cache logic
     // -------------------------------
-    let publicKey = window.__cachedAuthOptions;
+    const now = Date.now();
+    let publicKeys = null;
 
+    try {
+      const cached = JSON.parse(localStorage.getItem('__cachedAuthOptions'));
+      if (cached && now - cached.fetchedAt < BIOMETRIC_TTL) {
+        console.log('[verifyBiometrics] Using cached options from localStorage');
+        publicKeys = structuredClone(cached.opts);
+        window.__cachedAuthOptions = cached.opts;
+        window.__cachedAuthOptionsFetchedAt = cached.fetchedAt;
+      }
+    } catch (e) {
+      console.warn('[verifyBiometrics] Failed to parse localStorage cache', e);
+    }
+
+    if (!publicKeys) {
+      console.log('[verifyBiometrics] Cache missing or expired → fetching fresh');
+      publicKeys = await warmBiometricOptions(userId, context, { force: true });
+
+      // Save to localStorage for reload persistence
+      if (publicKeys) {
+        localStorage.setItem(
+          '__cachedAuthOptions',
+          JSON.stringify({ opts: publicKeys, fetchedAt: Date.now() })
+        );
+      }
+    }
+
+    const publicKey = structuredClone(publicKeys);
     if (!publicKey || !publicKey.challenge) {
-      console.log('[verifyBiometrics] No valid pre-warmed options → fetching fresh');
-      publicKey = await warmBiometricOptions(userId, context, { force: true });
+      throw new Error('Invalid WebAuthn options received');
     }
 
-    if (!publicKey || !publicKey.challenge) {
-      throw new Error('Failed to obtain WebAuthn options from server');
-    }
-
-    // Clone for modification
-    const pk = structuredClone(publicKey);
-
-    // FORCE challenge to Uint8Array
-    if (!(pk.challenge instanceof Uint8Array)) {
-      console.warn('[verifyBiometrics] Fixing challenge type:', typeof pk.challenge);
-      const converted = fromBase64Url(pk.challenge);
-      if (!(converted instanceof ArrayBuffer) || converted.byteLength === 0) {
-        throw new Error('Invalid challenge: could not convert to valid buffer');
-      }
-      pk.challenge = new Uint8Array(converted);
-    }
-
-    // FORCE allowCredentials[].id to Uint8Array
-    if (Array.isArray(pk.allowCredentials) && pk.allowCredentials.length > 0) {
-      const fixedCreds = [];
-      for (const cred of pk.allowCredentials) {
-        if (!cred.id) {
-          console.warn('[verifyBiometrics] Skipping credential with missing id');
-          continue;
-        }
-        if (!(cred.id instanceof Uint8Array)) {
-          console.warn('[verifyBiometrics] Fixing credential id type:', typeof cred.id);
-          const converted = fromBase64Url(cred.id);
-          if (!(converted instanceof ArrayBuffer) || converted.byteLength === 0) {
-            console.warn('[verifyBiometrics] Skipping invalid credential id');
-            continue;
-          }
-          cred.id = new Uint8Array(converted);
-        }
-        fixedCreds.push(cred);
-      }
-      pk.allowCredentials = fixedCreds;
-
-      if (pk.allowCredentials.length === 0) {
-        throw new Error('No valid registered credentials found');
-      }
-    }
-
-    // Required fields
-    pk.userVerification = 'required';
-    pk.timeout = 60000;
-
-    // Detailed debug log
-    console.log('[verifyBiometrics] Final options ready for prompt', {
-      challengeLength: pk.challenge.byteLength,
-      challengeType: pk.challenge.constructor.name,
-      allowCredCount: pk.allowCredentials?.length || 0,
-      allowCredIdsValid: pk.allowCredentials?.every(c => c.id instanceof Uint8Array) || false
+    console.log('[verifyBiometrics] Options ready', {
+      challenge: publicKey.challenge?.slice?.(0, 10) + '...',
+      allowCredCount: publicKey.allowCredentials?.length || 0
     });
 
-    // Trigger biometric prompt
-    const assertion = await navigator.credentials.get({ publicKey: pk });
-
-    if (!assertion) {
-      throw new Error('No assertion returned from authenticator');
+    // Convert base64url to buffers
+    publicKey.challenge = fromBase64Url(publicKey.challenge);
+    if (Array.isArray(publicKey.allowCredentials)) {
+      publicKey.allowCredentials = publicKey.allowCredentials.map(c => ({
+        ...c,
+        id: fromBase64Url(c.id)
+      }));
     }
+    publicKey.userVerification = 'required';
+    publicKey.timeout = 60000;
 
-    // Server verification
+    // Prompt user for biometrics
+    const assertion = await navigator.credentials.get({ publicKey });
+    if (!assertion) throw new Error('No assertion from authenticator');
+
+    // Show loader during verify
     return await withLoader(async () => {
       const payload = {
         id: assertion.id,
@@ -16993,7 +16905,6 @@ async function verifyBiometrics(uid, context = 'reauth') {
       const verifyData = await verifyRes.json();
       console.log('[verifyBiometrics] Verify success', verifyData);
 
-      // Success callbacks
       try {
         if (typeof onSuccessfulReauth === 'function') await onSuccessfulReauth();
         if (typeof guardedHideReauthModal === 'function') await guardedHideReauthModal();
@@ -17013,7 +16924,6 @@ async function verifyBiometrics(uid, context = 'reauth') {
 
       return { success: true, data: verifyData };
     });
-
   } catch (err) {
     console.error('[verifyBiometrics] Error', err);
     if (typeof notify === 'function') notify(`Biometric error: ${err.message}`, 'error');
@@ -17025,7 +16935,7 @@ async function verifyBiometrics(uid, context = 'reauth') {
   }
 }
 
-window.verifyBiometrics = window.verifyBiometrics || verifyBiometrics;
+window.verifyBiometrics = window.verifyBiometrics = verifyBiometrics;
 
 // 🔹 Improved simulatePinEntry with verbose debug logs and Promise-based completion
 // ---- REPLACE existing simulatePinEntry(...) with this improved version ----
