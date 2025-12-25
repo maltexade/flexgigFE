@@ -2464,14 +2464,42 @@ setTimeout(() => {
       };
 
       ws.onmessage = (e) => {
-        try {
-          const data = JSON.parse(e.data);
-          if (data.type === 'balance_update' && data.balance !== undefined) {
-            handleNewBalance(data.balance, 'websocket');
-            document.dispatchEvent(new CustomEvent('transaction_update', { detail: data }));
-          }
-        } catch (err) {}
-      };
+  try {
+    const data = JSON.parse(e.data);
+
+    // Handle balance update (most common case)
+    if (data.type === 'balance_update' && data.balance !== undefined) {
+      handleNewBalance(data.balance, 'websocket');
+    }
+
+    // Extract transaction details — wherever they are
+    let txDetail = null;
+
+    if (data.transaction) {
+      txDetail = data.transaction;
+    } else if (data.type === 'transaction') {
+      txDetail = data;
+    } else if (data.type === 'balance_update' && data.transaction) {
+      // Some backends nest it here
+      txDetail = data.transaction;
+    }
+    // Optional: fallback — if no explicit tx, infer minimal one from amount/description
+    // else if (data.amount && data.description) {
+    //   txDetail = { amount: data.amount, description: data.description, type: data.amount > 0 ? 'credit' : 'debit', ... };
+    // }
+
+    // Only dispatch if we have actual transaction data
+    if (txDetail) {
+      document.dispatchEvent(new CustomEvent('transaction_update', {
+        detail: txDetail
+      }));
+      console.log('[WS] Dispatching transaction_update', txDetail);
+    }
+
+  } catch (err) {
+    console.warn('[WS] Message parse error', err);
+  }
+};
 
       ws.onclose = ws.onerror = () => {
         console.log('[WS] Disconnected → fallback to polling');

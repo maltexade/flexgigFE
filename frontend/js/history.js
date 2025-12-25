@@ -1429,12 +1429,43 @@ function updateHeaders() {
     getAll: () => state.items.slice()
   };
 
-  document.addEventListener('transaction_update', () => {
-    if (state.open) {
-      console.log('[TransactionHistory] New transaction → refreshing history');
-      window.TransactionHistory.reload();
-    }
-  });
+  // REAL-TIME TRANSACTION UPDATES — INSTANT, NO RELOAD
+document.addEventListener('transaction_update', (e) => {
+  if (!state.open) return; // Only update if history modal is open
+
+  const newTx = e?.detail;
+
+  if (!newTx) {
+    console.warn('[TransactionHistory] transaction_update received but no detail');
+    return;
+  }
+
+  console.log('[TransactionHistory] New transaction received via WS → adding to top', newTx);
+
+  // Normalize the transaction format to match what your list expects
+  const normalizedTx = {
+    id: newTx.id || newTx.reference || `ws-${Date.now()}`,
+    reference: newTx.reference || newTx.id,
+    type: newTx.type || (newTx.amount > 0 ? 'credit' : 'debit'),
+    amount: Math.abs(Number(newTx.amount || 0)),
+    description: newTx.description || newTx.narration || 'Transaction',
+    time: newTx.time || newTx.created_at || new Date().toISOString(),
+    status: newTx.status || 'SUCCESS',
+    provider: newTx.provider,
+    phone: newTx.phone
+  };
+
+  // 1. Add to the beginning of state.items (newest first)
+  state.items.unshift(normalizedTx);
+
+  // 2. Re-group and re-render instantly
+  applyTransformsAndRender();
+
+  // Optional: Scroll to top to show the new transaction
+  historyList.scrollTop = 0;
+
+  console.log('[TransactionHistory] New transaction added & rendered instantly');
+});
 
   showStateUI();
   updateMonthDisplay();
