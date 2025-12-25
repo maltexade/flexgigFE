@@ -2453,62 +2453,71 @@ setTimeout(() => {
   }
 
   // WebSocket (best effort)
-  function connectWS() {
-    try {
-      ws = new WebSocket('wss://api.flexgig.com.ng/ws/wallet');
-
-      ws.onopen = () => {
-        console.log('[WS] Connected');
-        ws.send(JSON.stringify({ type: 'subscribe', user_uid: uid }));
-        if (pollTimer) clearTimeout(pollTimer); // WS wins
-      };
-
-      ws.onmessage = (e) => {
+ // Inside your unified real-time system — replace connectWS()
+function connectWS() {
   try {
-    const data = JSON.parse(e.data);
-
-    // Handle balance update (most common case)
-    if (data.type === 'balance_update' && data.balance !== undefined) {
-      handleNewBalance(data.balance, 'websocket');
+    if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
+      return; // Already connecting/open
     }
 
-    // Extract transaction details — wherever they are
-    let txDetail = null;
+    console.log('[WS] Connecting...');
+    ws = new WebSocket('wss://api.flexgig.com.ng/ws/wallet');
 
-    if (data.transaction) {
-      txDetail = data.transaction;
-    } else if (data.type === 'transaction') {
-      txDetail = data;
-    } else if (data.type === 'balance_update' && data.transaction) {
-      // Some backends nest it here
-      txDetail = data.transaction;
-    }
-    // Optional: fallback — if no explicit tx, infer minimal one from amount/description
-    // else if (data.amount && data.description) {
-    //   txDetail = { amount: data.amount, description: data.description, type: data.amount > 0 ? 'credit' : 'debit', ... };
-    // }
+    let heartbeatInterval = null;
 
-    // Only dispatch if we have actual transaction data
-    if (txDetail) {
-      document.dispatchEvent(new CustomEvent('transaction_update', {
-        detail: txDetail
-      }));
-      console.log('[WS] Dispatching transaction_update', txDetail);
-    }
+    ws.onopen = () => {
+      console.log('[WS] Connected');
+      ws.send(JSON.stringify({ type: 'subscribe', user_uid: uid }));
+
+      // Mobile fix: Send heartbeat every 20s to keep connection alive
+      clearInterval(heartbeatInterval);
+      heartbeatInterval = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'ping' })); // Backend should respond or ignore
+        }
+      }, 20000);
+
+      if (pollTimer) clearTimeout(pollTimer);
+    };
+
+    ws.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        console.log('WEBSOCKET MESSAGE:', data);
+
+        if (data.type === 'balance_update' && data.balance !== undefined) {
+          handleNewBalance(data.balance, 'websocket');
+        }
+
+        // Dispatch transaction if present
+        let txDetail = data.transaction || (data.type === 'transaction' ? data : null);
+        if (txDetail) {
+          document.dispatchEvent(new CustomEvent('transaction_update', { detail: txDetail }));
+        }
+      } catch (err) {
+        console.warn('[WS] Parse error', err);
+      }
+    };
+
+    ws.onerror = (e) => {
+      console.warn('[WS] Error', e);
+    };
+
+    ws.onclose = (e) => {
+      console.warn('[WS] Closed — reconnecting in 2s', e.code, e.reason);
+      clearInterval(heartbeatInterval);
+
+      // Aggressive reconnect — critical for mobile
+      setTimeout(() => {
+        connectWS();
+      }, 2000);
+    };
 
   } catch (err) {
-    console.warn('[WS] Message parse error', err);
+    console.error('[WS] Failed to create', err);
+    setTimeout(connectWS, 3000);
   }
-};
-
-      ws.onclose = ws.onerror = () => {
-        console.log('[WS] Disconnected → fallback to polling');
-        startPolling();
-      };
-    } catch (err) {
-      startPolling();
-    }
-  }
+}
 
   // CRITICAL: Re-check balance when user returns to app (iOS/Android fix)
   document.addEventListener('visibilitychange', () => {
