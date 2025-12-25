@@ -2338,7 +2338,6 @@ window.applyBalanceVisibility = applyBalanceVisibility;
   const uid = window.__USER_UID || localStorage.getItem('userId');
   if (!uid) return;
 
-  let ws = null;
   let pollTimer = null;
   let lastKnownBalance = null;
   let hasProcessedPayment = false; // prevent double toast/close

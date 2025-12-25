@@ -1697,8 +1697,8 @@
   <script src="/frontend/js/addMoney.js" defer></script>
   
 <script>
-  // WebSocket (best effort)
- // Inside your unified real-time system — replace connectWS()
+let ws = null;
+
 function connectWS() {
   try {
     if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
