@@ -299,7 +299,7 @@ checkoutModal?.querySelector('.close-btn')?.addEventListener('click', stopModalB
 // 🔧 PRODUCTION-READY MOBILE DEBUG CONSOLE
 // ==========================================
 // ⚙️ SET THIS TO false IN PRODUCTION ⚙️
-const DEBUG_MODE = false; // ← Change to false to hide completely
+const DEBUG_MODE = true; // ← Change to false to hide completely
 // ==========================================
 
 (function () {
@@ -2315,21 +2315,25 @@ window.updateAllBalances = function(newBalance, skipAnimation = false) {
 
 window.applyBalanceVisibility = applyBalanceVisibility;
 
-
 // ===============================================================
-//  MOBILE-IMMORTAL REALTIME BALANCE SYSTEM (FIXED)
-//  WS (best effort) + Polling (authoritative)
-//  Auto-recovers after background / sleep / data saver
+//  MOBILE-IMMORTAL REALTIME BALANCE SYSTEM (MOBILE FIXED)
+//  Handles: iOS Safari, Android Chrome, Data Saver, Sleep Mode
 // ===============================================================
 
 (function () {
   'use strict';
 
   const uid = window.__USER_UID || localStorage.getItem('userId');
-  if (!uid) return;
+  if (!uid) {
+    console.warn('[Balance] No user ID found');
+    return;
+  }
 
   const WS_URL = 'wss://api.flexgig.com.ng/ws/wallet';
-  const POLL_INTERVAL = 8000;
+  const POLL_INTERVAL = 6000; // Faster for mobile
+  const POLL_INTERVAL_BACKGROUND = 15000; // Slower when hidden
+  const WS_RECONNECT_DELAY = 2000;
+  const MAX_WS_RETRIES = 3;
 
   let ws = null;
   let pollTimer = null;
@@ -2337,16 +2341,56 @@ window.applyBalanceVisibility = applyBalanceVisibility;
   let lastWSActivity = 0;
   let hasProcessedPayment = false;
   let reconnecting = false;
+  let wsRetries = 0;
+  let isBackground = document.hidden;
+  let audioUnlocked = false;
+
+  // Mobile detection
+  const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+  const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+  console.log(`[Balance] Initialized for ${isMobile ? 'mobile' : 'desktop'}`);
 
   // ------------------------------------------------------------
-  // 🔊 SUCCESS SOUND
+  // 🔊 MOBILE-SAFE AUDIO (requires user gesture unlock)
   // ------------------------------------------------------------
+  const audioContext = typeof AudioContext !== 'undefined' ? new AudioContext() : null;
+  
+  function unlockAudio() {
+    if (audioUnlocked || !audioContext) return;
+    
+    // Resume AudioContext on first user interaction
+    audioContext.resume().then(() => {
+      audioUnlocked = true;
+      console.log('[Balance] Audio unlocked');
+    });
+  }
+
+  // Unlock audio on any user interaction
+  ['touchstart', 'touchend', 'click'].forEach(evt => {
+    document.addEventListener(evt, unlockAudio, { once: true, passive: true });
+  });
+
   function playSuccessDing() {
+    if (!audioUnlocked) {
+      console.log('[Balance] Audio not unlocked yet');
+      return;
+    }
+
     try {
-      const a = new Audio('/frontend/sound/paymentReceived.wav');
-      a.volume = 0.9;
-      a.play().catch(() => {});
-    } catch {}
+      const audio = new Audio('/frontend/sound/paymentReceived.wav');
+      audio.volume = 0.9;
+      
+      // Mobile browsers need explicit play promise handling
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+        playPromise.catch(err => {
+          console.log('[Balance] Audio play prevented:', err.message);
+        });
+      }
+    } catch (err) {
+      console.log('[Balance] Audio error:', err);
+    }
   }
 
   // ------------------------------------------------------------
@@ -2354,56 +2398,44 @@ window.applyBalanceVisibility = applyBalanceVisibility;
   // ------------------------------------------------------------
   function handleNewBalance(balance, source = 'unknown') {
     balance = Number(balance) || 0;
+    console.log(`[Balance] Update from ${source}: ₦${balance}`);
 
     if (lastKnownBalance === null) {
       lastKnownBalance = balance;
-      window.updateAllBalances(balance, true);
+      window.updateAllBalances?.(balance, true);
       return;
     }
 
     if (balance <= lastKnownBalance) {
       lastKnownBalance = balance;
-      window.updateAllBalances(balance);
+      window.updateAllBalances?.(balance);
       return;
     }
 
     const diff = balance - lastKnownBalance;
     lastKnownBalance = balance;
 
-    window.updateAllBalances(balance);
+    window.updateAllBalances?.(balance);
 
     if (!hasProcessedPayment && diff > 0) {
       hasProcessedPayment = true;
+      console.log(`[Balance] 💰 Payment detected: +₦${diff}`);
 
       try {
-        removePendingTxFromStorage?.();
+        window.removePendingTxFromStorage?.();
         localStorage.removeItem('flexgig.pending_fund_tx');
       } catch {}
 
       playSuccessDing();
 
+      // Mobile-optimized notification
       if (typeof window.notify === 'function') {
         window.notify(`₦${diff.toLocaleString()} received!`, 'success');
       } else {
-        const t = document.createElement('div');
-        t.textContent = `✓ ₦${diff.toLocaleString()} credited!`;
-        Object.assign(t.style, {
-          position: 'fixed',
-          top: '20px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          background: '#10b981',
-          color: 'white',
-          padding: '16px 24px',
-          borderRadius: '16px',
-          zIndex: 999999,
-          fontWeight: 'bold',
-          boxShadow: '0 10px 30px rgba(0,0,0,0.3)'
-        });
-        document.body.appendChild(t);
-        setTimeout(() => t.remove(), 4000);
+        showMobileToast(`✓ ₦${diff.toLocaleString()} credited!`);
       }
 
+      // Close modal after delay
       setTimeout(() => {
         window.ModalManager?.closeModal?.('addMoneyModal');
       }, 300);
@@ -2412,72 +2444,167 @@ window.applyBalanceVisibility = applyBalanceVisibility;
         detail: { balance, amount: diff }
       }));
 
+      // Mobile: Vibrate if supported
+      if (navigator.vibrate) {
+        navigator.vibrate([200, 100, 200]);
+      }
+
       setTimeout(() => (hasProcessedPayment = false), 30000);
     }
   }
+
+  function showMobileToast(message) {
+    const toast = document.createElement('div');
+    toast.textContent = message;
+    Object.assign(toast.style, {
+      position: 'fixed',
+      top: '20px',
+      left: '50%',
+      transform: 'translateX(-50%)',
+      background: '#10b981',
+      color: 'white',
+      padding: '16px 24px',
+      borderRadius: '16px',
+      zIndex: '999999',
+      fontWeight: 'bold',
+      boxShadow: '0 10px 30px rgba(0,0,0,0.3)',
+      maxWidth: '90vw',
+      textAlign: 'center',
+      fontSize: '14px'
+    });
+    document.body.appendChild(toast);
+    
+    // Force reflow for animation
+    toast.offsetHeight;
+    
+    setTimeout(() => {
+      toast.style.transition = 'opacity 0.3s';
+      toast.style.opacity = '0';
+      setTimeout(() => toast.remove(), 300);
+    }, 3500);
+  }
+
   window.handleNewBalance = window.handleNewBalance || handleNewBalance;
 
   // ------------------------------------------------------------
-  // POLLING (AUTHORITATIVE — NEVER FAILS)
+  // POLLING (AUTHORITATIVE — WORKS ON ALL MOBILE NETWORKS)
   // ------------------------------------------------------------
   function startPolling() {
     clearTimeout(pollTimer);
 
+    const interval = isBackground ? POLL_INTERVAL_BACKGROUND : POLL_INTERVAL;
+
     const poll = async () => {
       try {
-        const r = await fetch(
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+        const response = await fetch(
           `${window.__SEC_API_BASE}/api/session?light=true&t=${Date.now()}`,
-          { credentials: 'include', cache: 'no-store' }
+          { 
+            credentials: 'include',
+            cache: 'no-store',
+            signal: controller.signal,
+            // Mobile: Ensure cache bypass
+            headers: {
+              'Cache-Control': 'no-cache, no-store, must-revalidate',
+              'Pragma': 'no-cache'
+            }
+          }
         );
-        if (r.ok) {
-          const j = await r.json();
-          const bal = j.user?.wallet_balance;
+
+        clearTimeout(timeoutId);
+
+        if (response.ok) {
+          const data = await response.json();
+          const bal = data.user?.wallet_balance;
+          
           if (bal !== undefined && bal !== lastKnownBalance) {
             handleNewBalance(bal, 'polling');
           }
         }
-      } catch {}
+      } catch (err) {
+        if (err.name !== 'AbortError') {
+          console.log('[Balance] Poll error:', err.message);
+        }
+      }
 
-      pollTimer = setTimeout(poll, POLL_INTERVAL);
+      // Schedule next poll (use requestIdleCallback on mobile if available)
+      if (window.requestIdleCallback && isBackground) {
+        requestIdleCallback(() => {
+          pollTimer = setTimeout(poll, interval);
+        });
+      } else {
+        pollTimer = setTimeout(poll, interval);
+      }
     };
 
     poll();
   }
 
   // ------------------------------------------------------------
-  // WEBSOCKET (RACE-CONDITION SAFE)
+  // WEBSOCKET (MOBILE-SAFE WITH RETRY LOGIC)
   // ------------------------------------------------------------
   function connectWS(force = false) {
-    if (reconnecting) return;
+    if (reconnecting && !force) return;
     if (!force && ws && ws.readyState === WebSocket.OPEN) return;
+
+    // Mobile: Don't retry WS indefinitely if it keeps failing
+    if (wsRetries >= MAX_WS_RETRIES) {
+      console.log('[Balance] WS max retries reached, relying on polling');
+      return;
+    }
 
     reconnecting = true;
 
-    try { ws?.close(); } catch {}
+    try { 
+      ws?.close(); 
+    } catch {}
 
     let socket;
     try {
       socket = new WebSocket(WS_URL);
-    } catch {
+    } catch (err) {
+      console.log('[Balance] WS connection failed:', err.message);
       reconnecting = false;
+      wsRetries++;
+      
+      // Retry with exponential backoff
+      setTimeout(() => connectWS(true), WS_RECONNECT_DELAY * wsRetries);
       return;
     }
 
     ws = socket;
     window.__current_ws = socket;
 
+    let pingInterval;
+
     socket.onopen = () => {
-      if (ws !== socket) return; // 🔐 stale socket protection
+      if (ws !== socket) return;
 
       reconnecting = false;
+      wsRetries = 0; // Reset on successful connection
       lastWSActivity = Date.now();
+
+      console.log('[Balance] WS connected');
 
       try {
         socket.send(JSON.stringify({
           type: 'subscribe',
           user_uid: uid
         }));
-      } catch {}
+      } catch (err) {
+        console.log('[Balance] WS subscribe error:', err.message);
+      }
+
+      // Mobile: Send periodic ping to keep connection alive
+      pingInterval = setInterval(() => {
+        if (socket.readyState === WebSocket.OPEN) {
+          try {
+            socket.send(JSON.stringify({ type: 'ping' }));
+          } catch {}
+        }
+      }, 20000);
     };
 
     socket.onmessage = (e) => {
@@ -2485,100 +2612,169 @@ window.applyBalanceVisibility = applyBalanceVisibility;
 
       lastWSActivity = Date.now();
       try {
-        const d = JSON.parse(e.data);
-        if (d.type === 'balance_update' && d.balance !== undefined) {
-          handleNewBalance(d.balance, 'ws');
+        const data = JSON.parse(e.data);
+        if (data.type === 'balance_update' && data.balance !== undefined) {
+          handleNewBalance(data.balance, 'ws');
         }
-      } catch {}
+      } catch (err) {
+        console.log('[Balance] WS message parse error:', err.message);
+      }
     };
 
-    socket.onclose = () => {
-      if (ws === socket) ws = null;
+    socket.onclose = (event) => {
+      clearInterval(pingInterval);
+      
+      if (ws === socket) {
+        ws = null;
+        console.log(`[Balance] WS closed (${event.code})`);
+      }
+      
       reconnecting = false;
+
+      // Auto-reconnect if not a permanent failure
+      if (!isBackground && event.code !== 1000) {
+        wsRetries++;
+        setTimeout(() => connectWS(true), WS_RECONNECT_DELAY);
+      }
     };
 
-    socket.onerror = () => {
+    socket.onerror = (err) => {
+      console.log('[Balance] WS error');
       try { socket.close(); } catch {}
     };
   }
 
   // ------------------------------------------------------------
-  // WS SILENCE DETECTOR (FOREGROUND ONLY)
-  // ------------------------------------------------------------
-  setInterval(() => {
-    if (!ws) return;
-    if (Date.now() - lastWSActivity > 25000) {
-      try { ws.close(); } catch {}
-    }
-  }, 10000);
-
-  // ------------------------------------------------------------
-  // 🔁 MOBILE LIFECYCLE RESURRECTION + SERVER CONFIRM
+  // 🔁 MOBILE LIFECYCLE MANAGEMENT
   // ------------------------------------------------------------
   function resurrect() {
+    console.log('[Balance] 🔄 Resurrecting...');
+    
+    isBackground = false;
+    wsRetries = 0; // Reset retry counter
+    
     connectWS(true);
     startPolling();
 
     // ALWAYS confirm from server when visible again
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 5000);
+
     fetch(`${window.__SEC_API_BASE}/api/session?light=true&t=${Date.now()}`, {
       credentials: 'include',
-      cache: 'no-store'
+      cache: 'no-store',
+      signal: controller.signal
     })
       .then(r => r.ok ? r.json() : null)
-      .then(j => {
-        if (j?.user?.wallet_balance !== undefined) {
-          handleNewBalance(j.user.wallet_balance, 'resume');
+      .then(data => {
+        if (data?.user?.wallet_balance !== undefined) {
+          handleNewBalance(data.user.wallet_balance, 'resume');
+        }
+      })
+      .catch(err => {
+        if (err.name !== 'AbortError') {
+          console.log('[Balance] Resume fetch error:', err.message);
         }
       });
   }
 
+  function handleBackground() {
+    console.log('[Balance] Going to background');
+    isBackground = true;
+    
+    // Keep polling but slow it down
+    startPolling();
+  }
+
+  // Visibility change (works on all mobile browsers)
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') resurrect();
+    if (document.visibilityState === 'visible') {
+      resurrect();
+    } else {
+      handleBackground();
+    }
   });
 
+  // iOS Safari specific
+  window.addEventListener('pageshow', (event) => {
+    // BFCache restoration
+    if (event.persisted) {
+      console.log('[Balance] BFCache restored');
+      resurrect();
+    }
+  });
+
+  window.addEventListener('pagehide', () => {
+    handleBackground();
+  });
+
+  // Standard events
   window.addEventListener('focus', resurrect);
   window.addEventListener('online', resurrect);
-  window.addEventListener('pageshow', resurrect); // iOS Safari BFCache fix
+
+  // Android Chrome specific
+  if ('onfreeze' in document) {
+    document.addEventListener('freeze', handleBackground);
+    document.addEventListener('resume', resurrect);
+  }
 
   // ------------------------------------------------------------
   // INIT
   // ------------------------------------------------------------
   setTimeout(() => {
+    console.log('[Balance] Starting...');
     connectWS(true);
     startPolling();
-  }, 800);
+  }, 500); // Faster init
 
-  getSession?.().then(s => {
-    if (s?.user?.wallet_balance !== undefined) {
-      handleNewBalance(s.user.wallet_balance, 'initial');
-    }
-  });
+  // Initial balance fetch
+  if (typeof getSession === 'function') {
+    getSession().then(session => {
+      if (session?.user?.wallet_balance !== undefined) {
+        handleNewBalance(session.user.wallet_balance, 'initial');
+      }
+    }).catch(err => {
+      console.log('[Balance] Initial session error:', err.message);
+    });
+  }
 
   // ------------------------------------------------------------
-// 🌍 EXPOSE GLOBAL CONTROLS (DEBUG + MANUAL RECOVERY)
-// ------------------------------------------------------------
-window.WalletRealtime = {
-  connectWS,
-  startPolling,
-  resurrect,
+  // 🌍 GLOBAL CONTROLS
+  // ------------------------------------------------------------
+  window.WalletRealtime = {
+    connectWS,
+    startPolling,
+    resurrect,
 
-  forceReconnect() {
-    try { ws?.close(); } catch {}
-    connectWS(true);
-    startPolling();
-  },
+    forceReconnect() {
+      wsRetries = 0;
+      try { ws?.close(); } catch {}
+      connectWS(true);
+      startPolling();
+    },
 
-  getStatus() {
-    return {
-      wsState: ws ? ws.readyState : 'none',
-      lastWSActivity,
-      lastKnownBalance,
-      pollingActive: !!pollTimer,
-      reconnecting
-    };
-  }
-};
+    getStatus() {
+      return {
+        wsState: ws ? ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'][ws.readyState] : 'none',
+        lastWSActivity: lastWSActivity ? new Date(lastWSActivity).toLocaleTimeString() : 'never',
+        lastKnownBalance: lastKnownBalance,
+        pollingActive: !!pollTimer,
+        reconnecting,
+        wsRetries,
+        isBackground,
+        isMobile,
+        audioUnlocked
+      };
+    },
 
+    // Mobile debug helper
+    testNotification() {
+      const testBalance = (lastKnownBalance || 0) + 1000;
+      handleNewBalance(testBalance, 'test');
+    }
+  };
+
+  console.log('[Balance] Ready. Type WalletRealtime.getStatus() to debug');
 
 })();
 
