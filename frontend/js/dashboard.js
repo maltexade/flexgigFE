@@ -2392,15 +2392,15 @@ window.applyBalanceVisibility = applyBalanceVisibility;
       }));
 
       // Close modal SAFELY
-      setTimeout(() => {
-        if (window.ModalManager?.closeModal) {
-          window.ModalManager.closeModal();
-          
-        } else if (document.getElementById('addMoneyModal')) {
-          document.getElementById('addMoneyModal').style.transform = 'translateY(100%)';
-          document.getElementById('addMoneyModal').classList.add('hidden');
-        }
-      }, 300);
+      // Close modal SAFELY via ModalManager with correct ID
+setTimeout(() => {
+  if (window.ModalManager?.closeModal) {
+    window.ModalManager.closeModal('addMoneyModal');
+    console.log('[Balance Update] Modal closed via ModalManager');
+  } else {
+    console.warn('[Balance Update] ModalManager not available');
+  }
+}, 300);
 
       // Re-open the add-money content (this will now NOT find the old tx in localStorage)
       window.openAddMoneyModalContent();
