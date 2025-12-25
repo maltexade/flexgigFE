@@ -1787,6 +1787,9 @@
   connect();
   console.log('REALTIME SYSTEM FULLY LOADED');
 })();
+  // Expose WS for debugging
+window.__current_ws = ws;
+console.log('[Realtime System] WebSocket exposed as window.__current_ws for debugging');
 </script>
 </body>
 </html>
