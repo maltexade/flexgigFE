@@ -2393,8 +2393,8 @@ window.applyBalanceVisibility = applyBalanceVisibility;
 
       // Close modal SAFELY
       setTimeout(() => {
-        if (window.ModalManager?.closeTopModal) {
-          window.ModalManager.closeTopModal();
+        if (window.ModalManager?.closeModal) {
+          window.ModalManager.closeModal();
           
         } else if (document.getElementById('addMoneyModal')) {
           document.getElementById('addMoneyModal').style.transform = 'translateY(100%)';
