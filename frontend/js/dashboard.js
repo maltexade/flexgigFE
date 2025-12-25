@@ -2317,9 +2317,9 @@ window.applyBalanceVisibility = applyBalanceVisibility;
 
 
 // ===============================================================
-//  MOBILE-IMMORTAL REALTIME BALANCE SYSTEM
+//  MOBILE-IMMORTAL REALTIME BALANCE SYSTEM (FIXED)
 //  WS (best effort) + Polling (authoritative)
-//  Auto-resurrects after background / sleep / data saver
+//  Auto-recovers after background / sleep / data saver
 // ===============================================================
 
 (function () {
@@ -2330,7 +2330,6 @@ window.applyBalanceVisibility = applyBalanceVisibility;
 
   const WS_URL = 'wss://api.flexgig.com.ng/ws/wallet';
   const POLL_INTERVAL = 8000;
-  const WS_RECONNECT_DELAY = 1500;
 
   let ws = null;
   let pollTimer = null;
@@ -2353,7 +2352,7 @@ window.applyBalanceVisibility = applyBalanceVisibility;
   // ------------------------------------------------------------
   // CENTRAL BALANCE HANDLER
   // ------------------------------------------------------------
-  function handleNewBalance(balance, source) {
+  function handleNewBalance(balance, source = 'unknown') {
     balance = Number(balance) || 0;
 
     if (lastKnownBalance === null) {
@@ -2383,17 +2382,23 @@ window.applyBalanceVisibility = applyBalanceVisibility;
 
       playSuccessDing();
 
-            // Show toast
       if (typeof window.notify === 'function') {
-        window.notify(`₦${amountAdded.toLocaleString()} received!`, 'success');
+        window.notify(`₦${diff.toLocaleString()} received!`, 'success');
       } else {
-        // Fallback beautiful toast
         const t = document.createElement('div');
-        t.textContent = `✓ ₦${amountAdded.toLocaleString()} credited!`;
+        t.textContent = `✓ ₦${diff.toLocaleString()} credited!`;
         Object.assign(t.style, {
-          position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)',
-          background: '#10b981', color: 'white', padding: '16px 24px', borderRadius: '16px',
-          zIndex: 999999, fontWeight: 'bold', boxShadow: '0 10px 30px rgba(0,0,0,0.3)'
+          position: 'fixed',
+          top: '20px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: '#10b981',
+          color: 'white',
+          padding: '16px 24px',
+          borderRadius: '16px',
+          zIndex: 999999,
+          fontWeight: 'bold',
+          boxShadow: '0 10px 30px rgba(0,0,0,0.3)'
         });
         document.body.appendChild(t);
         setTimeout(() => t.remove(), 4000);
@@ -2412,7 +2417,7 @@ window.applyBalanceVisibility = applyBalanceVisibility;
   }
 
   // ------------------------------------------------------------
-  // POLLING (NEVER FAILS)
+  // POLLING (AUTHORITATIVE — NEVER FAILS)
   // ------------------------------------------------------------
   function startPolling() {
     clearTimeout(pollTimer);
@@ -2439,54 +2444,65 @@ window.applyBalanceVisibility = applyBalanceVisibility;
   }
 
   // ------------------------------------------------------------
-  // WEBSOCKET (RESURRECTABLE)
+  // WEBSOCKET (RACE-CONDITION SAFE)
   // ------------------------------------------------------------
   function connectWS(force = false) {
     if (reconnecting) return;
-
     if (!force && ws && ws.readyState === WebSocket.OPEN) return;
 
     reconnecting = true;
 
+    try { ws?.close(); } catch {}
+
+    let socket;
     try {
-      ws?.close();
-    } catch {}
-
-    try {
-      ws = new WebSocket(WS_URL);
-      window.__current_ws = ws;
-
-      ws.onopen = () => {
-        reconnecting = false;
-        lastWSActivity = Date.now();
-        ws.send(JSON.stringify({ type: 'subscribe', user_uid: uid }));
-      };
-
-      ws.onmessage = (e) => {
-        lastWSActivity = Date.now();
-        try {
-          const d = JSON.parse(e.data);
-          if (d.type === 'balance_update') {
-            handleNewBalance(d.balance, 'ws');
-          }
-        } catch {}
-      };
-
-      ws.onclose = () => {
-        ws = null;
-        reconnecting = false;
-      };
-
-      ws.onerror = () => {
-        try { ws.close(); } catch {}
-      };
+      socket = new WebSocket(WS_URL);
     } catch {
       reconnecting = false;
+      return;
     }
+
+    ws = socket;
+    window.__current_ws = socket;
+
+    socket.onopen = () => {
+      if (ws !== socket) return; // 🔐 stale socket protection
+
+      reconnecting = false;
+      lastWSActivity = Date.now();
+
+      try {
+        socket.send(JSON.stringify({
+          type: 'subscribe',
+          user_uid: uid
+        }));
+      } catch {}
+    };
+
+    socket.onmessage = (e) => {
+      if (ws !== socket) return;
+
+      lastWSActivity = Date.now();
+      try {
+        const d = JSON.parse(e.data);
+        if (d.type === 'balance_update' && d.balance !== undefined) {
+          handleNewBalance(d.balance, 'ws');
+        }
+      } catch {}
+    };
+
+    socket.onclose = () => {
+      if (ws === socket) ws = null;
+      reconnecting = false;
+    };
+
+    socket.onerror = () => {
+      try { socket.close(); } catch {}
+    };
   }
 
   // ------------------------------------------------------------
-  // WS SILENCE KILLER (FOREGROUND ONLY)
+  // WS SILENCE DETECTOR (FOREGROUND ONLY)
   // ------------------------------------------------------------
   setInterval(() => {
     if (!ws) return;
@@ -2496,19 +2512,23 @@ window.applyBalanceVisibility = applyBalanceVisibility;
   }, 10000);
 
   // ------------------------------------------------------------
-  // 🔁 MOBILE LIFECYCLE RESURRECTION (CRITICAL)
+  // 🔁 MOBILE LIFECYCLE RESURRECTION + SERVER CONFIRM
   // ------------------------------------------------------------
   function resurrect() {
     connectWS(true);
     startPolling();
 
-    // force immediate poll
-    fetch(`${window.__SEC_API_BASE}/api/session?light=true`, {
-      credentials: 'include'
+    // ALWAYS confirm from server when visible again
+    fetch(`${window.__SEC_API_BASE}/api/session?light=true&t=${Date.now()}`, {
+      credentials: 'include',
+      cache: 'no-store'
     })
       .then(r => r.ok ? r.json() : null)
-      .then(j => j?.user?.wallet_balance !== undefined &&
-        handleNewBalance(j.user.wallet_balance, 'resume'));
+      .then(j => {
+        if (j?.user?.wallet_balance !== undefined) {
+          handleNewBalance(j.user.wallet_balance, 'resume');
+        }
+      });
   }
 
   document.addEventListener('visibilitychange', () => {
@@ -2517,7 +2537,7 @@ window.applyBalanceVisibility = applyBalanceVisibility;
 
   window.addEventListener('focus', resurrect);
   window.addEventListener('online', resurrect);
-  window.addEventListener('pageshow', resurrect); // iOS Safari fix
+  window.addEventListener('pageshow', resurrect); // iOS Safari BFCache fix
 
   // ------------------------------------------------------------
   // INIT
