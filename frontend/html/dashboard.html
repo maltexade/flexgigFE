@@ -1733,33 +1733,44 @@
       };
 
       ws.onmessage = (e) => {
-        try {
-          const data = JSON.parse(e.data);
-          console.log('WEBSOCKET MESSAGE:', data);
-          if (data.type === 'balance_update') {
-            // UPDATE ALL BALANCE ELEMENTS
-            document.querySelectorAll('[data-balance], .wallet-balance, #walletBalance').forEach(el => {
-              el.textContent = '₦' + Number(data.balance).toLocaleString();
-            });
+  try {
+    const data = JSON.parse(e.data);
+    console.log('[Legacy WS] MESSAGE:', data);
 
-            // SHOW TOAST
-            if (window.notify) {
-              window.notify(`₦${Number(data.amount).toLocaleString()} received!`, 'success');
-            }
+    if (data.type === 'balance_update' && data.balance !== undefined) {
+      // Delegate balance update to main system
+      if (typeof handleNewBalance === 'function') {
+        handleNewBalance(data.balance, 'legacy-ws');
+      }
 
-            // AUTO CLOSE MODAL
-            const modal = document.getElementById('addMoneyModal');
-            if (modal && !modal.classList.contains('hidden')) {
-              if (window.modalManager?.closeModal) {
-                window.modalManager.closeModal('addMoneyModal');
-              } else {
-                modal.style.transform = 'translateY(100%)';
-              }
-              console.log('Modal auto-closed');
-            }
-          }
-        } catch (e) {}
-      };
+      // Close modal safely
+      if (window.ModalManager?.closeModal) {
+        window.ModalManager.closeModal('addMoneyModal');
+      }
+
+      // === DISPATCH TRANSACTION_UPDATE FOR HISTORY ===
+      let txDetail = data.transaction;
+      if (!txDetail && data.amount) {
+        txDetail = {
+          amount: data.amount,
+          description: 'Wallet Funding',
+          type: 'credit',
+          time: new Date().toISOString(),
+          status: 'SUCCESS',
+          reference: data.reference || `fund-${Date.now()}`
+        };
+      }
+      if (txDetail) {
+        document.dispatchEvent(new CustomEvent('transaction_update', {
+          detail: txDetail
+        }));
+        console.log('[Legacy WS] Dispatched transaction_update for history');
+      }
+    }
+  } catch (err) {
+    console.warn('[Legacy WS] Parse error', err);
+  }
+};
 
       ws.onerror = (e) => console.error('WS ERROR:', e);
       ws.onclose = () => {
