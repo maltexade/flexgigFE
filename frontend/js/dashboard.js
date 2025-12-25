@@ -2472,7 +2472,7 @@ setTimeout(() => {
 
   // Start everything
   setTimeout(() => {
-    connectWS();
+    window.connectWS();
     startPolling(); // run polling always on mobile
   }, 800);
 
