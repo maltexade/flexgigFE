@@ -2549,11 +2549,13 @@ function connectWS() {
     }
   });
 
-})();
-
-  // Expose WS for debugging
+    // Expose WS for debugging
 window.__current_ws = ws;
 console.log('[Realtime System] WebSocket exposed as window.__current_ws for debugging');
+
+})();
+
+
 
 // Run observer only on dashboard
 if (window.location.pathname.includes('dashboard.html')) {
