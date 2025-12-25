@@ -375,7 +375,6 @@ function showTransactionReceipt(tx) {
     if (desc.includes('9mobile') || desc.includes('etisalat')) return { name: '9Mobile', color: '#00A650' };
     if (desc.includes('opay')) return { name: 'Opay', color: '#1E3225' };
     if (desc.includes('refund')) return { name: 'Refund', color: '#fb923c' };
-    return { name: 'Transaction', color: '#00D4AA' };
   })();
 
   const amount = formatCurrency(Math.abs(Number(tx.amount || 0)));
