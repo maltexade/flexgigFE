@@ -1733,23 +1733,33 @@
       };
 
       ws.onmessage = (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        console.log('WEBSOCKET MESSAGE:', data);
+        try {
+          const data = JSON.parse(e.data);
+          console.log('WEBSOCKET MESSAGE:', data);
+          if (data.type === 'balance_update') {
+            // UPDATE ALL BALANCE ELEMENTS
+            document.querySelectorAll('[data-balance], .wallet-balance, #walletBalance').forEach(el => {
+              el.textContent = '₦' + Number(data.balance).toLocaleString();
+            });
 
-        if (data.type === 'balance_update' && data.balance !== undefined) {
-          handleNewBalance(data.balance, 'websocket');
-        }
+            // SHOW TOAST
+            if (window.notify) {
+              window.notify(`₦${Number(data.amount).toLocaleString()} received!`, 'success');
+            }
 
-        // Dispatch transaction if present
-        let txDetail = data.transaction || (data.type === 'transaction' ? data : null);
-        if (txDetail) {
-          document.dispatchEvent(new CustomEvent('transaction_update', { detail: txDetail }));
-        }
-      } catch (err) {
-        console.warn('[WS] Parse error', err);
-      }
-    };
+            // AUTO CLOSE MODAL
+            const modal = document.getElementById('addMoneyModal');
+            if (modal && !modal.classList.contains('hidden')) {
+              if (window.ModalManager?.closeModal) {
+                window.ModalManager.closeModal('addMoneyModal');
+              } else {
+                modal.style.transform = 'translateY(100%)';
+              }
+              console.log('Modal auto-closed');
+            }
+          }
+        } catch (e) {}
+      };
 
       ws.onerror = (e) => console.error('WS ERROR:', e);
       ws.onclose = () => {
