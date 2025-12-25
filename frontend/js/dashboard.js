@@ -2415,6 +2415,7 @@ window.applyBalanceVisibility = applyBalanceVisibility;
       setTimeout(() => (hasProcessedPayment = false), 30000);
     }
   }
+  window.handleNewBalance = window.handleNewBalance || handleNewBalance;
 
   // ------------------------------------------------------------
   // POLLING (AUTHORITATIVE — NEVER FAILS)
