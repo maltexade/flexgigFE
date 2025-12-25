@@ -2548,6 +2548,9 @@ function connectWS() {
       handleNewBalance(s.user.wallet_balance, 'initial');
     }
   });
+  // Expose WS for debugging
+window.__current_ws = ws;
+console.log('[Realtime System] WebSocket exposed as window.__current_ws for debugging');
 
 })();
 
