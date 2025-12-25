@@ -299,7 +299,7 @@ checkoutModal?.querySelector('.close-btn')?.addEventListener('click', stopModalB
 // 🔧 PRODUCTION-READY MOBILE DEBUG CONSOLE
 // ==========================================
 // ⚙️ SET THIS TO false IN PRODUCTION ⚙️
-const DEBUG_MODE = true; // ← Change to false to hide completely
+const DEBUG_MODE = false; // ← Change to false to hide completely
 // ==========================================
 
 (function () {
@@ -2504,12 +2504,7 @@ window.applyBalanceVisibility = applyBalanceVisibility;
           { 
             credentials: 'include',
             cache: 'no-store',
-            signal: controller.signal,
-            // Mobile: Ensure cache bypass
-            headers: {
-              'Cache-Control': 'no-cache, no-store, must-revalidate',
-              'Pragma': 'no-cache'
-            }
+            signal: controller.signal
           }
         );
 
