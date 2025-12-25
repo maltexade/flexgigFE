@@ -121,9 +121,9 @@ const addMoneyModal = document.getElementById('addMoneyModal');
     console.log('[Balance Update] Processing...'); // Debug log
 
     // 1. Close modal using ModalManager (your system)
-    if (window.modalManager && typeof window.modalManager.closeModal === 'function') {
-      window.modalManager.closeModal(MODAL_ID);
-      console.log('[Balance Update] Modal closed via modalManager');
+    if (window.ModalManager && typeof window.ModalManager.closeModal === 'function') {
+      window.ModalManager.closeModal(MODAL_ID);
+      console.log('[Balance Update] Modal closed via ModalManager');
     } else {
       const modal = document.getElementById(MODAL_ID);
       if (modal) {
@@ -783,7 +783,7 @@ function showGeneratedAccount(data) {
   const closeBtn = modalContent.querySelector('.addMoney-modal-close');
   if (closeBtn) {
     closeBtn.addEventListener('click', () => {
-      if (window.modalManager?.closeModal) window.modalManager.closeModal('addMoneyModal');
+      if (window.ModalManager?.closeModal) window.ModalManager.closeModal('addMoneyModal');
       else addMoneyModal.style.transform = 'translateY(100%)';
       if (countdownTimerInterval) {
         clearInterval(countdownTimerInterval);

@@ -1750,8 +1750,8 @@
             // AUTO CLOSE MODAL
             const modal = document.getElementById('addMoneyModal');
             if (modal && !modal.classList.contains('hidden')) {
-              if (window.modalManager?.closeModal) {
-                window.modalManager.closeModal('addMoneyModal');
+              if (window.ModalManager?.closeModal) {
+                window.ModalManager.closeModal('addMoneyModal');
               } else {
                 modal.style.transform = 'translateY(100%)';
               }
