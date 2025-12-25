@@ -2554,6 +2554,32 @@ window.applyBalanceVisibility = applyBalanceVisibility;
     }
   });
 
+  // ------------------------------------------------------------
+// 🌍 EXPOSE GLOBAL CONTROLS (DEBUG + MANUAL RECOVERY)
+// ------------------------------------------------------------
+window.WalletRealtime = {
+  connectWS,
+  startPolling,
+  resurrect,
+
+  forceReconnect() {
+    try { ws?.close(); } catch {}
+    connectWS(true);
+    startPolling();
+  },
+
+  getStatus() {
+    return {
+      wsState: ws ? ws.readyState : 'none',
+      lastWSActivity,
+      lastKnownBalance,
+      pollingActive: !!pollTimer,
+      reconnecting
+    };
+  }
+};
+
+
 })();
 
 
