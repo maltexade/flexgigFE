@@ -164,7 +164,7 @@ function getTxIcon(tx) {
     return { cls: 'airtel targets', img: '/frontend/svg/airtel-icon.svg', alt: 'Airtel' };
   }
   if (text.includes('glo')) {
-    return { cls: 'glo targets', img: '/frontend/svg/glo-icon.svg', alt: 'GLO' };
+    return { cls: 'glo targets', img: '/frontend/svg/GLO-icon.svg', alt: 'GLO' };
   }
   if (text.includes('9mobile') || text.includes('etisalat') || text.includes('nine mobile') || text.includes('nine-mobile')) {
     return { cls: 'nine-mobile targets', img: '/frontend/svg/9mobile-icon.svg', alt: '9Mobile' };
