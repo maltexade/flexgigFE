@@ -2317,7 +2317,10 @@ window.applyBalanceVisibility = applyBalanceVisibility;
 
 
 // ===============================================================
-//  BULLETPROOF REAL-TIME BALANCE + SUCCESS TOAST + DING (MOBILE)
+//  REAL-TIME BALANCE SYSTEM (MOBILE-PROOF)
+//  - WS = best effort
+//  - Polling = source of truth
+//  - Auto-resurrect WS on visibility / network / silence
 // ===============================================================
 
 (function () {
@@ -2336,16 +2339,7 @@ window.applyBalanceVisibility = applyBalanceVisibility;
   let lastWSMessageAt = 0;
   let hasProcessedPayment = false;
 
-  // -------------------------------------------------------------
-  // 🔊 SUCCESS SOUND (DING)
-  // -------------------------------------------------------------
-  function playSuccessDing() {
-    try {
-      const audio = new Audio('/frontend/sound/paymentReceived.wav'); // adjust path if needed
-      audio.volume = 0.9;
-      audio.play().catch(() => {});
-    } catch {}
-  }
+  const isMobile = /Android|iPhone|iPad/i.test(navigator.userAgent);
 
   // -------------------------------------------------------------
   // CENTRAL BALANCE HANDLER
@@ -2368,69 +2362,44 @@ window.applyBalanceVisibility = applyBalanceVisibility;
     const amountAdded = newBalance - lastKnownBalance;
     lastKnownBalance = newBalance;
 
-    console.log(
-      `[Balance] +₦${amountAdded.toLocaleString()} via ${source} → ₦${newBalance.toLocaleString()}`
-    );
+    console.log(`[Balance] +₦${amountAdded} via ${source}`);
 
-    // Update UI balances
     window.updateAllBalances(newBalance);
 
-    // 🔥 PAYMENT SUCCESS HANDLER
     if (!hasProcessedPayment && amountAdded > 0) {
       hasProcessedPayment = true;
 
-      // Clear pending tx storage
       try {
-        if (typeof removePendingTxFromStorage === 'function') {
-          removePendingTxFromStorage();
-        } else {
-          localStorage.removeItem('flexgig.pending_fund_tx');
-        }
+        localStorage.removeItem('flexgig.pending_fund_tx');
       } catch {}
 
-      // Dispatch global event
       window.dispatchEvent(new CustomEvent('balance_update', {
         detail: { balance: newBalance, amount: amountAdded }
       }));
 
-      // Close add-money modal safely
       setTimeout(() => {
         window.ModalManager?.closeModal?.('addMoneyModal');
       }, 300);
 
-      // Refresh modal content
       window.openAddMoneyModalContent?.();
 
-      // 🔊 PLAY SUCCESS DING
-      playSuccessDing();
-
-      // 🎉 SUCCESS TOAST
+      // Show toast
       if (typeof window.notify === 'function') {
         window.notify(`₦${amountAdded.toLocaleString()} received!`, 'success');
       } else {
-        const toast = document.createElement('div');
-        toast.textContent = `✓ ₦${amountAdded.toLocaleString()} credited!`;
-        Object.assign(toast.style, {
-          position: 'fixed',
-          top: '20px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          background: '#10b981',
-          color: '#fff',
-          padding: '16px 24px',
-          borderRadius: '16px',
-          fontWeight: 'bold',
-          zIndex: 999999,
-          boxShadow: '0 10px 30px rgba(0,0,0,0.3)'
+        // Fallback beautiful toast
+        const t = document.createElement('div');
+        t.textContent = `✓ ₦${amountAdded.toLocaleString()} credited!`;
+        Object.assign(t.style, {
+          position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)',
+          background: '#10b981', color: 'white', padding: '16px 24px', borderRadius: '16px',
+          zIndex: 999999, fontWeight: 'bold', boxShadow: '0 10px 30px rgba(0,0,0,0.3)'
         });
-        document.body.appendChild(toast);
-        setTimeout(() => toast.remove(), 4000);
+        document.body.appendChild(t);
+        setTimeout(() => t.remove(), 4000);
       }
 
-      // Unlock for next payment
-      setTimeout(() => {
-        hasProcessedPayment = false;
-      }, 30000);
+      setTimeout(() => { hasProcessedPayment = false; }, 30000);
     }
   }
 
@@ -2473,16 +2442,19 @@ window.applyBalanceVisibility = applyBalanceVisibility;
     try {
       if (ws && ws.readyState === WebSocket.OPEN) return;
 
+      console.log('[WS] Connecting...');
       ws = new WebSocket(WS_URL);
       window.__current_ws = ws;
 
       ws.onopen = () => {
+        console.log('[WS] Connected');
         lastWSMessageAt = Date.now();
         ws.send(JSON.stringify({ type: 'subscribe', user_uid: uid }));
       };
 
       ws.onmessage = (e) => {
         lastWSMessageAt = Date.now();
+
         try {
           const data = JSON.parse(e.data);
 
@@ -2495,41 +2467,53 @@ window.applyBalanceVisibility = applyBalanceVisibility;
               new CustomEvent('transaction_update', { detail: data.transaction })
             );
           }
-        } catch {}
+        } catch (err) {
+          console.warn('[WS] parse error', err);
+        }
+      };
+
+      ws.onerror = () => {
+        console.warn('[WS] error');
       };
 
       ws.onclose = () => {
+        console.warn('[WS] closed → retry');
         ws = null;
         setTimeout(connectWS, 2000);
       };
 
-      ws.onerror = () => {};
-    } catch {
+    } catch (err) {
+      console.error('[WS] failed', err);
       setTimeout(connectWS, 3000);
     }
   }
 
   // -------------------------------------------------------------
-  // WS SILENCE WATCHDOG
+  // WS SILENCE WATCHDOG (MOBILE FIX)
   // -------------------------------------------------------------
   setInterval(() => {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    if (Date.now() - lastWSMessageAt > WS_SILENCE_LIMIT) {
+
+    const silent = Date.now() - lastWSMessageAt;
+    if (silent > WS_SILENCE_LIMIT) {
+      console.warn('[WS] silent >30s → recycle');
       try { ws.close(); } catch {}
     }
   }, 10000);
 
   // -------------------------------------------------------------
-  // VISIBILITY + NETWORK RESUME
+  // VISIBILITY + NETWORK RESURRECTION
   // -------------------------------------------------------------
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
+      console.log('[Visibility] resume → reconnect WS');
       try { ws?.close(); } catch {}
       setTimeout(connectWS, 500);
     }
   });
 
   window.addEventListener('online', () => {
+    console.log('[Network] online → reconnect WS');
     try { ws?.close(); } catch {}
     setTimeout(connectWS, 500);
   });
@@ -2539,7 +2523,7 @@ window.applyBalanceVisibility = applyBalanceVisibility;
   // -------------------------------------------------------------
   setTimeout(() => {
     connectWS();
-    startPolling();
+    startPolling(); // ALWAYS ON (especially mobile)
   }, 800);
 
   getSession?.().then(s => {
@@ -2549,7 +2533,6 @@ window.applyBalanceVisibility = applyBalanceVisibility;
   });
 
 })();
-
 
 
 // Run observer only on dashboard
