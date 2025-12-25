@@ -2465,6 +2465,10 @@ function connectWS() {
 
     let heartbeatInterval = null;
 
+        // ← ADD THIS: Update global reference every time we create a new WS
+    window.__current_ws = ws;
+    console.log('[WS] Live instance exposed to window.__current_ws');
+
     ws.onopen = () => {
       console.log('[WS] Connected');
       ws.send(JSON.stringify({ type: 'subscribe', user_uid: uid }));
@@ -2548,10 +2552,6 @@ function connectWS() {
       handleNewBalance(s.user.wallet_balance, 'initial');
     }
   });
-
-    // Expose WS for debugging
-window.__current_ws = ws;
-console.log('[Realtime System] WebSocket exposed as window.__current_ws for debugging');
 
 })();
 
