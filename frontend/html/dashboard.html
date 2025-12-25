@@ -1697,107 +1697,73 @@
   <script src="/frontend/js/addMoney.js" defer></script>
   
 <script>
-// FORCE LOAD REALTIME BALANCE — MOBILE-RESILIENT BACKUP (SAFE VERSION)
-(function() {
-  console.log('LEGACY REALTIME BALANCE BACKUP STARTING... (mobile-resilient)');
-
-  // Optional: Skip if main system is already strong
-  if (window.__primary_ws_connected) {
-    console.log('Main WS already active — skipping legacy backup');
-    return;
-  }
-
-  window.__flexgig_ws_debug = true;
-  console.log('Legacy WebSocket debug flag set → true');
-
-  // GET UID — TRY EVERYTHING
-  const uid = 
-    window.__USER_UID || 
-    localStorage.getItem('uid') || 
-    localStorage.getItem('userId') ||
-    (window.__SERVER_USER_DATA__ && window.__SERVER_USER_DATA__.uid);
-
-  if (!uid || uid === 'undefined') {
-    console.error('NO UID FOUND — legacy realtime disabled');
-    return;
-  }
-
-  console.log('USER UID FOUND (legacy):', uid);
-  window.__USER_UID = uid; // ensure it's available
-
-  let ws = null;
-
-  function connect() {
-    try {
-      console.log('[Legacy WS] Connecting...');
-      ws = new WebSocket('wss://api.flexgig.com.ng/ws/wallet');
-
-      ws.onopen = () => {
-        console.log('[Legacy WS] CONNECTED');
-        ws.send(JSON.stringify({ type: 'subscribe', user_uid: uid }));
-      };
-
-      ws.onmessage = (e) => {
-        try {
-          const data = JSON.parse(e.data);
-          console.log('[Legacy WS] MESSAGE:', data);
-
-          if (data.type === 'balance_update' && data.balance !== undefined) {
-            // === DELEGATE TO MAIN SYSTEM (SAFE) ===
-            if (typeof handleNewBalance === 'function') {
-              handleNewBalance(data.balance, 'legacy-ws');
-            } else {
-              // Fallback: dispatch event so dashboard.js can handle it
-              window.dispatchEvent(new CustomEvent('balance_update', {
-                detail: { type: 'balance_update', balance: data.balance, amount: data.amount || 0 }
-              }));
-            }
-
-            // === AUTO-CLOSE MODAL SAFELY ===
-            if (window.ModalManager?.closeModal) {
-              window.ModalManager.closeModal('addMoneyModal');
-              console.log('[Legacy WS] Modal closed via ModalManager');
-            }
-
-            // === TRANSACTION HISTORY REAL-TIME UPDATE ===
-            let txDetail = data.transaction;
-            if (!txDetail && data.amount) {
-              // Minimal fallback transaction if backend doesn't send full details
-              txDetail = {
-                amount: data.amount,
-                description: 'Wallet Funding',
-                type: 'credit',
-                time: new Date().toISOString(),
-                status: 'SUCCESS'
-              };
-            }
-            if (txDetail) {
-              document.dispatchEvent(new CustomEvent('transaction_update', {
-                detail: txDetail
-              }));
-            }
-          }
-        } catch (err) {
-          console.warn('[Legacy WS] Message parse error', err);
-        }
-      };
-
-      ws.onerror = (e) => console.warn('[Legacy WS] Error', e);
-
-      ws.onclose = () => {
-        console.warn('[Legacy WS] Closed — reconnecting in 3s');
-        setTimeout(connect, 3000); // Aggressive reconnect = mobile magic
-      };
-
-    } catch (err) {
-      console.error('[Legacy WS] Connection failed', err);
-      setTimeout(connect, 5000);
+  // WebSocket (best effort)
+ // Inside your unified real-time system — replace connectWS()
+function connectWS() {
+  try {
+    if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
+      return; // Already connecting/open
     }
-  }
 
-  connect();
-  console.log('LEGACY REALTIME BACKUP FULLY LOADED');
-})();
+    console.log('[WS] Connecting...');
+    ws = new WebSocket('wss://api.flexgig.com.ng/ws/wallet');
+
+    let heartbeatInterval = null;
+
+    ws.onopen = () => {
+      console.log('[WS] Connected');
+      ws.send(JSON.stringify({ type: 'subscribe', user_uid: uid }));
+
+      // Mobile fix: Send heartbeat every 20s to keep connection alive
+      clearInterval(heartbeatInterval);
+      heartbeatInterval = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'ping' })); // Backend should respond or ignore
+        }
+      }, 20000);
+
+      if (pollTimer) clearTimeout(pollTimer);
+    };
+
+    ws.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        console.log('WEBSOCKET MESSAGE:', data);
+
+        if (data.type === 'balance_update' && data.balance !== undefined) {
+          handleNewBalance(data.balance, 'websocket');
+        }
+
+        // Dispatch transaction if present
+        let txDetail = data.transaction || (data.type === 'transaction' ? data : null);
+        if (txDetail) {
+          document.dispatchEvent(new CustomEvent('transaction_update', { detail: txDetail }));
+        }
+      } catch (err) {
+        console.warn('[WS] Parse error', err);
+      }
+    };
+
+    ws.onerror = (e) => {
+      console.warn('[WS] Error', e);
+    };
+
+    ws.onclose = (e) => {
+      console.warn('[WS] Closed — reconnecting in 2s', e.code, e.reason);
+      clearInterval(heartbeatInterval);
+
+      // Aggressive reconnect — critical for mobile
+      setTimeout(() => {
+        connectWS();
+      }, 2000);
+    };
+
+  } catch (err) {
+    console.error('[WS] Failed to create', err);
+    setTimeout(connectWS, 3000);
+  }
+}
+window.connectWS = window.connectWS || connectWS;
 </script>
 </body>
 </html>

@@ -2452,72 +2452,7 @@ setTimeout(() => {
     poll();
   }
 
-  // WebSocket (best effort)
- // Inside your unified real-time system — replace connectWS()
-function connectWS() {
-  try {
-    if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
-      return; // Already connecting/open
-    }
 
-    console.log('[WS] Connecting...');
-    ws = new WebSocket('wss://api.flexgig.com.ng/ws/wallet');
-
-    let heartbeatInterval = null;
-
-    ws.onopen = () => {
-      console.log('[WS] Connected');
-      ws.send(JSON.stringify({ type: 'subscribe', user_uid: uid }));
-
-      // Mobile fix: Send heartbeat every 20s to keep connection alive
-      clearInterval(heartbeatInterval);
-      heartbeatInterval = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'ping' })); // Backend should respond or ignore
-        }
-      }, 20000);
-
-      if (pollTimer) clearTimeout(pollTimer);
-    };
-
-    ws.onmessage = (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        console.log('WEBSOCKET MESSAGE:', data);
-
-        if (data.type === 'balance_update' && data.balance !== undefined) {
-          handleNewBalance(data.balance, 'websocket');
-        }
-
-        // Dispatch transaction if present
-        let txDetail = data.transaction || (data.type === 'transaction' ? data : null);
-        if (txDetail) {
-          document.dispatchEvent(new CustomEvent('transaction_update', { detail: txDetail }));
-        }
-      } catch (err) {
-        console.warn('[WS] Parse error', err);
-      }
-    };
-
-    ws.onerror = (e) => {
-      console.warn('[WS] Error', e);
-    };
-
-    ws.onclose = (e) => {
-      console.warn('[WS] Closed — reconnecting in 2s', e.code, e.reason);
-      clearInterval(heartbeatInterval);
-
-      // Aggressive reconnect — critical for mobile
-      setTimeout(() => {
-        connectWS();
-      }, 2000);
-    };
-
-  } catch (err) {
-    console.error('[WS] Failed to create', err);
-    setTimeout(connectWS, 3000);
-  }
-}
 
   // CRITICAL: Re-check balance when user returns to app (iOS/Android fix)
   document.addEventListener('visibilitychange', () => {
