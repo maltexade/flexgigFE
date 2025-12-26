@@ -2325,7 +2325,7 @@ window.applyBalanceVisibility = applyBalanceVisibility;
 
 (function () {
   // ========== DEBUG LOG TOGGLE ==========
-  const ENABLE_DEBUG_LOG = false; // Set to false to disable completely
+  const ENABLE_DEBUG_LOG = true; // Set to false to disable completely
   // ======================================
 
   const uid = window.__USER_UID || localStorage.getItem('userId');
