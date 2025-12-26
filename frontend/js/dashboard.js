@@ -2314,7 +2314,6 @@ window.updateAllBalances = function(newBalance, skipAnimation = false) {
 };
 
 window.applyBalanceVisibility = applyBalanceVisibility;
-
 // ===============================================================
 //  UNIFIED REAL-TIME BALANCE SYSTEM (Mobile-Safe Version)
 //  - Guaranteed to work on iOS, Android, Desktop
@@ -2326,7 +2325,7 @@ window.applyBalanceVisibility = applyBalanceVisibility;
 
 (function () {
   // ========== DEBUG LOG TOGGLE ==========
-  const ENABLE_DEBUG_LOG = false; // Set to false to disable completely
+  const ENABLE_DEBUG_LOG = true; // Set to false to disable completely
   // ======================================
 
   const uid = window.__USER_UID || localStorage.getItem('userId');
@@ -2429,6 +2428,10 @@ window.applyBalanceVisibility = applyBalanceVisibility;
   }
 
   function log(message, type = 'info') {
+    // Always log to console for debugging
+    console.log(`[Balance Debug] ${message}`);
+    
+    // Only show on-screen UI if debug is enabled
     if (!ENABLE_DEBUG_LOG || !debugLog) return;
 
     const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 });
@@ -2459,18 +2462,18 @@ window.applyBalanceVisibility = applyBalanceVisibility;
     if (entries.length > 100) {
       entries[0].remove();
     }
-
-    // Also log to console
-    console.log(`[Balance Debug] ${message}`);
   }
 
   // Expose log function globally
   window.__balanceLog = log;
 
-  // Initialize log
+  // Initialize log UI if enabled
   if (ENABLE_DEBUG_LOG) {
     setTimeout(initDebugLog, 500);
   }
+  
+  // Always log that system is starting
+  log('🚀 Balance system initializing...', 'info');
 
   let ws = null;
   let pollTimer = null;
@@ -2745,7 +2748,6 @@ window.applyBalanceVisibility = applyBalanceVisibility;
   }).catch(e => log(`❌ Initial session failed: ${e.message}`, 'error'));
 
 })();
-
 
 // Run observer only on dashboard
 if (window.location.pathname.includes('dashboard.html')) {
