@@ -86,41 +86,38 @@ let countdownTimerInterval = null;
 const addMoneyModal = document.getElementById('addMoneyModal');
 
 
+// Replace this entire section in your addmoney.js:
+
 // AUTO-CLOSE FUND MODAL + SUCCESS TOAST WHEN PAYMENT ARRIVES
 (function() {
   const MODAL_ID = 'addMoneyModal';
-  let hasShownSuccess = false;
 
   // UNIFIED handler for balance updates
   function handleBalanceUpdate(data) {
-    console.log('[Balance Update Received]', data); // Debug log
+    console.log('[Balance Update Received]', data);
     
     if (!data || data.type !== 'balance_update') return;
     
     const { balance, amount } = data;
     
-    // Only trigger once per session
-    if (hasShownSuccess) {
-      console.log('[Balance Update] Already shown, ignoring');
-      return;
+    // ❌ REMOVED: hasShownSuccess blocking logic
+    // Every payment should trigger the modal close + toast
+    
+    console.log('[Balance Update] Processing...');
+
+    try {
+      if (typeof removePendingTxFromStorage === 'function') {
+        removePendingTxFromStorage();
+        console.log('[Balance] Cleared local pending tx storage');
+      } else {
+        localStorage.removeItem('flexgig.pending_fund_tx');
+        console.log('[Balance] Cleared local pending tx storage (direct)');
+      }
+    } catch (e) {
+      console.warn('[handleBalanceUpdate] failed to clear pending tx storage', e);
     }
-    hasShownSuccess = true;
 
-      try {
-    if (typeof removePendingTxFromStorage === 'function') {
-      removePendingTxFromStorage();
-      console.log('[Balance] Cleared local pending tx storage');
-    } else {
-      localStorage.removeItem('flexgig.pending_fund_tx');
-      console.log('[Balance] Cleared local pending tx storage (direct)');
-    }
-  } catch (e) {
-    console.warn('[handleBalanceUpdate] failed to clear pending tx storage', e);
-  }
-
-    console.log('[Balance Update] Processing...'); // Debug log
-
-    // 1. Close modal using ModalManager (your system)
+    // 1. Close modal using ModalManager
     if (window.ModalManager && typeof window.ModalManager.closeModal === 'function') {
       window.ModalManager.closeModal(MODAL_ID);
       console.log('[Balance Update] Modal closed via ModalManager');
@@ -128,49 +125,35 @@ const addMoneyModal = document.getElementById('addMoneyModal');
       const modal = document.getElementById(MODAL_ID);
       if (modal) {
         modal.style.transform = 'translateY(100%)';
-        modal.classList.add('hidden'); // Also add hidden class
+        modal.classList.add('hidden');
         console.log('[Balance Update] Modal closed via style');
       }
     }
 
-    // 2. Show beautiful success toast + PLAY THE DING!
-showSuccessToast(`₦${Number(amount).toLocaleString()} received!`, 
-                `Wallet updated to ₦${Number(balance).toLocaleString()}`);
+    // 2. Show success toast + sound
+    showSuccessToast(`₦${Number(amount).toLocaleString()} received!`, 
+                    `Wallet updated to ₦${Number(balance).toLocaleString()}`);
 
-if (typeof window.playSuccessSound === 'function') {
-  window.playSuccessSound();   // CHA-CHING!
-}
+    if (typeof window.playSuccessSound === 'function') {
+      window.playSuccessSound();
+    }
 
-    // 3. Reset flag after 30s (allow next payment)
-    setTimeout(() => { 
-      hasShownSuccess = false;
-      console.log('[Balance Update] Flag reset');
-    }, 30000);
+    // 3. Reopen fresh modal after 500ms
+    setTimeout(() => {
+      openAddMoneyModalContent();
+    }, 500);
   }
 
-  // Add this AFTER your existing balance_update listener
-document.addEventListener('DOMContentLoaded', () => {
-  window.mobileLog('✅ DOM Ready - re-registering listeners', 'success');
-  
-  // Force re-attach listener (mobile safety)
-  window.addEventListener('balance_update', (e) => {
-    window.mobileLog('📡 DOM-ready listener fired', 'ws');
-    if (window.__handleBalanceUpdate) {
-      window.__handleBalanceUpdate(e.detail);
-    }
-  });
-});
-
-  // 🔥 PRIMARY LISTENER: Custom event from WebSocket (works on mobile!)
+  // Register listener
   window.addEventListener('balance_update', (e) => {
     console.log('[Custom Event] balance_update received', e.detail);
     handleBalanceUpdate(e.detail);
   });
 
-  // MOBILE FIX: Expose global handler for direct calls
+  // MOBILE FIX: Expose global handler
   window.__handleBalanceUpdate = handleBalanceUpdate;
 
-  // BEAUTIFUL SUCCESS TOAST
+  // BEAUTIFUL SUCCESS TOAST (same as before)
   function showSuccessToast(title, subtitle = '') {
     const toast = document.createElement('div');
     toast.style.cssText = `
@@ -203,9 +186,7 @@ document.addEventListener('DOMContentLoaded', () => {
     `;
 
     document.body.appendChild(toast);
-
     setTimeout(() => toast.remove(), 6600);
-    
     console.log('[Toast] Displayed successfully');
   }
 
@@ -216,7 +197,6 @@ document.addEventListener('DOMContentLoaded', () => {
       from { opacity: 0; transform: translate(-50%, -40px); }
       to   { opacity: 1; transform: translate(-50%, 0); }
     }
-
     @keyframes toastFadeOut {
       to { opacity: 0; transform: translate(-50%, -20px); }
     }
