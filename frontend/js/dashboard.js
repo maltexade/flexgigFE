@@ -2540,6 +2540,138 @@ window.applyBalanceVisibility = applyBalanceVisibility;
   window.addEventListener('online', resurrect);
   window.addEventListener('pageshow', resurrect); // iOS Safari BFCache fix
 
+  // -----------------------------
+// Aggressive monitoring while addMoneyModal is open
+// -----------------------------
+(function () {
+  const AGGRESSIVE_POLL_INTERVAL = 2000; // 2s while modal open
+  const NORMAL_POLL_STOP_DELAY = 800;   // wait a bit before resuming normal polling
+  let aggressivePollTimer = null;
+  let modalAggressiveMode = false;
+
+  function startAggressiveMode() {
+    if (modalAggressiveMode) return;
+    modalAggressiveMode = true;
+
+    // Ensure WS is forced-open and re-subscribed immediately
+    try {
+      connectWS(true);
+    } catch (e) {}
+
+    // aggressive polling loop (authoritative)
+    aggressivePollTimer = setInterval(async () => {
+      try {
+        // ensure ws is alive; if it has been silent or closed, force reconnect
+        if (!window.__current_ws || window.__current_ws.readyState !== WebSocket.OPEN) {
+          connectWS(true);
+        } else {
+          // optionally re-subscribe to be extra-safe (server should handle duplicates)
+          try {
+            window.__current_ws.send(JSON.stringify({
+              type: 'subscribe',
+              user_uid: window.__USER_UID || localStorage.getItem('userId')
+            }));
+          } catch {}
+        }
+
+        // authoritative confirm from server
+        const r = await fetch(`${window.__SEC_API_BASE}/api/session?light=true&t=${Date.now()}`, {
+          credentials: 'include',
+          cache: 'no-store'
+        });
+        if (r.ok) {
+          const j = await r.json();
+          const bal = j.user?.wallet_balance;
+          if (bal !== undefined) {
+            handleNewBalance(bal, 'aggressive-poll');
+          }
+        }
+      } catch (err) {
+        // swallow errors silently (we don't want modal UX to break)
+      }
+    }, AGGRESSIVE_POLL_INTERVAL);
+  }
+
+  function stopAggressiveMode() {
+    if (!modalAggressiveMode) return;
+    modalAggressiveMode = false;
+    clearInterval(aggressivePollTimer);
+    aggressivePollTimer = null;
+
+    // After a small delay, resume the normal polling so we don't hammer the server
+    setTimeout(() => {
+      // restart normal polling flow (startPolling internally handles its own timer)
+      try { startPolling(); } catch (e) {}
+    }, NORMAL_POLL_STOP_DELAY);
+  }
+
+  // ------------- hook into modal manager if available -------------
+  try {
+    const M = window.ModalManager;
+    if (M) {
+      // wrap openModal
+      if (typeof M.openModal === 'function') {
+        const _open = M.openModal.bind(M);
+        M.openModal = function (id, ...args) {
+          if (id === 'addMoneyModal') {
+            startAggressiveMode();
+          }
+          return _open(id, ...args);
+        };
+      }
+
+      // wrap closeModal
+      if (typeof M.closeModal === 'function') {
+        const _close = M.closeModal.bind(M);
+        M.closeModal = function (id, ...args) {
+          if (id === 'addMoneyModal') {
+            stopAggressiveMode();
+          }
+          return _close(id, ...args);
+        };
+      }
+    }
+  } catch (e) {}
+
+  // ------------- fallback: observe DOM for modal presence -------------
+  // If ModalManager is not used everywhere, this keeps us robust.
+  try {
+    const modalSelector = '#addMoneyModal, .add-money-modal, [data-modal="addMoneyModal"]';
+    const observer = new MutationObserver(() => {
+      const el = document.querySelector(modalSelector);
+      if (el) {
+        // detect visible state - you may need to adapt this based on your modal markup
+        const visible = el.offsetParent !== null || getComputedStyle(el).display !== 'none' || el.classList.contains('open') || el.classList.contains('show');
+        if (visible) startAggressiveMode();
+        else stopAggressiveMode();
+      } else {
+        // if element not present, ensure we stop
+        stopAggressiveMode();
+      }
+    });
+
+    observer.observe(document.documentElement || document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['class', 'style']
+    });
+
+    // immediate check
+    const initialEl = document.querySelector('#addMoneyModal, .add-money-modal, [data-modal="addMoneyModal"]');
+    if (initialEl) {
+      const visible = initialEl.offsetParent !== null || getComputedStyle(initialEl).display !== 'none' || initialEl.classList.contains('open') || initialEl.classList.contains('show');
+      if (visible) startAggressiveMode();
+    }
+  } catch (e) {}
+
+  // ------------- expose for debugging -------------
+  if (!window.WalletRealtime) window.WalletRealtime = {};
+  window.WalletRealtime._startAggressiveMode = startAggressiveMode;
+  window.WalletRealtime._stopAggressiveMode = stopAggressiveMode;
+})();
+
+
   // ------------------------------------------------------------
   // INIT
   // ------------------------------------------------------------
