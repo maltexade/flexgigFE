@@ -1006,73 +1006,50 @@ function renderChunked(groupedMonths) {
   }
 
   /* -------------------------- PRELOAD FULL HISTORY -------------------------- */
-  async function preloadHistoryForInstantOpen() {
-  if (state.preloaded) return;
-  if (state.preloadingInProgress) {
-    return new Promise((resolve) => {
-      const checkInterval = setInterval(() => {
-        if (state.preloaded || !state.preloadingInProgress) {
-          clearInterval(checkInterval);
-          resolve();
-        }
-      }, 100);
-    });
-  }
-  
-  state.preloadingInProgress = true;
-  console.log('[TransactionHistory] Preloading full history...');
+async function loadLatestHistory() {
+  // Always try to get the latest — but don't block UI
+  console.log('[TransactionHistory] Loading latest transactions...');
 
-  let allTx = [];
-  
-  // USE FAKE DATA FOR TESTING
-  if (USE_FAKE_DATA) {
-    console.log('[TransactionHistory] Using FAKE data for testing');
-    allTx = generateFakeTransactions();
-    
-    // Simulate network delay for realism
-    await new Promise(resolve => setTimeout(resolve, 500));
-  } else {
-    // Real API call
-    let page = 1;
-    let hasMore = true;
+  let allTx = state.items.slice(); // Start with what we have (from WS)
 
-    while (hasMore) {
-      try {
-        const data = await safeFetch(`${CONFIG.apiEndpoint}?limit=200&page=${page}`);
-        const items = data.items || [];
-        allTx.push(...items);
-        hasMore = page < (data.totalPages || data.total_pages || 1);
-        page++;
-      } catch (err) {
-        console.error('[TransactionHistory] Preload failed:', err);
-        break;
+  try {
+    // Always fetch page 1 (newest) to catch anything WS missed
+    const data = await safeFetch(`${CONFIG.apiEndpoint}?limit=200&page=1`);
+    const newItems = data.items || [];
+
+    if (newItems.length > 0) {
+      // Merge: replace duplicates, add new ones at top
+      const existingIds = new Set(allTx.map(tx => tx.id));
+      const trulyNew = newItems.filter(tx => !existingIds.has(tx.id || tx.reference));
+
+      if (trulyNew.length > 0) {
+        allTx.unshift(...trulyNew);
+        console.log(`[TransactionHistory] Added ${trulyNew.length} new tx from server sync`);
       }
     }
+  } catch (err) {
+    console.warn('[TransactionHistory] Failed to sync latest page:', err);
+    // Fall back to what we have (from WS)
   }
 
-state.items = USE_FAKE_DATA ? allTx : allTx.map(raw => ({
-  id: raw.id || raw.reference,
-  reference: raw.reference,
-  type: raw.type || 'debit',
-  amount: Number(raw.amount || 0),
-  description: raw.description || '',
-  time: raw.time || raw.created_at || raw.date,  // string is fine
-  status: raw.status || 'SUCCESS',
-  phone: raw.phone || null,
-  provider: raw.provider || null,
-  plan_id: raw.plan_id || null,
-  category: raw.category || null
-}));
+  // Normalize and update state
+  state.items = allTx.map(raw => ({
+    id: raw.id || raw.reference,
+    reference: raw.reference || raw.id,
+    type: raw.type || (Number(raw.amount) > 0 ? 'credit' : 'debit'),
+    amount: Math.abs(Number(raw.amount || 0)),
+    description: raw.description || raw.narration || 'Transaction',
+    time: raw.time || raw.created_at || new Date().toISOString(),
+    status: raw.status || 'SUCCESS',
+    provider: raw.provider,
+    phone: raw.phone
+  }));
 
-  state.fullHistoryLoaded = true;
-  state.accurateTotalsCalculated = true;
+  state.fullHistoryLoaded = true; // We have at least recent ones
   state.preloaded = true;
-  state.done = true;
-  state.preloadingInProgress = false;
-  resolvePreloadWaiters();
 
+  applyTransformsAndRender();
   hide(loadingEl);
-  console.log(`[TransactionHistory] PRELOADED ${allTx.length} transactions`);
 }
 
   /* -------------------------- MONTH FILTER FUNCTIONS -------------------------- */
@@ -1311,20 +1288,15 @@ function createMonthPickerModal() {
 
   async function handleModalOpened() {
   state.open = true;
-  
-  // Set to All Time by default
-  selectedMonth = null;  // Changed from specific current month
-  
+  selectedMonth = null;
+
   show(loadingEl);
   hide(emptyEl);
-  
-  await preloadHistoryForInstantOpen();
 
-  if (state.preloaded && state.items.length > 0) {
-    hide(loadingEl);
-    applyMonthFilterAndRender();
-  } else if (state.items.length === 0) {
-    hide(loadingEl);
+  // Always load latest (combines WS + server sync)
+  await loadLatestHistory();
+
+  if (state.items.length === 0) {
     show(emptyEl);
   }
 }
@@ -1430,9 +1402,8 @@ function updateHeaders() {
   };
 
   // REAL-TIME TRANSACTION UPDATES — INSTANT, NO RELOAD
+// REAL-TIME TRANSACTION UPDATES — WORKS EVEN WHEN CLOSED
 document.addEventListener('transaction_update', (e) => {
-  if (!state.open) return; // Only update if history modal is open
-
   const newTx = e?.detail;
 
   if (!newTx) {
@@ -1440,9 +1411,9 @@ document.addEventListener('transaction_update', (e) => {
     return;
   }
 
-  console.log('[TransactionHistory] New transaction received via WS → adding to top', newTx);
+  console.log('[TransactionHistory] New transaction received via WS', newTx);
 
-  // Normalize the transaction format to match what your list expects
+  // Normalize the transaction format
   const normalizedTx = {
     id: newTx.id || newTx.reference || `ws-${Date.now()}`,
     reference: newTx.reference || newTx.id,
@@ -1455,16 +1426,20 @@ document.addEventListener('transaction_update', (e) => {
     phone: newTx.phone
   };
 
-  // 1. Add to the beginning of state.items (newest first)
+  // ✅ Add to state even if modal is closed (keeps preload fresh)
   state.items.unshift(normalizedTx);
+  console.log('[TransactionHistory] Transaction added to state (total:', state.items.length, ')');
 
-  // 2. Re-group and re-render instantly
-  applyTransformsAndRender();
-
-  // Optional: Scroll to top to show the new transaction
-  historyList.scrollTop = 0;
-
-  console.log('[TransactionHistory] New transaction added & rendered instantly');
+  // ✅ Only re-render if modal is currently open
+  if (state.open) {
+    console.log('[TransactionHistory] Modal is open → re-rendering with new transaction');
+    applyTransformsAndRender();
+    
+    // Scroll to top to show the new transaction
+    historyList.scrollTop = 0;
+  } else {
+    console.log('[TransactionHistory] Modal closed → transaction stored for next open');
+  }
 });
 
   showStateUI();
