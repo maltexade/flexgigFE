@@ -2326,7 +2326,7 @@ window.applyBalanceVisibility = applyBalanceVisibility;
 
 (function () {
   // ========== DEBUG LOG TOGGLE ==========
-  const ENABLE_DEBUG_LOG = false; // Set to false to disable completely
+  const ENABLE_DEBUG_LOG = true; // Set to false to disable completely
   // ======================================
 
   const uid = window.__USER_UID || localStorage.getItem('userId');
@@ -2574,8 +2574,9 @@ window.applyBalanceVisibility = applyBalanceVisibility;
         });
         if (res.ok) {
           const json = await res.json();
-          const bal = json.user?.wallet_balance;
-          log(`✓ Poll success: ₦${bal?.toLocaleString() || 'N/A'}`, 'success');
+          log(`📦 Poll response: ${JSON.stringify(json).substring(0, 200)}...`, 'info');
+          const bal = json.user?.wallet_balance ?? json.wallet_balance ?? json.balance;
+          log(`✓ Poll success: ₦${bal?.toLocaleString() || 'N/A'} (from ${json.user?.wallet_balance !== undefined ? 'user.wallet_balance' : json.wallet_balance !== undefined ? 'wallet_balance' : json.balance !== undefined ? 'balance' : 'NONE'})`, 'success');
           if (bal !== undefined && bal !== lastKnownBalance) {
             handleNewBalance(bal, 'polling');
           }
