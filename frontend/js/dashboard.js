@@ -2321,11 +2321,156 @@ window.applyBalanceVisibility = applyBalanceVisibility;
 //  - WebSocket + Polling Fallback
 //  - Global "balance_update" event
 //  - Success Toast + Modal Close
+//  - ON-SCREEN DEBUG LOG (for mobile debugging)
 // ===============================================================
 
 (function () {
+  // ========== DEBUG LOG TOGGLE ==========
+  const ENABLE_DEBUG_LOG = true; // Set to false to disable completely
+  // ======================================
+
   const uid = window.__USER_UID || localStorage.getItem('userId');
   if (!uid) return;
+
+  // Initialize on-screen debug log
+  let debugLog = null;
+  let debugLogVisible = false;
+
+  function initDebugLog() {
+    if (!ENABLE_DEBUG_LOG) return;
+
+    // Create log container
+    debugLog = document.createElement('div');
+    debugLog.id = 'balance-debug-log';
+    debugLog.style.cssText = `
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      max-height: 40vh;
+      background: rgba(0, 0, 0, 0.95);
+      color: #0f0;
+      font-family: monospace;
+      font-size: 11px;
+      padding: 10px;
+      overflow-y: auto;
+      z-index: 999999;
+      border-top: 2px solid #0f0;
+      display: none;
+    `;
+
+    // Create toggle button
+    const toggleBtn = document.createElement('button');
+    toggleBtn.textContent = '🐛 LOG';
+    toggleBtn.style.cssText = `
+      position: fixed;
+      bottom: 10px;
+      right: 10px;
+      background: rgba(0, 255, 0, 0.2);
+      color: #0f0;
+      border: 2px solid #0f0;
+      border-radius: 50%;
+      width: 50px;
+      height: 50px;
+      font-size: 18px;
+      z-index: 9999999;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(0, 255, 0, 0.3);
+    `;
+
+    toggleBtn.onclick = () => {
+      debugLogVisible = !debugLogVisible;
+      debugLog.style.display = debugLogVisible ? 'block' : 'none';
+      toggleBtn.style.background = debugLogVisible ? 'rgba(0, 255, 0, 0.4)' : 'rgba(0, 255, 0, 0.2)';
+    };
+
+    // Create copy button inside log
+    const copyBtn = document.createElement('button');
+    copyBtn.textContent = '📋 COPY ALL';
+    copyBtn.style.cssText = `
+      position: sticky;
+      top: 0;
+      background: #0f0;
+      color: black;
+      border: none;
+      padding: 5px 10px;
+      margin-bottom: 10px;
+      cursor: pointer;
+      font-weight: bold;
+      border-radius: 4px;
+      width: 100%;
+    `;
+    copyBtn.onclick = () => {
+      const text = Array.from(debugLog.querySelectorAll('.log-entry'))
+        .map(el => el.textContent)
+        .join('\n');
+      
+      navigator.clipboard.writeText(text).then(() => {
+        copyBtn.textContent = '✓ COPIED!';
+        setTimeout(() => { copyBtn.textContent = '📋 COPY ALL'; }, 2000);
+      }).catch(() => {
+        // Fallback for older browsers
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+        copyBtn.textContent = '✓ COPIED!';
+        setTimeout(() => { copyBtn.textContent = '📋 COPY ALL'; }, 2000);
+      });
+    };
+
+    debugLog.appendChild(copyBtn);
+    document.body.appendChild(debugLog);
+    document.body.appendChild(toggleBtn);
+
+    log('🟢 Debug log initialized');
+  }
+
+  function log(message, type = 'info') {
+    if (!ENABLE_DEBUG_LOG || !debugLog) return;
+
+    const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 });
+    const colors = {
+      info: '#0f0',
+      warn: '#ff0',
+      error: '#f00',
+      success: '#0ff'
+    };
+
+    const entry = document.createElement('div');
+    entry.className = 'log-entry';
+    entry.style.cssText = `
+      color: ${colors[type] || colors.info};
+      margin-bottom: 3px;
+      padding: 2px 0;
+      border-bottom: 1px solid rgba(0, 255, 0, 0.1);
+    `;
+    entry.textContent = `[${timestamp}] ${message}`;
+
+    debugLog.appendChild(entry);
+
+    // Auto-scroll to bottom
+    debugLog.scrollTop = debugLog.scrollHeight;
+
+    // Keep only last 100 entries
+    const entries = debugLog.querySelectorAll('.log-entry');
+    if (entries.length > 100) {
+      entries[0].remove();
+    }
+
+    // Also log to console
+    console.log(`[Balance Debug] ${message}`);
+  }
+
+  // Expose log function globally
+  window.__balanceLog = log;
+
+  // Initialize log
+  if (ENABLE_DEBUG_LOG) {
+    setTimeout(initDebugLog, 500);
+  }
 
   let ws = null;
   let pollTimer = null;
@@ -2351,7 +2496,7 @@ window.applyBalanceVisibility = applyBalanceVisibility;
     const amountAdded = newBalance - lastKnownBalance;
     lastKnownBalance = newBalance;
 
-    console.log(`[Balance] +₦${amountAdded.toLocaleString()} (from ${source}) → ₦${newBalance.toLocaleString()}`);
+    log(`💰 +₦${amountAdded.toLocaleString()} (from ${source}) → ₦${newBalance.toLocaleString()}`, 'success');
 
     // Update UI
     window.updateAllBalances(newBalance);
@@ -2364,14 +2509,14 @@ window.applyBalanceVisibility = applyBalanceVisibility;
       try {
         if (typeof removePendingTxFromStorage === 'function') {
           removePendingTxFromStorage();
-          console.log('[Balance] Cleared local pending tx storage');
+          log('✓ Cleared pending tx storage', 'success');
         } else {
           // defensive: try to remove directly if helper not present
           localStorage.removeItem('flexgig.pending_fund_tx');
-          console.log('[Balance] Cleared local pending tx storage (direct)');
+          log('✓ Cleared pending tx storage (direct)', 'success');
         }
       } catch (e) {
-        console.warn('[handleNewBalance] failed to clear pending tx storage', e);
+        log(`⚠️ Failed to clear pending tx: ${e.message}`, 'warn');
       }
 
       // Dispatch event (for any other listeners)
@@ -2383,9 +2528,9 @@ window.applyBalanceVisibility = applyBalanceVisibility;
       setTimeout(() => {
         if (window.ModalManager?.closeModal) {
           window.ModalManager.closeModal('addMoneyModal');
-          console.log('[Balance Update] Modal closed via ModalManager');
+          log('✓ Modal closed via ModalManager', 'success');
         } else {
-          console.warn('[Balance Update] ModalManager not available');
+          log('⚠️ ModalManager not available', 'warn');
         }
       }, 300);
 
@@ -2421,6 +2566,7 @@ window.applyBalanceVisibility = applyBalanceVisibility;
 
     const poll = async () => {
       try {
+        log('🔄 Polling balance...', 'info');
         const res = await fetch(`${window.__SEC_API_BASE}/api/session?light=true&t=${Date.now()}`, {
           credentials: 'include',
           cache: 'no-store',
@@ -2429,11 +2575,16 @@ window.applyBalanceVisibility = applyBalanceVisibility;
         if (res.ok) {
           const json = await res.json();
           const bal = json.user?.wallet_balance;
+          log(`✓ Poll success: ₦${bal?.toLocaleString() || 'N/A'}`, 'success');
           if (bal !== undefined && bal !== lastKnownBalance) {
             handleNewBalance(bal, 'polling');
           }
+        } else {
+          log(`⚠️ Poll failed: ${res.status}`, 'warn');
         }
-      } catch (e) { console.warn('[Balance Poll] failed', e); }
+      } catch (e) { 
+        log(`❌ Poll error: ${e.message}`, 'error');
+      }
 
       // Mobile-optimized: poll every 3s (aggressive but necessary)
       pollTimer = setTimeout(poll, 3000);
@@ -2445,30 +2596,32 @@ window.applyBalanceVisibility = applyBalanceVisibility;
   function connectWS() {
     try {
       if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
+        log('⚠️ WS already connecting/open', 'warn');
         return; // Already connecting/open
       }
 
-      console.log('[WS] Connecting...');
+      log('🔌 WS: Connecting to wss://api.flexgig.com.ng/ws/wallet...', 'info');
       ws = new WebSocket('wss://api.flexgig.com.ng/ws/wallet');
 
       let heartbeatInterval = null;
 
       // Update global reference every time we create a new WS
       window.__current_ws = ws;
-      console.log('[WS] Live instance exposed to window.__current_ws');
+      log('✓ WS instance exposed to window.__current_ws', 'success');
 
       ws.onopen = () => {
-        console.log('[WS] Connected');
+        log('✅ WS: Connected! Subscribing...', 'success');
         ws.send(JSON.stringify({ type: 'subscribe', user_uid: uid }));
+        log(`📤 WS: Sent subscribe for user ${uid}`, 'info');
 
         // AGGRESSIVE heartbeat: every 15s to fight mobile connection drops
         clearInterval(heartbeatInterval);
         heartbeatInterval = setInterval(() => {
           if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: 'ping' }));
-            console.log('[WS] Heartbeat sent');
+            log('💓 WS: Heartbeat sent', 'info');
           } else {
-            console.warn('[WS] Connection dead, attempting reconnect...');
+            log('❌ WS: Connection dead, attempting reconnect...', 'error');
             clearInterval(heartbeatInterval);
             connectWS();
           }
@@ -2480,28 +2633,30 @@ window.applyBalanceVisibility = applyBalanceVisibility;
       ws.onmessage = (e) => {
         try {
           const data = JSON.parse(e.data);
-          console.log('WEBSOCKET MESSAGE:', data);
+          log(`📨 WS: Received message: ${JSON.stringify(data)}`, 'info');
 
           if (data.type === 'balance_update' && data.balance !== undefined) {
+            log(`💰 WS: Balance update received: ₦${data.balance.toLocaleString()}`, 'success');
             handleNewBalance(data.balance, 'websocket');
           }
 
           // Dispatch transaction if present
           let txDetail = data.transaction || (data.type === 'transaction' ? data : null);
           if (txDetail) {
+            log(`📝 WS: Transaction update dispatched`, 'info');
             document.dispatchEvent(new CustomEvent('transaction_update', { detail: txDetail }));
           }
         } catch (err) {
-          console.warn('[WS] Parse error', err);
+          log(`❌ WS: Parse error: ${err.message}`, 'error');
         }
       };
 
       ws.onerror = (e) => {
-        console.warn('[WS] Error', e);
+        log(`❌ WS: Error occurred`, 'error');
       };
 
       ws.onclose = (e) => {
-        console.warn('[WS] Closed — reconnecting in 1s', e.code, e.reason);
+        log(`🔴 WS: Closed (code: ${e.code}, reason: ${e.reason}) — reconnecting in 1s`, 'warn');
         clearInterval(heartbeatInterval);
 
         // IMMEDIATE reconnect for mobile + ensure polling continues
@@ -2512,7 +2667,7 @@ window.applyBalanceVisibility = applyBalanceVisibility;
       };
 
     } catch (err) {
-      console.error('[WS] Failed to create', err);
+      log(`❌ WS: Failed to create: ${err.message}`, 'error');
       setTimeout(connectWS, 3000);
     }
   }
@@ -2520,7 +2675,7 @@ window.applyBalanceVisibility = applyBalanceVisibility;
   // CRITICAL: Re-check balance when user returns to app (iOS/Android fix)
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
-      console.log('[Visibility] Page visible → force balance check + WS reconnect');
+      log('👁️ Page visible → force balance check + WS reconnect', 'info');
       
       // Immediate balance check
       fetch(`${window.__SEC_API_BASE}/api/session?light=true&t=${Date.now()}`, { 
@@ -2531,13 +2686,15 @@ window.applyBalanceVisibility = applyBalanceVisibility;
         .then(r => r.ok ? r.json() : null)
         .then(j => {
           if (j?.user?.wallet_balance !== undefined) {
+            log(`✓ Visibility check: ₦${j.user.wallet_balance.toLocaleString()}`, 'success');
             handleNewBalance(j.user.wallet_balance, 'visibility');
           }
-        });
+        })
+        .catch(e => log(`❌ Visibility check failed: ${e.message}`, 'error'));
 
       // Force WebSocket reconnect if dead
       if (!ws || ws.readyState !== WebSocket.OPEN) {
-        console.log('[Visibility] WS dead, reconnecting...');
+        log('🔌 WS dead, reconnecting...', 'warn');
         connectWS();
       }
 
@@ -2549,7 +2706,7 @@ window.applyBalanceVisibility = applyBalanceVisibility;
   // Also on resume, focus, pageshow (covers all mobile scenarios)
   ['resume', 'focus', 'pageshow'].forEach(event => {
     window.addEventListener(event, () => {
-      console.log(`[${event}] Forcing balance check + WS reconnect`);
+      log(`🔄 [${event}] Forcing balance check + WS reconnect`, 'info');
       
       // Triple guarantee: fetch + WS + polling
       fetch(`${window.__SEC_API_BASE}/api/session?light=true&t=${Date.now()}`, { 
@@ -2557,7 +2714,13 @@ window.applyBalanceVisibility = applyBalanceVisibility;
         cache: 'no-store' 
       })
         .then(r => r.ok ? r.json() : null)
-        .then(j => j?.user?.wallet_balance !== undefined && handleNewBalance(j.user.wallet_balance, event));
+        .then(j => {
+          if (j?.user?.wallet_balance !== undefined) {
+            log(`✓ [${event}] Balance: ₦${j.user.wallet_balance.toLocaleString()}`, 'success');
+            handleNewBalance(j.user.wallet_balance, event);
+          }
+        })
+        .catch(e => log(`❌ [${event}] Check failed: ${e.message}`, 'error'));
 
       connectWS();
       startPolling();
@@ -2566,6 +2729,7 @@ window.applyBalanceVisibility = applyBalanceVisibility;
 
   // Start everything
   setTimeout(() => {
+    log('🚀 Starting balance monitoring system...', 'info');
     connectWS();
     startPolling(); // run polling always on mobile
   }, 800);
@@ -2573,9 +2737,10 @@ window.applyBalanceVisibility = applyBalanceVisibility;
   // Initial load
   getSession().then(s => {
     if (s?.user?.wallet_balance !== undefined) {
+      log(`💰 Initial balance: ₦${s.user.wallet_balance.toLocaleString()}`, 'success');
       handleNewBalance(s.user.wallet_balance, 'initial');
     }
-  });
+  }).catch(e => log(`❌ Initial session failed: ${e.message}`, 'error'));
 
 })();
 
