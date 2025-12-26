@@ -2567,7 +2567,8 @@ window.applyBalanceVisibility = applyBalanceVisibility;
     const poll = async () => {
       try {
         log('🔄 Polling balance...', 'info');
-        const res = await fetch(`${window.__SEC_API_BASE}/api/session?light=true&t=${Date.now()}`, {
+        // REMOVED light=true — we need the full user object with wallet_balance
+        const res = await fetch(`${window.__SEC_API_BASE}/api/session?t=${Date.now()}`, {
           credentials: 'include',
           cache: 'no-store',
           headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' }
@@ -2679,7 +2680,7 @@ window.applyBalanceVisibility = applyBalanceVisibility;
       log('👁️ Page visible → force balance check + WS reconnect', 'info');
       
       // Immediate balance check
-      fetch(`${window.__SEC_API_BASE}/api/session?light=true&t=${Date.now()}`, { 
+      fetch(`${window.__SEC_API_BASE}/api/session?t=${Date.now()}`, { 
         credentials: 'include',
         cache: 'no-store',
         headers: { 'Cache-Control': 'no-cache' }
@@ -2710,7 +2711,7 @@ window.applyBalanceVisibility = applyBalanceVisibility;
       log(`🔄 [${event}] Forcing balance check + WS reconnect`, 'info');
       
       // Triple guarantee: fetch + WS + polling
-      fetch(`${window.__SEC_API_BASE}/api/session?light=true&t=${Date.now()}`, { 
+      fetch(`${window.__SEC_API_BASE}/api/session?t=${Date.now()}`, { 
         credentials: 'include',
         cache: 'no-store' 
       })
