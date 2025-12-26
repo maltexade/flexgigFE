@@ -2592,8 +2592,8 @@ window.applyBalanceVisibility = applyBalanceVisibility;
         log(`❌ Poll error: ${e.message}`, 'error');
       }
 
-      // Mobile-optimized: poll every 3s (aggressive but necessary)
-      pollTimer = setTimeout(poll, 3000);
+      // Termux-optimized: poll every 15s (gentle on device + still responsive)
+      pollTimer = setTimeout(poll, 15000);
     };
     poll();
   }
