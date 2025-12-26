@@ -2325,7 +2325,8 @@ window.applyBalanceVisibility = applyBalanceVisibility;
 
 (function () {
   // ========== DEBUG LOG TOGGLE ==========
-  const ENABLE_DEBUG_LOG = true; // Set to false to disable completely
+  const ENABLE_DEBUG_LOG = true;  // KEEP THIS TRUE - keeps polling/WS alive
+  const SHOW_DEBUG_UI = false;    // Set to true only when YOU need to debug
   // ======================================
 
   const uid = window.__USER_UID || localStorage.getItem('userId');
@@ -2336,7 +2337,7 @@ window.applyBalanceVisibility = applyBalanceVisibility;
   let debugLogVisible = false;
 
   function initDebugLog() {
-    if (!ENABLE_DEBUG_LOG) return;
+    if (!ENABLE_DEBUG_LOG || !SHOW_DEBUG_UI) return; // Only create UI if SHOW_DEBUG_UI is true
 
     // Create log container
     debugLog = document.createElement('div');
@@ -2431,8 +2432,8 @@ window.applyBalanceVisibility = applyBalanceVisibility;
     // Always log to console for debugging
     console.log(`[Balance Debug] ${message}`);
     
-    // Only show on-screen UI if debug is enabled
-    if (!ENABLE_DEBUG_LOG || !debugLog) return;
+    // Only show on-screen UI if SHOW_DEBUG_UI is enabled
+    if (!SHOW_DEBUG_UI || !debugLog) return;
 
     const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 });
     const colors = {
@@ -2467,8 +2468,8 @@ window.applyBalanceVisibility = applyBalanceVisibility;
   // Expose log function globally
   window.__balanceLog = log;
 
-  // Initialize log UI if enabled
-  if (ENABLE_DEBUG_LOG) {
+  // Initialize log UI only if SHOW_DEBUG_UI is enabled
+  if (ENABLE_DEBUG_LOG && SHOW_DEBUG_UI) {
     setTimeout(initDebugLog, 500);
   }
   
