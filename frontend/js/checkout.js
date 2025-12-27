@@ -1040,6 +1040,7 @@ async function pollForFinalStatus(reference) {
   let attempts = 0;
   const maxAttempts = 60;
   let showedPending = false;
+  let showedFailed = false;
 
   while (attempts < maxAttempts) {
     try {
@@ -1060,21 +1061,23 @@ async function pollForFinalStatus(reference) {
             return;
           }
 
-          // Final failure after all retries
-          if (status === 'failed' || status === 'refund') {
+          // Final failure — show only once
+          if ((status === 'failed' || status === 'refund') && !showedFailed) {
+            showedFailed = true;
+
             if (showedPending) {
               updateReceiptToFailed('Data delivery failed. Amount has been refunded instantly.');
             } else {
-              // Rare: final fail before pending shown
+              // First attempt failed and no retries succeeded — show Pending with fail message
               updateReceiptToPending();
               document.getElementById('receipt-status').textContent = 'Delivery Failed';
-              document.getElementById('receipt-message').textContent = 'Data delivery failed after retries. Amount has been refunded instantly.';
+              document.getElementById('receipt-message').textContent = 'Data delivery failed. Amount has been refunded instantly.';
             }
             closeCheckoutModal();
             return;
           }
 
-          // After second poll (~30s, matches your retry delay) and still pending → first attempt failed → show Pending
+          // Still pending — after ~30s (2 polls) → first attempt failed → show Pending once
           if (!showedPending && attempts >= 2) {
             showedPending = true;
             updateReceiptToPending();
@@ -1086,15 +1089,18 @@ async function pollForFinalStatus(reference) {
     }
 
     attempts++;
-    await new Promise(r => setTimeout(r, 15000)); // 15s poll
+    await new Promise(r => setTimeout(r, 15000));
   }
 
   // Timeout
-  if (showedPending) {
-    document.getElementById('receipt-message').textContent = 'Taking longer than expected. Check history later.';
-  } else {
-    updateReceiptToPending();
-    document.getElementById('receipt-message').textContent = 'Delivery taking longer than expected. Check history.';
+  if (!showedFailed) {
+    showedFailed = true;
+    if (showedPending) {
+      document.getElementById('receipt-message').textContent = 'Taking longer than expected. Check history later.';
+    } else {
+      updateReceiptToPending();
+      document.getElementById('receipt-message').textContent = 'Delivery taking longer than expected. Check history.';
+    }
   }
 }
 // Close & Buy Again handlers (unchanged)
