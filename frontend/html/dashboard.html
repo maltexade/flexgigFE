@@ -344,23 +344,24 @@
           </div>
 
           <div class="phone-section">
-            <p style="font-size: small;" for="phone-input">Phone Number</p>
-            <div class="phone-input-row">
-              <input
-                type="tel"
-                id="phone-input"
-                class="phone-input"
-                pattern="[0-9]*"
-                inputmode="tel"
-                placeholder="Enter phone number"
-                autocomplete="tel"
-                enterkeyhint="done"
-              />
-              <button class="contact-btn" type="button" aria-label="Pick from contacts">
-                <img src="/frontend/svg/contact-icon.svg" alt="Contact Icon" class="contact-btn contact-btn-svg" />
-              </button>
-            </div>
-          </div>
+  <p style="font-size: small;" for="phone-input">Phone Number</p>
+  <div class="phone-input-row">
+    <input
+      type="tel"
+      id="phone-input"
+      class="phone-input"
+      pattern="[0-9]*"
+      inputmode="tel"
+      placeholder="Enter phone number"
+      autocomplete="off"
+      enterkeyhint="done"
+      name="phone"
+    />
+    <button class="contact-btn" type="button" aria-label="Pick from contacts">
+      <img src="/frontend/svg/contact-icon.svg" alt="Contact Icon" class="contact-btn contact-btn-svg" />
+    </button>
+  </div>
+</div>
 
           <div class="contact-modal" id="contactModal" style="display:none;">
             <div class="modal-content">
