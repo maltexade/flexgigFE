@@ -1049,7 +1049,8 @@ function updateReceiptToPending() {
 
 async function pollForFinalStatus(reference) {
   let attempts = 0;
-  const maxAttempts = 40;  // ~10 mins
+  const maxAttempts = 60;
+  let firstAttemptChecked = false;
 
   while (attempts < maxAttempts) {
     try {
@@ -1061,17 +1062,33 @@ async function pollForFinalStatus(reference) {
         if (tx) {
           const status = tx.status.toLowerCase();
 
-          if (status === 'success') {
-            // If receipt open, update content to success
-            if (!document.getElementById('smart-receipt-backdrop').classList.contains('hidden')) {
-              updateReceiptToSuccess(tx);
+          // First time status changes from pending = first attempt result
+          if (!firstAttemptChecked && status !== 'pending') {
+            firstAttemptChecked = true;
+
+            if (status === 'success') {
+              // First attempt succeeded → show Success immediately
+              await updateReceiptToSuccess(tx);
+              addLocalTransaction(window._currentCheckoutData);
+              resetCheckoutUI();
+              closeCheckoutModal();
+              return;
+            } else {
+              // First attempt failed → show Pending receipt
+              updateReceiptToPending();
             }
+          }
+
+          // Final result
+          if (status === 'success') {
+            await updateReceiptToSuccess(tx);
+            addLocalTransaction(window._currentCheckoutData);
+            resetCheckoutUI();
+            closeCheckoutModal();
             return;
           } else if (status === 'failed' || status === 'refund') {
-            // If receipt open, update to failed
-            if (!document.getElementById('smart-receipt-backdrop').classList.contains('hidden')) {
-              updateReceiptToFailed('Data delivery failed. Amount has been refunded.');
-            }
+            updateReceiptToFailed('Data delivery failed. Amount has been refunded instantly.');
+            closeCheckoutModal();
             return;
           }
         }
@@ -1081,13 +1098,11 @@ async function pollForFinalStatus(reference) {
     }
 
     attempts++;
-    await new Promise(r => setTimeout(r, 15000));  // 15s poll
+    await new Promise(r => setTimeout(r, 15000));
   }
 
-  // If still pending, update message if open
-  if (!document.getElementById('smart-receipt-backdrop').classList.contains('hidden')) {
-    document.getElementById('receipt-message').textContent = 'Taking longer than expected. Check history later.';
-  }
+  updateReceiptToFailed('Delivery taking longer than expected. Check history.');
+  closeCheckoutModal();
 }
 // Close & Buy Again handlers (unchanged)
 document.getElementById('receipt-done')?.addEventListener('click', () => {
