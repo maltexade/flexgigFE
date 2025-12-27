@@ -1038,7 +1038,10 @@ async function loadLatestHistory() {
     reference: raw.reference || raw.id,
     type: raw.type || (Number(raw.amount) > 0 ? 'credit' : 'debit'),
     amount: Math.abs(Number(raw.amount || 0)),
-    description: raw.description || raw.narration || 'Transaction',
+    description: (raw.description || raw.narration || 'Transaction')
+  .replace(/\s*\(pending\)\s*/gi, '')
+  .trim(),
+
     time: raw.time || raw.created_at || new Date().toISOString(),
     status: raw.status || 'SUCCESS',
     provider: raw.provider,

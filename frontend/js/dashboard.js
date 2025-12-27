@@ -101,24 +101,12 @@ openModal: (() => {
 
 
 
-    // Form inputs
-    phoneNumber: document.getElementById('phone-input')?.value || '',
-    pinInputs: {
-      current: document.getElementById('currentPin')?.value || '',
-      new: document.getElementById('newPin')?.value || '',
-      confirm: document.getElementById('confirmPin')?.value || '',
-    },
 
     // Selection state
     selectedProvider: document.querySelector('.provider-box.active')?.className.match(/mtn|airtel|glo|ninemobile/)?.[0] || 'mtn',
     selectedPlanId: document.querySelector('.plan-box.selected')?.getAttribute('data-id') || '',
 
-    // Scroll positions
-    scrollPositions: {
-      dashboard: window.scrollY,
-      plansRow: document.querySelector('.plans-row')?.scrollLeft || 0,
-      allPlansModal: document.getElementById('allPlansModalContent')?.scrollTop || 0,
-    },
+
 
     // Extra
     timestamp: Date.now(),
@@ -755,6 +743,17 @@ const DEBUG_MODE = false; // ← Change to false to hide completely
   }, 1500);
 
 })();
+
+document.addEventListener(
+  'click',
+  e => {
+    if (e.target.matches('input, textarea, select')) {
+      e.stopImmediatePropagation();
+    }
+  },
+  true
+);
+
 
 
 let __backHandler = null;
