@@ -438,9 +438,7 @@ async function triggerCheckoutAuthWithDedicatedModal() {
 // ==================== REAL PAYMENT PROCESSING (WITH LOADER) ====================
 // ==================== REAL PAYMENT PROCESSING (NO LOADER OVERLAY) ====================
 async function processPayment() {
-  if (!checkoutData) {
-    throw new Error('No checkout data available');
-  }
+  if (!checkoutData) throw new Error('No checkout data');
 
   const payload = {
     plan_id: checkoutData.planId,
@@ -448,15 +446,9 @@ async function processPayment() {
     provider: checkoutData.provider.toLowerCase(),
   };
 
-  console.log('[checkout] Sending to backend:', payload);
-  showToast('Processing', 'info');
-
-  // Fetch without withLoader – receipt modal handles UI
   const response = await fetch('https://api.flexgig.com.ng/api/purchase-data', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
     credentials: 'include',
   });
@@ -467,30 +459,21 @@ async function processPayment() {
     if (result.error === 'insufficient_balance') {
       throw new Error(`Insufficient balance: ₦${result.current_balance?.toLocaleString() || '0'}`);
     }
-    if (result.error === 'delivery_failed') {
-      throw new Error('Data delivery failed. Amount has been refunded.');
-    }
-    throw new Error(result.error || result.message || 'Payment failed');
+    throw new Error(result.message || 'Purchase failed');
   }
 
-  console.log('[checkout] Payment success:', result);
-
-  if (result.new_balance !== undefined) {
-    window.updateAllBalances?.(result.new_balance);
+  // Save reference for polling
+  if (result.reference) {
+    window._currentCheckoutData.reference = result.reference;
   }
 
-  if (typeof renderTransactions === 'function') {
-    setTimeout(renderTransactions, 500);
-  }
-
-  return result;  // Return full result for message, reference, etc.
+  return result;
 }
 
 // ==================== MAIN PAY BUTTON HANDLER ====================
 // ==================== MAIN PAY BUTTON HANDLER ====================
 async function onPayClicked(ev) {
   console.log('[checkout] Pay button clicked');
-
 
   const payBtn = document.getElementById('payBtn');
   if (!payBtn || payBtn.disabled) return;
@@ -506,31 +489,16 @@ async function onPayClicked(ev) {
     const authSuccess = await triggerCheckoutAuthWithDedicatedModal();
     if (!authSuccess) return;
 
-    // Show processing receipt immediately
     showProcessingReceipt(checkoutData);
 
     const result = await processPayment();
 
-    addLocalTransaction(checkoutData);
-    resetCheckoutUI();
-
-    // Update to success with full details
-    await updateReceiptToSuccess(result);
-
-    closeCheckoutModal();
+    // Start polling for final status
+    pollForFinalStatus(result.reference || checkoutData.reference);
 
   } catch (err) {
     console.error('[checkout] Payment failed:', err);
-
-    let message = err.message || 'Purchase failed. Please try again.';
-    if (err.message?.includes('Insufficient')) message = err.message;
-    if (err.message?.includes('refunded')) message = err.message;
-
-    // Update to failed
-    updateReceiptToFailed(message);
-
-    closeCheckoutModal();
-
+    updateReceiptToFailed(err.message || 'Purchase failed. Please try again.');
   } finally {
     payBtn.disabled = false;
     payBtn.textContent = originalText;
@@ -1041,16 +1009,108 @@ function updateReceiptToFailed(errorMessage) {
   document.getElementById('receipt-actions').style.display = 'flex';
   document.getElementById('receipt-buy-again').textContent = 'Try Again';
 }
+// NEW: Calm pending screen after 60 seconds
+function updateReceiptToPending() {
+  const icon = document.getElementById('receipt-icon');
+  icon.className = 'receipt-icon pending';
+  icon.innerHTML = `
+    <svg width="52" height="52" viewBox="0 0 52 52" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="26" cy="26" r="25" fill="none" stroke="#FF9500" stroke-width="2"/>
+      <circle cx="26" cy="26" r="10" fill="#FF9500"/>
+      <path d="M26 16V26L32 32" stroke="white" stroke-width="3" stroke-linecap="round"/>
+    </svg>
+  `;
+
+  document.getElementById('receipt-status').textContent = 'Delivery in Progress';
+  document.getElementById('receipt-message').innerHTML = `
+    Your data purchase is being processed.<br><br>
+    <strong>This may take 1–5 minutes</strong> due to network delays.<br><br>
+    You can safely close this screen.<br>
+    <span style="color:#4ade80; font-weight:600;">Your money is safe — if delivery fails, it will be refunded automatically.</span>
+  `;
+
+  document.getElementById('receipt-details').style.display = 'block';
+
+  const actions = document.getElementById('receipt-actions');
+  actions.style.display = 'flex';
+  actions.innerHTML = `
+    <button id="receipt-done" style="flex:1; background:linear-gradient(90deg,#00d4aa,#00bfa5); color:white; border:none; border-radius:50px; padding:14px; font-weight:600;">
+      Done
+    </button>
+  `;
+
+  // Re-attach close handler
+  document.getElementById('receipt-done').onclick = () => {
+    const backdrop = document.getElementById('smart-receipt-backdrop');
+    if (backdrop) {
+      backdrop.classList.add('hidden');
+      backdrop.setAttribute('aria-hidden', 'true');
+      lockScrollForReceiptModal(backdrop, false);
+      resetCheckoutUI();
+      closeCheckoutModal();
+    }
+  };
+}
+
+// NEW: Poll backend for final status with timeout to pending screen
+async function pollForFinalStatus(reference) {
+  let attempts = 0;
+  const maxProcessingAttempts = 4;    // 60 seconds (15s × 4 polls)
+  const maxTotalAttempts = 40;        // 10 minutes total
+
+  while (attempts < maxTotalAttempts) {
+    try {
+      const res = await fetch('https://api.flexgig.com.ng/api/transactions?limit=10', {
+        credentials: 'include'
+      });
+      if (res.ok) {
+        const json = await res.json();
+        const tx = json.items.find(t => t.reference === reference);
+
+        if (tx) {
+          const status = tx.status.toLowerCase();
+
+          if (status === 'success') {
+            await updateReceiptToSuccess(tx);
+            return;
+          } else if (status === 'failed' || status === 'refund') {
+            updateReceiptToFailed('Data delivery failed. Amount has been refunded instantly.');
+            return;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[checkout] Poll error:', e);
+    }
+
+    attempts++;
+
+    // After 60 seconds → show calm pending screen
+    if (attempts === maxProcessingAttempts) {
+      updateReceiptToPending();
+    }
+
+    await new Promise(r => setTimeout(r, 15000)); // Poll every 15 seconds
+  }
+
+  // Final fallback if still not done
+  updateReceiptToPending();
+}
 
 // Close & Buy Again handlers (unchanged)
-document.getElementById('receipt-done')?.addEventListener('click', () => {
+function closeReceiptAndReset() {
   const backdrop = document.getElementById('smart-receipt-backdrop');
-  backdrop?.classList.add('hidden');
-  backdrop?.setAttribute('aria-hidden', 'true');
+  if (backdrop) {
+    backdrop.classList.add('hidden');
+    backdrop.setAttribute('aria-hidden', 'true');
+    lockScrollForReceiptModal(backdrop, false);
+    resetCheckoutUI();
+    closeCheckoutModal();
+  }
+}
 
-  // 🔓 UNLOCK SCROLL HERE
-  lockScrollForReceiptModal(backdrop, false);
-});
+document.getElementById('receipt-done')?.addEventListener('click', closeReceiptAndReset);
+document.getElementById('receipt-buy-again')?.addEventListener('click', closeReceiptAndReset);
 
 
 
