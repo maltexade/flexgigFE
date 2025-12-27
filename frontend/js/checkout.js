@@ -447,7 +447,7 @@ async function triggerCheckoutAuthWithDedicatedModal() {
           provider: checkoutData.provider.toLowerCase()
         };
 
-        const res = await fetch('https://api.flexgig.com.ng/api/purchase-data/prepare', {
+        const res = await fetch('https://api.flexgig.com.ng/api/transactions/purchase-data/prepare', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
@@ -564,7 +564,7 @@ async function onPayClicked(ev) {
         reference: checkoutData.reference  // Re-use prepared reference
       };
 
-      const response = await fetch('https://api.flexgig.com.ng/api/purchase-data', {
+      const response = await fetch('https://api.flexgig.com.ng/api/transactions/buy-data', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(finalPayload),
