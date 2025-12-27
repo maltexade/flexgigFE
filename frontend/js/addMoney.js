@@ -430,6 +430,7 @@ if (pending) {
   // Reassign elements and events after restoring content
   assignAddMoneyEvents();
 }
+window.openAddMoneyModalContent = window.openAddMoneyModalContent || openAddMoneyModalContent;
 
 /* 3) When a balance update arrives (payment completed), clear localStorage so modal won't show old tx */
 (function patchBalanceUpdateClear() {

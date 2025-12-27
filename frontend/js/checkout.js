@@ -494,9 +494,17 @@ async function onPayClicked(ev) {
     // Keep Processing spinner — poll will handle switching
     pollForFinalStatus(result.reference);
 
-  } catch (err) {
+    } catch (err) {
     console.error('[checkout] Payment failed:', err);
-    updateReceiptToFailed(err.message || 'Purchase failed. Please try again.');
+
+    if (err.message.includes('Insufficient balance')) {
+      // Extract balance from message like "Insufficient balance: ₦500"
+      const match = err.message.match(/₦([\d,]+)/);
+      const currentBal = match ? parseFloat(match[1].replace(/,/g, '')) : 0;
+      updateReceiptToInsufficient('You do not have enough balance to complete this purchase.', currentBal);
+    } else {
+      updateReceiptToFailed(err.message || 'Purchase failed. Please try again.');
+    }
     closeCheckoutModal();
   } finally {
     payBtn.disabled = false;
@@ -1007,6 +1015,60 @@ function updateReceiptToFailed(errorMessage) {
   document.getElementById('receipt-actions').style.display = 'flex';
   document.getElementById('receipt-buy-again').textContent = 'Try Again';
 }
+
+function updateReceiptToInsufficient(message, currentBalance = 0) {
+  const icon = document.getElementById('receipt-icon');
+  icon.className = 'receipt-icon failed';
+  icon.innerHTML = `
+    <svg class="cross" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 52">
+      <circle class="cross__circle" cx="26" cy="26" r="25" fill="none"/>
+      <path class="cross__path" fill="none" d="M16 16 36 36"/>
+      <path class="cross__path" fill="none" d="M16 36 36 16"/>
+    </svg>
+  `;
+
+  document.getElementById('receipt-status').textContent = 'Insufficient Balance';
+  document.getElementById('receipt-message').innerHTML = `
+    ${message}<br><br>
+    <strong>Current balance: ₦${Number(currentBalance).toLocaleString()}</strong><br><br>
+    Please fund your wallet to complete this purchase.
+  `;
+
+  document.getElementById('receipt-details').style.display = 'none';
+
+  const actions = document.getElementById('receipt-actions');
+  actions.style.display = 'flex';
+  actions.innerHTML = `
+    <button id="receipt-fund-wallet" style="flex:1; background:linear-gradient(90deg,#00d4aa,#00bfa5); color:white; border:none; border-radius:50px; padding:14px; font-weight:600; margin-right:8px;">
+      Fund Wallet
+    </button>
+    <button id="receipt-done" style="flex:1; background:#333; color:white; border:none; border-radius:50px; padding:14px; font-weight:600;">
+      Close
+    </button>
+  `;
+
+  // Add click handler for Fund Wallet
+  document.getElementById('receipt-fund-wallet')?.addEventListener('click', () => {
+    closeCheckoutModal();
+    // Open your fund wallet modal/page — replace with your actual function
+    if (typeof openFundWalletModal === 'function') {
+      openAddMoneyModalContent();
+    } else if (typeof navigateToFund === 'function') {
+      navigateToFund();
+    } else {
+      window.location.href = '/fund'; // fallback
+    }
+  });
+
+  document.getElementById('receipt-done')?.addEventListener('click', () => {
+    const backdrop = document.getElementById('smart-receipt-backdrop');
+    backdrop?.classList.add('hidden');
+    backdrop?.setAttribute('aria-hidden', 'true');
+    lockScrollForReceiptModal(backdrop, false);
+  });
+}
+
+
 function updateReceiptToPending() {
   const icon = document.getElementById('receipt-icon');
   icon.className = 'receipt-icon pending';
