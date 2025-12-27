@@ -1050,14 +1050,14 @@ function updateReceiptToInsufficient(message, currentBalance = 0) {
   // Add click handler for Fund Wallet
   document.getElementById('receipt-fund-wallet')?.addEventListener('click', () => {
     closeCheckoutModal();
+    
     // Open your fund wallet modal/page — replace with your actual function
-    if (typeof addMoneyModal === 'function') {
-      window.ModalManager.openModal('addMoneyModal');
-    } else if (typeof navigateToFund === 'function') {
-      navigateToFund();
-    } else {
-      window.location.href = '/fund'; // fallback
-    }
+    if (window.ModalManager?.openModal) {
+          window.ModalManager.openModal('addMoneyModal');
+          log('✓ Modal opened via ModalManager', 'success');
+        } else {
+          log('⚠️ ModalManager not available', 'warn');
+        }
   });
 
   document.getElementById('receipt-done')?.addEventListener('click', () => {
