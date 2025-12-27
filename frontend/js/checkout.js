@@ -281,11 +281,6 @@ function closeCheckoutModal() {
     if (history.state && history.state.popup && history.state.modal === 'checkout') {
       history.back();
     }
-        // Clear prepared reference if purchase not completed
-    if (checkoutData?.reference) {
-      checkoutData.reference = null;
-      checkoutData.new_balance = null;
-    }
   } catch (err) {
     console.error('[checkout] Error closing modal:', err);
   }
@@ -425,27 +420,14 @@ function addLocalTransaction(info) {
 
 // ==================== AUTHENTICATION WITH DEDICATED PIN MODAL ====================
 async function triggerCheckoutAuthWithDedicatedModal() {
-  return new Promise(async (resolve) => {
+  return new Promise((resolve) => {
     window._checkoutPinResolve = (success) => {
       delete window._checkoutPinResolve;
       resolve(success);
     };
 
     if (typeof window.showCheckoutPinModal === 'function') {
-      try {
-        // Just gather data — NO pre-flight, NO receipt yet
-        checkoutData = gatherCheckoutData();
-        if (!checkoutData) {
-          resolve(false);
-          return;
-        }
-
-        // Just show PIN modal — clean and simple
-        window.showCheckoutPinModal();
-      } catch (err) {
-        console.error('[checkout] Failed to open PIN modal:', err);
-        resolve(false);
-      }
+      window.showCheckoutPinModal();
     } else {
       console.error('[checkout] showCheckoutPinModal not available');
       resolve(false);
@@ -498,95 +480,36 @@ async function onPayClicked(ev) {
   payBtn.disabled = true;
   payBtn.textContent = 'Processing...';
 
-          try {
-      // Data gathered in triggerCheckoutAuthWithDedicatedModal
-      const authSuccess = await triggerCheckoutAuthWithDedicatedModal();
-      if (!authSuccess) {
-        payBtn.disabled = false;
-        payBtn.textContent = originalText;
-        return;
-      }
+  try {
+    checkoutData = gatherCheckoutData();
+    if (!checkoutData) throw new Error('Invalid checkout data');
 
-      // === NOW: After PIN success → show Processing + do final purchase ===
-      showProcessingReceipt(checkoutData);
+    const authSuccess = await triggerCheckoutAuthWithDedicatedModal();
+    if (!authSuccess) return;
 
-      // Pre-flight prepare (fast balance check)
-      const preparePayload = {
-        plan_id: checkoutData.planId,
-        phone: checkoutData.rawNumber,
-        provider: checkoutData.provider.toLowerCase()
-      };
+    showProcessingReceipt(checkoutData);
 
-      let reference;
-      try {
-        const prepareRes = await fetch('https://api.flexgig.com.ng/api/transactions/purchase-data/prepare', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(preparePayload),
-          credentials: 'include'
-        });
+    const result = await processPayment();
 
-        const prepareResult = await prepareRes.json();
-
-        if (!prepareRes.ok) {
-          if (prepareResult.error === 'insufficient_balance') {
-            updateReceiptToInsufficient('Insufficient balance.', prepareResult.current_balance || 0);
-          } else {
-            updateReceiptToFailed(prepareResult.message || 'Failed to prepare purchase.');
-          }
-          closeCheckoutModal();
-          return;
-        }
-
-        reference = prepareResult.reference;
-      } catch (err) {
-        updateReceiptToFailed('Network error during preparation.');
-        closeCheckoutModal();
-        return;
-      }
-
-      // Final purchase with reference
-      const finalPayload = {
-        plan_id: checkoutData.planId,
-        phone: checkoutData.rawNumber,
-        provider: checkoutData.provider.toLowerCase(),
-        reference
-      };
-
-      const response = await fetch('https://api.flexgig.com.ng/api/transactions/buy-data', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(finalPayload),
-        credentials: 'include'
-      });
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        if (result.error === 'insufficient_balance') {
-          updateReceiptToInsufficient('Insufficient balance.', result.current_balance || 0);
-        } else {
-          updateReceiptToFailed(result.message || 'Purchase failed.');
-        }
-        closeCheckoutModal();
-        return;
-      }
-
-      // Success/pending
-      checkoutData.reference = result.reference;
-      checkoutData.new_balance = result.new_balance;
-
-      // Start polling
-      pollForFinalStatus(result.reference);
+    // Keep Processing spinner — poll will handle switching
+    pollForFinalStatus(result.reference);
 
     } catch (err) {
-      console.error('[checkout] Purchase failed:', err);
-      updateReceiptToFailed('An error occurred. Please try again.');
-      closeCheckoutModal();
-    } finally {
-      payBtn.disabled = false;
-      payBtn.textContent = originalText;
+    console.error('[checkout] Payment failed:', err);
+
+    if (err.message.includes('Insufficient balance')) {
+      // Extract balance from message like "Insufficient balance: ₦500"
+      const match = err.message.match(/₦([\d,]+)/);
+      const currentBal = match ? parseFloat(match[1].replace(/,/g, '')) : 0;
+      updateReceiptToInsufficient('You do not have enough balance to complete this purchase.', currentBal);
+    } else {
+      updateReceiptToFailed(err.message || 'Purchase failed. Please try again.');
     }
+    closeCheckoutModal();
+  } finally {
+    payBtn.disabled = false;
+    payBtn.textContent = originalText;
+  }
 }
 // ==================== DEDICATED CHECKOUT PIN MODAL LOGIC ====================
 (function() {
