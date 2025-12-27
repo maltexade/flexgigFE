@@ -1,17 +1,21 @@
 // dashboard.js
+// === PREVENT UNWANTED AUTO-SCROLL ON RELOAD (lightweight hack) ===
+(function() {
+  // Attaching a focusin listener early often blocks browser auto-focus/scroll restore
+  document.addEventListener('focusin', () => {}, { passive: true });
 
-if ('scrollRestoration' in history) {
-  history.scrollRestoration = 'manual';
-}
+  // Safety: also force top on load (clean, no flash)
+  const forceTop = () => window.scrollTo(0, 0);
 
-const nav = performance.getEntriesByType('navigation')[0];
-const isReload = nav && nav.type === 'reload';
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', forceTop);
+  }
+  window.addEventListener('load', () => {
+    setTimeout(forceTop, 100);
+  });
 
-if (isReload) {
-  window.scrollTo(0, 0);
-}
-
-
+  console.log('[SCROLL FIX] Lightweight prevention active – no more middle/bottom reloads');
+})();
 import { getAllPlans, getPlans, fetchPlans } from './dataPlans.js';  // ADD THIS LINE
 import {
   openCheckoutModal,
@@ -29,7 +33,48 @@ const { createClient } = supabase;
 const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 
-
+    // NUCLEAR OPTION: Total scroll control - disables restore, forces top, blocks jumps
+    (function() {
+      // 1. EARLY: Disable browser's scroll memory globally (before anything else)
+      if ('scrollRestoration' in history) {
+        history.scrollRestoration = 'manual';
+      }
+      
+      // 2. PRE-SAVE: On unload/reload, wipe scroll position (prevents Chrome/Safari from remembering)
+      window.addEventListener('beforeunload', function() {
+        window.scrollTo(0, 0);
+        // Clear any history state that might carry scroll
+        if (history.state && history.state.scrollY) {
+          history.replaceState({ ...history.state, scrollY: 0 }, '');
+        }
+      });
+      
+      // 3. POST-LOAD ENFORCEMENT: Force top after full render (images/JS done)
+      window.addEventListener('load', function() {
+        window.scrollTo(0, 0);
+        // Trap the first unwanted scroll (common Chrome jump after load)
+        let hasJumped = false;
+        window.addEventListener('scroll', function handler() {
+          if (!hasJumped && window.scrollY > 0) {
+            hasJumped = true;
+            window.scrollTo(0, 0);
+            // Remove listener after fix (no perf hit)
+            window.removeEventListener('scroll', handler);
+          }
+        }, { once: true, passive: true });
+      }, { once: true });
+      
+      // 4. DOM READY SAFETY: Immediate top if already loaded (edge case)
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function() {
+          setTimeout(() => window.scrollTo(0, 0), 0); // Micro-delay for reflow
+        });
+      } else {
+        window.scrollTo(0, 0);
+      }
+      
+      console.log('[NUCLEAR SCROLL FIX] Activated - top enforced on reload');
+    })();
 
 
     function saveCurrentAppState() {
