@@ -287,82 +287,156 @@ function closeCheckoutModal() {
 }
 
 // Reset UI after successful purchase (FULL CLEAN RESET TO MTN)
+// Replace your resetCheckoutUI() function (lines 185-248) with this:
 function resetCheckoutUI() {
-  console.log('[checkout] Performing full UI reset after successful purchase');
+  console.log('[checkout] 🧹 Performing full UI reset after successful purchase');
 
   // 1. Clear phone input
   const phoneInput = document.getElementById('phone-input');
   if (phoneInput) {
     phoneInput.value = '';
     phoneInput.classList.remove('invalid');
+    console.log('[checkout] ✓ Phone cleared');
   }
 
-  // 2. Remove .selected from ALL plan boxes (dashboard + modal)
+  // 2. Remove .selected from ALL plan boxes (dashboard + modal) + remove provider classes
+  const providerClasses = ['mtn', 'airtel', 'glo', 'ninemobile'];
   document.querySelectorAll('.plan-box.selected').forEach(el => {
-    el.classList.remove('selected', 'mtn', 'airtel', 'glo', 'ninemobile');
+    el.classList.remove('selected', ...providerClasses);
+    // Also remove the price styling
+    const amount = el.querySelector('.plan-amount');
+    if (amount) amount.classList.remove('plan-price');
   });
+  console.log('[checkout] ✓ All selected plans cleared');
 
-  // 3. Remove active/selected from all provider boxes
-  document.querySelectorAll('.provider-box.active, .provider-box.selected').forEach(el => {
+  // 3. Remove active from all provider boxes
+  document.querySelectorAll('.provider-box').forEach(el => {
     el.classList.remove('active', 'selected');
   });
 
-  // 4. Force MTN as the active provider
+  // 4. Set MTN as active provider
   const mtnBox = document.querySelector('.provider-box.mtn');
   if (mtnBox) {
-    mtnBox.classList.add('active'); // or 'selected' if your CSS uses that
+    mtnBox.classList.add('active');
+    console.log('[checkout] ✓ MTN set as active');
   }
 
-  // 5. Move slider back to MTN (critical for visual correctness)
-  const slider = document.querySelector('.provider-grid .slider');
+  // 5. Move slider to MTN (call dashboard function if available, else do it manually)
+  const slider = document.querySelector('.provider-grid .slider, .slider');
   if (slider && mtnBox) {
-    // Reuse your existing moveSliderTo if available
-    if (typeof moveSliderTo === 'function') {
-      moveSliderTo(mtnBox);
+    // Try to use dashboard's function first
+    if (typeof window.moveSliderTo === 'function') {
+      window.moveSliderTo(mtnBox);
+      console.log('[checkout] ✓ Slider moved via moveSliderTo()');
+    } else {
+      // Manual fallback
+      slider.className = 'slider mtn';
+      const svgPaths = {
+        mtn: '/frontend/svg/MTN-icon.svg'
+      };
+      slider.innerHTML = `
+        <img src="${svgPaths.mtn}" alt="MTN" class="provider-icon" />
+        <div class="provider-name">MTN</div>
+      `;
+      
+      // Position slider on MTN box
+      const boxRect = mtnBox.getBoundingClientRect();
+      const gridRect = mtnBox.parentElement.getBoundingClientRect();
+      const scrollContainer = mtnBox.closest('.provider-grid');
+      const scrollLeft = scrollContainer?.scrollLeft || 0;
+      const left = boxRect.left - gridRect.left + scrollLeft;
+      const top = boxRect.top - gridRect.top;
+      
+      slider.style.left = `${left}px`;
+      slider.style.top = `${top}px`;
+      slider.style.width = `${boxRect.width}px`;
+      slider.style.height = `${boxRect.height}px`;
+      slider.style.transition = 'all 0.3s ease';
+      
+      console.log('[checkout] ✓ Slider moved manually');
     }
-    // Fallback: force classes and position
-    slider.className = 'slider mtn';
-    // Optional: force inline styles if needed
-    const boxRect = mtnBox.getBoundingClientRect();
-    const gridRect = mtnBox.parentElement.getBoundingClientRect();
-    const scrollContainer = mtnBox.closest('.provider-grid');
-    const left = boxRect.left - gridRect.left + (scrollContainer?.scrollLeft || 0);
-    slider.style.left = `${left}px`;
-    slider.style.top = `${boxRect.top - gridRect.top}px`;
-    slider.style.width = `${boxRect.width}px`;
-    slider.style.height = `${boxRect.height}px`;
   }
 
-  // 6. Clear plans row provider classes
+  // 6. Reset plans row to MTN
   const plansRow = document.querySelector('.plans-row');
   if (plansRow) {
-    plansRow.classList.remove('mtn', 'airtel', 'glo', 'ninemobile');
+    plansRow.classList.remove(...providerClasses);
     plansRow.classList.add('mtn');
+    console.log('[checkout] ✓ Plans row set to MTN');
   }
 
-  // 7. Clear any saved plan state to prevent restoreEverything() from re-selecting
+  // 7. Re-render MTN plans (critical - ensures fresh MTN plans are shown)
+  if (typeof window.renderDashboardPlans === 'function') {
+    window.renderDashboardPlans('mtn');
+    console.log('[checkout] ✓ MTN plans re-rendered');
+  }
+  
+  if (typeof window.renderModalPlans === 'function') {
+    window.renderModalPlans('mtn');
+    console.log('[checkout] ✓ Modal plans re-rendered');
+  }
+
+  // 8. Re-attach plan listeners
+  if (typeof window.attachPlanListeners === 'function') {
+    window.attachPlanListeners();
+    console.log('[checkout] ✓ Plan listeners re-attached');
+  }
+
+  // 9. Clear saved state completely
   try {
-    // Clear from localStorage
+    // Clear userState but keep user info
     const rawState = localStorage.getItem('userState');
     if (rawState) {
       const state = JSON.parse(rawState);
+      // Only clear transaction-related data
       delete state.selectedPlan;
       delete state.planId;
+      delete state.provider;
+      delete state.number;
       localStorage.setItem('userState', JSON.stringify(state));
     }
+    
+    // Remove specific checkout keys
     localStorage.removeItem('lastSelectedPlan');
-
-    // Critical: Clear sessionStorage to stop restoreEverything() from bringing back old plan/phone
+    
+    // Clear session state (prevents restoreEverything from bringing back old data)
     sessionStorage.removeItem('__fg_app_state_v2');
+    
+    // Clear provider-specific plan tracking
+    if (typeof window.selectedPlanByProvider === 'object') {
+      Object.keys(window.selectedPlanByProvider).forEach(key => {
+        delete window.selectedPlanByProvider[key];
+      });
+    }
+    
+    console.log('[checkout] ✓ All saved states cleared');
   } catch (err) {
     console.warn('[checkout] Failed to clear storage during reset:', err);
   }
 
-  // 8. Trigger UI updates
-  if (typeof updateContinueState === 'function') updateContinueState();
-  if (typeof updateContactOrCancel === 'function') updateContactOrCancel();
+  // 10. Update UI state (continue button, contact/cancel button)
+  if (typeof window.updateContinueState === 'function') {
+    window.updateContinueState();
+    console.log('[checkout] ✓ Continue button updated');
+  }
+  
+  if (typeof window.updateContactOrCancel === 'function') {
+    window.updateContactOrCancel();
+    console.log('[checkout] ✓ Contact/cancel button updated');
+  }
 
-  console.log('[checkout] Full reset complete — back to fresh MTN state');
+  // 11. Save the clean state
+  if (typeof window.saveUserState === 'function') {
+    window.saveUserState();
+    console.log('[checkout] ✓ Clean state saved');
+  }
+  
+  if (typeof window.saveCurrentAppState === 'function') {
+    window.saveCurrentAppState();
+    console.log('[checkout] ✓ App state saved');
+  }
+
+  console.log('[checkout] ✅ Full reset complete — fresh MTN state restored');
 }
 // Add local transaction (same as your old mock)
 // Add local transaction (safe version — no ReferenceError)
