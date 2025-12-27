@@ -1011,9 +1011,28 @@ function updateReceiptToFailed(errorMessage) {
   document.getElementById('receipt-status').textContent = 'Transaction Failed';
   document.getElementById('receipt-message').textContent = errorMessage;
 
-  document.getElementById('receipt-details').style.display = 'none';  // Hide details on failure
-  document.getElementById('receipt-actions').style.display = 'flex';
-  document.getElementById('receipt-buy-again').textContent = 'Try Again';
+  document.getElementById('receipt-details').style.display = 'none';
+
+  const actions = document.getElementById('receipt-actions');
+  actions.style.display = 'flex';
+  actions.innerHTML = `
+    <button id="receipt-buy-again" style="flex:1; background:#ff4444; color:white; border:none; border-radius:50px; padding:14px; font-weight:600; margin-right:8px;">
+      Try Again
+    </button>
+    <button id="receipt-done" style="flex:1; background:#333; color:white; border:none; border-radius:50px; padding:14px; font-weight:600;">
+      Close
+    </button>
+  `;
+
+  // Reattach close handler
+  document.getElementById('receipt-done')?.addEventListener('click', () => {
+    const backdrop = document.getElementById('smart-receipt-backdrop');
+    if (backdrop) {
+      backdrop.classList.add('hidden');
+      backdrop.setAttribute('aria-hidden', 'true');
+      lockScrollForReceiptModal(backdrop, false);
+    }
+  });
 }
 
 function updateReceiptToInsufficient(message, currentBalance = 0) {
@@ -1081,7 +1100,7 @@ function updateReceiptToPending() {
   const icon = document.getElementById('receipt-icon');
   icon.className = 'receipt-icon pending';
   icon.innerHTML = `
-    <svg class="checkmark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 52">  <!-- Matches success layout -->
+    <svg class="checkmark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 52">
       <circle class="checkmark__circle" cx="26" cy="26" r="25" fill="none" stroke="#FF9500" stroke-width="2"/>
       <path d="M26 16V26L32 32" stroke="#FF9500" stroke-width="3" stroke-linecap="round"/>
     </svg>
@@ -1090,7 +1109,6 @@ function updateReceiptToPending() {
   document.getElementById('receipt-status').textContent = 'Pending Delivery';
   document.getElementById('receipt-message').textContent = 'Your data is being delivered. This may take a few minutes due to network. Money safe - auto refund on fail.';
 
-  // Fill details (same as success)
   const data = window._currentCheckoutData;
   const providerKey = data.provider.toLowerCase() === '9mobile' ? 'ninemobile' : data.provider.toLowerCase();
   const svg = svgShapes[providerKey] || '';
@@ -1099,13 +1117,28 @@ function updateReceiptToPending() {
   document.getElementById('receipt-plan').textContent = `${data.dataAmount} / ${data.validity}`;
   document.getElementById('receipt-amount').textContent = `₦${Number(data.price).toLocaleString()}`;
   document.getElementById('receipt-transaction-id').textContent = data.reference || 'N/A';
-  document.getElementById('receipt-balance').textContent = `₦${Number(data.new_balance || 0).toLocaleString()}`;  // Use data.new_balance if available
+  document.getElementById('receipt-balance').textContent = `₦${Number(data.new_balance || 0).toLocaleString()}`;
   document.getElementById('receipt-time').textContent = new Date().toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
 
   document.getElementById('receipt-details').style.display = 'block';
-  document.getElementById('receipt-actions').style.display = 'flex';
-}
 
+  const actions = document.getElementById('receipt-actions');
+  actions.style.display = 'flex';
+  actions.innerHTML = `
+    <button id="receipt-done" style="width:100%; background:#333; color:white; border:none; border-radius:50px; padding:14px; font-weight:600;">
+      OK
+    </button>
+  `;
+
+  document.getElementById('receipt-done')?.addEventListener('click', () => {
+    const backdrop = document.getElementById('smart-receipt-backdrop');
+    if (backdrop) {
+      backdrop.classList.add('hidden');
+      backdrop.setAttribute('aria-hidden', 'true');
+      lockScrollForReceiptModal(backdrop, false);
+    }
+  });
+}
 async function pollForFinalStatus(reference) {
   let attempts = 0;
   const maxAttempts = 60;
