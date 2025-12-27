@@ -1051,8 +1051,8 @@ function updateReceiptToInsufficient(message, currentBalance = 0) {
   document.getElementById('receipt-fund-wallet')?.addEventListener('click', () => {
     closeCheckoutModal();
     // Open your fund wallet modal/page — replace with your actual function
-    if (typeof openFundWalletModal === 'function') {
-      openAddMoneyModalContent();
+    if (typeof addMoneyModal === 'function') {
+      window.ModalManager.openModal('addMoneyModal');
     } else if (typeof navigateToFund === 'function') {
       navigateToFund();
     } else {
