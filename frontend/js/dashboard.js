@@ -745,31 +745,34 @@ const DEBUG_MODE = false; // ← Change to false to hide completely
 })();
 
 // =======================================================
-// MOBILE-SAFE GLOBAL TOUCHSTART GUARD
-// Prevents PIN/password from opening when touching normal inputs
+// MOBILE-SAFE PATCH FOR EXISTING TOUCHSTART HANDLERS
+// Prevents PIN/password from opening on inputs
 // =======================================================
 (function() {
-  const origAddEventListener = EventTarget.prototype.addEventListener;
+  // Grab all existing event listeners on document and body
+  const targets = [document, document.body];
+  
+  targets.forEach(target => {
+    // @ts-ignore: getEventListeners is only available in DevTools; fallback below
+    const listeners = (typeof getEventListeners === 'function')
+      ? getEventListeners(target).touchstart || []
+      : []; // fallback: we cannot access already-hidden listeners outside DevTools
 
-  // Monkey-patch to wrap all future touchstart handlers
-  EventTarget.prototype.addEventListener = function(type, listener, options) {
-    if (type === 'touchstart') {
+    listeners.forEach(l => {
+      const orig = l.listener;
+      target.removeEventListener('touchstart', orig, l.useCapture);
       const wrapped = function(e) {
-        // Ignore normal form inputs
+        // Skip normal inputs
         if (e.target.matches('input, textarea, select')) return;
+        if (e.target.matches('.phone-input')) return;
 
-        // Optional: ignore inputs inside forms too
         if (e.target.closest('form')) return;
 
-        // Otherwise, call original handler
-        return listener.call(this, e);
+        return orig.call(this, e);
       };
-
-      return origAddEventListener.call(this, type, wrapped, options);
-    }
-
-    return origAddEventListener.call(this, type, listener, options);
-  };
+      target.addEventListener('touchstart', wrapped, l.useCapture);
+    });
+  });
 })();
 
 
