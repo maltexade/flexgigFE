@@ -343,9 +343,14 @@
             <div class="recent-transactions-list"></div>
           </div>
 
-          <div class="phone-section">
+<div class="phone-section">
   <p style="font-size: small;" for="phone-input">Phone Number</p>
   <div class="phone-input-row">
+    <!-- Hidden dummy inputs to absorb autofill -->
+    <input type="text" name="fakeusernameremembered" style="display:none">
+    <input type="password" name="fakepasswordremembered" style="display:none">
+
+    <!-- Real phone input -->
     <input
       type="tel"
       id="phone-input"
@@ -353,19 +358,19 @@
       pattern="[0-9]*"
       inputmode="tel"
       placeholder="Enter phone number"
-      autocomplete="new-password"
+      autocomplete="off"
       autocorrect="off"
       autocapitalize="off"
       spellcheck="false"
       enterkeyhint="done"
-      name="phone-number-input"
-      data-form-type="other"
     />
+
     <button class="contact-btn" type="button" aria-label="Pick from contacts">
       <img src="/frontend/svg/contact-icon.svg" alt="Contact Icon" class="contact-btn contact-btn-svg" />
     </button>
   </div>
 </div>
+
 
           <div class="contact-modal" id="contactModal" style="display:none;">
             <div class="modal-content">
