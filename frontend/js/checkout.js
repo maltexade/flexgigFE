@@ -491,18 +491,7 @@ async function onPayClicked(ev) {
 
     const result = await processPayment();
 
-    // === FIRST RESPONSE DECIDES ===
-    if (result.status === 'success') {
-      // Immediate success — skip pending
-      addLocalTransaction(checkoutData);
-      resetCheckoutUI();
-      await updateReceiptToSuccess(result);
-      closeCheckoutModal();
-      return;
-    }
-
-    // === FAILED or PENDING → show Pending receipt + start polling ===
-    updateReceiptToPending();
+    // Keep Processing spinner — poll will handle switching
     pollForFinalStatus(result.reference);
 
   } catch (err) {
@@ -1050,7 +1039,7 @@ function updateReceiptToPending() {
 async function pollForFinalStatus(reference) {
   let attempts = 0;
   const maxAttempts = 60;
-  let firstAttemptChecked = false;
+  let firstAttemptResultSeen = false;
 
   while (attempts < maxAttempts) {
     try {
@@ -1062,9 +1051,9 @@ async function pollForFinalStatus(reference) {
         if (tx) {
           const status = tx.status.toLowerCase();
 
-          // First time status changes from pending = first attempt result
-          if (!firstAttemptChecked && status !== 'pending') {
-            firstAttemptChecked = true;
+          // First time we see non-pending = result of first attempt
+          if (!firstAttemptResultSeen && status !== 'pending') {
+            firstAttemptResultSeen = true;
 
             if (status === 'success') {
               // First attempt succeeded → show Success immediately
@@ -1079,7 +1068,7 @@ async function pollForFinalStatus(reference) {
             }
           }
 
-          // Final result
+          // Final result after retries
           if (status === 'success') {
             await updateReceiptToSuccess(tx);
             addLocalTransaction(window._currentCheckoutData);
@@ -1098,9 +1087,10 @@ async function pollForFinalStatus(reference) {
     }
 
     attempts++;
-    await new Promise(r => setTimeout(r, 15000));
+    await new Promise(r => setTimeout(r, 15000)); // 15s poll
   }
 
+  // Timeout fallback
   updateReceiptToFailed('Delivery taking longer than expected. Check history.');
   closeCheckoutModal();
 }
