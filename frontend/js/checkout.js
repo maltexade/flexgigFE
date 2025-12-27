@@ -462,18 +462,11 @@ async function processPayment() {
     throw new Error(result.message || 'Purchase failed');
   }
 
-  checkoutData.reference = result.reference || checkoutData.reference;
+  // Save for later use
+  checkoutData.reference = result.reference;
   checkoutData.new_balance = result.new_balance;
 
-  if (result.status === 'success') {
-    updateReceiptToSuccess(result);
-  } else if (result.status === 'failed') {
-    updateReceiptToFailed(result.message || 'Purchase failed. Refund initiated.');
-  } else {  // Pending
-    pollForFinalStatus(result.reference);
-  }
-
-  return result;
+  return result;  // Contains status: 'success', 'pending', or 'failed'
 }
 // ==================== MAIN PAY BUTTON HANDLER ====================
 // ==================== MAIN PAY BUTTON HANDLER ====================
@@ -498,18 +491,19 @@ async function onPayClicked(ev) {
 
     const result = await processPayment();
 
-    if (result.status === 'pending') {
-      // Show pending after 5 secs if not resolved
-      setTimeout(() => {
-        if (document.getElementById('receipt-status').textContent === 'Processing Transaction') {
-          updateReceiptToPending();
-        }
-      }, 5000);
-    } else {
+    // === FIRST RESPONSE DECIDES ===
+    if (result.status === 'success') {
+      // Immediate success — skip pending
       addLocalTransaction(checkoutData);
       resetCheckoutUI();
+      await updateReceiptToSuccess(result);
       closeCheckoutModal();
+      return;
     }
+
+    // === FAILED or PENDING → show Pending receipt + start polling ===
+    updateReceiptToPending();
+    pollForFinalStatus(result.reference);
 
   } catch (err) {
     console.error('[checkout] Payment failed:', err);
@@ -520,7 +514,6 @@ async function onPayClicked(ev) {
     payBtn.textContent = originalText;
   }
 }
-
 // ==================== DEDICATED CHECKOUT PIN MODAL LOGIC ====================
 (function() {
   const modal = document.getElementById('checkout-pin-modal');
@@ -996,7 +989,7 @@ async function updateReceiptToSuccess(result) {
     document.getElementById('receipt-transaction-id').textContent = transactionRef;
     
     document.getElementById('receipt-balance').textContent = 
-  `₦${Number(txData.balance_after || 0).toLocaleString()}`;
+  `₦${Number(data.new_balance || 0).toLocaleString()}`;
     
     document.getElementById('receipt-time').textContent = 
       new Date().toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
