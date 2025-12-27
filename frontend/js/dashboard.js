@@ -744,15 +744,33 @@ const DEBUG_MODE = false; // ← Change to false to hide completely
 
 })();
 
-document.addEventListener(
-  'click',
-  e => {
-    if (e.target.matches('input, textarea, select')) {
-      e.stopImmediatePropagation();
+// =======================================================
+// MOBILE-SAFE GLOBAL TOUCHSTART GUARD
+// Prevents PIN/password from opening when touching normal inputs
+// =======================================================
+(function() {
+  const origAddEventListener = EventTarget.prototype.addEventListener;
+
+  // Monkey-patch to wrap all future touchstart handlers
+  EventTarget.prototype.addEventListener = function(type, listener, options) {
+    if (type === 'touchstart') {
+      const wrapped = function(e) {
+        // Ignore normal form inputs
+        if (e.target.matches('input, textarea, select')) return;
+
+        // Optional: ignore inputs inside forms too
+        if (e.target.closest('form')) return;
+
+        // Otherwise, call original handler
+        return listener.call(this, e);
+      };
+
+      return origAddEventListener.call(this, type, wrapped, options);
     }
-  },
-  true
-);
+
+    return origAddEventListener.call(this, type, listener, options);
+  };
+})();
 
 
 
