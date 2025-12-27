@@ -462,17 +462,19 @@ async function processPayment() {
     throw new Error(result.message || 'Purchase failed');
   }
 
-  checkoutData.reference = result.reference || checkoutData.reference;  // Save ref
+  checkoutData.reference = result.reference || checkoutData.reference;
+  checkoutData.new_balance = result.new_balance;
 
-  if (result.status === 'pending') {
-    updateReceiptToPending();
+  if (result.status === 'success') {
+    updateReceiptToSuccess(result);
+  } else if (result.status === 'failed') {
+    updateReceiptToFailed(result.message || 'Purchase failed. Refund initiated.');
+  } else {  // Pending
     pollForFinalStatus(result.reference);
-    return { status: 'pending' };  // Let handler know it's pending
-  } else {
-    return result;
   }
-}
 
+  return result;
+}
 // ==================== MAIN PAY BUTTON HANDLER ====================
 // ==================== MAIN PAY BUTTON HANDLER ====================
 async function onPayClicked(ev) {
@@ -497,14 +499,17 @@ async function onPayClicked(ev) {
     const result = await processPayment();
 
     if (result.status === 'pending') {
-      // Pending already shown - polling started in processPayment
-      return;
+      // Show pending after 5 secs if not resolved
+      setTimeout(() => {
+        if (document.getElementById('receipt-status').textContent === 'Processing Transaction') {
+          updateReceiptToPending();
+        }
+      }, 5000);
+    } else {
+      addLocalTransaction(checkoutData);
+      resetCheckoutUI();
+      closeCheckoutModal();
     }
-
-    addLocalTransaction(checkoutData);
-    resetCheckoutUI();
-    await updateReceiptToSuccess(result);
-    closeCheckoutModal();
 
   } catch (err) {
     console.error('[checkout] Payment failed:', err);
@@ -991,7 +996,7 @@ async function updateReceiptToSuccess(result) {
     document.getElementById('receipt-transaction-id').textContent = transactionRef;
     
     document.getElementById('receipt-balance').textContent = 
-      `₦${Number(result.new_balance || 0).toLocaleString()}`;
+  `₦${Number(txData.balance_after || 0).toLocaleString()}`;
     
     document.getElementById('receipt-time').textContent = 
       new Date().toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
@@ -1024,15 +1029,16 @@ function updateReceiptToPending() {
   const icon = document.getElementById('receipt-icon');
   icon.className = 'receipt-icon pending';
   icon.innerHTML = `
-    <svg class="checkmark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 52">  <!-- Reuse success layout but orange -->
+    <svg class="checkmark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 52">  <!-- Matches success layout -->
       <circle class="checkmark__circle" cx="26" cy="26" r="25" fill="none" stroke="#FF9500" stroke-width="2"/>
       <path d="M26 16V26L32 32" stroke="#FF9500" stroke-width="3" stroke-linecap="round"/>
     </svg>
   `;
 
-  document.getElementById('receipt-status').textContent = 'Pending';
-  document.getElementById('receipt-message').textContent = 'Your data is being delivered. This may take a few minutes due to network delays. Your money is safe - if it fails, refund is automatic.';
+  document.getElementById('receipt-status').textContent = 'Pending Delivery';
+  document.getElementById('receipt-message').textContent = 'Your data is being delivered. This may take a few minutes due to network. Money safe - auto refund on fail.';
 
+  // Fill details (same as success)
   const data = window._currentCheckoutData;
   const providerKey = data.provider.toLowerCase() === '9mobile' ? 'ninemobile' : data.provider.toLowerCase();
   const svg = svgShapes[providerKey] || '';
@@ -1041,7 +1047,7 @@ function updateReceiptToPending() {
   document.getElementById('receipt-plan').textContent = `${data.dataAmount} / ${data.validity}`;
   document.getElementById('receipt-amount').textContent = `₦${Number(data.price).toLocaleString()}`;
   document.getElementById('receipt-transaction-id').textContent = data.reference || 'N/A';
-  document.getElementById('receipt-balance').textContent = `₦${Number(result.new_balance || 0).toLocaleString()}`;
+  document.getElementById('receipt-balance').textContent = `₦${Number(data.new_balance || 0).toLocaleString()}`;  // Use data.new_balance if available
   document.getElementById('receipt-time').textContent = new Date().toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
 
   document.getElementById('receipt-details').style.display = 'block';
@@ -1063,15 +1069,15 @@ async function pollForFinalStatus(reference) {
           const status = tx.status.toLowerCase();
 
           if (status === 'success') {
-            // If receipt still open, update to success
-            if (document.getElementById('smart-receipt-backdrop').classList.contains('hidden') === false) {
+            // If receipt open, update content to success
+            if (!document.getElementById('smart-receipt-backdrop').classList.contains('hidden')) {
               updateReceiptToSuccess(tx);
             }
             return;
           } else if (status === 'failed' || status === 'refund') {
-            // If receipt still open, update to failed
-            if (document.getElementById('smart-receipt-backdrop').classList.contains('hidden') === false) {
-              updateReceiptToFailed('Data delivery failed. Amount has been refunded instantly.');
+            // If receipt open, update to failed
+            if (!document.getElementById('smart-receipt-backdrop').classList.contains('hidden')) {
+              updateReceiptToFailed('Data delivery failed. Amount has been refunded.');
             }
             return;
           }
@@ -1085,8 +1091,8 @@ async function pollForFinalStatus(reference) {
     await new Promise(r => setTimeout(r, 15000));  // 15s poll
   }
 
-  // If still pending after max, leave as is or update message if open
-  if (document.getElementById('smart-receipt-backdrop').classList.contains('hidden') === false) {
+  // If still pending, update message if open
+  if (!document.getElementById('smart-receipt-backdrop').classList.contains('hidden')) {
     document.getElementById('receipt-message').textContent = 'Taking longer than expected. Check history later.';
   }
 }
