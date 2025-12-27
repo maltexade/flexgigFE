@@ -1051,20 +1051,31 @@ async function pollForFinalStatus(reference) {
         if (tx) {
           const status = tx.status.toLowerCase();
 
+          // Immediate success
           if (status === 'success') {
             await updateReceiptToSuccess(tx);
             addLocalTransaction(window._currentCheckoutData);
             resetCheckoutUI();
             closeCheckoutModal();
             return;
-          } else if (status === 'failed' || status === 'refund') {
-            updateReceiptToFailed('Data delivery failed. Amount has been refunded instantly.');
+          }
+
+          // Final failure after all retries
+          if (status === 'failed' || status === 'refund') {
+            if (showedPending) {
+              updateReceiptToFailed('Data delivery failed. Amount has been refunded instantly.');
+            } else {
+              // Rare: final fail before pending shown
+              updateReceiptToPending();
+              document.getElementById('receipt-status').textContent = 'Delivery Failed';
+              document.getElementById('receipt-message').textContent = 'Data delivery failed after retries. Amount has been refunded instantly.';
+            }
             closeCheckoutModal();
             return;
           }
 
-          // If still 'pending' after 3 polls (~45s) → first attempt likely failed → show Pending receipt
-          if (!showedPending && attempts >= 3) {
+          // After second poll (~30s, matches your retry delay) and still pending → first attempt failed → show Pending
+          if (!showedPending && attempts >= 2) {
             showedPending = true;
             updateReceiptToPending();
           }
@@ -1078,9 +1089,13 @@ async function pollForFinalStatus(reference) {
     await new Promise(r => setTimeout(r, 15000)); // 15s poll
   }
 
-  // Timeout fallback
-  updateReceiptToFailed('Delivery taking longer than expected. Check history.');
-  closeCheckoutModal();
+  // Timeout
+  if (showedPending) {
+    document.getElementById('receipt-message').textContent = 'Taking longer than expected. Check history later.';
+  } else {
+    updateReceiptToPending();
+    document.getElementById('receipt-message').textContent = 'Delivery taking longer than expected. Check history.';
+  }
 }
 // Close & Buy Again handlers (unchanged)
 document.getElementById('receipt-done')?.addEventListener('click', () => {
