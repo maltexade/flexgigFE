@@ -1446,7 +1446,7 @@ document.addEventListener('transaction_update', (e) => {
   updateMonthDisplay();
   console.log('[TransactionHistory] READY - Controlled by ModalManager');
 
-  preloadHistoryForInstantOpen();
+  loadLatestHistory()
 
   function trunTx() {
     const rows = document.querySelectorAll('.tx-row');
