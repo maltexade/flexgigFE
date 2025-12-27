@@ -433,59 +433,19 @@ async function triggerCheckoutAuthWithDedicatedModal() {
 
     if (typeof window.showCheckoutPinModal === 'function') {
       try {
-        // Gather fresh data
+        // Just gather data — NO pre-flight, NO receipt yet
         checkoutData = gatherCheckoutData();
         if (!checkoutData) {
           resolve(false);
           return;
         }
 
-        // === PRE-FLIGHT: Prepare purchase (fast, no deduction) ===
-        const payload = {
-          plan_id: checkoutData.planId,
-          phone: checkoutData.rawNumber,
-          provider: checkoutData.provider.toLowerCase()
-        };
-
-        const res = await fetch('https://api.flexgig.com.ng/api/transactions/purchase-data/prepare', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-          credentials: 'include'
-        });
-
-        const result = await res.json();
-
-        if (res.ok && result.success && result.reference) {
-          // Success: store reference and show Processing instantly
-          checkoutData.reference = result.reference;
-          showProcessingReceipt(checkoutData);
-
-          // Start polling early (will update when final purchase happens)
-          pollForFinalStatus(result.reference);
-        } else if (result.error === 'insufficient_balance') {
-          // Early insufficient balance detection
-          updateReceiptToInsufficient(
-            'You do not have enough balance to complete this purchase.',
-            result.current_balance || 0
-          );
-          resolve(false);
-          return;
-        } else {
-          // Other prepare error
-          updateReceiptToFailed(result.message || 'Failed to prepare purchase. Try again.');
-          resolve(false);
-          return;
-        }
+        // Just show PIN modal — clean and simple
+        window.showCheckoutPinModal();
       } catch (err) {
-        console.error('[checkout] Pre-flight failed:', err);
-        updateReceiptToFailed('Network error. Please try again.');
+        console.error('[checkout] Failed to open PIN modal:', err);
         resolve(false);
-        return;
       }
-
-      // Finally show PIN modal
-      window.showCheckoutPinModal();
     } else {
       console.error('[checkout] showCheckoutPinModal not available');
       resolve(false);
@@ -538,37 +498,66 @@ async function onPayClicked(ev) {
   payBtn.disabled = true;
   payBtn.textContent = 'Processing...';
 
-      try {
-      // Data already gathered + prepared in triggerCheckoutAuthWithDedicatedModal
-      // So we skip gatherCheckoutData() here
-
+          try {
+      // Data gathered in triggerCheckoutAuthWithDedicatedModal
       const authSuccess = await triggerCheckoutAuthWithDedicatedModal();
       if (!authSuccess) {
-        // User cancelled PIN or failed verification
-        // Money was NOT deducted → safe to just return
         payBtn.disabled = false;
         payBtn.textContent = originalText;
         return;
       }
 
-      // === FINAL PURCHASE: Now deduct money using pre-generated reference ===
-      if (!checkoutData?.reference) {
-        updateReceiptToFailed('Purchase preparation failed. Please try again.');
+      // === NOW: After PIN success → show Processing + do final purchase ===
+      showProcessingReceipt(checkoutData);
+
+      // Pre-flight prepare (fast balance check)
+      const preparePayload = {
+        plan_id: checkoutData.planId,
+        phone: checkoutData.rawNumber,
+        provider: checkoutData.provider.toLowerCase()
+      };
+
+      let reference;
+      try {
+        const prepareRes = await fetch('https://api.flexgig.com.ng/api/transactions/purchase-data/prepare', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(preparePayload),
+          credentials: 'include'
+        });
+
+        const prepareResult = await prepareRes.json();
+
+        if (!prepareRes.ok) {
+          if (prepareResult.error === 'insufficient_balance') {
+            updateReceiptToInsufficient('Insufficient balance.', prepareResult.current_balance || 0);
+          } else {
+            updateReceiptToFailed(prepareResult.message || 'Failed to prepare purchase.');
+          }
+          closeCheckoutModal();
+          return;
+        }
+
+        reference = prepareResult.reference;
+      } catch (err) {
+        updateReceiptToFailed('Network error during preparation.');
+        closeCheckoutModal();
         return;
       }
 
+      // Final purchase with reference
       const finalPayload = {
         plan_id: checkoutData.planId,
         phone: checkoutData.rawNumber,
         provider: checkoutData.provider.toLowerCase(),
-        reference: checkoutData.reference  // Re-use prepared reference
+        reference
       };
 
       const response = await fetch('https://api.flexgig.com.ng/api/transactions/buy-data', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(finalPayload),
-        credentials: 'include',
+        credentials: 'include'
       });
 
       const result = await response.json();
@@ -577,22 +566,22 @@ async function onPayClicked(ev) {
         if (result.error === 'insufficient_balance') {
           updateReceiptToInsufficient('Insufficient balance.', result.current_balance || 0);
         } else {
-          updateReceiptToFailed(result.message || 'Purchase failed. Please try again.');
+          updateReceiptToFailed(result.message || 'Purchase failed.');
         }
         closeCheckoutModal();
         return;
       }
 
-      // Final success/pending
+      // Success/pending
       checkoutData.reference = result.reference;
       checkoutData.new_balance = result.new_balance;
 
-      // Polling already started in pre-flight → will pick up status
-      // Just wait for it
+      // Start polling
+      pollForFinalStatus(result.reference);
 
     } catch (err) {
-      console.error('[checkout] Final payment failed:', err);
-      updateReceiptToFailed(err.message || 'Purchase failed. Please try again.');
+      console.error('[checkout] Purchase failed:', err);
+      updateReceiptToFailed('An error occurred. Please try again.');
       closeCheckoutModal();
     } finally {
       payBtn.disabled = false;
