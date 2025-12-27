@@ -1039,7 +1039,7 @@ function updateReceiptToPending() {
 async function pollForFinalStatus(reference) {
   let attempts = 0;
   const maxAttempts = 60;
-  let firstAttemptResultSeen = false;
+  let showedPending = false;
 
   while (attempts < maxAttempts) {
     try {
@@ -1051,24 +1051,6 @@ async function pollForFinalStatus(reference) {
         if (tx) {
           const status = tx.status.toLowerCase();
 
-          // First time we see non-pending = result of first attempt
-          if (!firstAttemptResultSeen && status !== 'pending') {
-            firstAttemptResultSeen = true;
-
-            if (status === 'success') {
-              // First attempt succeeded → show Success immediately
-              await updateReceiptToSuccess(tx);
-              addLocalTransaction(window._currentCheckoutData);
-              resetCheckoutUI();
-              closeCheckoutModal();
-              return;
-            } else {
-              // First attempt failed → show Pending receipt
-              updateReceiptToPending();
-            }
-          }
-
-          // Final result after retries
           if (status === 'success') {
             await updateReceiptToSuccess(tx);
             addLocalTransaction(window._currentCheckoutData);
@@ -1079,6 +1061,12 @@ async function pollForFinalStatus(reference) {
             updateReceiptToFailed('Data delivery failed. Amount has been refunded instantly.');
             closeCheckoutModal();
             return;
+          }
+
+          // If still 'pending' after 3 polls (~45s) → first attempt likely failed → show Pending receipt
+          if (!showedPending && attempts >= 3) {
+            showedPending = true;
+            updateReceiptToPending();
           }
         }
       }
