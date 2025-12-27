@@ -1048,16 +1048,24 @@ function updateReceiptToInsufficient(message, currentBalance = 0) {
   `;
 
   // Add click handler for Fund Wallet
-  document.getElementById('receipt-fund-wallet')?.addEventListener('click', () => {
-    closeCheckoutModal();
-    
-    // Open your fund wallet modal/page — replace with your actual function
+   document.getElementById('receipt-fund-wallet')?.addEventListener('click', () => {
+    // Close the receipt modal properly
+    const backdrop = document.getElementById('smart-receipt-backdrop');
+    if (backdrop) {
+      backdrop.classList.add('hidden');
+      backdrop.setAttribute('aria-hidden', 'true');
+      lockScrollForReceiptModal(backdrop, false);
+    }
+
+    // Now open fund wallet modal
     if (window.ModalManager?.openModal) {
-          window.ModalManager.openModal('addMoneyModal');
-          log('✓ Modal opened via ModalManager', 'success');
-        } else {
-          log('⚠️ ModalManager not available', 'warn');
-        }
+      window.ModalManager.openModal('addMoneyModal');
+      console.log('✓ Fund modal opened', 'success');
+    } else {
+      console.warn('⚠️ ModalManager not available');
+      // Fallback: redirect to fund page if needed
+      // window.location.href = '/wallet';
+    }
   });
 
   document.getElementById('receipt-done')?.addEventListener('click', () => {
