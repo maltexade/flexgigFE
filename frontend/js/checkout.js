@@ -462,12 +462,15 @@ async function processPayment() {
     throw new Error(result.message || 'Purchase failed');
   }
 
-  // Save reference for polling
-  if (result.reference) {
-    window._currentCheckoutData.reference = result.reference;
-  }
+  checkoutData.reference = result.reference || checkoutData.reference;  // Save ref
 
-  return result;
+  if (result.status === 'pending') {
+    updateReceiptToPending();
+    pollForFinalStatus(result.reference);
+    return { status: 'pending' };  // Let handler know it's pending
+  } else {
+    return result;
+  }
 }
 
 // ==================== MAIN PAY BUTTON HANDLER ====================
@@ -493,12 +496,20 @@ async function onPayClicked(ev) {
 
     const result = await processPayment();
 
-    // Start polling for final status
-    pollForFinalStatus(result.reference || checkoutData.reference);
+    if (result.status === 'pending') {
+      // Pending already shown - polling started in processPayment
+      return;
+    }
+
+    addLocalTransaction(checkoutData);
+    resetCheckoutUI();
+    await updateReceiptToSuccess(result);
+    closeCheckoutModal();
 
   } catch (err) {
     console.error('[checkout] Payment failed:', err);
     updateReceiptToFailed(err.message || 'Purchase failed. Please try again.');
+    closeCheckoutModal();
   } finally {
     payBtn.disabled = false;
     payBtn.textContent = originalText;
@@ -1009,60 +1020,41 @@ function updateReceiptToFailed(errorMessage) {
   document.getElementById('receipt-actions').style.display = 'flex';
   document.getElementById('receipt-buy-again').textContent = 'Try Again';
 }
-// NEW: Calm pending screen after 60 seconds
 function updateReceiptToPending() {
   const icon = document.getElementById('receipt-icon');
   icon.className = 'receipt-icon pending';
   icon.innerHTML = `
-    <svg width="52" height="52" viewBox="0 0 52 52" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="26" cy="26" r="25" fill="none" stroke="#FF9500" stroke-width="2"/>
-      <circle cx="26" cy="26" r="10" fill="#FF9500"/>
-      <path d="M26 16V26L32 32" stroke="white" stroke-width="3" stroke-linecap="round"/>
+    <svg class="checkmark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 52">  <!-- Reuse success layout but orange -->
+      <circle class="checkmark__circle" cx="26" cy="26" r="25" fill="none" stroke="#FF9500" stroke-width="2"/>
+      <path d="M26 16V26L32 32" stroke="#FF9500" stroke-width="3" stroke-linecap="round"/>
     </svg>
   `;
 
-  document.getElementById('receipt-status').textContent = 'Delivery in Progress';
-  document.getElementById('receipt-message').innerHTML = `
-    Your data purchase is being processed.<br><br>
-    <strong>This may take 1–5 minutes</strong> due to network delays.<br><br>
-    You can safely close this screen.<br>
-    <span style="color:#4ade80; font-weight:600;">Your money is safe — if delivery fails, it will be refunded automatically.</span>
-  `;
+  document.getElementById('receipt-status').textContent = 'Pending';
+  document.getElementById('receipt-message').textContent = 'Your data is being delivered. This may take a few minutes due to network delays. Your money is safe - if it fails, refund is automatic.';
+
+  const data = window._currentCheckoutData;
+  const providerKey = data.provider.toLowerCase() === '9mobile' ? 'ninemobile' : data.provider.toLowerCase();
+  const svg = svgShapes[providerKey] || '';
+  document.getElementById('receipt-provider').innerHTML = `${svg} ${data.provider.toUpperCase()}`;
+  document.getElementById('receipt-phone').textContent = data.number;
+  document.getElementById('receipt-plan').textContent = `${data.dataAmount} / ${data.validity}`;
+  document.getElementById('receipt-amount').textContent = `₦${Number(data.price).toLocaleString()}`;
+  document.getElementById('receipt-transaction-id').textContent = data.reference || 'N/A';
+  document.getElementById('receipt-balance').textContent = `₦${Number(result.new_balance || 0).toLocaleString()}`;
+  document.getElementById('receipt-time').textContent = new Date().toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
 
   document.getElementById('receipt-details').style.display = 'block';
-
-  const actions = document.getElementById('receipt-actions');
-  actions.style.display = 'flex';
-  actions.innerHTML = `
-    <button id="receipt-done" style="flex:1; background:linear-gradient(90deg,#00d4aa,#00bfa5); color:white; border:none; border-radius:50px; padding:14px; font-weight:600;">
-      Done
-    </button>
-  `;
-
-  // Re-attach close handler
-  document.getElementById('receipt-done').onclick = () => {
-    const backdrop = document.getElementById('smart-receipt-backdrop');
-    if (backdrop) {
-      backdrop.classList.add('hidden');
-      backdrop.setAttribute('aria-hidden', 'true');
-      lockScrollForReceiptModal(backdrop, false);
-      resetCheckoutUI();
-      closeCheckoutModal();
-    }
-  };
+  document.getElementById('receipt-actions').style.display = 'flex';
 }
 
-// NEW: Poll backend for final status with timeout to pending screen
 async function pollForFinalStatus(reference) {
   let attempts = 0;
-  const maxProcessingAttempts = 4;    // 60 seconds (15s × 4 polls)
-  const maxTotalAttempts = 40;        // 10 minutes total
+  const maxAttempts = 40;  // ~10 mins
 
-  while (attempts < maxTotalAttempts) {
+  while (attempts < maxAttempts) {
     try {
-      const res = await fetch('https://api.flexgig.com.ng/api/transactions?limit=10', {
-        credentials: 'include'
-      });
+      const res = await fetch('https://api.flexgig.com.ng/api/transactions?limit=10', { credentials: 'include' });
       if (res.ok) {
         const json = await res.json();
         const tx = json.items.find(t => t.reference === reference);
@@ -1071,10 +1063,16 @@ async function pollForFinalStatus(reference) {
           const status = tx.status.toLowerCase();
 
           if (status === 'success') {
-            await updateReceiptToSuccess(tx);
+            // If receipt still open, update to success
+            if (document.getElementById('smart-receipt-backdrop').classList.contains('hidden') === false) {
+              updateReceiptToSuccess(tx);
+            }
             return;
           } else if (status === 'failed' || status === 'refund') {
-            updateReceiptToFailed('Data delivery failed. Amount has been refunded instantly.');
+            // If receipt still open, update to failed
+            if (document.getElementById('smart-receipt-backdrop').classList.contains('hidden') === false) {
+              updateReceiptToFailed('Data delivery failed. Amount has been refunded instantly.');
+            }
             return;
           }
         }
@@ -1084,33 +1082,23 @@ async function pollForFinalStatus(reference) {
     }
 
     attempts++;
-
-    // After 60 seconds → show calm pending screen
-    if (attempts === maxProcessingAttempts) {
-      updateReceiptToPending();
-    }
-
-    await new Promise(r => setTimeout(r, 15000)); // Poll every 15 seconds
+    await new Promise(r => setTimeout(r, 15000));  // 15s poll
   }
 
-  // Final fallback if still not done
-  updateReceiptToPending();
+  // If still pending after max, leave as is or update message if open
+  if (document.getElementById('smart-receipt-backdrop').classList.contains('hidden') === false) {
+    document.getElementById('receipt-message').textContent = 'Taking longer than expected. Check history later.';
+  }
 }
-
 // Close & Buy Again handlers (unchanged)
-function closeReceiptAndReset() {
+document.getElementById('receipt-done')?.addEventListener('click', () => {
   const backdrop = document.getElementById('smart-receipt-backdrop');
-  if (backdrop) {
-    backdrop.classList.add('hidden');
-    backdrop.setAttribute('aria-hidden', 'true');
-    lockScrollForReceiptModal(backdrop, false);
-    resetCheckoutUI();
-    closeCheckoutModal();
-  }
-}
+  backdrop?.classList.add('hidden');
+  backdrop?.setAttribute('aria-hidden', 'true');
 
-document.getElementById('receipt-done')?.addEventListener('click', closeReceiptAndReset);
-document.getElementById('receipt-buy-again')?.addEventListener('click', closeReceiptAndReset);
+  // 🔓 UNLOCK SCROLL HERE
+  lockScrollForReceiptModal(backdrop, false);
+});
 
 
 
