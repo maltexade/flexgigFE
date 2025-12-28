@@ -6589,18 +6589,25 @@ viewAllLink.addEventListener('click', (e) => {
 
 
 
-
 (async () => {
   const recentTransactionsList = document.querySelector('.recent-transactions-list');
   const recentTransactionsSection = document.querySelector('.recent-transactions');
 
-  // --- Helper: Render Recent Transactions ---
-  function renderRecentTransactions(transactions = []) {
-  recentTransactionsList.innerHTML = '';
-  if (!transactions.length) {
-    recentTransactionsSection.classList.remove('active');
+  if (!recentTransactionsList || !recentTransactionsSection) {
+    console.warn('[recent-tx] Required elements not found');
     return;
   }
+
+  // --- Helper: Render Recent Transactions (PERMANENT & FINAL VERSION) ---
+  function renderRecentTransactions(transactions = []) {
+    recentTransactionsList.innerHTML = '';
+
+    if (!transactions.length) {
+      recentTransactionsSection.classList.remove('active');
+      console.log('[recent-tx] No transactions → section hidden');
+      return;
+    }
+
     recentTransactionsSection.classList.add('active');
 
     transactions.forEach(tx => {
@@ -6613,96 +6620,125 @@ viewAllLink.addEventListener('click', (e) => {
           ? tx.provider.charAt(0).toUpperCase() + tx.provider.slice(1).toLowerCase()
           : 'Unknown';
 
-      // Extract data amount from description
-      let dataAmount = '';
-      if (tx.description) {
-        const match = tx.description.match(/(\d+\s*(?:GB|TB|MB))/i);
+      // === SHOW DATA AMOUNT CORRECTLY ===
+      // 1. Prefer tx.data (set by local purchases)
+      // 2. Fallback to regex on description (for server transactions)
+      let dataAmount = tx.data || '';
+      if (!dataAmount && tx.description) {
+        const match = tx.description.match(/(\d+\.?\d*\s*(?:GB|TB|MB))/i);
         if (match) dataAmount = match[1];
       }
 
-      // Use SVG if available, fallback empty
-      const svg = svgShapes[tx.provider?.toLowerCase()] || svgShapes['default'] || '';
+      // SVG from global svgShapes
+      const svg = (window.svgShapes && window.svgShapes[tx.provider?.toLowerCase()]) || '';
 
       txDiv.innerHTML = `
-        <span class="tx-desc">${tx.phone} - ${dataAmount || ''}</span>
+        <span class="tx-desc">${tx.phone} - ${dataAmount}</span>
         <span class="tx-provider">${svg} ${displayName}</span>
       `;
 
       txDiv.setAttribute('role', 'button');
       txDiv.setAttribute('aria-label', `Reuse transaction for ${tx.phone} on ${displayName}`);
+
       txDiv.addEventListener('click', () => {
-    const phoneInput = document.getElementById('phone-input');
-    if (!phoneInput) return alert('Phone input field not found.');
-    const formattedNumber = formatNigeriaNumber(tx.phone);
-    if (!formattedNumber.valid) return alert('Invalid phone number in transaction.');
-    phoneInput.value = formattedNumber.value;
+        const phoneInput = document.getElementById('phone-input');
+        if (!phoneInput) {
+          alert('Phone input field not found.');
+          return;
+        }
 
-    // Normalize provider for CSS
-    let normalizedProvider = tx.provider?.toLowerCase();
-    if (normalizedProvider === 'ninemobile') normalizedProvider = 'ninemobile'; // same as class in HTML
-    selectProvider(normalizedProvider);
+        const formatted = window.formatNigeriaNumber ? window.formatNigeriaNumber(tx.phone) : { value: tx.phone };
+        phoneInput.value = formatted.value || tx.phone;
 
-    updateContactOrCancel();
-    updateContinueState();
-    saveUserState();
-    saveCurrentAppState();
-    phoneInput.blur();
-});
+        let provider = tx.provider?.toLowerCase();
+        if (provider === '9mobile') provider = 'ninemobile';
 
+        if (window.selectProvider) window.selectProvider(provider);
+        if (window.updateContactOrCancel) window.updateContactOrCancel();
+        if (window.updateContinueState) window.updateContinueState();
+        if (window.saveUserState) window.saveUserState();
+        if (window.saveCurrentAppState) window.saveCurrentAppState();
+
+        phoneInput.blur();
+      });
 
       recentTransactionsList.appendChild(txDiv);
     });
 
-    console.log('[DEBUG] renderRecentTransactions: Rendered', transactions.length, 'recent transactions', transactions);
+    console.log('[recent-tx] Rendered', transactions.length, 'recent transactions');
   }
 
-  // --- Load from localStorage immediately ---
-  let recentTransactions = JSON.parse(localStorage.getItem('recentTransactions')) || [];
-  // Filter out any without phone numbers
-  recentTransactions = recentTransactions.filter(tx => tx.phone && tx.phone.trim() !== '');
-  renderRecentTransactions(recentTransactions);
+  // === LOAD & MERGE LOGIC (NO DUPLICATES + STRICTLY 5 ENTRIES) ===
+  let recentTransactions = [];
 
-  // --- Fetch latest transactions from server ---
+  // 1. Load from localStorage
   try {
-    const res = await fetch(`${window.__SEC_API_BASE}/api/transactions?limit=10`, {
+    const stored = localStorage.getItem('recentTransactions');
+    if (stored) {
+      recentTransactions = JSON.parse(stored);
+      if (!Array.isArray(recentTransactions)) recentTransactions = [];
+    }
+  } catch (e) {
+    console.warn('[recent-tx] Failed to parse localStorage', e);
+    recentTransactions = [];
+  }
+
+  // 2. Filter valid (must have phone)
+  recentTransactions = recentTransactions.filter(tx => tx && tx.phone && tx.phone.trim() !== '');
+
+  // 3. Fetch latest from server
+  try {
+    const res = await fetch(`${window.__SEC_API_BASE}/api/transactions?limit=20`, { // increased limit to be safe
       credentials: 'include',
     });
-    if (!res.ok) throw new Error('Failed to fetch transactions from API');
 
-    const data = await res.json();
-    let allTransactions = data.items || [];
+    if (res.ok) {
+      const data = await res.json();
+      const serverTxs = (data.items || []).filter(tx => tx && tx.phone && tx.phone.trim() !== '');
 
-    // Keep only transactions with phone numbers
-    const validTransactions = allTransactions.filter(tx => tx.phone && tx.phone.trim() !== '');
+      // Merge: add server tx only if not already in list (by server id OR exact match)
+      serverTxs.forEach(serverTx => {
+        const exists = recentTransactions.some(localTx =>
+          localTx.id && serverTx.id && localTx.id === serverTx.id || // server id match
+          localTx.phone === serverTx.phone &&
+          localTx.amount === serverTx.amount &&
+          Math.abs(new Date(localTx.timestamp || localTx.created_at) - new Date(serverTx.created_at)) < 60000 // within 1 min
+        );
 
-    // Merge with existing, remove duplicates
-    validTransactions.forEach(tx => {
-      if (!recentTransactions.find(rtx => rtx.id === tx.id)) {
-        recentTransactions.push(tx);
-      }
-    });
-
-    // Filter again in case of bad data
-    recentTransactions = recentTransactions.filter(tx => tx.phone && tx.phone.trim() !== '');
-
-    // Sort descending
-    recentTransactions.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-
-    // Keep only latest 5
-    recentTransactions = recentTransactions.slice(0, 5);
-
-    // Save updated list
-    localStorage.setItem('recentTransactions', JSON.stringify(recentTransactions));
-    window.recentTransactions = recentTransactions;
-
-    // Re-render with updated data
-    renderRecentTransactions(recentTransactions);
+        if (!exists) {
+          recentTransactions.push(serverTx);
+        }
+      });
+    }
   } catch (err) {
-    console.error('Error fetching transactions:', err);
+    console.error('[recent-tx] Failed to fetch server transactions:', err);
   }
 
-  // Expose globally if needed
-  window.renderRecentTransactions = window.renderRecentTransactions || renderRecentTransactions;
+  // 4. Sort newest first
+  recentTransactions.sort((a, b) => {
+    const timeA = new Date(a.timestamp || a.created_at || 0).getTime();
+    const timeB = new Date(b.timestamp || b.created_at || 0).getTime();
+    return timeB - timeA;
+  });
+
+  // 5. STRICTLY keep only latest 5
+  recentTransactions = recentTransactions.slice(0, 5);
+
+  // 6. Save clean list
+  try {
+    localStorage.setItem('recentTransactions', JSON.stringify(recentTransactions));
+    window.recentTransactions = recentTransactions;
+  } catch (e) {
+    console.warn('[recent-tx] Failed to save to localStorage', e);
+  }
+
+  // 7. Render
+  renderRecentTransactions(recentTransactions);
+
+  // Expose globally
+  window.renderRecentTransactions = renderRecentTransactions;
+
+  console.log('%c[recent-tx] Initialization complete — max 5 unique recent transactions with data amount displayed', 'color:lime;font-weight:bold');
 })();
 
 
