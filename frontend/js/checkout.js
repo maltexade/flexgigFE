@@ -11,15 +11,6 @@ console.log('[checkout] Module loaded 🛒');
 // ==================== STATE ====================
 let checkoutData = null; // Stores current checkout information
 
-// ==================== PROVIDER SVG SHAPES ====================
-const svgShapes = {
-  mtn: `<svg class="yellow-circle-icon" width="25" height="25" viewBox="0 0 24 24" fill="none" style="vertical-align: middle; display: inline-block;"><circle cx="12" cy="12" r="10" fill="#FFD700"/></svg>`,
-  airtel: `<svg class="airtel-rect-icon" width="25" height="25" viewBox="0 0 24 24" fill="none" style="vertical-align: middle; display: inline-block;"><rect x="4" y="6" width="20" height="12" rx="4" fill="#e4012b"/></svg>`,
-  glo: `<svg class="glo-diamond-icon" width="25" height="25" viewBox="0 0 24 24" fill="none" style="vertical-align: middle; display: inline-block;"><polygon points="12,2 22,12 12,22 2,12" fill="#00B13C"/></svg>`,
-  ninemobile: `<svg class="ninemobile-triangle-icon" width="25" height="25" viewBox="0 0 24 24" fill="none" style="vertical-align: middle; display: inline-block;"><polygon points="12,3 21,21 3,21" fill="#7DB700"/></svg>`,
-  receive: `<svg class="bank-icon" width="25" height="25" viewBox="0 0 24 24" fill="none"><path d="M4 9v9h16V9l-8-5-8 5zm4 4h8v2H8v-2zm0 4h4v2H8v-2z" fill="#00cc00" stroke="#fff" stroke-width="1"/></svg>`
-};
-
 // ==================== HELPER: GATHER CHECKOUT DATA ====================
 function gatherCheckoutData() {
   try {
@@ -438,69 +429,6 @@ function resetCheckoutUI() {
 
   console.log('[checkout] ✅ Full reset complete — fresh MTN state restored');
 }
-// Add local transaction (same as your old mock)
-// Add local transaction (safe version — fixes the renderRecentTransactions crash)
-function addLocalTransaction(info) {
-  let subType = 'GIFTING';
-  if (info.provider.toLowerCase() === 'mtn' && info.planId.toLowerCase().includes('awoof')) subType = 'AWOOF';
-  if (info.provider.toLowerCase() === 'airtel' && info.planId.toLowerCase().includes('awoof')) subType = 'AWOOF';
-  if (info.provider.toLowerCase() === 'glo' && info.planId.toLowerCase().includes('cg')) subType = 'CG';
-
-  const transaction = {
-    type: 'data',
-    description: 'Data Purchase',
-    amount: info.price,
-    phone: info.rawNumber,
-    provider: info.provider,
-    subType,
-    data: info.dataAmount,
-    duration: info.validity,
-    timestamp: new Date().toISOString(),
-    status: 'success'
-  };
-
-  // Safely load existing recentTransactions
-  let recentTransactions = [];
-  try {
-    const stored = localStorage.getItem('recentTransactions');
-    if (stored) {
-      recentTransactions = JSON.parse(stored);
-      // Ensure it's an array (defensive)
-      if (!Array.isArray(recentTransactions)) recentTransactions = [];
-    }
-  } catch (e) {
-    console.warn('[checkout] Failed to parse recentTransactions from storage', e);
-    recentTransactions = [];
-  }
-
-  // Add the new transaction at the beginning (most recent first)
-  recentTransactions.unshift(transaction);
-
-  // Limit to 50 entries
-  if (recentTransactions.length > 50) {
-    recentTransactions = recentTransactions.slice(0, 50);
-  }
-
-  // Save back to localStorage
-  try {
-    localStorage.setItem('recentTransactions', JSON.stringify(recentTransactions));
-  } catch (e) {
-    console.warn('[checkout] Failed to save recentTransactions', e);
-  }
-
-  // === UPDATE UI SAFELY ===
-  // Pass the fresh array to renderRecentTransactions (fixes the undefined.length error)
-  if (typeof window.renderRecentTransactions === 'function') {
-    window.renderRecentTransactions(recentTransactions);
-  }
-
-  // Also refresh the main transactions list if the function exists
-  if (typeof window.renderTransactions === 'function') {
-    window.renderTransactions();
-  }
-
-  console.log('[checkout] Local transaction added and UI refreshed:', transaction);
-}
 
 // ==================== AUTHENTICATION WITH DEDICATED PIN MODAL ====================
 async function triggerCheckoutAuthWithDedicatedModal() {
@@ -574,7 +502,6 @@ async function onPayClicked(ev) {
     showProcessingReceipt(checkoutData);
 
     const result = await processPayment();
-    addLocalTransaction(checkoutData);
 
     // Keep Processing spinner — poll will handle switching
     pollForFinalStatus(result.reference);
@@ -1020,7 +947,6 @@ async function updateReceiptToSuccess(result) {
   `;
 
   document.getElementById('receipt-status').textContent = 'Transaction Successful';
-  document.getElementById('receipt-message').textContent = result.message || 'Your data has been delivered successfully!';
 
   const data = window._currentCheckoutData;
   let transactionRef = 'Loading...';
@@ -1080,6 +1006,16 @@ async function updateReceiptToSuccess(result) {
   // Show details immediately (no delay or expansion)
   document.getElementById('receipt-details').style.display = 'block';
   document.getElementById('receipt-actions').style.display = 'flex';
+
+  // Auto-refresh recent transactions after successful purchase
+if (typeof window.renderRecentTransactions === 'function') {
+  let current = [];
+  try {
+    const stored = localStorage.getItem('recentTransactions');
+    if (stored) current = JSON.parse(stored);
+  } catch (e) {}
+  window.renderRecentTransactions(current);
+}
 }
 
 function updateReceiptToFailed(errorMessage) {

@@ -5213,7 +5213,7 @@ p:has(.balance-real, .balance-masked) {
 
 .receipt-details {
   background: #151515;
-  padding: 8px 30px 8px 30px;
+  padding: 8px 25px 8px 25px;
   font-size: 15px;
 }
 

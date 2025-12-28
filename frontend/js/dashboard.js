@@ -6598,13 +6598,21 @@ viewAllLink.addEventListener('click', (e) => {
     return;
   }
 
-  // --- PERMANENT RENDER FUNCTION ---
+  // === FORCE YOUR 28px svgShapes GLOBALLY (overrides any other version) ===
+  window.svgShapes = {
+    mtn: `<svg class="yellow-circle-icon" width="28" height="28" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="#FFD700"/></svg>`,
+    airtel: `<svg class="airtel-rect-icon" width="28" height="28" viewBox="0 0 24 24" fill="none"><rect x="4" y="6" width="20" height="12" rx="4" fill="#e4012b"/></svg>`,
+    glo: `<svg class="glo-diamond-icon" width="28" height="28" viewBox="0 0 24 24" fill="none"><polygon points="12,2 22,12 12,22 2,12" fill="#00B13C"/></svg>`,
+    ninemobile: `<svg class="ninemobile-triangle-icon" width="28" height="28" viewBox="0 0 24 24" fill="none"><polygon points="12,3 21,21 3,21" fill="#7DB700"/></svg>`,
+    receive: `<svg class="bank-icon" width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M4 9v9h16V9l-8-5-8 5zm4 4h8v2H8v-2zm0 4h4v2H8v-2z" fill="#00cc00" stroke="#fff" stroke-width="1"/></svg>`
+  };
+
+  // --- PERMANENT RENDER FUNCTION (uses forced svgShapes) ---
   function renderRecentTransactions(transactions = []) {
     recentTransactionsList.innerHTML = '';
 
     if (!transactions.length) {
       recentTransactionsSection.classList.remove('active');
-      console.log('[recent-tx] No transactions → section hidden');
       return;
     }
 
@@ -6620,18 +6628,18 @@ viewAllLink.addEventListener('click', (e) => {
           ? tx.provider.charAt(0).toUpperCase() + tx.provider.slice(1).toLowerCase()
           : 'Unknown';
 
-      // === DATA AMOUNT: Prefer tx.data (from local purchase), fallback to description ===
+      // Data amount
       let dataAmount = tx.data || '';
       if (!dataAmount && tx.description) {
         const match = tx.description.match(/(\d+\.?\d*\s*(?:GB|TB|MB))/i);
         if (match) dataAmount = match[1];
       }
 
-      // === GET SVG FROM YOUR svgShapes (correct key mapping) ===
-      const providerKey = (tx.provider?.toLowerCase() === '9mobile') ? 'ninemobile' : tx.provider?.toLowerCase();
-      const svg = (window.svgShapes && window.svgShapes[providerKey]) || '';
+      // Correct key mapping + force from global svgShapes
+      const providerKey = tx.provider?.toLowerCase() === '9mobile' ? 'ninemobile' : tx.provider?.toLowerCase();
+      const svg = window.svgShapes[providerKey] || '';
 
-      // === FINAL LAYOUT: Phone + Data LEFT, SVG + Provider RIGHT ===
+      // Phone + Data LEFT, SVG + Provider RIGHT
       txDiv.innerHTML = `
         <span class="tx-desc">${tx.phone} - ${dataAmount}</span>
         <span class="tx-provider">${svg} ${displayName}</span>
@@ -6665,13 +6673,12 @@ viewAllLink.addEventListener('click', (e) => {
       recentTransactionsList.appendChild(txDiv);
     });
 
-    console.log('[recent-tx] Rendered', transactions.length, 'recent transactions (SVG on right)');
+    console.log('[recent-tx] Rendered', transactions.length, 'transactions with correct SVGs');
   }
 
   // === LOAD, MERGE, DEDUPLICATE, LIMIT TO 5 ===
   let recentTransactions = [];
 
-  // Load from localStorage
   try {
     const stored = localStorage.getItem('recentTransactions');
     if (stored) {
@@ -6679,14 +6686,11 @@ viewAllLink.addEventListener('click', (e) => {
       if (!Array.isArray(recentTransactions)) recentTransactions = [];
     }
   } catch (e) {
-    console.warn('[recent-tx] Failed to parse localStorage', e);
-    recentTransactions = [];
+    console.warn('[recent-tx] localStorage parse error', e);
   }
 
-  // Keep only valid (with phone)
   recentTransactions = recentTransactions.filter(tx => tx && tx.phone && tx.phone.trim() !== '');
 
-  // Fetch from server
   try {
     const res = await fetch(`${window.__SEC_API_BASE}/api/transactions?limit=20`, {
       credentials: 'include',
@@ -6699,9 +6703,7 @@ viewAllLink.addEventListener('click', (e) => {
       serverTxs.forEach(serverTx => {
         const exists = recentTransactions.some(localTx =>
           (localTx.id && serverTx.id && localTx.id === serverTx.id) ||
-          (localTx.phone === serverTx.phone &&
-           localTx.amount === serverTx.amount &&
-           Math.abs(new Date(localTx.timestamp || localTx.created_at || 0) - new Date(serverTx.created_at || 0)) < 60000)
+          (localTx.phone === serverTx.phone && localTx.amount === serverTx.amount)
         );
 
         if (!exists) {
@@ -6710,36 +6712,30 @@ viewAllLink.addEventListener('click', (e) => {
       });
     }
   } catch (err) {
-    console.error('[recent-tx] Server fetch failed:', err);
+    console.error('[recent-tx] Server fetch failed', err);
   }
 
-  // Sort newest first
   recentTransactions.sort((a, b) => {
     const timeA = new Date(a.timestamp || a.created_at || 0).getTime();
     const timeB = new Date(b.timestamp || b.created_at || 0).getTime();
     return timeB - timeA;
   });
 
-  // Keep only latest 5
   recentTransactions = recentTransactions.slice(0, 5);
 
-  // Save clean list
   try {
     localStorage.setItem('recentTransactions', JSON.stringify(recentTransactions));
     window.recentTransactions = recentTransactions;
   } catch (e) {
-    console.warn('[recent-tx] Failed to save', e);
+    console.warn('[recent-tx] Save failed', e);
   }
 
-  // Render
   renderRecentTransactions(recentTransactions);
 
-  // Expose globally
   window.renderRecentTransactions = renderRecentTransactions;
 
-  console.log('%c[recent-tx] PERMANENT SETUP COMPLETE — 5 recent txs, data amount shown, SVG on right ✅', 'color:lime;font-weight:bold');
+  console.log('%c[recent-tx] FINAL PERMANENT SETUP — Correct 28px SVGs, max 5, no duplicates ✅', 'color:lime;font-weight:bold');
 })();
-
 
 /* ===========================================================
    PIN modal — unified keypad + keyboard input + toast system
