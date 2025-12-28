@@ -6650,6 +6650,7 @@ viewAllLink.addEventListener('click', (e) => {
 
   // Initialize recent transactions
  renderRecentTransactions();
+ window.renderRecentTransactions = window.renderRecentTransactions || renderRecentTransactions; // Expose globally if needed
 
 //    payBtn.disabled = true;
 //  payBtn.textContent = 'Processing...';
