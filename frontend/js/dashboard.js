@@ -101,6 +101,9 @@ openModal: (() => {
 
 
 
+    // Form inputs
+    phoneNumber: document.getElementById('phone-input')?.value || '',
+
 
     // Selection state
     selectedProvider: document.querySelector('.provider-box.active')?.className.match(/mtn|airtel|glo|ninemobile/)?.[0] || 'mtn',
@@ -743,38 +746,6 @@ const DEBUG_MODE = false; // ← Change to false to hide completely
   }, 1500);
 
 })();
-
-// =======================================================
-// MOBILE-SAFE PATCH FOR EXISTING TOUCHSTART HANDLERS
-// Prevents PIN/password from opening on inputs
-// =======================================================
-(function() {
-  // Grab all existing event listeners on document and body
-  const targets = [document, document.body];
-  
-  targets.forEach(target => {
-    // @ts-ignore: getEventListeners is only available in DevTools; fallback below
-    const listeners = (typeof getEventListeners === 'function')
-      ? getEventListeners(target).touchstart || []
-      : []; // fallback: we cannot access already-hidden listeners outside DevTools
-
-    listeners.forEach(l => {
-      const orig = l.listener;
-      target.removeEventListener('touchstart', orig, l.useCapture);
-      const wrapped = function(e) {
-        // Skip normal inputs
-        if (e.target.matches('input, textarea, select')) return;
-        if (e.target.matches('.phone-input')) return;
-
-        if (e.target.closest('form')) return;
-
-        return orig.call(this, e);
-      };
-      target.addEventListener('touchstart', wrapped, l.useCapture);
-    });
-  });
-})();
-
 
 
 let __backHandler = null;
