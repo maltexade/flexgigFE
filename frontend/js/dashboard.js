@@ -6632,18 +6632,24 @@ viewAllLink.addEventListener('click', (e) => {
       txDiv.setAttribute('role', 'button');
       txDiv.setAttribute('aria-label', `Reuse transaction for ${tx.phone} on ${displayName}`);
       txDiv.addEventListener('click', () => {
-        const phoneInput = document.getElementById('phone-input');
-        if (!phoneInput) return alert('Phone input field not found.');
-        const formattedNumber = formatNigeriaNumber(tx.phone);
-        if (!formattedNumber.valid) return alert('Invalid phone number in transaction.');
-        phoneInput.value = formattedNumber.value;
-        selectProvider(tx.provider);
-        updateContactOrCancel();
-        updateContinueState();
-        saveUserState();
-        saveCurrentAppState();
-        phoneInput.blur();
-      });
+    const phoneInput = document.getElementById('phone-input');
+    if (!phoneInput) return alert('Phone input field not found.');
+    const formattedNumber = formatNigeriaNumber(tx.phone);
+    if (!formattedNumber.valid) return alert('Invalid phone number in transaction.');
+    phoneInput.value = formattedNumber.value;
+
+    // Normalize provider for CSS
+    let normalizedProvider = tx.provider?.toLowerCase();
+    if (normalizedProvider === 'ninemobile') normalizedProvider = 'ninemobile'; // same as class in HTML
+    selectProvider(normalizedProvider);
+
+    updateContactOrCancel();
+    updateContinueState();
+    saveUserState();
+    saveCurrentAppState();
+    phoneInput.blur();
+});
+
 
       recentTransactionsList.appendChild(txDiv);
     });
