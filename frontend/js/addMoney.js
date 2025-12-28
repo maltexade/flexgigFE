@@ -407,10 +407,16 @@ if (pending) {
 
     <!-- Amount Input -->
     <div class="addMoney-amount-section">
-      <input type="text" id="addMoneyAmountInput"
-             class="addMoney-amount-input"
-             autocomplete="off"
-             placeholder="₦ Enter amount" />
+      <input
+  type="text"                 
+  id="addMoneyAmountInput"
+  class="addMoney-amount-input"
+  autocomplete="off"           
+  inputmode="decimal"          
+  pattern="[0-9]*"             
+  placeholder="₦ Enter amount"
+/>
+
     </div>
 
     <!-- Quick Amount Buttons -->
