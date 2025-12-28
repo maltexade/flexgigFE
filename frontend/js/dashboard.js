@@ -6590,67 +6590,116 @@ viewAllLink.addEventListener('click', (e) => {
 
 
 
-  // --- RECENT TRANSACTIONS ---
-  // --- RECENT TRANSACTIONS ---
-  // --- RECENT TRANSACTIONS ---
+(async () => {
   const recentTransactionsList = document.querySelector('.recent-transactions-list');
   const recentTransactionsSection = document.querySelector('.recent-transactions');
-  const recentTransactions = JSON.parse(localStorage.getItem('recentTransactions')) || [];
 
-  function renderRecentTransactions() {
+  // --- Helper: Render Recent Transactions ---
+  function renderRecentTransactions(transactions) {
     recentTransactionsList.innerHTML = '';
-    if (recentTransactions.length === 0) {
+    if (!transactions.length) {
       recentTransactionsSection.classList.remove('active');
       console.log('[DEBUG] renderRecentTransactions: Section hidden, no transactions');
-    } else {
-      recentTransactionsSection.classList.add('active');
-      const maxRecent = 5; // Show last 5 transactions
-      const recentToShow = recentTransactions.slice(-maxRecent).reverse(); // Show latest at top
-      recentToShow.forEach(tx => {
-        const txDiv = document.createElement('div');
-        txDiv.className = 'recent-transaction-item';
-        const displayName = tx.provider === 'ninemobile' ? '9mobile' : tx.provider.charAt(0).toUpperCase() + tx.provider.slice(1);
-        txDiv.innerHTML = `
-          <span class="tx-desc">${tx.phone} - ${tx.data}</span>
-          <span class="tx-provider">${svgShapes[tx.provider]} ${displayName}</span>
-        `;
-        txDiv.setAttribute('role', 'button');
-        txDiv.setAttribute('aria-label', `Reuse transaction for ${tx.phone} on ${displayName}`);
-        txDiv.addEventListener('click', () => {
-          const phoneInput = document.getElementById('phone-input');
-          if (!phoneInput) {
-            console.error('[ERROR] recentTransaction click: #phone-input not found in DOM');
-            alert('Error: Phone input field not found.');
-            return;
-          }
-          const formattedNumber = formatNigeriaNumber(tx.phone);
-          if (!formattedNumber.valid) {
-            console.error('[ERROR] recentTransaction click: Invalid phone number:', tx.phone);
-            alert('Invalid phone number in transaction. Please try another.');
-            return;
-          }
-          phoneInput.value = formattedNumber.value; // Set formatted number (e.g., "0803 123 4567")
-          selectProvider(tx.provider); // Select provider
-          updateContactOrCancel();
-          updateContinueState();
-          saveUserState();
-          saveCurrentAppState();
-          if (formattedNumber.valid && tx.phone.length === 11 && isNigeriaMobile(tx.phone)) {
-            phoneInput.blur(); // Close the keyboard immediately
-            console.log('[RAW LOG] recentTransaction click: Keyboard closed, valid Nigeria number:', tx.phone);
-          }
-          console.log('[DEBUG] recentTransaction click: Set phone:', formattedNumber.value, 'Raw:', tx.phone, 'Provider:', tx.provider);
-        });
-        recentTransactionsList.appendChild(txDiv);
-      });
-      console.log('[DEBUG] renderRecentTransactions: Rendered', recentToShow.length, 'recent transactions', recentToShow);
+      return;
     }
-    localStorage.setItem('recentTransactions', JSON.stringify(recentTransactions));
+    recentTransactionsSection.classList.add('active');
+
+    transactions.forEach(tx => {
+      const txDiv = document.createElement('div');
+      txDiv.className = 'recent-transaction-item';
+
+      const displayName = tx.provider === 'ninemobile'
+        ? '9mobile'
+        : tx.provider
+          ? tx.provider.charAt(0).toUpperCase() + tx.provider.slice(1).toLowerCase()
+          : 'Unknown';
+
+      // Extract data amount from description
+      let dataAmount = '';
+      if (tx.description) {
+        const match = tx.description.match(/(\d+\s*(?:GB|TB|MB))/i);
+        if (match) dataAmount = match[1];
+      }
+
+      // Use SVG if available, fallback empty
+      const svg = svgShapes[tx.provider?.toLowerCase()] || svgShapes['default'] || '';
+
+      txDiv.innerHTML = `
+        <span class="tx-desc">${tx.phone} - ${dataAmount || ''}</span>
+        <span class="tx-provider">${svg} ${displayName}</span>
+      `;
+
+      txDiv.setAttribute('role', 'button');
+      txDiv.setAttribute('aria-label', `Reuse transaction for ${tx.phone} on ${displayName}`);
+      txDiv.addEventListener('click', () => {
+        const phoneInput = document.getElementById('phone-input');
+        if (!phoneInput) return alert('Phone input field not found.');
+        const formattedNumber = formatNigeriaNumber(tx.phone);
+        if (!formattedNumber.valid) return alert('Invalid phone number in transaction.');
+        phoneInput.value = formattedNumber.value;
+        selectProvider(tx.provider);
+        updateContactOrCancel();
+        updateContinueState();
+        saveUserState();
+        saveCurrentAppState();
+        phoneInput.blur();
+      });
+
+      recentTransactionsList.appendChild(txDiv);
+    });
+
+    console.log('[DEBUG] renderRecentTransactions: Rendered', transactions.length, 'recent transactions', transactions);
   }
 
-  // Initialize recent transactions
- renderRecentTransactions();
- window.renderRecentTransactions = window.renderRecentTransactions || renderRecentTransactions; // Expose globally if needed
+  // --- Load from localStorage immediately ---
+  let recentTransactions = JSON.parse(localStorage.getItem('recentTransactions')) || [];
+  // Filter out any without phone numbers
+  recentTransactions = recentTransactions.filter(tx => tx.phone && tx.phone.trim() !== '');
+  renderRecentTransactions(recentTransactions);
+
+  // --- Fetch latest transactions from server ---
+  try {
+    const res = await fetch(`${window.__SEC_API_BASE}/api/transactions?limit=10`, {
+      credentials: 'include',
+    });
+    if (!res.ok) throw new Error('Failed to fetch transactions from API');
+
+    const data = await res.json();
+    let allTransactions = data.items || [];
+
+    // Keep only transactions with phone numbers
+    const validTransactions = allTransactions.filter(tx => tx.phone && tx.phone.trim() !== '');
+
+    // Merge with existing, remove duplicates
+    validTransactions.forEach(tx => {
+      if (!recentTransactions.find(rtx => rtx.id === tx.id)) {
+        recentTransactions.push(tx);
+      }
+    });
+
+    // Filter again in case of bad data
+    recentTransactions = recentTransactions.filter(tx => tx.phone && tx.phone.trim() !== '');
+
+    // Sort descending
+    recentTransactions.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+    // Keep only latest 5
+    recentTransactions = recentTransactions.slice(0, 5);
+
+    // Save updated list
+    localStorage.setItem('recentTransactions', JSON.stringify(recentTransactions));
+    window.recentTransactions = recentTransactions;
+
+    // Re-render with updated data
+    renderRecentTransactions(recentTransactions);
+  } catch (err) {
+    console.error('Error fetching transactions:', err);
+  }
+
+  // Expose globally if needed
+  window.renderRecentTransactions = window.renderRecentTransactions || renderRecentTransactions;
+})();
+
 
 //    payBtn.disabled = true;
 //  payBtn.textContent = 'Processing...';
