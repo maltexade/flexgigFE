@@ -564,7 +564,7 @@ async function onPayClicked(ev) {
     showProcessingReceipt(checkoutData);
 
     const result = await processPayment();
-    addLocalTransaction(checkoutData);
+    
 
     // Keep Processing spinner — poll will handle switching
     pollForFinalStatus(result.reference);
