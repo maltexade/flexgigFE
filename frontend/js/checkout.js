@@ -1179,7 +1179,6 @@ async function pollForFinalStatus(reference) {
           // Immediate success
           if (status === 'success') {
             await updateReceiptToSuccess(tx);
-            addLocalTransaction(window._currentCheckoutData);
             resetCheckoutUI();
             closeCheckoutModal();
             return;
