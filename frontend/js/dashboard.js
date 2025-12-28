@@ -6595,13 +6595,12 @@ viewAllLink.addEventListener('click', (e) => {
   const recentTransactionsSection = document.querySelector('.recent-transactions');
 
   // --- Helper: Render Recent Transactions ---
-  function renderRecentTransactions(transactions) {
-    recentTransactionsList.innerHTML = '';
-    if (!transactions.length) {
-      recentTransactionsSection.classList.remove('active');
-      console.log('[DEBUG] renderRecentTransactions: Section hidden, no transactions');
-      return;
-    }
+  function renderRecentTransactions(transactions = []) {
+  recentTransactionsList.innerHTML = '';
+  if (!transactions.length) {
+    recentTransactionsSection.classList.remove('active');
+    return;
+  }
     recentTransactionsSection.classList.add('active');
 
     transactions.forEach(tx => {

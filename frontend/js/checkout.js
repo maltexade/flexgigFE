@@ -439,7 +439,7 @@ function resetCheckoutUI() {
   console.log('[checkout] ✅ Full reset complete — fresh MTN state restored');
 }
 // Add local transaction (same as your old mock)
-// Add local transaction (safe version — no ReferenceError)
+// Add local transaction (safe version — fixes the renderRecentTransactions crash)
 function addLocalTransaction(info) {
   let subType = 'GIFTING';
   if (info.provider.toLowerCase() === 'mtn' && info.planId.toLowerCase().includes('awoof')) subType = 'AWOOF';
@@ -459,37 +459,47 @@ function addLocalTransaction(info) {
     status: 'success'
   };
 
-  // Safely get or create recentTransactions from localStorage
+  // Safely load existing recentTransactions
   let recentTransactions = [];
   try {
     const stored = localStorage.getItem('recentTransactions');
-    if (stored) recentTransactions = JSON.parse(stored);
+    if (stored) {
+      recentTransactions = JSON.parse(stored);
+      // Ensure it's an array (defensive)
+      if (!Array.isArray(recentTransactions)) recentTransactions = [];
+    }
   } catch (e) {
     console.warn('[checkout] Failed to parse recentTransactions from storage', e);
+    recentTransactions = [];
   }
 
-  // Add new transaction
+  // Add the new transaction at the beginning (most recent first)
   recentTransactions.unshift(transaction);
 
-  // Keep only last 50
-  if (recentTransactions.length > 50) recentTransactions = recentTransactions.slice(0, 50);
+  // Limit to 50 entries
+  if (recentTransactions.length > 50) {
+    recentTransactions = recentTransactions.slice(0, 50);
+  }
 
-  // Save back
+  // Save back to localStorage
   try {
     localStorage.setItem('recentTransactions', JSON.stringify(recentTransactions));
   } catch (e) {
     console.warn('[checkout] Failed to save recentTransactions', e);
   }
 
-  // Trigger UI update if functions exist
+  // === UPDATE UI SAFELY ===
+  // Pass the fresh array to renderRecentTransactions (fixes the undefined.length error)
   if (typeof window.renderRecentTransactions === 'function') {
-    window.renderRecentTransactions();
+    window.renderRecentTransactions(recentTransactions);
   }
+
+  // Also refresh the main transactions list if the function exists
   if (typeof window.renderTransactions === 'function') {
     window.renderTransactions();
   }
 
-  console.log('[checkout] Local transaction added:', transaction);
+  console.log('[checkout] Local transaction added and UI refreshed:', transaction);
 }
 
 // ==================== AUTHENTICATION WITH DEDICATED PIN MODAL ====================
