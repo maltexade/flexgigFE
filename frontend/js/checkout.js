@@ -928,7 +928,7 @@ function showProcessingReceipt(data) {
   icon.innerHTML = '<div class="spinner"></div>';
 
   document.getElementById('receipt-status').textContent = 'Processing Transaction';
-  document.getElementById('receipt-message').textContent = 'Please wait while we deliver your data...';
+  document.getElementById('receipt-message').textContent = '';
   document.getElementById('receipt-details').style.display = 'none';
   document.getElementById('receipt-actions').style.display = 'none';
 
@@ -951,7 +951,7 @@ async function updateReceiptToSuccess(result) {
   const data = window._currentCheckoutData;
   let transactionRef = 'Loading...';
 
-  // === FETCH LATEST TRANSACTION & GET REFERENCE (RELIABLE MATCHING) ===
+  // === FETCH LATEST TRANSACTION & GET REFERENCE ===
   try {
     const res = await fetch('https://api.flexgig.com.ng/api/transactions?limit=20', {
       credentials: 'include'
@@ -959,10 +959,6 @@ async function updateReceiptToSuccess(result) {
     const json = await res.json();
     const txs = json.items || json || [];
 
-    // Match by:
-    // 1. Amount (most accurate)
-    // 2. Reference starts with 'data_'
-    // 3. Reference includes your user ID part (bcee735e)
     const match = txs.find(tx => 
       Math.abs(tx.amount - data.price) <= 10 &&
       tx.reference &&
@@ -973,7 +969,6 @@ async function updateReceiptToSuccess(result) {
     if (match?.reference) {
       transactionRef = match.reference;
     } else {
-      // Fallback: just take the latest reference that starts with 'data_'
       const fallback = txs.find(tx => tx.reference?.startsWith('data_'));
       transactionRef = fallback?.reference || 'Unavailable';
     }
@@ -982,40 +977,59 @@ async function updateReceiptToSuccess(result) {
     transactionRef = 'Unavailable';
   }
 
-  // === FILL ALL DETAILS FROM LOCAL (MORE ACCURATE) ===
+  // === FILL RECEIPT DETAILS ===
   if (data) {
     const providerKey = data.provider.toLowerCase() === '9mobile' ? 'ninemobile' : data.provider.toLowerCase();
     const svg = svgShapes[providerKey] || '';
     document.getElementById('receipt-provider').innerHTML = `${svg} ${data.provider.toUpperCase()}`;
     
     document.getElementById('receipt-phone').textContent = data.number;
-    
     document.getElementById('receipt-plan').textContent = `${data.dataAmount} / ${data.validity}`;
-    
     document.getElementById('receipt-amount').textContent = `₦${Number(data.price).toLocaleString()}`;
-    
     document.getElementById('receipt-transaction-id').textContent = transactionRef;
-    
-    document.getElementById('receipt-balance').textContent = 
-  `₦${Number(data.new_balance || 0).toLocaleString()}`;
-    
-    document.getElementById('receipt-time').textContent = 
-      new Date().toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
+    document.getElementById('receipt-balance').textContent = `₦${Number(data.new_balance || 0).toLocaleString()}`;
+    document.getElementById('receipt-time').textContent = new Date().toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
   }
 
-  // Show details immediately (no delay or expansion)
   document.getElementById('receipt-details').style.display = 'block';
   document.getElementById('receipt-actions').style.display = 'flex';
 
-  // Auto-refresh recent transactions after successful purchase
-if (typeof window.renderRecentTransactions === 'function') {
-  let current = [];
-  try {
-    const stored = localStorage.getItem('recentTransactions');
-    if (stored) current = JSON.parse(stored);
-  } catch (e) {}
-  window.renderRecentTransactions(current);
-}
+  // === AUTO-UPDATE RECENT TRANSACTIONS LIST INSTANTLY ===
+  if (typeof window.renderRecentTransactions === 'function') {
+    try {
+      const res = await fetch(`${window.__SEC_API_BASE}/api/transactions?limit=20`, {
+        credentials: 'include'
+      });
+      if (res.ok) {
+        const serverData = await res.json();
+        const serverTxs = (serverData.items || []).filter(tx => tx && tx.phone && tx.phone.trim() !== '');
+
+        let merged = serverTxs.slice(0, 5); // Use fresh server data (most accurate)
+
+        // Optional: fall back to localStorage if server fails
+        if (merged.length === 0) {
+          const stored = localStorage.getItem('recentTransactions');
+          if (stored) merged = JSON.parse(stored).slice(0, 5);
+        }
+
+        // Save to localStorage for next load
+        localStorage.setItem('recentTransactions', JSON.stringify(merged));
+
+        // Render immediately
+        window.renderRecentTransactions(merged);
+        console.log('[checkout] Recent transactions auto-updated after success');
+      }
+    } catch (err) {
+      console.warn('[checkout] Failed to auto-refresh recent transactions:', err);
+      // Fallback: just render from localStorage
+      let fallback = [];
+      try {
+        const stored = localStorage.getItem('recentTransactions');
+        if (stored) fallback = JSON.parse(stored);
+      } catch (e) {}
+      window.renderRecentTransactions(fallback);
+    }
+  }
 }
 
 function updateReceiptToFailed(errorMessage) {
