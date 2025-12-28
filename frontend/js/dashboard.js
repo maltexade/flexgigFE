@@ -6598,7 +6598,7 @@ viewAllLink.addEventListener('click', (e) => {
     return;
   }
 
-  // --- Helper: Render Recent Transactions (PERMANENT & FINAL VERSION) ---
+  // --- PERMANENT RENDER FUNCTION ---
   function renderRecentTransactions(transactions = []) {
     recentTransactionsList.innerHTML = '';
 
@@ -6620,18 +6620,18 @@ viewAllLink.addEventListener('click', (e) => {
           ? tx.provider.charAt(0).toUpperCase() + tx.provider.slice(1).toLowerCase()
           : 'Unknown';
 
-      // === SHOW DATA AMOUNT CORRECTLY ===
-      // 1. Prefer tx.data (set by local purchases)
-      // 2. Fallback to regex on description (for server transactions)
+      // === DATA AMOUNT: Prefer tx.data (from local purchase), fallback to description ===
       let dataAmount = tx.data || '';
       if (!dataAmount && tx.description) {
         const match = tx.description.match(/(\d+\.?\d*\s*(?:GB|TB|MB))/i);
         if (match) dataAmount = match[1];
       }
 
-      // SVG from global svgShapes
-      const svg = (window.svgShapes && window.svgShapes[tx.provider?.toLowerCase()]) || '';
+      // === GET SVG FROM YOUR svgShapes (correct key mapping) ===
+      const providerKey = (tx.provider?.toLowerCase() === '9mobile') ? 'ninemobile' : tx.provider?.toLowerCase();
+      const svg = (window.svgShapes && window.svgShapes[providerKey]) || '';
 
+      // === FINAL LAYOUT: Phone + Data LEFT, SVG + Provider RIGHT ===
       txDiv.innerHTML = `
         <span class="tx-desc">${tx.phone} - ${dataAmount}</span>
         <span class="tx-provider">${svg} ${displayName}</span>
@@ -6665,13 +6665,13 @@ viewAllLink.addEventListener('click', (e) => {
       recentTransactionsList.appendChild(txDiv);
     });
 
-    console.log('[recent-tx] Rendered', transactions.length, 'recent transactions');
+    console.log('[recent-tx] Rendered', transactions.length, 'recent transactions (SVG on right)');
   }
 
-  // === LOAD & MERGE LOGIC (NO DUPLICATES + STRICTLY 5 ENTRIES) ===
+  // === LOAD, MERGE, DEDUPLICATE, LIMIT TO 5 ===
   let recentTransactions = [];
 
-  // 1. Load from localStorage
+  // Load from localStorage
   try {
     const stored = localStorage.getItem('recentTransactions');
     if (stored) {
@@ -6683,12 +6683,12 @@ viewAllLink.addEventListener('click', (e) => {
     recentTransactions = [];
   }
 
-  // 2. Filter valid (must have phone)
+  // Keep only valid (with phone)
   recentTransactions = recentTransactions.filter(tx => tx && tx.phone && tx.phone.trim() !== '');
 
-  // 3. Fetch latest from server
+  // Fetch from server
   try {
-    const res = await fetch(`${window.__SEC_API_BASE}/api/transactions?limit=20`, { // increased limit to be safe
+    const res = await fetch(`${window.__SEC_API_BASE}/api/transactions?limit=20`, {
       credentials: 'include',
     });
 
@@ -6696,13 +6696,12 @@ viewAllLink.addEventListener('click', (e) => {
       const data = await res.json();
       const serverTxs = (data.items || []).filter(tx => tx && tx.phone && tx.phone.trim() !== '');
 
-      // Merge: add server tx only if not already in list (by server id OR exact match)
       serverTxs.forEach(serverTx => {
         const exists = recentTransactions.some(localTx =>
-          localTx.id && serverTx.id && localTx.id === serverTx.id || // server id match
-          localTx.phone === serverTx.phone &&
-          localTx.amount === serverTx.amount &&
-          Math.abs(new Date(localTx.timestamp || localTx.created_at) - new Date(serverTx.created_at)) < 60000 // within 1 min
+          (localTx.id && serverTx.id && localTx.id === serverTx.id) ||
+          (localTx.phone === serverTx.phone &&
+           localTx.amount === serverTx.amount &&
+           Math.abs(new Date(localTx.timestamp || localTx.created_at || 0) - new Date(serverTx.created_at || 0)) < 60000)
         );
 
         if (!exists) {
@@ -6711,81 +6710,36 @@ viewAllLink.addEventListener('click', (e) => {
       });
     }
   } catch (err) {
-    console.error('[recent-tx] Failed to fetch server transactions:', err);
+    console.error('[recent-tx] Server fetch failed:', err);
   }
 
-  // 4. Sort newest first
+  // Sort newest first
   recentTransactions.sort((a, b) => {
     const timeA = new Date(a.timestamp || a.created_at || 0).getTime();
     const timeB = new Date(b.timestamp || b.created_at || 0).getTime();
     return timeB - timeA;
   });
 
-  // 5. STRICTLY keep only latest 5
+  // Keep only latest 5
   recentTransactions = recentTransactions.slice(0, 5);
 
-  // 6. Save clean list
+  // Save clean list
   try {
     localStorage.setItem('recentTransactions', JSON.stringify(recentTransactions));
     window.recentTransactions = recentTransactions;
   } catch (e) {
-    console.warn('[recent-tx] Failed to save to localStorage', e);
+    console.warn('[recent-tx] Failed to save', e);
   }
 
-  // 7. Render
+  // Render
   renderRecentTransactions(recentTransactions);
 
   // Expose globally
   window.renderRecentTransactions = renderRecentTransactions;
 
-  console.log('%c[recent-tx] Initialization complete — max 5 unique recent transactions with data amount displayed', 'color:lime;font-weight:bold');
+  console.log('%c[recent-tx] PERMANENT SETUP COMPLETE — 5 recent txs, data amount shown, SVG on right ✅', 'color:lime;font-weight:bold');
 })();
 
-
-//    payBtn.disabled = true;
-//  payBtn.textContent = 'Processing...';
-//  setTimeout(() => {
-//    // Payment logic
-//     payBtn.disabled = false;
-//     payBtn.textContent = 'Pay';
-//   }, 1000); 
-  // // --- ADD MONEY HANDLER ---
-  // const addMoneyBtn = document.querySelector('.card.add-money1');
-  // addMoneyBtn.addEventListener('click', () => {
-  //   const amount = prompt('Enter amount to fund (₦):', '1000');
-  //   if (!amount || isNaN(amount) || amount <= 0) {
-  //     alert('Please enter a valid amount.');
-  //     console.error('[ERROR] addMoneyBtn: Invalid amount:', amount);
-  //     return;
-  //   }
-  //   const fundAmount = parseFloat(amount);
-  //   // Mock API call
-  //   const mockResponse = { success: true, transactionId: `TX${Date.now()}` };
-  //   console.log('[DEBUG] addMoneyBtn: Mock API response:', mockResponse);
-
-  //   // Update balance
-  //   userBalance += fundAmount;
-  //   updateBalanceDisplay();
-
-  //   // Add to transactions
-  //   const transaction = {
-  //     type: 'receive',
-  //     description: 'Fund Wallet',
-  //     amount: fundAmount,
-  //     phone: null,
-  //     provider: null,
-  //     subType: null,
-  //     data: null,
-  //     duration: null,
-  //     timestamp: new Date().toISOString(),
-  //     status: 'success' // Mock success
-  //   };
-  //   transactions.push(transaction);
-  //   renderTransactions();
-
-  //   alert(`Successfully funded ₦${fundAmount}!`);
-  //   console.log('[DEBUG] addMoneyBtn: Funding processed, new balance:', userBalance, 'Transaction:', transaction);
-  // });
 
 /* ===========================================================
    PIN modal — unified keypad + keyboard input + toast system
