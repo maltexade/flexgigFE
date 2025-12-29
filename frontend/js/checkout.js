@@ -149,15 +149,6 @@ function domReady(cb) {
   } else cb();
 }
 
-// ==================== UTILITY FUNCTIONS ====================
-const showToast = (msg, type = 'info') => {
-  if (typeof window.notify === 'function') {
-    return window.notify(msg, type);
-  } else if (typeof notify === 'function') {
-    return notify(msg, type);
-  }
-  console.log('[notify]', type, msg);
-};
 
 
 
