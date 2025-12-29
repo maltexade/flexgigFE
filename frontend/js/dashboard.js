@@ -9829,6 +9829,7 @@ function openUpdateProfileModal(profile = {}) {
  
   console.log('[DEBUG] openUpdateProfileModal: Modal opened', { fullName, username, phoneNumber, email });
 }
+window.openUpdateProfileModal = openUpdateProfileModal;
 
 function closeUpdateProfileModal() {
     detachProfileListeners();
