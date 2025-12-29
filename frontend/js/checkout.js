@@ -292,14 +292,8 @@ function requireTransactionReady() {
     if (!profileCompleted) {
       showToast('Please complete your profile before making transactions.', 'error');
 
-      // fallback to existing global modal functions
-      if (typeof window.openUpdateProfileModal === 'function') {
-        ModalManager.openModal('updateProfileModal');
+      ModalManager.openModal('updateProfileModal');
 console.log('open modals:', ModalManager.getOpenModals());
-      } else if (typeof window.openProfileModal === 'function') {
-        ModalManager.openProfileModal();
-      }
-      return false;
     }
 
     // 2. PIN check (localStorage)
