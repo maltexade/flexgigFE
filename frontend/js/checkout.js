@@ -22,37 +22,34 @@ const safeGetUserState = () => {
 };
 
 
-// Wrap dashboard's checkPinExists (callback-based) into a Promise
-function checkPinExistsAsync(context = 'checkout') {
-  return new Promise((resolve) => {
-    // If dashboard helper missing, assume PIN exists to avoid blocking (but warn)
-    if (typeof window.checkPinExists !== 'function') {
-      console.warn('[checkout] window.checkPinExists not available — skipping PIN check');
-      return resolve(true);
-    }
+// Synchronous PIN check using localStorage
+function checkPinExists(context = 'checkout') {
+  try {
+    const hasPin = localStorage.getItem('hasPin');
+    // localStorage stores everything as strings, so convert to boolean
+    return hasPin === 'true';
+  } catch (err) {
+    console.error('[checkout] Failed to read PIN from localStorage:', err);
+    return false; // fail-safe: assume no PIN
+  }
+}
 
-    // checkPinExists expects (callback, context)
-    try {
-      window.checkPinExists((pinExists) => {
-        // callback receives true if pin exists (or true after set)
-        resolve(Boolean(pinExists));
-      }, context);
-    } catch (err) {
-      console.error('[checkout] checkPinExists failed:', err);
-      // Fail-safe: do not block transactions if wrapper throws — but you can change this
-      resolve(false);
-    }
-  });
+// Usage example
+if (checkPinExists()) {
+  console.log('PIN exists, proceed.');
+} else {
+  console.log('No PIN found, prompt user.');
 }
 
 
-// Async guard: profile check + delegate PIN check to dashboard.checkPinExists
-async function requireTransactionReady() {
+
+// Guard: profile check + localStorage PIN check
+function requireTransactionReady() {
   try {
     // 1. Profile check (local)
     if (!isProfileComplete()) {
       showToast('Please complete your profile before making transactions.', 'error');
-      // dashboard UI should provide this; fallback to existing global
+      // fallback to existing global modal functions
       if (typeof window.openUpdateProfileModal === 'function') {
         window.openUpdateProfileModal();
       } else if (typeof window.openProfileModal === 'function') {
@@ -61,23 +58,30 @@ async function requireTransactionReady() {
       return false;
     }
 
-    // 2. PIN check (delegated)
-    const pinOk = await checkPinExistsAsync('checkout');
-
-    if (!pinOk) {
-      // checkPinExists already opened the PIN modal and will call the callback when done.
-      // We return false here and rely on the modal flow to re-trigger checkout.
+    // 2. PIN check (localStorage)
+    const hasPin = localStorage.getItem('hasPin') === 'true';
+    if (!hasPin) {
+      showToast('Please set up your transaction PIN before proceeding.', 'error');
+      // Optionally, open a PIN setup modal if you have one
+      if (typeof window.openPinSetupModal === 'function') {
+        window.openPinSetupModal();
+      }
       return false;
     }
 
     return true;
   } catch (err) {
     console.error('[checkout] requireTransactionReady error:', err);
-    // Be conservative: block if something unexpected happened
     showToast('Security check failed. Please reload the page.', 'error');
     return false;
   }
 }
+
+// Usage:
+if (requireTransactionReady()) {
+  // proceed with transaction
+}
+
 
 // Extracted payment logic so we can call it after security checks
 async function continueCheckoutFlow() {
@@ -255,12 +259,20 @@ const hasPin = () => {
   }
 };
 
-// Replaced isProfileComplete — uses safeGetUserState
 function isProfileComplete() {
   const state = safeGetUserState();
-  // More forgiving check: fullName + phoneNumber are sufficient
-  return !!(state.fullName && state.phoneNumber);
+
+  // Checkout phone input
+  const checkoutPhone =
+    document.getElementById('phone-input')?.value?.trim() ||
+    state.number; // fallback if already saved
+
+  return !!(
+    checkoutPhone &&
+    checkoutPhone.length >= 10
+  );
 }
+
 
 
 function getAvailableBalance() {
