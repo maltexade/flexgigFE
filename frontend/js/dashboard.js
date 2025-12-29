@@ -4666,6 +4666,116 @@ if (!window.prefetchAuthOptions) window.prefetchAuthOptions = async function pre
 })();
 
 
+// Add this function to load user data into the modal
+async function loadProfileData() {
+  console.log('[DEBUG] loadProfileData: Loading user profile into modal');
+
+  // Load data from localStorage
+  const fullName = localStorage.getItem('fullName') || '';
+  const username = localStorage.getItem('username') || '';
+  const phoneNumber = localStorage.getItem('phoneNumber') || '';
+  const email = localStorage.getItem('userEmail') || '';
+  const address = localStorage.getItem('address') || '';
+  const profilePicture = localStorage.getItem('profilePicture') || '';
+
+  // Populate form fields
+  if (fullNameInput) fullNameInput.value = fullName;
+  if (usernameInput) usernameInput.value = username;
+  if (phoneNumberInput) phoneNumberInput.value = phoneNumber;
+  if (emailInput) emailInput.value = email;
+  if (addressInput) addressInput.value = address;
+
+  // Set profile picture preview
+  if (profilePicturePreview) {
+    const displayName = username || fullName.split(' ')[0] || 'User';
+    const fallbackLetter = displayName.charAt(0).toUpperCase();
+
+    if (profilePicture && isValidImageSource(profilePicture)) {
+      profilePicturePreview.innerHTML = `<img src="${profilePicture}" alt="Profile Picture" class="avatar-img" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`;
+    } else {
+      profilePicturePreview.innerHTML = '';
+      profilePicturePreview.textContent = fallbackLetter;
+    }
+  }
+
+  // Check if username has been set before (lock it if already set)
+  const lastUpdate = localStorage.getItem('lastUsernameUpdate');
+  if (lastUpdate && usernameInput) {
+    usernameInput.disabled = true;
+    if (usernameError) {
+      usernameError.textContent = 'Username cannot be changed after initial setup';
+      usernameError.classList.add('active', 'info');
+    }
+  }
+
+  console.log('[DEBUG] loadProfileData: Data loaded', { fullName, username, email });
+}
+
+// Helper function to validate image source
+function isValidImageSource(url) {
+  if (!url) return false;
+  return /^(data:image\/|https?:\/\/|\/|blob:)/i.test(url);
+}
+
+// Update the modal open handlers to load data
+if (settingsUpdateBtn) {
+  settingsUpdateBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    lastModalSource = 'settings';
+    window.ModalManager?.openModal('updateProfileModal');
+
+    // Load profile data and run validation after transition
+    setTimeout(() => {
+      loadProfileData();
+      validateProfileForm(true);
+    }, 450);
+  });
+}
+
+if (updateProfileBtn) {
+  updateProfileBtn.addEventListener('click', () => {
+    lastModalSource = 'dashboard';
+    window.ModalManager?.openModal('updateProfileModal');
+    
+    // Load profile data and run validation after transition
+    setTimeout(() => {
+      loadProfileData();
+      validateProfileForm(true);
+    }, 450);
+  });
+}
+
+// Update dashboard card handler
+document.querySelector('.card.update-profile')?.addEventListener('click', () => {
+  lastModalSource = 'dashboard';
+  window.ModalManager?.openModal('updateProfileModal');
+  
+  // Load profile data and run validation after transition
+  setTimeout(() => {
+    loadProfileData();
+    validateProfileForm(true);
+  }, 450);
+});
+
+// Also attach listeners when modal opens (ModalManager callback)
+if (window.ModalManager) {
+  const originalOpenModal = window.ModalManager.openModal;
+  window.ModalManager.openModal = function(modalId) {
+    const result = originalOpenModal.call(this, modalId);
+    
+    if (modalId === 'updateProfileModal') {
+      setTimeout(() => {
+        loadProfileData();
+        attachProfileListeners();
+        validateProfileForm(true);
+      }, 450);
+    }
+    
+    return result;
+  };
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   const providerClasses = ['mtn', 'airtel', 'glo', 'ninemobile'];
   const serviceItems = document.querySelectorAll('.short-item');
@@ -9678,6 +9788,8 @@ if (addressInput && !addressInput.disabled) {
 
 // → ONLY keep this: let ModalManager do 100% of the work
 
+// ===== PROFILE MODAL OPEN HANDLERS =====
+
 if (settingsUpdateBtn) {
   settingsUpdateBtn.addEventListener('click', (e) => {
     e.preventDefault();
@@ -9685,8 +9797,12 @@ if (settingsUpdateBtn) {
     lastModalSource = 'settings';
     window.ModalManager?.openModal('updateProfileModal');
 
-    // Run validation after transition (ModalManager uses 0.3s)
-    setTimeout(() => validateProfileForm(true), 450);
+    // Load profile data and run validation after transition
+    setTimeout(() => {
+      loadProfileData();
+      attachProfileListeners();
+      validateProfileForm(true);
+    }, 450);
   });
 }
 
@@ -9694,15 +9810,27 @@ if (updateProfileBtn) {
   updateProfileBtn.addEventListener('click', () => {
     lastModalSource = 'dashboard';
     window.ModalManager?.openModal('updateProfileModal');
-    setTimeout(() => validateProfileForm(true), 450);
+    
+    // Load profile data and run validation after transition
+    setTimeout(() => {
+      loadProfileData();
+      attachProfileListeners();
+      validateProfileForm(true);
+    }, 450);
   });
 }
 
-// Optional: If you have a dashboard card with class .card.update-profile
+// Dashboard card handler
 document.querySelector('.card.update-profile')?.addEventListener('click', () => {
   lastModalSource = 'dashboard';
   window.ModalManager?.openModal('updateProfileModal');
-  setTimeout(() => validateProfileForm(true), 450);
+  
+  // Load profile data and run validation after transition
+  setTimeout(() => {
+    loadProfileData();
+    attachProfileListeners();
+    validateProfileForm(true);
+  }, 450);
 });
 
 // That's it. Nothing else needed.
