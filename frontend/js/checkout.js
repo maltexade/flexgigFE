@@ -488,6 +488,33 @@ async function onPayClicked(ev) {
   const payBtn = document.getElementById('payBtn');
   if (!payBtn || payBtn.disabled) return;
 
+
+  // ==================== PRE-CHECK: PIN & PROFILE ====================
+  if (!hasPin()) {
+    showToast('Please set your transaction PIN before making payments.', 'error');
+
+    // Optional: open profile / PIN setup modal
+    if (typeof window.openSetPinModal === 'function') {
+      window.openSetPinModal();
+    } else if (typeof window.openProfileModal === 'function') {
+      window.openProfileModal();
+    }
+
+    return;
+  }
+
+  if (!isProfileComplete()) {
+    showToast('Please complete your profile before making transactions.', 'error');
+
+    if (typeof window.openUpdateProfileModal === 'function') {
+      window.openUpdateProfileModal();
+    } else if (typeof window.openProfileModal === 'function') {
+      window.openProfileModal();
+    }
+
+    return;
+  }
+
   const originalText = payBtn.textContent;
   payBtn.disabled = true;
   payBtn.textContent = 'Processing...';
