@@ -6635,24 +6635,23 @@ txDiv.addEventListener('click', () => {
     return;
   }
 
-  // Always format using your function
+  // 1. Format number
   const result = window.formatNigeriaNumber(tx.phone);
-  phoneInput.value = result.value; // This gives "0808 336 3636" with spaces
+  phoneInput.value = result.value; // e.g., "0808 336 3636"
 
-  // Auto select provider
-  if (normalized.length >= 4) {
-        const provider = detectProvider(normalized);
-        console.log('[DEBUG] contactBtn: Detected provider:', provider);
-        if (provider) {
-          const providerClass = provider.toLowerCase() === '9mobile' ? 'ninemobile' : provider.toLowerCase();
-          debounce(() => {
-            selectProvider(providerClass);
-            console.log('[DEBUG] contactBtn: Provider selected:', providerClass);
-          }, 100)();
-        }
-      }
+  // 2. Normalize and detect provider
+  const normalizedPhone = tx.phone.replace(/^\+234/, '0');
+  const provider = detectProvider(normalizedPhone);
 
-  // Update UI
+  if (provider) {
+    const providerClass = provider.toLowerCase() === '9mobile' ? 'ninemobile' : provider.toLowerCase();
+    debounce(() => {
+      selectProvider(providerClass);
+      console.log('[DEBUG] Provider auto-selected:', providerClass);
+    }, 100)();
+  }
+
+  // 3. Update UI states
   if (window.updateContactOrCancel) window.updateContactOrCancel();
   if (window.updateContinueState) window.updateContinueState();
   if (window.saveUserState) window.saveUserState();
@@ -6660,6 +6659,7 @@ txDiv.addEventListener('click', () => {
 
   phoneInput.blur();
 });
+
 
       recentTransactionsList.appendChild(txDiv);
     });
