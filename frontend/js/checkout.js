@@ -7,6 +7,20 @@ console.log('[checkout] Module loaded 🛒');
 
 'use strict';
 
+// ======= SAFE USER STATE ACCESS (use window.getUserState if defined) =======
+const safeGetUserState = () => {
+  try {
+    if (typeof window.getUserState === 'function') {
+      return window.getUserState() || {};
+    }
+    const raw = localStorage.getItem('userState');
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) {
+    console.error('[checkout] safeGetUserState parse error', e);
+    return {};
+  }
+};
+
 
 // Wrap dashboard's checkPinExists (callback-based) into a Promise
 function checkPinExistsAsync(context = 'checkout') {
