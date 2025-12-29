@@ -9737,6 +9737,83 @@ if (addressInput && !addressInput.disabled) {
 }
 
 
+function openUpdateProfileModal(profile = {}) {
+  if (!updateProfileModal || !updateProfileForm) {
+    console.error('[ERROR] openUpdateProfileModal: Modal or form not found');
+    return;
+  }
+ 
+  // show modal
+  updateProfileModal.style.display = 'block';
+  setTimeout(() => {
+    updateProfileModal.classList.add('active');
+    updateProfileModal.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('modal-open');
+  }, 10);
+ 
+  // --- Populate form fields (prefer provided profile, then localStorage as fallback) ---
+  const fullName = profile?.fullName || localStorage.getItem('fullName') || (localStorage.getItem('userEmail') || '').split('@')[0] || '';
+  const username = profile?.username || localStorage.getItem('username') || '';
+  const phoneNumber = profile?.phoneNumber || localStorage.getItem('phoneNumber') || '';
+  const email = profile?.email || localStorage.getItem('userEmail') || '';
+  const address = profile?.address || localStorage.getItem('address') || '';
+ 
+  if (fullNameInput) fullNameInput.value = fullName;
+  if (usernameInput) usernameInput.value = username;
+  if (phoneNumberInput) phoneNumberInput.value = phoneNumber ? formatNigeriaNumberProfile(phoneNumber).value : '';
+  if (emailInput) emailInput.value = email;
+  if (addressInput) addressInput.value = address;
+ 
+  // --- Field enable/disable rules (server-driven) ---
+  if (fullNameInput) fullNameInput.disabled = localStorage.getItem('fullNameEdited') === 'true';
+  if (phoneNumberInput) phoneNumberInput.disabled = !!phoneNumber;
+  if (emailInput) emailInput.disabled = true;
+  if (addressInput) addressInput.disabled = !!(profile?.address || localStorage.getItem('address')?.trim());
+  if (profilePictureInput) profilePictureInput.disabled = false; // always editable
+ 
+  // --- Avatar / preview ---
+  const profilePicture = localStorage.getItem('profilePicture') || '';
+  const isValidProfilePicture = !!profilePicture && /^(data:image\/|https?:\/\/|\/|blob:)/i.test(profilePicture);
+  const displayName = username || (fullName.split(' ')[0] || 'User');
+ 
+  if (profilePicturePreview) {
+    if (isValidProfilePicture) {
+      profilePicturePreview.innerHTML = `<img src="${profilePicture}" alt="Profile Picture" class="avatar-img" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`;
+    } else {
+      profilePicturePreview.innerHTML = '';
+      profilePicturePreview.textContent = displayName.charAt(0).toUpperCase();
+    }
+  }
+ 
+  // --- Reset error UI, invalid classes and touched flags ---
+  [fullNameError, usernameError, phoneNumberError, addressError, profilePictureError].forEach(errEl => {
+    if (errEl) {
+      errEl.textContent = '';
+      errEl.classList.remove('active', 'error', 'checking', 'available');
+    }
+  });
+ 
+  [fullNameInput, usernameInput, phoneNumberInput, addressInput].forEach(inp => {
+    if (inp) inp.classList.remove('invalid');
+  });
+ 
+  Object.keys(fieldTouched).forEach(k => fieldTouched[k] = false);
+ 
+  // --- Ensure no duplicate listeners: detach previous, then attach fresh handlers ---
+  detachProfileListeners();
+  attachProfileListeners(); // attachProfileListeners should add input/blur/paste handlers for fullName/username/phone/address/profilePicture
+ 
+  // NOTE: Do NOT add inline input listeners for validation here.
+  // The attachProfileListeners() function is the single source of truth and
+  // is responsible for adding the input + blur handlers that follow the
+  // "live rules vs blur-on-length" pattern (so length errors only show on blur/submit).
+ 
+  // Re-run initial validation to set the save button state correctly
+  validateProfileForm(false);
+ 
+  console.log('[DEBUG] openUpdateProfileModal: Modal opened', { fullName, username, phoneNumber, email });
+}
+
 
 
 
