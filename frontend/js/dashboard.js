@@ -82,22 +82,6 @@ const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     // ==================== MODALS – FIXED & BULLETPROOF ====================
     
 
-openModal: (() => {
-  // This will NOW work perfectly
-  if (window.ModalManager && typeof window.ModalManager.getTopModal === 'function') {
-    const top = window.ModalManager.getTopModal();
-    if (top) {
-      console.log('[StateSaver] Detected open modal via ModalManager:', top);
-      return top;
-    }
-  }
-
-  // Fallback (should never trigger now)
-  const visible = document.querySelector('.modal.active, .modal[style*="flex"], .modal[style*="block"]');
-  if (visible?.id) return visible.id;
-
-  return null;
-})(),
 
 
 
@@ -5948,16 +5932,7 @@ function restoreEverything() {
     updateContactOrCancel(); // Update cancel button based on phone
     updateContinueState(); // Enable/disable continue
 
-    // 5. Restore scroll/modal if present
-    if (saved.scrollPositions) {
-      window.scrollTo(0, saved.scrollPositions.dashboard || 0);
-      if (plansRow) plansRow.scrollLeft = saved.scrollPositions.plansRow || 0;
-      const modalContent = document.getElementById('allPlansModalContent');
-      if (modalContent) modalContent.scrollTop = saved.scrollPositions.allPlansModal || 0;
-    }
-    if (saved.openModal && window.ModalManager) {
-      setTimeout(() => ModalManager.openModal(saved.openModal), 100);
-    }
+
 
     console.log('[restoreEverything] Full restore complete');
   }, 650);
