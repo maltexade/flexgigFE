@@ -294,9 +294,10 @@ function requireTransactionReady() {
 
       // fallback to existing global modal functions
       if (typeof window.openUpdateProfileModal === 'function') {
-        window.openUpdateProfileModal();
+        ModalManager.openModal('updateProfileModal');
+console.log('open modals:', ModalManager.getOpenModals());
       } else if (typeof window.openProfileModal === 'function') {
-        window.openProfileModal();
+        ModalManager.openProfileModal();
       }
       return false;
     }
@@ -306,8 +307,8 @@ function requireTransactionReady() {
     if (!hasPin) {
       showToast('Please set up your transaction PIN before proceeding.', 'error');
 
-      if (typeof window.openPinSetupModal === 'function') {
-        window.openPinSetupModal();
+      if (typeof window.pinModal === 'function') {
+        ModalManager.openModal('pinModal');
       }
       return false;
     }
