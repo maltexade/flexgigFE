@@ -7,6 +7,23 @@ console.log('[checkout] Module loaded 🛒');
 
 'use strict';
 
+function getUserState() {
+  try {
+    return JSON.parse(localStorage.getItem('userState')) || {};
+  } catch {
+    return {};
+  }
+}
+
+window.pinModal ||= () => {
+  showToast('Set PIN modal not wired yet', 'error');
+};
+
+window.openUpdateProfileModal ||= () => {
+  showToast('Profile update modal not wired yet', 'error');
+};
+
+
 
 // ==================== STATE ====================
 let checkoutData = null; // Stores current checkout information
