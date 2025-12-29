@@ -6640,12 +6640,17 @@ txDiv.addEventListener('click', () => {
   phoneInput.value = result.value; // This gives "0808 336 3636" with spaces
 
   // Auto select provider
-  let providerClass = tx.provider?.toLowerCase();
-  if (providerClass === '9mobile') providerClass = 'ninemobile';
-
-  if (providerClass && window.selectProvider) {
-    window.selectProvider(providerClass);
-  }
+  if (normalized.length >= 4) {
+        const provider = detectProvider(normalized);
+        console.log('[DEBUG] contactBtn: Detected provider:', provider);
+        if (provider) {
+          const providerClass = provider.toLowerCase() === '9mobile' ? 'ninemobile' : provider.toLowerCase();
+          debounce(() => {
+            selectProvider(providerClass);
+            console.log('[DEBUG] contactBtn: Provider selected:', providerClass);
+          }, 100)();
+        }
+      }
 
   // Update UI
   if (window.updateContactOrCancel) window.updateContactOrCancel();
