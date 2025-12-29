@@ -45,96 +45,6 @@ if (checkPinExists()) {
 
 
 
-// Guard: profile check + localStorage PIN check
-function requireTransactionReady() {
-  try {
-    // 1. Profile check (local)
-    if (!isProfileComplete()) {
-      showToast('Please complete your profile before making transactions.', 'error');
-      // fallback to existing global modal functions
-      if (typeof window.openUpdateProfileModal === 'function') {
-        window.openUpdateProfileModal();
-      } else if (typeof window.openProfileModal === 'function') {
-        window.openProfileModal();
-      }
-      return false;
-    }
-
-    // 2. PIN check (localStorage)
-    const hasPin = localStorage.getItem('hasPin') === 'true';
-    if (!hasPin) {
-      showToast('Please set up your transaction PIN before proceeding.', 'error');
-      // Optionally, open a PIN setup modal if you have one
-      if (typeof window.openPinSetupModal === 'function') {
-        window.openPinSetupModal();
-      }
-      return false;
-    }
-
-    return true;
-  } catch (err) {
-    console.error('[checkout] requireTransactionReady error:', err);
-    showToast('Security check failed. Please reload the page.', 'error');
-    return false;
-  }
-}
-
-// Usage:
-if (requireTransactionReady()) {
-  // proceed with transaction
-}
-
-
-// Extracted payment logic so we can call it after security checks
-async function continueCheckoutFlow() {
-  const payBtn = document.getElementById('payBtn');
-  if (!payBtn) return;
-
-  const originalText = payBtn.textContent;
-  payBtn.disabled = true;
-  payBtn.textContent = 'Processing...';
-
-  try {
-    checkoutData = gatherCheckoutData();
-    if (!checkoutData) throw new Error('Invalid checkout data');
-
-    // Trigger dedicated PIN modal for verification (if used)
-    const authSuccess = await triggerCheckoutAuthWithDedicatedModal();
-    if (!authSuccess) {
-      // User cancelled PIN entry
-      showToast('Payment cancelled', 'info');
-      return;
-    }
-
-    showProcessingReceipt(checkoutData);
-
-    const result = await processPayment();
-
-    // Keep Processing spinner — poll will handle switching
-    pollForFinalStatus(result.reference);
-
-  } catch (err) {
-    console.error('[checkout] Payment failed:', err);
-
-    if (err.message && err.message.includes('Insufficient balance')) {
-      const match = err.message.match(/₦([\d,]+)/);
-      const currentBal = match ? parseFloat(match[1].replace(/,/g, '')) : 0;
-      updateReceiptToInsufficient('You do not have enough balance to complete this purchase.', currentBal);
-    } else {
-      updateReceiptToFailed(err.message || 'Purchase failed. Please try again.');
-    }
-    closeCheckoutModal();
-  } finally {
-    // restore UI
-    const payBtnFinal = document.getElementById('payBtn');
-    if (payBtnFinal) {
-      payBtnFinal.disabled = false;
-      payBtnFinal.textContent = originalText;
-    }
-  }
-}
-
-
 
 
 
@@ -382,6 +292,100 @@ function openCheckoutModal(data) {
     showToast('Failed to load checkout details', 'error');
   }
 }
+
+
+// Guard: profile check + localStorage PIN check
+function requireTransactionReady() {
+  try {
+    // 1. Profile check (local)
+    if (!isProfileComplete()) {
+      showToast('Please complete your profile before making transactions.', 'error');
+      // fallback to existing global modal functions
+      if (typeof window.openUpdateProfileModal === 'function') {
+        window.openUpdateProfileModal();
+      } else if (typeof window.openProfileModal === 'function') {
+        window.openProfileModal();
+      }
+      return false;
+    }
+
+    // 2. PIN check (localStorage)
+    const hasPin = localStorage.getItem('hasPin') === 'true';
+    if (!hasPin) {
+      showToast('Please set up your transaction PIN before proceeding.', 'error');
+      // Optionally, open a PIN setup modal if you have one
+      if (typeof window.openPinSetupModal === 'function') {
+        window.openPinSetupModal();
+      }
+      return false;
+    }
+
+    return true;
+  } catch (err) {
+    console.error('[checkout] requireTransactionReady error:', err);
+    showToast('Security check failed. Please reload the page.', 'error');
+    return false;
+  }
+}
+
+// Usage:
+if (requireTransactionReady()) {
+  // proceed with transaction
+}
+
+
+// Extracted payment logic so we can call it after security checks
+async function continueCheckoutFlow() {
+  const payBtn = document.getElementById('payBtn');
+  if (!payBtn) return;
+
+  const originalText = payBtn.textContent;
+  payBtn.disabled = true;
+  payBtn.textContent = 'Processing...';
+
+  try {
+    checkoutData = gatherCheckoutData();
+    if (!checkoutData) throw new Error('Invalid checkout data');
+
+    // Trigger dedicated PIN modal for verification (if used)
+    const authSuccess = await triggerCheckoutAuthWithDedicatedModal();
+    if (!authSuccess) {
+      // User cancelled PIN entry
+      showToast('Payment cancelled', 'info');
+      return;
+    }
+
+    showProcessingReceipt(checkoutData);
+
+    const result = await processPayment();
+
+    // Keep Processing spinner — poll will handle switching
+    pollForFinalStatus(result.reference);
+
+  } catch (err) {
+    console.error('[checkout] Payment failed:', err);
+
+    if (err.message && err.message.includes('Insufficient balance')) {
+      const match = err.message.match(/₦([\d,]+)/);
+      const currentBal = match ? parseFloat(match[1].replace(/,/g, '')) : 0;
+      updateReceiptToInsufficient('You do not have enough balance to complete this purchase.', currentBal);
+    } else {
+      updateReceiptToFailed(err.message || 'Purchase failed. Please try again.');
+    }
+    closeCheckoutModal();
+  } finally {
+    // restore UI
+    const payBtnFinal = document.getElementById('payBtn');
+    if (payBtnFinal) {
+      payBtnFinal.disabled = false;
+      payBtnFinal.textContent = originalText;
+    }
+  }
+}
+
+
+
+
 
 function closeCheckoutModal() {
   const modal = document.getElementById('checkoutModal');
