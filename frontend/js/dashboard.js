@@ -9739,61 +9739,7 @@ if (addressInput && !addressInput.disabled) {
 
 
 
-// ===== FINAL CLEAN VERSION — DELETE EVERYTHING BELOW THIS LINE IN YOUR FILE =====
 
-// 1. Remove the entire openUpdateProfileModal() function
-// 2. Remove closeUpdateProfileModal()
-// 3. Remove the manual popstate listener
-// 4. Remove all manual .active / display / aria-hidden manipulation
-
-// → ONLY keep this: let ModalManager do 100% of the work
-
-// ===== PROFILE MODAL OPEN HANDLERS =====
-
-if (settingsUpdateBtn) {
-  settingsUpdateBtn.addEventListener('click', (e) => {
-    e.preventDefault();
-    e.stopImmediatePropagation();
-    lastModalSource = 'settings';
-    window.ModalManager?.openModal('updateProfileModal');
-
-    // Load profile data and run validation after transition
-    setTimeout(() => {
-      loadProfileData();
-      attachProfileListeners();
-      validateProfileForm(true);
-    }, 450);
-  });
-}
-
-if (updateProfileBtn) {
-  updateProfileBtn.addEventListener('click', () => {
-    lastModalSource = 'dashboard';
-    window.ModalManager?.openModal('updateProfileModal');
-    
-    // Load profile data and run validation after transition
-    setTimeout(() => {
-      loadProfileData();
-      attachProfileListeners();
-      validateProfileForm(true);
-    }, 450);
-  });
-}
-
-// Dashboard card handler
-document.querySelector('.card.update-profile')?.addEventListener('click', () => {
-  lastModalSource = 'dashboard';
-  window.ModalManager?.openModal('updateProfileModal');
-  
-  // Load profile data and run validation after transition
-  setTimeout(() => {
-    loadProfileData();
-    attachProfileListeners();
-    validateProfileForm(true);
-  }, 450);
-});
-
-// That's it. Nothing else needed.
 
 if (profilePictureInput && profilePicturePreview) {
   profilePictureInput.addEventListener('change', (e) => {
