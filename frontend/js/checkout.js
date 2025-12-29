@@ -480,40 +480,52 @@ async function processPayment() {
 
   return result;  // Contains status: 'success', 'pending', or 'failed'
 }
+
+function requireTransactionReady() {
+  const state = getUserState();
+
+  const pinOk =
+    localStorage.getItem('hasPin') === 'true' ||
+    !!(state.pin && state.pin.length === 4);
+
+  const profileOk =
+    localStorage.getItem('profileCompleted') === 'true' ||
+    !!(state.fullName && state.username && state.phoneNumber);
+
+  if (!pinOk) {
+    showToast('Please set your transaction PIN before making payments.', 'error');
+    window.openSetPinModal?.();
+    return false;
+  }
+
+  if (!profileOk) {
+    showToast('Please complete your profile before making transactions.', 'error');
+    window.openUpdateProfileModal?.();
+    return false;
+  }
+
+  return true;
+}
+
+
 // ==================== MAIN PAY BUTTON HANDLER ====================
 // ==================== MAIN PAY BUTTON HANDLER ====================
 async function onPayClicked(ev) {
   console.log('[checkout] Pay button clicked');
 
+  ev?.preventDefault();
+
+
+    // 🔐 REQUIREMENTS CHECK (DO NOT DISABLE BUTTON YET)
+  if (!requireTransactionReady()) {
+    return;
+  }
+
   const payBtn = document.getElementById('payBtn');
   if (!payBtn || payBtn.disabled) return;
 
 
-  // ==================== PRE-CHECK: PIN & PROFILE ====================
-  if (!hasPin()) {
-    showToast('Please set your transaction PIN before making payments.', 'error');
 
-    // Optional: open profile / PIN setup modal
-    if (typeof window.openSetPinModal === 'function') {
-      window.openSetPinModal();
-    } else if (typeof window.openProfileModal === 'function') {
-      window.openProfileModal();
-    }
-
-    return;
-  }
-
-  if (!isProfileComplete()) {
-    showToast('Please complete your profile before making transactions.', 'error');
-
-    if (typeof window.openUpdateProfileModal === 'function') {
-      window.openUpdateProfileModal();
-    } else if (typeof window.openProfileModal === 'function') {
-      window.openProfileModal();
-    }
-
-    return;
-  }
 
   const originalText = payBtn.textContent;
   payBtn.disabled = true;
