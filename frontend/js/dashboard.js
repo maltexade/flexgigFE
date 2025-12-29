@@ -108,6 +108,26 @@ const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 }
 window.saveCurrentAppState = saveCurrentAppState;
 
+// dashboard.js (or a shared utils file loaded FIRST)
+
+(function () {
+  'use strict';
+
+  function getUserState() {
+    try {
+      const raw = localStorage.getItem('userState');
+      return raw ? JSON.parse(raw) : {};
+    } catch (e) {
+      console.error('[getUserState] Invalid userState JSON', e);
+      return {};
+    }
+  }
+
+  // ✅ expose globally
+  window.getUserState = window.getUserState || getUserState;
+})();
+
+
 // ---------------------------
 // 1️⃣ Biometric warm function
 // ---------------------------

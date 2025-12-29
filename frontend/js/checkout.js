@@ -7,13 +7,7 @@ console.log('[checkout] Module loaded 🛒');
 
 'use strict';
 
-function getUserState() {
-  try {
-    return JSON.parse(localStorage.getItem('userState')) || {};
-  } catch {
-    return {};
-  }
-}
+
 
 window.pinModal ||= () => {
   showToast('Set PIN modal not wired yet', 'error');
@@ -139,15 +133,7 @@ const showToast = (msg, type = 'info') => {
   console.log('[notify]', type, msg);
 };
 
-const getUserState = () => {
-  try {
-    const state = localStorage.getItem('userState');
-    return state ? JSON.parse(state) : {};
-  } catch (e) {
-    console.error('[checkout] Error parsing userState:', e);
-    return {};
-  }
-};
+
 
 const hasPin = () => {
   try {
@@ -511,7 +497,7 @@ function requireTransactionReady() {
 
   if (!pinOk) {
     showToast('Please set your transaction PIN before making payments.', 'error');
-    window.openSetPinModal?.();
+    window.pinModal?.();
     return false;
   }
 
