@@ -308,10 +308,10 @@ console.log('open modals:', ModalManager.getOpenModals());
     if (!hasPin) {
       showToast('Please set up your transaction PIN before proceeding.', 'error');
 
-      if (typeof window.pinModal === 'function') {
-        ModalManager.openModal('pinModal');
-      }
-      return false;
+      setTimeout(() => {
+  ModalManager.openModal('pinModal');
+}, 300); // delay in milliseconds (300ms here, adjust as needed)
+
     }
 
     return true;
