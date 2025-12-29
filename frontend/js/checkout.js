@@ -287,33 +287,36 @@ function openCheckoutModal(data) {
 
 function requireTransactionReady() {
   try {
-    // 1. Profile check (localStorage)
+    // 1. Profile check
     const profileCompleted = localStorage.getItem('profileCompleted') === 'true';
     if (!profileCompleted) {
       showToast('Please complete your profile before making transactions.', 'error');
 
-      // fallback to existing global modal functions
       if (typeof window.openUpdateProfileModal === 'function') {
         window.openUpdateProfileModal();
         ModalManager.openModal('updateProfileModal');
-console.log('open modals:', ModalManager.getOpenModals());
+        console.log('open modals:', ModalManager.getOpenModals());
       } else if (typeof window.openProfileModal === 'function') {
-        ModalManager.openProfileModal();
+        window.openProfileModal();
       }
       return false;
     }
 
-    // 2. PIN check (localStorage)
+    // 2. PIN check
     const hasPin = localStorage.getItem('hasPin') === 'true';
     if (!hasPin) {
       showToast('Please set up your transaction PIN before proceeding.', 'error');
 
+      // Delay opening modal slightly for smooth animation
       setTimeout(() => {
-  ModalManager.openModal('pinModal');
-}, 300); // delay in milliseconds (300ms here, adjust as needed)
+        ModalManager.openModal('pinModal');
+      }, 300);
 
+      // STOP further execution until user sets PIN
+      return false;
     }
 
+    // All checks passed
     return true;
   } catch (err) {
     console.error('[checkout] requireTransactionReady error:', err);
@@ -321,6 +324,7 @@ console.log('open modals:', ModalManager.getOpenModals());
     return false;
   }
 }
+
 
 
 
