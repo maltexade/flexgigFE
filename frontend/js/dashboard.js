@@ -4724,6 +4724,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     return null;
   }
+  window.detectProvider = window.detectProvider || detectProvider;
 
   // --- PHONE NUMBER FORMATTING ---
   // --- PHONE NUMBER FORMATTING ---
@@ -5586,6 +5587,7 @@ attachPlanListeners();
     } else {
       contactBtn.innerHTML = contactSVG;
     }
+    window.updateContactOrCancel = window.updateContactOrCancel || updateContactOrCancel;
 
     function handleCancelClick(e) {
       e.preventDefault();
@@ -5597,6 +5599,7 @@ attachPlanListeners();
       saveCurrentAppState();
     }
   }
+  window.updateContactOrCancel = window.updateContactOrCancel || updateContactOrCancel;
 
   // --- UPDATE CONTINUE BUTTON ---
   function updateContinueState() {
@@ -5609,6 +5612,7 @@ attachPlanListeners();
       continueBtn.classList.remove('active');
     }
   }
+  window.updateContinueState = window.updateContinueState || updateContinueState;
 
   
 
@@ -6648,27 +6652,33 @@ viewAllLink.addEventListener('click', (e) => {
       txDiv.setAttribute('role', 'button');
       txDiv.setAttribute('aria-label', `Reuse transaction for ${tx.phone} on ${displayName}`);
 
-      txDiv.addEventListener('click', () => {
-        const phoneInput = document.getElementById('phone-input');
-        if (!phoneInput) {
-          alert('Phone input field not found.');
-          return;
-        }
+txDiv.addEventListener('click', () => {
+  const phoneInput = document.getElementById('phone-input');
+  if (!phoneInput) {
+    alert('Phone input field not found.');
+    return;
+  }
 
-        const formatted = window.formatNigeriaNumber ? window.formatNigeriaNumber(tx.phone) : { value: tx.phone };
-        phoneInput.value = formatted.value || tx.phone;
+  // Always format using your function
+  const result = window.formatNigeriaNumber(tx.phone);
+  phoneInput.value = result.value; // This gives "0808 336 3636" with spaces
 
-        let provider = tx.provider?.toLowerCase();
-        if (provider === '9mobile') provider = 'ninemobile';
+  // Auto select provider
+  let providerClass = tx.provider?.toLowerCase();
+  if (providerClass === '9mobile') providerClass = 'ninemobile';
 
-        if (window.selectProvider) window.selectProvider(provider);
-        if (window.updateContactOrCancel) window.updateContactOrCancel();
-        if (window.updateContinueState) window.updateContinueState();
-        if (window.saveUserState) window.saveUserState();
-        if (window.saveCurrentAppState) window.saveCurrentAppState();
+  if (providerClass && window.selectProvider) {
+    window.selectProvider(providerClass);
+  }
 
-        phoneInput.blur();
-      });
+  // Update UI
+  if (window.updateContactOrCancel) window.updateContactOrCancel();
+  if (window.updateContinueState) window.updateContinueState();
+  if (window.saveUserState) window.saveUserState();
+  if (window.saveCurrentAppState) window.saveCurrentAppState();
+
+  phoneInput.blur();
+});
 
       recentTransactionsList.appendChild(txDiv);
     });
