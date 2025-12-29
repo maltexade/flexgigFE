@@ -294,12 +294,13 @@ function openCheckoutModal(data) {
 }
 
 
-// Guard: profile check + localStorage PIN check
 function requireTransactionReady() {
   try {
-    // 1. Profile check (local)
-    if (!isProfileComplete()) {
+    // 1. Profile check (localStorage)
+    const profileCompleted = localStorage.getItem('profileCompleted') === 'true';
+    if (!profileCompleted) {
       showToast('Please complete your profile before making transactions.', 'error');
+
       // fallback to existing global modal functions
       if (typeof window.openUpdateProfileModal === 'function') {
         window.openUpdateProfileModal();
@@ -313,7 +314,7 @@ function requireTransactionReady() {
     const hasPin = localStorage.getItem('hasPin') === 'true';
     if (!hasPin) {
       showToast('Please set up your transaction PIN before proceeding.', 'error');
-      // Optionally, open a PIN setup modal if you have one
+
       if (typeof window.openPinSetupModal === 'function') {
         window.openPinSetupModal();
       }
@@ -328,10 +329,6 @@ function requireTransactionReady() {
   }
 }
 
-// Usage:
-if (requireTransactionReady()) {
-  // proceed with transaction
-}
 
 
 // Extracted payment logic so we can call it after security checks
