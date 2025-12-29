@@ -295,6 +295,15 @@
     return Array.from(found);
   }
 
+  // safe resolver: returns the modal element from the modals map or by id
+function getModalElement(modalId) {
+  try {
+    if (modals && modals[modalId] && modals[modalId].element) return modals[modalId].element;
+  } catch (e) {}
+  return document.getElementById(modalId) || null;
+}
+
+
   function markRecentModification(el) {
     try {
       recentModifications.set(el, Date.now());
@@ -585,7 +594,8 @@ function applyTransition(modal, show, callback) {
 
   // Force close modal
   function forceCloseModal(modalId) {
-      const allPlansModalContent = allPlansModal.querySelector('.plan-modal-content');
+const allPlansModalEl = getModalElement('allPlansModal');
+const allPlansModalContent = allPlansModalEl ? allPlansModalEl.querySelector('.plan-modal-content') : null;
 
     log('debug', `forceCloseModal: Forcing close of ${modalId}`);
     const modalConfig = modals[modalId];
@@ -708,7 +718,8 @@ if (classAnimatedModals.includes(modalId)) {
 
   // Open modal
   function openModal(modalId, skipHistory = false) {
-      const allPlansModalContent = allPlansModal.querySelector('.plan-modal-content');
+const allPlansModalEl = getModalElement('allPlansModal');
+const allPlansModalContent = allPlansModalEl ? allPlansModalEl.querySelector('.plan-modal-content') : null;
 
     
     log('debug', `openModal: Attempting to open ${modalId}`);
@@ -850,7 +861,8 @@ if (classAnimatedModals.includes(modalId)) {
 
   // Close modal
   function closeModal(modalId) {
-      const allPlansModalContent = allPlansModal.querySelector('.plan-modal-content');
+const allPlansModalEl = getModalElement('allPlansModal');
+const allPlansModalContent = allPlansModalEl ? allPlansModalEl.querySelector('.plan-modal-content') : null;
 
     log('debug', `closeModal: Attempting to close ${modalId}`);
     const modalConfig = modals[modalId];
@@ -1147,6 +1159,13 @@ log('debug', 'handlePopstate: openModalsStack snapshot', { stack: openModalsStac
       log('debug', 'handlePopstate: Popstate processing complete');
     }, 50);
   }
+
+  function getPreviousModal(id) {
+  const stack = openModalsStack.map(m => m.id);
+  const idx = stack.lastIndexOf(id);
+  return (idx > 0) ? stack[idx - 1] : null;
+}
+
 
   // Initialize
   function initialize() {
@@ -1488,6 +1507,7 @@ if (historyModal) {
       getRawLogs,
       downloadRawLogs,
       copyRawLogs,
+      getPreviousModal,
       sendRawLogsTo,
       closeAll: () => {
         log('info', 'closeAll: Closing all modals');

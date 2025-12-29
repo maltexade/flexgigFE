@@ -9814,6 +9814,26 @@ function openUpdateProfileModal(profile = {}) {
   console.log('[DEBUG] openUpdateProfileModal: Modal opened', { fullName, username, phoneNumber, email });
 }
 
+function closeUpdateProfileModal() {
+    detachProfileListeners();
+
+    // 1️⃣ Ask the ModalManager what the previous modal is BEFORE closing
+    const previousModal = ModalManager.getPreviousModal('updateProfileModal');
+
+    // 2️⃣ Close the current modal
+    ModalManager.closeModal('updateProfileModal');
+
+    // 3️⃣ If a previous modal exists and is not already open, restore it
+    if (previousModal) {
+        console.log('[DEBUG] Restoring previous modal:', previousModal);
+        ModalManager.openModal(previousModal);
+    }
+
+    console.log('[DEBUG] updateProfileModal closed via ModalManager');
+}
+
+window.closeUpdateProfileModal = closeUpdateProfileModal;
+
 
 
 
