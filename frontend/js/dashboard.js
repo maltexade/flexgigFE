@@ -4744,6 +4744,7 @@ function formatNigeriaNumber(phone, isInitialDigit = false, isPaste = false) {
     return { value: '', cursorOffset: 0, valid: false };
   }
 }
+window.formatNigeriaNumber = window.formatNigeriaNumber || formatNigeriaNumber;
 
 
   // --- VALIDATION HELPERS ---
