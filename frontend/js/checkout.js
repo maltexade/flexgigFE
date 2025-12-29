@@ -6,6 +6,8 @@
 console.log('[checkout] Module loaded 🛒');
 
 'use strict';
+// ==================== STATE ====================
+let checkoutData = null; // Stores current checkout information
 
 // ======= SAFE USER STATE ACCESS (use window.getUserState if defined) =======
 const safeGetUserState = () => {
@@ -134,8 +136,7 @@ async function continueCheckoutFlow() {
 
 
 
-// ==================== STATE ====================
-let checkoutData = null; // Stores current checkout information
+
 
 // ==================== HELPER: GATHER CHECKOUT DATA ====================
 function gatherCheckoutData() {
