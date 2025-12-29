@@ -17,11 +17,7 @@
   console.log('[SCROLL FIX] Lightweight prevention active – no more middle/bottom reloads');
 })();
 import { getAllPlans, getPlans, fetchPlans } from './dataPlans.js';  // ADD THIS LINE
-import {
-  openCheckoutModal,
-  closeCheckoutModal,
-  onPayClicked
-} from '/frontend/js/checkout.js';
+
 
 window.__SEC_API_BASE = 'https://api.flexgig.com.ng'
 
