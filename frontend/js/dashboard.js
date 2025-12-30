@@ -10126,7 +10126,6 @@ window.addEventListener('storage', (ev) => {
   }
 });
 
-// loadProfileToSettings: prefer cache; fetch only when needed or forced
 async function loadProfileToSettings(force = false) {
   const settingsAvatar = document.getElementById('settingsAvatar');
   const settingsUsername = document.getElementById('settingsUsername');
@@ -10148,201 +10147,121 @@ async function loadProfileToSettings(force = false) {
 
   const hasUsefulCache = !!(localProfile.profilePicture || localProfile.username || localProfile.fullName || localProfile.email);
 
-  // Render from cache immediately (no fetch)
-  const displayName =
-    localProfile.username ||
-    localProfile.firstName ||
-    (localProfile.email ? localProfile.email.split('@')[0] : 'User');
+  // Helper to update UI safely
+  const updateUI = (profile, useCacheBuster = false) => {
+    const displayName =
+      profile.username ||
+      profile.firstName ||
+      (profile.email ? profile.email.split('@')[0] : 'User');
 
-  const avatarUrl = localProfile.profilePicture || '/frontend/img/avatar-placeholder.png';
-  const fallbackLetter = (displayName.charAt(0) || 'U').toUpperCase();
+    const avatarUrl = profile.profilePicture || '/frontend/img/avatar-placeholder.png';
+    const fallbackLetter = (displayName.charAt(0) || 'U').toUpperCase();
 
-  // show cached avatar (no cache-buster here to avoid re-request)
-  updateAvatar(settingsAvatar, avatarUrl, fallbackLetter);
-  settingsUsername.textContent = displayName;
-  settingsUsername.classList.add('fade-in');
-  settingsEmail.textContent = localProfile.email || 'Not set';
-  settingsEmail.classList.add('fade-in');
+    // Always use cache buster when updating to ensure fresh image
+    const finalAvatarUrl = useCacheBuster ? addCacheBuster(avatarUrl) : avatarUrl;
+    
+    updateAvatar(settingsAvatar, finalAvatarUrl, fallbackLetter);
+    settingsUsername.textContent = displayName;
+    settingsUsername.classList.add('fade-in');
+    settingsEmail.textContent = profile.email || 'Not set';
+    settingsEmail.classList.add('fade-in');
+  };
 
-  // If we have cache and not forced, do NOT fetch now.
-  // Instead, kick off a background fetch (non-blocking) that updates only if changed.
-  if (hasUsefulCache && !force) {
-    // Start background refresh but do not await it
-    (async () => {
-      try {
-        // reuse your cached-promise logic to avoid duplicate server calls
-        if (typeof _cachedProfilePromise === 'undefined' || _cachedProfilePromise === null) {
-          // create the cached promise if absent
-          _cachedProfilePromise = (async () => {
-            try {
-              const resp = await fetch(`https://api.flexgig.com.ng/api/profile?_${Date.now()}`, {
-                credentials: 'include',
-                headers: { Authorization: `Bearer ${localStorage.getItem('authToken') || ''}` },
-                cache: 'no-store'
-              });
-              const serverProfile = resp.ok ? await resp.json().catch(() => ({})) : {};
-              // Merge & save as your earlier logic (sync hasPin, etc.)
-              const mergedProfile = {
-                profilePicture:
-                  serverProfile.profilePicture ||
-                  serverProfile.profile_picture ||
-                  serverProfile.avatar_url ||
-                  localProfile.profilePicture ||
-                  '',
-                username: serverProfile.username || localProfile.username || '',
-                fullName: serverProfile.fullName || serverProfile.full_name || localProfile.fullName || '',
-                firstName:
-                  (serverProfile.fullName && serverProfile.fullName.split(' ')[0]) ||
-                  (serverProfile.full_name && serverProfile.full_name.split(' ')[0]) ||
-                  localProfile.firstName ||
-                  '',
-                email: serverProfile.email || localProfile.email || '',
-              };
-
-              // Sync hasPin if present
-              const serverHasPin = serverProfile.hasPin ?? serverProfile.has_pin ?? serverProfile.hasPIN ?? null;
-              if (serverHasPin !== null) {
-                localStorage.setItem('hasPin', serverHasPin ? 'true' : 'false');
-                if (serverHasPin && typeof setupInactivity === 'function') {
-                  try { setupInactivity(); } catch(e){ console.warn('setupInactivity failed', e); }
-                }
-              }
-
-              // Save changed fields only
-              try {
-                if (mergedProfile.profilePicture && mergedProfile.profilePicture !== localProfile.profilePicture) {
-                  localStorage.setItem('profilePicture', mergedProfile.profilePicture);
-                }
-                if (mergedProfile.username && mergedProfile.username !== localProfile.username) {
-                  localStorage.setItem('username', mergedProfile.username);
-                }
-                if (mergedProfile.fullName && mergedProfile.fullName !== localProfile.fullName) {
-                  localStorage.setItem('fullName', mergedProfile.fullName);
-                  localStorage.setItem('firstName', (mergedProfile.fullName.split && mergedProfile.fullName.split(' ')[0]) || '');
-                }
-                if (mergedProfile.email && mergedProfile.email !== localProfile.email) {
-                  localStorage.setItem('userEmail', mergedProfile.email);
-                }
-                try { localStorage.setItem('profile_refreshed_at', Date.now().toString()); } catch(_) {}
-              } catch (e) { console.warn('Could not save mergedProfile to localStorage', e); }
-
-              return mergedProfile;
-            } catch (err) {
-              console.warn('[background refresh] profile fetch failed', err);
-              return localProfile;
-            }
-          })();
-        }
-
-        const finalProfile = await _cachedProfilePromise;
-
-        // Only update UI if something changed vs what we already rendered
-        const currentRendered = {
-          profilePicture: localProfile.profilePicture || '',
-          username: localProfile.username || '',
-          email: localProfile.email || ''
-        };
-
-        const changed =
-          (finalProfile.profilePicture || '') !== currentRendered.profilePicture ||
-          (finalProfile.username || '') !== currentRendered.username ||
-          (finalProfile.email || '') !== currentRendered.email;
-
-        if (changed) {
-          // update avatar with cache-buster so browser fetches the new image
-          updateAvatar(settingsAvatar, addCacheBuster(finalProfile.profilePicture || '/frontend/img/avatar-placeholder.png'), (finalProfile.username || finalProfile.firstName || 'U').charAt(0).toUpperCase());
-          settingsUsername.textContent = finalProfile.username || finalProfile.firstName || (finalProfile.email ? finalProfile.email.split('@')[0] : 'User');
-          settingsEmail.textContent = finalProfile.email || 'Not set';
-        }
-      } catch (e) {
-        // silent fail for background refresh
-        console.debug('[background refresh] failed', e);
-      }
-    })();
-
-    // Return early — do not await network call
-    return localProfile;
+  // Render from cache immediately (no fetch) - without cache buster for instant display
+  if (hasUsefulCache) {
+    updateUI(localProfile, false);
   }
 
-  // If here: either no cache or force === true => perform normal (blocking) fetch path
-  if (force) _cachedProfilePromise = null; // clear any previous cached promise
+  // If forced, clear cache to ensure fresh fetch
+  if (force) {
+    _cachedProfilePromise = null;
+  }
 
+  // Create or reuse cached promise
   if (!_cachedProfilePromise) {
     _cachedProfilePromise = (async () => {
       try {
-        const resp = await fetch(`https://api.flexgig.com.ng/api/profile?_${Date.now()}`, {
+        const resp = await fetch(`https://api.flexgig.com.ng/api/profile?_=${Date.now()}`, {
           credentials: 'include',
           headers: { Authorization: `Bearer ${localStorage.getItem('authToken') || ''}` },
           cache: 'no-store'
         });
-        const serverProfile = resp.ok ? await resp.json().catch(() => ({})) : {};
+        
+        if (!resp.ok) {
+          console.warn('[loadProfileToSettings] Server returned non-OK:', resp.status);
+          return localProfile;
+        }
+
+        const serverProfile = await resp.json().catch(() => ({}));
 
         const mergedProfile = {
           profilePicture:
             serverProfile.profilePicture ||
             serverProfile.profile_picture ||
             serverProfile.avatar_url ||
-            localProfile.profilePicture ||
             '',
-          username: serverProfile.username || localProfile.username || '',
-          fullName: serverProfile.fullName || serverProfile.full_name || localProfile.fullName || '',
+          username: serverProfile.username || '',
+          fullName: serverProfile.fullName || serverProfile.full_name || '',
           firstName:
             (serverProfile.fullName && serverProfile.fullName.split(' ')[0]) ||
             (serverProfile.full_name && serverProfile.full_name.split(' ')[0]) ||
-            localProfile.firstName ||
             '',
-          email: serverProfile.email || localProfile.email || '',
+          email: serverProfile.email || '',
         };
 
-        // Save to localStorage (only if changed)
+        // Sync hasPin if present
+        const serverHasPin = serverProfile.hasPin ?? serverProfile.has_pin ?? serverProfile.hasPIN ?? null;
+        if (serverHasPin !== null) {
+          localStorage.setItem('hasPin', serverHasPin ? 'true' : 'false');
+          if (serverHasPin && typeof setupInactivity === 'function') {
+            try { setupInactivity(); } catch(e){ console.warn('setupInactivity failed', e); }
+          }
+        }
+
+        // Save to localStorage
         try {
-          if (mergedProfile.profilePicture && mergedProfile.profilePicture !== localProfile.profilePicture) {
+          if (mergedProfile.profilePicture) {
             localStorage.setItem('profilePicture', mergedProfile.profilePicture);
           }
-          if (mergedProfile.username && mergedProfile.username !== localProfile.username) {
+          if (mergedProfile.username) {
             localStorage.setItem('username', mergedProfile.username);
           }
-          if (mergedProfile.fullName && mergedProfile.fullName !== localProfile.fullName) {
+          if (mergedProfile.fullName) {
             localStorage.setItem('fullName', mergedProfile.fullName);
-            localStorage.setItem('firstName', (mergedProfile.fullName.split && mergedProfile.fullName.split(' ')[0]) || '');
+            localStorage.setItem('firstName', mergedProfile.firstName || mergedProfile.fullName.split(' ')[0] || '');
           }
-          if (mergedProfile.email && mergedProfile.email !== localProfile.email) {
+          if (mergedProfile.email) {
             localStorage.setItem('userEmail', mergedProfile.email);
           }
-          try { localStorage.setItem('profile_refreshed_at', Date.now().toString()); } catch(_) {}
+          localStorage.setItem('profile_refreshed_at', Date.now().toString());
         } catch (e) {
           console.warn('Could not save mergedProfile to localStorage', e);
         }
 
         return mergedProfile;
       } catch (err) {
-        console.error('[ERROR] loadProfileToSettings server fetch failed', err);
-        return localProfile; // fallback
+        console.error('[ERROR] loadProfileToSettings fetch failed:', err);
+        return localProfile;
       }
     })();
   }
 
+  // Wait for fetch to complete
   const finalProfile = await _cachedProfilePromise;
 
-  // update UI (blocking) — only update if different to avoid flicker
-  const avatarChanged = (finalProfile.profilePicture || '') !== (localProfile.profilePicture || '');
-  if (avatarChanged) {
-    updateAvatar(settingsAvatar, addCacheBuster(finalProfile.profilePicture || '/frontend/img/avatar-placeholder.png'), (finalProfile.username || finalProfile.firstName || 'U').charAt(0).toUpperCase());
+  // Check if DOM elements still exist before updating
+  if (!document.getElementById('settingsAvatar') || 
+      !document.getElementById('settingsUsername') || 
+      !document.getElementById('settingsEmail')) {
+    console.warn('[loadProfileToSettings] DOM elements removed during fetch');
+    return finalProfile;
   }
-  const nameChanged = (finalProfile.username || finalProfile.firstName || '') !== (localProfile.username || localProfile.firstName || '');
-  if (nameChanged) {
-    settingsUsername.textContent = finalProfile.username || finalProfile.firstName || (finalProfile.email ? finalProfile.email.split('@')[0] : 'User');
-    settingsUsername.classList.add('fade-in');
-  }
-  const emailChanged = (finalProfile.email || '') !== (localProfile.email || '');
-  if (emailChanged) {
-    settingsEmail.textContent = finalProfile.email || 'Not set';
-    settingsEmail.classList.add('fade-in');
-  }
+
+  // Update UI with fresh data (with cache buster to force image reload)
+  updateUI(finalProfile, true);
 
   return finalProfile;
 }
-
 window.loadProfileToSettings = window.loadProfileToSettings || loadProfileToSettings;
 
 
