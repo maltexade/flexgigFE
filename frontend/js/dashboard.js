@@ -1753,28 +1753,42 @@ function setupBroadcastSubscription(force = false) {
     __fg_broadcast_channel = supabaseClient.channel('public:broadcasts');
 
     // Helper: centralize showing logic so we consistently persist serverId
-    function applyBroadcastRow(row) {
-      if (!row) return;
-      const now = new Date();
-      const startsOk = !row.starts_at || new Date(row.starts_at) <= now;
-      const notExpired = !row.expire_at || new Date(row.expire_at) > now;
-      if (row.active && startsOk && notExpired) {
-        const id = row.id != null ? String(row.id) : null;
-        // Use same contract as pollStatus: set serverId and persist active id
-        try {
-          showBanner(row.message || '', { persistent: !!row.sticky, serverId: id });
-        } catch (e) { console.warn('applyBroadcastRow showBanner failed', e); }
-        try { 
-          if (id != null) localStorage.setItem('active_broadcast_id', String(id));
-          localStorage.setItem('active_broadcast_ts', String(Date.now()));
-          window.__fg_currentBanner = window.__fg_currentBanner || {};
-          window.__fg_currentBanner.serverId = id;
-          window.__fg_currentBanner.id = id;
-          window.__fg_currentBanner.message = row.message || '';
-          window.__fg_currentBanner.sticky = !!row.sticky;
-          window.__fg_currentBanner.clientSticky = false;
-        } catch (e) {}
-      } else {
+function applyBroadcastRow(row) {
+  if (!row) return;
+  const now = new Date();
+  const startsOk = !row.starts_at || new Date(row.starts_at) <= now;
+  const notExpired = !row.expire_at || new Date(row.expire_at) > now;
+
+  if (row.active && startsOk && notExpired) {
+    const id = row.id != null ? String(row.id) : null;
+
+    // Determine level from DB, default 'info'
+    const allowedLevels = ['info', 'warning', 'error'];
+    const level = allowedLevels.includes(row.level) ? row.level : 'info';
+
+    // Show banner with correct level
+    try {
+      showBanner(row.message || '', {
+        persistent: !!row.sticky,
+        serverId: id,
+        type: level // ← pass the level here
+      });
+    } catch (e) {
+      console.warn('applyBroadcastRow showBanner failed', e);
+    }
+
+    try { 
+      if (id != null) localStorage.setItem('active_broadcast_id', String(id));
+      localStorage.setItem('active_broadcast_ts', String(Date.now()));
+      window.__fg_currentBanner = window.__fg_currentBanner || {};
+      window.__fg_currentBanner.serverId = id;
+      window.__fg_currentBanner.id = id;
+      window.__fg_currentBanner.message = row.message || '';
+      window.__fg_currentBanner.level = level; // ← store level
+      window.__fg_currentBanner.sticky = !!row.sticky;
+      window.__fg_currentBanner.clientSticky = false;
+    } catch (e) {}
+  } else {
         const showingId = localStorage.getItem('active_broadcast_id');
         if (showingId && String(showingId) === String(row.id)) {
           hideBanner();
