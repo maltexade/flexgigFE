@@ -4751,6 +4751,81 @@ if (!window.prefetchAuthOptions) window.prefetchAuthOptions = async function pre
 
 })();
 
+// STRICT active state management for shortcuts
+let currentActiveShortcut = 'data'; // Always default to Data
+
+function setActiveShortcut(shortcutId) {
+  // Remove active from EVERY item, no exceptions
+  document.querySelectorAll('.short-item').forEach(item => {
+    item.classList.remove('active');
+  });
+
+  // ONLY allow active state on items that are NOT .coming-soon
+  const target = document.querySelector(`.short-item[data-shortcut="${shortcutId}"]:not(.coming-soon)`);
+  if (target) {
+    target.classList.add('active');
+    currentActiveShortcut = shortcutId;
+  } else {
+    // If someone tries to activate a coming-soon item, force it back to Data
+    const dataItem = document.querySelector('.short-item[data-shortcut="data"]');
+    if (dataItem) {
+      dataItem.classList.add('active');
+    }
+    currentActiveShortcut = 'data';
+  }
+}
+
+// Force Data to be active on page load
+document.addEventListener('DOMContentLoaded', () => {
+  setActiveShortcut('data');
+});
+
+// Real (non-coming-soon) shortcuts — can become active
+document.querySelectorAll('.short-item:not(.coming-soon)').forEach(item => {
+  const id = item.dataset.shortcut;
+
+  const activate = () => {
+    setActiveShortcut(id);
+
+    if (id === 'data') {
+      console.log('Opening Data purchase...');
+      // openDataModal(); // your real function
+    }
+  };
+
+  item.addEventListener('click', activate);
+  item.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      activate();
+    }
+  });
+});
+
+// Coming-soon items — show toast, NEVER activate
+document.querySelectorAll('.short-item.coming-soon').forEach(item => {
+  const showComingSoon = (e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    showToast('This service is coming soon!', 'info');
+
+    // Critical: Force active state back to Data if it somehow changed
+    if (currentActiveShortcut !== 'data') {
+      setActiveShortcut('data');
+    }
+  };
+
+  item.addEventListener('click', showComingSoon);
+  item.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      showComingSoon();
+    }
+  });
+});
+
 
 document.addEventListener('DOMContentLoaded', () => {
   const providerClasses = ['mtn', 'airtel', 'glo', 'ninemobile'];
@@ -5847,16 +5922,7 @@ async function findPlanById(planId, provider) {
   //   console.log('[DEBUG] closeCheckoutModal: Modal closed, display:', checkoutModal.style.display, 'active:', checkoutModal.classList.length);
   // }
 
-  // --- SERVICE SELECTION ---
-  serviceItems.forEach((item, i) => {
-    item.addEventListener('click', () => {
-      serviceItems.forEach(el => el.classList.remove('active'));
-      item.classList.add('active');
-      saveUserState();
-      saveCurrentAppState();
-    });
-  });
-  serviceItems[0].classList.add('active');
+
 
   // --- INITIAL PROVIDER SETUP ---
   // REPLACE your current initializeProviderFromState() with this version
@@ -6847,109 +6913,107 @@ txDiv.addEventListener('click', () => {
     let step = "create"; // "create" | "confirm" | "reauth"
     let processing = false; // prevents double submits
 
-    // ---------------------
-    // Toast (top-right) system
-    // ---------------------
-    const toastContainerId = 'flexgig_toast_container';
-    function ensureToastStylesAndContainer() {
-      if (!document.getElementById(toastContainerId + '_style')) {
-        const style = document.createElement('style');
-        style.id = toastContainerId + '_style';
-        style.textContent = `
-          #${toastContainerId} {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-            z-index: 9999999;
-            pointer-events: none;
-          }
-          .flexgig-toast {
-            pointer-events: auto;
-            min-width: 240px;
-            max-width: 360px;
-            padding: 12px 16px;
-            border-radius: 10px;
-            color: #fff;
-            font-weight: 600;
-            box-shadow: 0 6px 18px rgba(0,0,0,0.15);
-            transform: translateX(120%);
-            opacity: 0;
-            transition: transform .36s cubic-bezier(.22,.9,.32,1), opacity .28s ease;
-            font-size: 14px;
-          }
-          .flexgig-toast.show { transform: translateX(0); opacity: 1; }
-          .flexgig-toast.success { background: linear-gradient(135deg,#4caf50,#43a047); }
-          .flexgig-toast.error   { background: linear-gradient(135deg,#f44336,#e53935); }
-          .flexgig-toast.info    { background: linear-gradient(135deg,#2196f3,#1e88e5); }
-          `;
-        document.head.appendChild(style);
-      }
-      let container = document.getElementById(toastContainerId);
-      if (!container) {
-        container = document.createElement('div');
-        container.id = toastContainerId;
-        document.body.appendChild(container);
-      }
-      return container;
-    }
+const toastContainerId = 'flexgig_toast_container';
+let activeToast = null;
+let activeTimer = null;
 
-    function showToast(message, type = 'success', duration = 2800) {
-  const container = ensureToastStylesAndContainer();
+function ensureToast() {
+  if (!document.getElementById(toastContainerId + '_style')) {
+    const style = document.createElement('style');
+    style.id = toastContainerId + '_style';
+    style.textContent = `
+      #${toastContainerId} {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        z-index: 999999;
+        pointer-events: none;
+      }
+      .flexgig-toast {
+        pointer-events: auto;
+        padding: 13px 18px;
+        border-radius: 10px;
+        color: #fff;
+        font-weight: 600;
+        font-size: 14.5px;
+        max-width: 85vw;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        box-shadow: 0 8px 24px rgba(0,0,0,.25);
+
+        transform: translateX(120%);
+        opacity: 0;
+        transition: transform .35s ease, opacity .25s ease;
+      }
+      .flexgig-toast.show {
+        transform: translateX(0);
+        opacity: 1;
+      }
+      .flexgig-toast.success { background: linear-gradient(135deg,#4caf50,#43a047); }
+      .flexgig-toast.error   { background: linear-gradient(135deg,#f44336,#e53935); }
+      .flexgig-toast.info    { background: linear-gradient(135deg,#2196f3,#1e88e5); }
+    `;
+    document.head.appendChild(style);
+  }
+
+  let container = document.getElementById(toastContainerId);
+  if (!container) {
+    container = document.createElement('div');
+    container.id = toastContainerId;
+    document.body.appendChild(container);
+  }
+  return container;
+}
+
+function showToast(message, type = 'success', duration = 3000) {
+  const container = ensureToast();
+
+  /* 🔪 HARD RESET — THIS IS THE KEY */
+  if (activeTimer) {
+    clearTimeout(activeTimer);
+    activeTimer = null;
+  }
+  if (activeToast) {
+    activeToast.remove(); // NO delayed removal
+    activeToast = null;
+  }
+
   const toast = document.createElement('div');
   toast.className = `flexgig-toast ${type}`;
   toast.textContent = message;
-  container.appendChild(toast);
 
-  // animate in (existing behaviour)
+  container.innerHTML = '';
+  container.appendChild(toast);
+  activeToast = toast;
+
+  // animate in
   requestAnimationFrame(() => toast.classList.add('show'));
 
-  // Helper to remove this toast: slide-out if it's the top visible notification,
-  // otherwise fade and remove (no slide).
-  const removeAfter = () => {
-    try {
-      // compute "top" relative to container's visual order.
-      // Note: your container uses flex-direction: column; firstElementChild is the top-most.
-      const isTop = container.firstElementChild === toast;
+  // start fresh timer ONLY for this toast
+  activeTimer = setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => {
+      toast.remove();
+      if (activeToast === toast) activeToast = null;
+    }, 300);
+    activeTimer = null;
+  }, duration);
 
-      if (isTop) {
-        // Keep existing behaviour for top toast: remove .show so CSS handles transform (slide-out) + opacity
-        toast.classList.remove('show');
-        // Give CSS time to animate the slide-out (same 420ms you used before)
-        setTimeout(() => {
-          if (toast.parentNode) toast.remove();
-        }, 420);
-      } else {
-        // Not the top: do a fade-only removal without triggering translateX reverse animation.
-        // Force the toast to have no transform and only animate opacity.
-        // Use inline style to override injected stylesheet.
-        toast.style.transition = 'opacity .28s ease';
-        toast.style.transform = 'none';
-        // trigger reflow so the browser notices the style change before we set opacity to 0
-        // (safe micro-yield)
-        // eslint-disable-next-line no-unused-expressions
-        toast.offsetHeight;
-        toast.style.opacity = '0';
-        setTimeout(() => {
-          if (toast.parentNode) toast.remove();
-        }, 320); // slightly shorter than slide duration
-      }
-    } catch (err) {
-      // fallback: remove immediately if anything goes wrong
-      if (toast.parentNode) toast.remove();
-      console.warn('showToast removeAfter failed:', err);
+  // click to dismiss
+  toast.onclick = () => {
+    if (activeTimer) {
+      clearTimeout(activeTimer);
+      activeTimer = null;
     }
+    toast.classList.remove('show');
+    setTimeout(() => toast.remove(), 300);
+    activeToast = null;
   };
-
-  // schedule the removal
-  setTimeout(removeAfter, duration);
-
-  // return the element in case caller wants to manipulate it (optional)
-  return toast;
 }
+
 window.showToast = showToast;
+
 
 
     // ---------------------

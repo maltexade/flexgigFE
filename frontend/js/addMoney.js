@@ -408,13 +408,17 @@ if (pending) {
     <!-- Amount Input -->
     <div class="addMoney-amount-section">
       <input
-  type="text"                 
-  id="addMoneyAmountInput"
+        type="tel"
+      pattern="[0-9]*"
+      inputmode="tel"
+      placeholder="Enter phone number"
+      autocomplete="off"  
+      id="addMoneyAmountInput"
   class="addMoney-amount-input"
-  autocomplete="off"           
-  inputmode="decimal"          
-  pattern="[0-9]*"             
-  placeholder="₦ Enter amount"
+      autocorrect="off"
+      autocapitalize="off"
+      spellcheck="false"
+      enterkeyhint="done"
 />
 
     </div>
