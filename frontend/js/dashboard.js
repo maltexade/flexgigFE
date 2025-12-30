@@ -1667,6 +1667,19 @@ function showBanner(msg, opts = {}) {
   setBannerMessage(msg, 1);
   STATUS_BANNER.classList.remove('hidden');
 
+  STATUS_BANNER.classList.remove('banner-info', 'banner-warning', 'banner-error', 'banner-success');
+
+    // Apply the correct class based on level
+  const level = (opts.level || 'info').toLowerCase();
+  let bannerClass = 'banner-info'; // default
+
+  if (level.includes('error') || level.includes('danger')) bannerClass = 'banner-error';
+  else if (level.includes('warn')) bannerClass = 'banner-warning';
+  else if (level.includes('success')) bannerClass = 'banner-success';
+  else bannerClass = 'banner-info';
+
+  STATUS_BANNER.classList.add(bannerClass);
+
   // Update global banner state
   try {
     window.__fg_currentBanner = window.__fg_currentBanner || { id: null, sticky: false, clientSticky: false, message: '' };
@@ -1752,7 +1765,7 @@ function setupBroadcastSubscription(force = false) {
         const id = row.id != null ? String(row.id) : null;
         // Use same contract as pollStatus: set serverId and persist active id
         try {
-          showBanner(row.message || '', { persistent: !!row.sticky, serverId: id });
+          showBanner(row.message || '', { persistent: !!row.sticky, serverId: id, level: row.level || 'info' });
         } catch (e) { console.warn('applyBroadcastRow showBanner failed', e); }
         try { 
           if (id != null) localStorage.setItem('active_broadcast_id', String(id));

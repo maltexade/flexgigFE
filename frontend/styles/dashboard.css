@@ -3237,6 +3237,28 @@ a[style*="color: #f00"] { color: var(--danger); }
   }
 }
 
+/* Default is already blue (#00AAFF) for info — keep it */
+
+/* Success - Green */
+.status-banner.level-success {
+  background: #22c55e;  /* vibrant green */
+}
+
+/* Warning - Amber/Orange */
+.status-banner.level-warning {
+  background: #f59e0b;  /* amber */
+}
+
+/* Error - Red */
+.status-banner.level-error {
+  background: #ef4444;  /* red */
+}
+
+/* Optional: Slight hover brighten for all */
+.status-banner:hover {
+  filter: brightness(1.1);
+}
+
 .loader-overlay {
   position: fixed;
   inset: 0;
