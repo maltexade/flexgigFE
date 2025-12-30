@@ -210,31 +210,32 @@
     return max + 10;
   }
 
-  // ===== Active State Management =====
-  const modalTriggerMap = {
-    home: 'homeNavLink',
-    historyModal: 'historyNavLink',
-    settingsModal: 'settingsBtn',
-    securityModal: 'securityBtn',
-    helpSupportModal: 'helpSupportBtn',
-    referralModal: 'referralsBtn',
-    allPlansModal: 'see-all-plans',
-    pinModal: 'dashboardPinCard',
-    updateProfileModal: 'dashboardUpdateProfileCard',
-    changePwdModal: 'changePWD',
-    checkoutModal: 'continueBtn',
-    addMoneyModal: 'addMoneyBtn'
-  };
+// ===== Active State Management =====
 
-  // Modals that should NOT affect nav tab active states (card/button triggered, not nav items)
-  const nonNavModals = ['allPlansModal', 'checkoutModal', 'pinModal', 'updateProfileModal', 'securityPinModal', 'changePwdModal', 'referralModal', 'securityModal', 'helpSupportModal', 'updateProfileModal', 'addMoneyModal'];
-  
-  // Only these modals should manage nav active states
-  const navModals = ['historyModal', 'settingsModal'];
+// Map of modalId → primary trigger element ID (used only for finding triggers)
+const modalTriggerMap = {
+  home: 'homeNavLink',
+  historyModal: 'historyNavLink',
+  settingsModal: 'settingsBtn',
+  securityModal: 'securityBtn',
+  helpSupportModal: 'helpSupportBtn',
+  referralModal: 'referralsBtn',
+  allPlansModal: 'see-all-plans',
+  pinModal: 'dashboardPinCard',
+  updateProfileModal: 'dashboardUpdateProfileCard',
+  changePwdModal: 'changePWD',
+  checkoutModal: 'continueBtn',
+  addMoneyModal: 'addMoneyBtn'
+  // Add new triggers here as needed
+};
 
+// THESE ARE THE ONLY MODALS THAT SHOULD EVER HIGHLIGHT A MAIN NAVIGATION TAB
+// If a modal is not in this list → it will NOT manage .active / aria-current on nav items
+const NAV_LINKED_MODALS = ['historyModal', 'settingsModal'];
 
-  function shouldManageActiveState(modalId) {
-  return !['allPlansModal', ...nonNavModals].includes(modalId);
+// Helper: does this modal correspond to a main navigation tab?
+function shouldManageActiveState(modalId) {
+  return NAV_LINKED_MODALS.includes(modalId);
 }
   // Helper: find all possible trigger elements for a modal id.
   function findTriggerElements(modalId) {
