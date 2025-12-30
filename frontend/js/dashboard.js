@@ -1664,21 +1664,17 @@ function showBanner(msg, opts = {}) {
   // opts: { type: 'info'|'error'|'warning', persistent: boolean, serverId: any, clientSticky: boolean }
   const STATUS_BANNER = document.getElementById('status-banner');
   if (!STATUS_BANNER) return;
+
+  // Update message
   setBannerMessage(msg, 1);
   STATUS_BANNER.classList.remove('hidden');
 
-  STATUS_BANNER.classList.remove('banner-info', 'banner-warning', 'banner-error', 'banner-success');
+  // Remove previous level classes
+  STATUS_BANNER.classList.remove('level-info', 'level-error', 'level-warning');
 
-    // Apply the correct class based on level
-  const level = (opts.level || 'info').toLowerCase();
-  let bannerClass = 'banner-info'; // default
-
-  if (level.includes('error') || level.includes('danger')) bannerClass = 'banner-error';
-  else if (level.includes('warn')) bannerClass = 'banner-warning';
-  else if (level.includes('success')) bannerClass = 'banner-success';
-  else bannerClass = 'banner-info';
-
-  STATUS_BANNER.classList.add(bannerClass);
+  // Apply new level class (default to info)
+  const level = opts.type || 'info';
+  STATUS_BANNER.classList.add(`level-${level}`);
 
   // Update global banner state
   try {
@@ -1686,12 +1682,13 @@ function showBanner(msg, opts = {}) {
     window.__fg_currentBanner.message = String(msg || '');
     window.__fg_currentBanner.sticky = !!opts.persistent;
     window.__fg_currentBanner.id = opts.serverId || window.__fg_currentBanner.id || null;
-    // If caller explicitly marks it clientSticky, set that (admin/manual broadcasts)
+
+    // clientSticky flag
     if (opts.clientSticky) window.__fg_currentBanner.clientSticky = true;
-    // If serverId provided and not clientSticky, ensure clientSticky is false (server banner)
     if (opts.serverId && !opts.clientSticky) window.__fg_currentBanner.clientSticky = false;
   } catch (e) { /* swallow */ }
 }
+
 // 🔥 MAKE BROADCAST ENGINE GLOBAL (required since dashboard.js is an ES module)
 window.setBannerMessage = setBannerMessage;
 window.showBanner = showBanner;
@@ -1765,7 +1762,7 @@ function setupBroadcastSubscription(force = false) {
         const id = row.id != null ? String(row.id) : null;
         // Use same contract as pollStatus: set serverId and persist active id
         try {
-          showBanner(row.message || '', { persistent: !!row.sticky, serverId: id, level: row.level || 'info' });
+          showBanner(row.message || '', { persistent: !!row.sticky, serverId: id });
         } catch (e) { console.warn('applyBroadcastRow showBanner failed', e); }
         try { 
           if (id != null) localStorage.setItem('active_broadcast_id', String(id));
