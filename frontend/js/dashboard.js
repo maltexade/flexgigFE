@@ -1664,17 +1664,8 @@ function showBanner(msg, opts = {}) {
   // opts: { type: 'info'|'error'|'warning', persistent: boolean, serverId: any, clientSticky: boolean }
   const STATUS_BANNER = document.getElementById('status-banner');
   if (!STATUS_BANNER) return;
-
-  // Update message
   setBannerMessage(msg, 1);
   STATUS_BANNER.classList.remove('hidden');
-
-  // Remove previous level classes
-  STATUS_BANNER.classList.remove('level-info', 'level-error', 'level-warning');
-
-  // Apply new level class (default to info)
-  const level = opts.type || 'info';
-  STATUS_BANNER.classList.add(`level-${level}`);
 
   // Update global banner state
   try {
@@ -1682,13 +1673,12 @@ function showBanner(msg, opts = {}) {
     window.__fg_currentBanner.message = String(msg || '');
     window.__fg_currentBanner.sticky = !!opts.persistent;
     window.__fg_currentBanner.id = opts.serverId || window.__fg_currentBanner.id || null;
-
-    // clientSticky flag
+    // If caller explicitly marks it clientSticky, set that (admin/manual broadcasts)
     if (opts.clientSticky) window.__fg_currentBanner.clientSticky = true;
+    // If serverId provided and not clientSticky, ensure clientSticky is false (server banner)
     if (opts.serverId && !opts.clientSticky) window.__fg_currentBanner.clientSticky = false;
   } catch (e) { /* swallow */ }
 }
-
 // 🔥 MAKE BROADCAST ENGINE GLOBAL (required since dashboard.js is an ES module)
 window.setBannerMessage = setBannerMessage;
 window.showBanner = showBanner;
@@ -1856,63 +1846,33 @@ function setupBroadcastSubscription(force = false) {
 
 
 
+
 // Fetch active broadcasts on load and show the first applicable one
 async function fetchActiveBroadcasts() {
   try {
-    const res = await fetch(`${window.__SEC_API_BASE || ''}/api/broadcasts/active?_${Date.now()}`, {
-      credentials: 'include',
-      cache: 'no-store'
-    });
+    const res = await fetch(`${window.__SEC_API_BASE || ''}/api/broadcasts/active?_${Date.now()}`, { credentials: 'include', cache: 'no-store' });
     if (!res.ok) {
       console.warn('[BCAST] /api/broadcasts/active returned', res.status);
       return [];
     }
-
     const json = await res.json();
     const broadcasts = json.broadcasts || [];
-
-    // Sort broadcasts by start time (earliest first)
-    broadcasts.sort((a, b) => {
+    // If you want the latest/highest priority first, sort here (by starts_at asc or created_at)
+    broadcasts.sort((a,b) => {
       const aStart = a.starts_at ? new Date(a.starts_at).getTime() : 0;
       const bStart = b.starts_at ? new Date(b.starts_at).getTime() : 0;
       return aStart - bStart;
     });
 
     if (broadcasts.length > 0) {
+      // Show the first one (you can render multiple if you like)
       const b = broadcasts[0];
-      const now = new Date();
-
-      // Check expiry on client
-      if (!b.expire_at || new Date(b.expire_at) > now) {
-        const STATUS_BANNER = document.getElementById('status-banner');
-        if (STATUS_BANNER) {
-          // Remove previous level classes
-          STATUS_BANNER.classList.remove('level-info', 'level-warning', 'level-error');
-
-          // Determine level
-          const allowedLevels = ['info', 'warning', 'error'];
-          const level = allowedLevels.includes(b.level) ? b.level : 'info';
-          STATUS_BANNER.classList.add(`level-${level}`);
-
-          // Show message
-          window.setBannerMessage(b.message || '', 1);
-
-          // Show banner
-          STATUS_BANNER.classList.remove('hidden');
-
-          // Update global banner state
-          window.__fg_currentBanner = window.__fg_currentBanner || {};
-          window.__fg_currentBanner.message = b.message || '';
-          window.__fg_currentBanner.level = level;
-          window.__fg_currentBanner.sticky = !!b.sticky;
-          window.__fg_currentBanner.clientSticky = false;
-          window.__fg_currentBanner.id = b.id;
-        }
-
-        // Store visible broadcast id
+      // defensive: check expiry on client too
+      if (!b.expire_at || new Date(b.expire_at) > new Date()) {
+        showBanner(b.message || '');
+        // store visible broadcast id if you need to reference later
         localStorage.setItem('active_broadcast_id', b.id);
       } else {
-        // Expired
         hideBanner();
         localStorage.removeItem('active_broadcast_id');
       }
@@ -1920,14 +1880,12 @@ async function fetchActiveBroadcasts() {
       hideBanner();
       localStorage.removeItem('active_broadcast_id');
     }
-
     return broadcasts;
   } catch (err) {
     console.error('[BCAST] fetchActiveBroadcasts error', err);
     return [];
   }
 }
-
 
 
 
