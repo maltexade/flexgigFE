@@ -1,23 +1,11 @@
 // dashboard.js
-// === PREVENT UNWANTED AUTO-SCROLL ON RELOAD (lightweight hack) ===
-(function() {
-  // Attaching a focusin listener early often blocks browser auto-focus/scroll restore
-  document.addEventListener('focusin', () => {}, { passive: true });
 
-  // Safety: also force top on load (clean, no flash)
-  const forceTop = () => window.scrollTo(0, 0);
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', forceTop);
-  }
-  window.addEventListener('load', () => {
-    setTimeout(forceTop, 100);
-  });
-
-  console.log('[SCROLL FIX] Lightweight prevention active – no more middle/bottom reloads');
-})();
 import { getAllPlans, getPlans, fetchPlans } from './dataPlans.js';  // ADD THIS LINE
-
+import {
+  openCheckoutModal,
+  closeCheckoutModal,
+  onPayClicked
+} from '/frontend/js/checkout.js';
 
 window.__SEC_API_BASE = 'https://api.flexgig.com.ng'
 
@@ -78,18 +66,43 @@ const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     // ==================== MODALS – FIXED & BULLETPROOF ====================
     
 
+openModal: (() => {
+  // This will NOW work perfectly
+  if (window.ModalManager && typeof window.ModalManager.getTopModal === 'function') {
+    const top = window.ModalManager.getTopModal();
+    if (top) {
+      console.log('[StateSaver] Detected open modal via ModalManager:', top);
+      return top;
+    }
+  }
+
+  // Fallback (should never trigger now)
+  const visible = document.querySelector('.modal.active, .modal[style*="flex"], .modal[style*="block"]');
+  if (visible?.id) return visible.id;
+
+  return null;
+})(),
 
 
 
     // Form inputs
     phoneNumber: document.getElementById('phone-input')?.value || '',
-
+    pinInputs: {
+      current: document.getElementById('currentPin')?.value || '',
+      new: document.getElementById('newPin')?.value || '',
+      confirm: document.getElementById('confirmPin')?.value || '',
+    },
 
     // Selection state
     selectedProvider: document.querySelector('.provider-box.active')?.className.match(/mtn|airtel|glo|ninemobile/)?.[0] || 'mtn',
     selectedPlanId: document.querySelector('.plan-box.selected')?.getAttribute('data-id') || '',
 
-
+    // Scroll positions
+    scrollPositions: {
+      dashboard: window.scrollY,
+      plansRow: document.querySelector('.plans-row')?.scrollLeft || 0,
+      allPlansModal: document.getElementById('allPlansModalContent')?.scrollTop || 0,
+    },
 
     // Extra
     timestamp: Date.now(),
@@ -103,26 +116,6 @@ const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   console.log('[StateSaver] UI state saved → openModal:', state.openModal, state);
 }
 window.saveCurrentAppState = saveCurrentAppState;
-
-// dashboard.js (or a shared utils file loaded FIRST)
-
-(function () {
-  'use strict';
-
-  function getUserState() {
-    try {
-      const raw = localStorage.getItem('userState');
-      return raw ? JSON.parse(raw) : {};
-    } catch (e) {
-      console.error('[getUserState] Invalid userState JSON', e);
-      return {};
-    }
-  }
-
-  // ✅ expose globally
-  window.getUserState = window.getUserState || getUserState;
-})();
-
 
 // ---------------------------
 // 1️⃣ Biometric warm function
@@ -188,117 +181,44 @@ async function warmBiometricOptions(userId, context = 'reauth', options = {}) {
 }
 
 window.warmBiometricOptions = window.warmBiometricOptions || warmBiometricOptions;
+
 // ---------------------------
-// 🔄 Checkout Modal Controls Biometric Rewarming
-// Keeps options fresh every 30 seconds while modal is open
+// 2️⃣ Pre-warm on Pay click (supports dynamic buttons)
 // ---------------------------
-let biometricRewarmInterval = null;
+document.addEventListener('click', async e => {
+  // Support both ID and class selector
+  const btn = e.target.closest('#payBtn, .pay-btn');
+  if (!btn) return;
 
-const checkoutModal = document.getElementById('checkoutModal');
+  console.log('[biometric] Pay clicked — warming options...');
 
-function startModalBiometricRewarming() {
-  if (biometricRewarmInterval) clearInterval(biometricRewarmInterval);
-
-  // Get UID once
-  let uid = null;
   try {
-    const userData = localStorage.getItem('userData');
-    if (userData) {
-      const parsed = JSON.parse(userData);
-      uid = parsed.uid || parsed.user?.id || parsed.user?.uid;
-    }
-  } catch (e) {}
-
-  if (!uid) {
-    console.warn('[modal-rewarm] No user ID found — cannot start rewarming');
-    return;
-  }
-
-  console.log('%c[modal-rewarm] Starting continuous rewarming for checkout modal', 'color:#0b0;font-weight:bold');
-
-  const rewarm = async () => {
-    try {
-      // Clear old cache first
-      window.__cachedAuthOptions = null;
-      localStorage.removeItem('__cachedAuthOptions');
-
-      // Fetch fresh
-      const opts = await warmBiometricOptions(uid, 'reauth', { force: true });
-      if (!opts) return;
-
-      // Force correct types (Uint8Array)
-      if (window.__cachedAuthOptions) {
-        if (!(window.__cachedAuthOptions.challenge instanceof Uint8Array)) {
-          const buf = fromBase64Url(window.__cachedAuthOptions.challenge);
-          if (buf instanceof ArrayBuffer && buf.byteLength > 0) {
-            window.__cachedAuthOptions.challenge = new Uint8Array(buf);
-          }
-        }
-
-        if (Array.isArray(window.__cachedAuthOptions.allowCredentials)) {
-          window.__cachedAuthOptions.allowCredentials = window.__cachedAuthOptions.allowCredentials
-            .map(c => {
-              if (!c.id) return null;
-              if (!(c.id instanceof Uint8Array)) {
-                const buf = fromBase64Url(c.id);
-                return buf instanceof ArrayBuffer && buf.byteLength > 0
-                  ? { ...c, id: new Uint8Array(buf) }
-                  : null;
-              }
-              return c;
-            })
-            .filter(Boolean);
-        }
+    // Resolve UID from cache
+    let uid = null;
+    const cached = localStorage.getItem('userData');
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        uid = parsed.uid || parsed.user?.id || parsed.user?.uid;
+        console.log('[biometric] UID from cache:', uid);
+      } catch (err) {
+        console.warn('[biometric] Failed to parse cached userData', err);
       }
-
-      console.log('[modal-rewarm] Fresh options ready');
-    } catch (err) {
-      console.error('[modal-rewarm] Failed', err);
     }
-  };
 
-  // Initial + every 30 seconds
-  rewarm();
-  biometricRewarmInterval = setInterval(rewarm, 30_000);
-}
-
-function stopModalBiometricRewarming() {
-  if (biometricRewarmInterval) {
-    clearInterval(biometricRewarmInterval);
-    biometricRewarmInterval = null;
-    console.log('[modal-rewarm] Stopped — modal closed');
-  }
-}
-
-// ---------------------------
-// Observe modal visibility (aria-hidden + display)
-// ---------------------------
-if (checkoutModal) {
-  const observer = new MutationObserver(() => {
-    const isHidden = checkoutModal.getAttribute('aria-hidden') === 'true';
-    const isDisplayed = window.getComputedStyle(checkoutModal).display !== 'none';
-
-    if (!isHidden && isDisplayed) {
-      startModalBiometricRewarming();
-    } else {
-      stopModalBiometricRewarming();
+    if (!uid) {
+      console.warn('[biometric] Cannot warm — no UID available');
+      return;
     }
-  });
 
-  observer.observe(checkoutModal, {
-    attributes: true,
-    attributeFilter: ['aria-hidden', 'style', 'class']
-  });
-
-  // Check initial state
-  if (checkoutModal.getAttribute('aria-hidden') !== 'true' &&
-      window.getComputedStyle(checkoutModal).display !== 'none') {
-    startModalBiometricRewarming();
+    // Force a fresh warm regardless of TTL
+    await warmBiometricOptions(uid, 'reauth', { force: true });
+    console.log('[biometric] Options pre-warmed, ready for biometric prompt');
+  } catch (err) {
+    console.error('[biometric] Warm failed', err);
   }
-}
+});
 
-// Also stop when close button clicked (extra safety)
-checkoutModal?.querySelector('.close-btn')?.addEventListener('click', stopModalBiometricRewarming);
 
 
 
@@ -2321,167 +2241,29 @@ window.updateAllBalances = function(newBalance, skipAnimation = false) {
 };
 
 window.applyBalanceVisibility = applyBalanceVisibility;
+
+
 // ===============================================================
 //  UNIFIED REAL-TIME BALANCE SYSTEM (Mobile-Safe Version)
 //  - Guaranteed to work on iOS, Android, Desktop
 //  - WebSocket + Polling Fallback
 //  - Global "balance_update" event
 //  - Success Toast + Modal Close
-//  - ON-SCREEN DEBUG LOG (for mobile debugging)
+// ===============================================================
+// ===============================================================
+//  UNIFIED REAL-TIME BALANCE SYSTEM (Mobile-Safe Version)
+//  - Guaranteed to work on iOS, Android, Desktop
+//  - WebSocket + Polling Fallback
+//  - Global "balance_update" event
+//  - Success Toast + Modal Close
+// ===============================================================
+// ===============================================================
+//  BULLETPROOF REAL-TIME BALANCE + AUTO-CLOSE (MOBILE FIXED)
 // ===============================================================
 
 (function () {
-  // ========== DEBUG LOG TOGGLE ==========
-  const ENABLE_DEBUG_LOG = true;  // KEEP THIS TRUE - keeps polling/WS alive
-  const SHOW_DEBUG_UI = false;    // Set to true only when YOU need to debug
-  // ======================================
-
   const uid = window.__USER_UID || localStorage.getItem('userId');
   if (!uid) return;
-
-  // Initialize on-screen debug log
-  let debugLog = null;
-  let debugLogVisible = false;
-
-  function initDebugLog() {
-    if (!ENABLE_DEBUG_LOG || !SHOW_DEBUG_UI) return; // Only create UI if SHOW_DEBUG_UI is true
-
-    // Create log container
-    debugLog = document.createElement('div');
-    debugLog.id = 'balance-debug-log';
-    debugLog.style.cssText = `
-      position: fixed;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      max-height: 40vh;
-      background: rgba(0, 0, 0, 0.95);
-      color: #0f0;
-      font-family: monospace;
-      font-size: 11px;
-      padding: 10px;
-      overflow-y: auto;
-      z-index: 999999;
-      border-top: 2px solid #0f0;
-      display: none;
-    `;
-
-    // Create toggle button
-    const toggleBtn = document.createElement('button');
-    toggleBtn.textContent = '🐛 LOG';
-    toggleBtn.style.cssText = `
-      position: fixed;
-      bottom: 10px;
-      right: 10px;
-      background: rgba(0, 255, 0, 0.2);
-      color: #0f0;
-      border: 2px solid #0f0;
-      border-radius: 50%;
-      width: 50px;
-      height: 50px;
-      font-size: 18px;
-      z-index: 9999999;
-      cursor: pointer;
-      box-shadow: 0 4px 12px rgba(0, 255, 0, 0.3);
-    `;
-
-    toggleBtn.onclick = () => {
-      debugLogVisible = !debugLogVisible;
-      debugLog.style.display = debugLogVisible ? 'block' : 'none';
-      toggleBtn.style.background = debugLogVisible ? 'rgba(0, 255, 0, 0.4)' : 'rgba(0, 255, 0, 0.2)';
-    };
-
-    // Create copy button inside log
-    const copyBtn = document.createElement('button');
-    copyBtn.textContent = '📋 COPY ALL';
-    copyBtn.style.cssText = `
-      position: sticky;
-      top: 0;
-      background: #0f0;
-      color: black;
-      border: none;
-      padding: 5px 10px;
-      margin-bottom: 10px;
-      cursor: pointer;
-      font-weight: bold;
-      border-radius: 4px;
-      width: 100%;
-    `;
-    copyBtn.onclick = () => {
-      const text = Array.from(debugLog.querySelectorAll('.log-entry'))
-        .map(el => el.textContent)
-        .join('\n');
-      
-      navigator.clipboard.writeText(text).then(() => {
-        copyBtn.textContent = '✓ COPIED!';
-        setTimeout(() => { copyBtn.textContent = '📋 COPY ALL'; }, 2000);
-      }).catch(() => {
-        // Fallback for older browsers
-        const textarea = document.createElement('textarea');
-        textarea.value = text;
-        document.body.appendChild(textarea);
-        textarea.select();
-        document.execCommand('copy');
-        document.body.removeChild(textarea);
-        copyBtn.textContent = '✓ COPIED!';
-        setTimeout(() => { copyBtn.textContent = '📋 COPY ALL'; }, 2000);
-      });
-    };
-
-    debugLog.appendChild(copyBtn);
-    document.body.appendChild(debugLog);
-    document.body.appendChild(toggleBtn);
-
-    log('🟢 Debug log initialized');
-  }
-
-  function log(message, type = 'info') {
-    // Always log to console for debugging
-    console.log(`[Balance Debug] ${message}`);
-    
-    // Only show on-screen UI if SHOW_DEBUG_UI is enabled
-    if (!SHOW_DEBUG_UI || !debugLog) return;
-
-    const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 });
-    const colors = {
-      info: '#0f0',
-      warn: '#ff0',
-      error: '#f00',
-      success: '#0ff'
-    };
-
-    const entry = document.createElement('div');
-    entry.className = 'log-entry';
-    entry.style.cssText = `
-      color: ${colors[type] || colors.info};
-      margin-bottom: 3px;
-      padding: 2px 0;
-      border-bottom: 1px solid rgba(0, 255, 0, 0.1);
-    `;
-    entry.textContent = `[${timestamp}] ${message}`;
-
-    debugLog.appendChild(entry);
-
-    // Auto-scroll to bottom
-    debugLog.scrollTop = debugLog.scrollHeight;
-
-    // Keep only last 100 entries
-    const entries = debugLog.querySelectorAll('.log-entry');
-    if (entries.length > 100) {
-      entries[0].remove();
-    }
-  }
-
-  // Expose log function globally
-  window.__balanceLog = log;
-
-  // Initialize log UI only if SHOW_DEBUG_UI is enabled
-  if (ENABLE_DEBUG_LOG && SHOW_DEBUG_UI) {
-    setTimeout(initDebugLog, 500);
-  }
-  
-  // Always log that system is starting
-  log('🚀 Balance system initializing...', 'info');
 
   let ws = null;
   let pollTimer = null;
@@ -2507,7 +2289,7 @@ window.applyBalanceVisibility = applyBalanceVisibility;
     const amountAdded = newBalance - lastKnownBalance;
     lastKnownBalance = newBalance;
 
-    log(`💰 +₦${amountAdded.toLocaleString()} (from ${source}) → ₦${newBalance.toLocaleString()}`, 'success');
+    console.log(`[Balance] +₦${amountAdded.toLocaleString()} (from ${source}) → ₦${newBalance.toLocaleString()}`);
 
     // Update UI
     window.updateAllBalances(newBalance);
@@ -2516,32 +2298,34 @@ window.applyBalanceVisibility = applyBalanceVisibility;
     if (!hasProcessedPayment && amountAdded > 0) {
       hasProcessedPayment = true;
 
-      // Clear local pending tx storage immediately so UI won't resurrect old tx
+      // ---- NEW: clear local pending tx storage immediately so UI won't resurrect old tx ----
       try {
         if (typeof removePendingTxFromStorage === 'function') {
           removePendingTxFromStorage();
-          log('✓ Cleared pending tx storage', 'success');
+          console.log('[Balance] Cleared local pending tx storage');
         } else {
           // defensive: try to remove directly if helper not present
           localStorage.removeItem('flexgig.pending_fund_tx');
-          log('✓ Cleared pending tx storage (direct)', 'success');
+          console.log('[Balance] Cleared local pending tx storage (direct)');
         }
       } catch (e) {
-        log(`⚠️ Failed to clear pending tx: ${e.message}`, 'warn');
+        console.warn('[handleNewBalance] failed to clear pending tx storage', e);
       }
+      // -------------------------------------------------------------------------------------
 
       // Dispatch event (for any other listeners)
       window.dispatchEvent(new CustomEvent('balance_update', {
         detail: { type: 'balance_update', balance: newBalance, amount: amountAdded }
       }));
 
-      // Close modal SAFELY via ModalManager with correct ID
+      // Close modal SAFELY
       setTimeout(() => {
-        if (window.ModalManager?.closeModal) {
-          window.ModalManager.closeModal('addMoneyModal');
-          log('✓ Modal closed via ModalManager', 'success');
-        } else {
-          log('⚠️ ModalManager not available', 'warn');
+        if (window.ModalManager?.closeTopModal) {
+          window.ModalManager.closeTopModal();
+          
+        } else if (document.getElementById('addMoneyModal')) {
+          document.getElementById('addMoneyModal').style.transform = 'translateY(100%)';
+          document.getElementById('addMoneyModal').classList.add('hidden');
         }
       }, 300);
 
@@ -2571,36 +2355,26 @@ window.applyBalanceVisibility = applyBalanceVisibility;
 
   window.handleNewBalance = window.handleNewBalance || handleNewBalance;
 
-  // AGGRESSIVE Polling fallback (mobile-first: checks every 3s)
+  // Polling fallback (runs always on mobile)
   async function startPolling() {
     if (pollTimer) clearTimeout(pollTimer);
 
     const poll = async () => {
       try {
-        log('🔄 Polling balance...', 'info');
-        // REMOVED light=true — we need the full user object with wallet_balance
-        const res = await fetch(`${window.__SEC_API_BASE}/api/session?t=${Date.now()}`, {
+        const res = await fetch(`${window.__SEC_API_BASE}/api/session?light=true&t=${Date.now()}`, {
           credentials: 'include',
-          cache: 'no-store',
-          headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' }
+          cache: 'no-store'
         });
         if (res.ok) {
           const json = await res.json();
-          log(`📦 Poll response: ${JSON.stringify(json).substring(0, 200)}...`, 'info');
-          const bal = json.user?.wallet_balance ?? json.wallet_balance ?? json.balance;
-          log(`✓ Poll success: ₦${bal?.toLocaleString() || 'N/A'} (from ${json.user?.wallet_balance !== undefined ? 'user.wallet_balance' : json.wallet_balance !== undefined ? 'wallet_balance' : json.balance !== undefined ? 'balance' : 'NONE'})`, 'success');
+          const bal = json.user?.wallet_balance;
           if (bal !== undefined && bal !== lastKnownBalance) {
             handleNewBalance(bal, 'polling');
           }
-        } else {
-          log(`⚠️ Poll failed: ${res.status}`, 'warn');
         }
-      } catch (e) { 
-        log(`❌ Poll error: ${e.message}`, 'error');
-      }
+      } catch (e) { console.warn('[Balance Poll] failed', e); }
 
-      // Termux-optimized: poll every 15s (gentle on device + still responsive)
-      pollTimer = setTimeout(poll, 15000);
+      pollTimer = setTimeout(poll, 8000); // every 8s
     };
     poll();
   }
@@ -2608,141 +2382,52 @@ window.applyBalanceVisibility = applyBalanceVisibility;
   // WebSocket (best effort)
   function connectWS() {
     try {
-      if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
-        log('⚠️ WS already connecting/open', 'warn');
-        return; // Already connecting/open
-      }
-
-      log('🔌 WS: Connecting to wss://api.flexgig.com.ng/ws/wallet...', 'info');
       ws = new WebSocket('wss://api.flexgig.com.ng/ws/wallet');
 
-      let heartbeatInterval = null;
-
-      // Update global reference every time we create a new WS
-      window.__current_ws = ws;
-      log('✓ WS instance exposed to window.__current_ws', 'success');
-
       ws.onopen = () => {
-        log('✅ WS: Connected! Subscribing...', 'success');
+        console.log('[WS] Connected');
         ws.send(JSON.stringify({ type: 'subscribe', user_uid: uid }));
-        log(`📤 WS: Sent subscribe for user ${uid}`, 'info');
-
-        // AGGRESSIVE heartbeat: every 15s to fight mobile connection drops
-        clearInterval(heartbeatInterval);
-        heartbeatInterval = setInterval(() => {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'ping' }));
-            log('💓 WS: Heartbeat sent', 'info');
-          } else {
-            log('❌ WS: Connection dead, attempting reconnect...', 'error');
-            clearInterval(heartbeatInterval);
-            connectWS();
-          }
-        }, 15000);
-
-        if (pollTimer) clearTimeout(pollTimer);
+        if (pollTimer) clearTimeout(pollTimer); // WS wins
       };
 
       ws.onmessage = (e) => {
         try {
           const data = JSON.parse(e.data);
-          log(`📨 WS: Received message: ${JSON.stringify(data)}`, 'info');
-
           if (data.type === 'balance_update' && data.balance !== undefined) {
-            log(`💰 WS: Balance update received: ₦${data.balance.toLocaleString()}`, 'success');
             handleNewBalance(data.balance, 'websocket');
+            document.dispatchEvent(new CustomEvent('transaction_update', { detail: data }));
           }
-
-          // Dispatch transaction if present
-          let txDetail = data.transaction || (data.type === 'transaction' ? data : null);
-          if (txDetail) {
-            log(`📝 WS: Transaction update dispatched`, 'info');
-            document.dispatchEvent(new CustomEvent('transaction_update', { detail: txDetail }));
-          }
-        } catch (err) {
-          log(`❌ WS: Parse error: ${err.message}`, 'error');
-        }
+        } catch (err) {}
       };
 
-      ws.onerror = (e) => {
-        log(`❌ WS: Error occurred`, 'error');
+      ws.onclose = ws.onerror = () => {
+        console.log('[WS] Disconnected → fallback to polling');
+        startPolling();
       };
-
-      ws.onclose = (e) => {
-        log(`🔴 WS: Closed (code: ${e.code}, reason: ${e.reason}) — reconnecting in 1s`, 'warn');
-        clearInterval(heartbeatInterval);
-
-        // IMMEDIATE reconnect for mobile + ensure polling continues
-        setTimeout(() => {
-          connectWS();
-          startPolling(); // restart polling if it died
-        }, 1000);
-      };
-
     } catch (err) {
-      log(`❌ WS: Failed to create: ${err.message}`, 'error');
-      setTimeout(connectWS, 3000);
+      startPolling();
     }
   }
 
   // CRITICAL: Re-check balance when user returns to app (iOS/Android fix)
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
-      log('👁️ Page visible → force balance check + WS reconnect', 'info');
-      
-      // Immediate balance check
-      fetch(`${window.__SEC_API_BASE}/api/session?t=${Date.now()}`, { 
-        credentials: 'include',
-        cache: 'no-store',
-        headers: { 'Cache-Control': 'no-cache' }
-      })
+      console.log('[Visibility] Page visible → force balance check');
+      // Force a poll immediately
+      fetch(`${window.__SEC_API_BASE}/api/session?light=true&t=${Date.now()}`, { credentials: 'include' })
         .then(r => r.ok ? r.json() : null)
-        .then(j => {
-          if (j?.user?.wallet_balance !== undefined) {
-            log(`✓ Visibility check: ₦${j.user.wallet_balance.toLocaleString()}`, 'success');
-            handleNewBalance(j.user.wallet_balance, 'visibility');
-          }
-        })
-        .catch(e => log(`❌ Visibility check failed: ${e.message}`, 'error'));
-
-      // Force WebSocket reconnect if dead
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        log('🔌 WS dead, reconnecting...', 'warn');
-        connectWS();
-      }
-
-      // Restart polling
-      startPolling();
+        .then(j => j?.user?.wallet_balance !== undefined && handleNewBalance(j.user.wallet_balance, 'visibility'));
     }
   });
 
-  // Also on resume, focus, pageshow (covers all mobile scenarios)
-  ['resume', 'focus', 'pageshow'].forEach(event => {
-    window.addEventListener(event, () => {
-      log(`🔄 [${event}] Forcing balance check + WS reconnect`, 'info');
-      
-      // Triple guarantee: fetch + WS + polling
-      fetch(`${window.__SEC_API_BASE}/api/session?t=${Date.now()}`, { 
-        credentials: 'include',
-        cache: 'no-store' 
-      })
-        .then(r => r.ok ? r.json() : null)
-        .then(j => {
-          if (j?.user?.wallet_balance !== undefined) {
-            log(`✓ [${event}] Balance: ₦${j.user.wallet_balance.toLocaleString()}`, 'success');
-            handleNewBalance(j.user.wallet_balance, event);
-          }
-        })
-        .catch(e => log(`❌ [${event}] Check failed: ${e.message}`, 'error'));
-
-      connectWS();
-      startPolling();
-    });
+  // Also on resume (mobile)
+  document.addEventListener('resume', () => {
+    console.log('[App Resume] Forcing balance check');
+    setTimeout(() => startPolling(), 1000);
   });
 
   // Start everything
   setTimeout(() => {
-    log('🚀 Starting balance monitoring system...', 'info');
     connectWS();
     startPolling(); // run polling always on mobile
   }, 800);
@@ -2750,12 +2435,13 @@ window.applyBalanceVisibility = applyBalanceVisibility;
   // Initial load
   getSession().then(s => {
     if (s?.user?.wallet_balance !== undefined) {
-      log(`💰 Initial balance: ₦${s.user.wallet_balance.toLocaleString()}`, 'success');
       handleNewBalance(s.user.wallet_balance, 'initial');
     }
-  }).catch(e => log(`❌ Initial session failed: ${e.message}`, 'error'));
+  });
 
 })();
+
+
 
 // Run observer only on dashboard
 if (window.location.pathname.includes('dashboard.html')) {
@@ -4160,76 +3846,6 @@ deleteKey.addEventListener('click', () => {
   }
 });
 
-
-// Add this function to load user data into the modal
-async function loadProfileData() {
-  console.log('[DEBUG] loadProfileData: Loading user profile into modal');
-
-  // Load data from localStorage
-  const fullName = localStorage.getItem('fullName') || '';
-  const username = localStorage.getItem('username') || '';
-  const phoneNumber = localStorage.getItem('phoneNumber') || '';
-  const email = localStorage.getItem('userEmail') || '';
-  const address = localStorage.getItem('address') || '';
-  const profilePicture = localStorage.getItem('profilePicture') || '';
-
-  // Populate form fields
-  if (fullNameInput) fullNameInput.value = fullName;
-  if (usernameInput) usernameInput.value = username;
-  if (phoneNumberInput) phoneNumberInput.value = phoneNumber;
-  if (emailInput) emailInput.value = email;
-  if (addressInput) addressInput.value = address;
-
-  // Set profile picture preview
-  if (profilePicturePreview) {
-    const displayName = username || fullName.split(' ')[0] || 'User';
-    const fallbackLetter = displayName.charAt(0).toUpperCase();
-
-    if (profilePicture && isValidImageSource(profilePicture)) {
-      profilePicturePreview.innerHTML = `<img src="${profilePicture}" alt="Profile Picture" class="avatar-img" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`;
-    } else {
-      profilePicturePreview.innerHTML = '';
-      profilePicturePreview.textContent = fallbackLetter;
-    }
-  }
-
-  // Check if username has been set before (lock it if already set)
-  const lastUpdate = localStorage.getItem('lastUsernameUpdate');
-  if (lastUpdate && usernameInput) {
-    usernameInput.disabled = true;
-    if (usernameError) {
-      usernameError.textContent = 'Username cannot be changed after initial setup';
-      usernameError.classList.add('active', 'info');
-    }
-  }
-
-  console.log('[DEBUG] loadProfileData: Data loaded', { fullName, username, email });
-}
-
-
-
-
-
-// Also attach listeners when modal opens (ModalManager callback)
-if (window.ModalManager) {
-  const originalOpenModal = window.ModalManager.openModal;
-  window.ModalManager.openModal = function(modalId) {
-    const result = originalOpenModal.call(this, modalId);
-    
-    if (modalId === 'updateProfileModal') {
-      setTimeout(() => {
-        loadProfileData();
-        attachProfileListeners();
-        validateProfileForm(true);
-      }, 450);
-    }
-    
-    return result;
-  };
-}
-
-
-
 // document.addEventListener('DOMContentLoaded', fetchUserData);
 
 // Update DOM with greeting and avatar
@@ -4751,81 +4367,6 @@ if (!window.prefetchAuthOptions) window.prefetchAuthOptions = async function pre
 
 })();
 
-// STRICT active state management for shortcuts
-let currentActiveShortcut = 'data'; // Always default to Data
-
-function setActiveShortcut(shortcutId) {
-  // Remove active from EVERY item, no exceptions
-  document.querySelectorAll('.short-item').forEach(item => {
-    item.classList.remove('active');
-  });
-
-  // ONLY allow active state on items that are NOT .coming-soon
-  const target = document.querySelector(`.short-item[data-shortcut="${shortcutId}"]:not(.coming-soon)`);
-  if (target) {
-    target.classList.add('active');
-    currentActiveShortcut = shortcutId;
-  } else {
-    // If someone tries to activate a coming-soon item, force it back to Data
-    const dataItem = document.querySelector('.short-item[data-shortcut="data"]');
-    if (dataItem) {
-      dataItem.classList.add('active');
-    }
-    currentActiveShortcut = 'data';
-  }
-}
-
-// Force Data to be active on page load
-document.addEventListener('DOMContentLoaded', () => {
-  setActiveShortcut('data');
-});
-
-// Real (non-coming-soon) shortcuts — can become active
-document.querySelectorAll('.short-item:not(.coming-soon)').forEach(item => {
-  const id = item.dataset.shortcut;
-
-  const activate = () => {
-    setActiveShortcut(id);
-
-    if (id === 'data') {
-      console.log('Opening Data purchase...');
-      // openDataModal(); // your real function
-    }
-  };
-
-  item.addEventListener('click', activate);
-  item.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      activate();
-    }
-  });
-});
-
-// Coming-soon items — show toast, NEVER activate
-document.querySelectorAll('.short-item.coming-soon').forEach(item => {
-  const showComingSoon = (e) => {
-    if (e) {
-      e.preventDefault();
-      e.stopPropagation();
-    }
-    showToast('This service is coming soon!', 'info');
-
-    // Critical: Force active state back to Data if it somehow changed
-    if (currentActiveShortcut !== 'data') {
-      setActiveShortcut('data');
-    }
-  };
-
-  item.addEventListener('click', showComingSoon);
-  item.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      showComingSoon();
-    }
-  });
-});
-
 
 document.addEventListener('DOMContentLoaded', () => {
   const providerClasses = ['mtn', 'airtel', 'glo', 'ninemobile'];
@@ -4869,7 +4410,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     return null;
   }
-  window.detectProvider = window.detectProvider || detectProvider;
 
   // --- PHONE NUMBER FORMATTING ---
   // --- PHONE NUMBER FORMATTING ---
@@ -4905,7 +4445,6 @@ function formatNigeriaNumber(phone, isInitialDigit = false, isPaste = false) {
     return { value: '', cursorOffset: 0, valid: false };
   }
 }
-window.formatNigeriaNumber = window.formatNigeriaNumber || formatNigeriaNumber;
 
 
   // --- VALIDATION HELPERS ---
@@ -5733,7 +5272,6 @@ attachPlanListeners();
     } else {
       contactBtn.innerHTML = contactSVG;
     }
-    window.updateContactOrCancel = window.updateContactOrCancel || updateContactOrCancel;
 
     function handleCancelClick(e) {
       e.preventDefault();
@@ -5745,7 +5283,6 @@ attachPlanListeners();
       saveCurrentAppState();
     }
   }
-  window.updateContactOrCancel = window.updateContactOrCancel || updateContactOrCancel;
 
   // --- UPDATE CONTINUE BUTTON ---
   function updateContinueState() {
@@ -5758,7 +5295,6 @@ attachPlanListeners();
       continueBtn.classList.remove('active');
     }
   }
-  window.updateContinueState = window.updateContinueState || updateContinueState;
 
   
 
@@ -5922,7 +5458,16 @@ async function findPlanById(planId, provider) {
   //   console.log('[DEBUG] closeCheckoutModal: Modal closed, display:', checkoutModal.style.display, 'active:', checkoutModal.classList.length);
   // }
 
-
+  // --- SERVICE SELECTION ---
+  serviceItems.forEach((item, i) => {
+    item.addEventListener('click', () => {
+      serviceItems.forEach(el => el.classList.remove('active'));
+      item.classList.add('active');
+      saveUserState();
+      saveCurrentAppState();
+    });
+  });
+  serviceItems[0].classList.add('active');
 
   // --- INITIAL PROVIDER SETUP ---
   // REPLACE your current initializeProviderFromState() with this version
@@ -6085,7 +5630,16 @@ function restoreEverything() {
     updateContactOrCancel(); // Update cancel button based on phone
     updateContinueState(); // Enable/disable continue
 
-
+    // 5. Restore scroll/modal if present
+    if (saved.scrollPositions) {
+      window.scrollTo(0, saved.scrollPositions.dashboard || 0);
+      if (plansRow) plansRow.scrollLeft = saved.scrollPositions.plansRow || 0;
+      const modalContent = document.getElementById('allPlansModalContent');
+      if (modalContent) modalContent.scrollTop = saved.scrollPositions.allPlansModal || 0;
+    }
+    if (saved.openModal && window.ModalManager) {
+      setTimeout(() => ModalManager.openModal(saved.openModal), 100);
+    }
 
     console.log('[restoreEverything] Full restore complete');
   }, 650);
@@ -6721,164 +6275,112 @@ viewAllLink.addEventListener('click', (e) => {
 
 
 
-(async () => {
+
+  // --- RECENT TRANSACTIONS ---
+  // --- RECENT TRANSACTIONS ---
+  // --- RECENT TRANSACTIONS ---
   const recentTransactionsList = document.querySelector('.recent-transactions-list');
   const recentTransactionsSection = document.querySelector('.recent-transactions');
+  const recentTransactions = JSON.parse(localStorage.getItem('recentTransactions')) || [];
 
-  if (!recentTransactionsList || !recentTransactionsSection) {
-    console.warn('[recent-tx] Required elements not found');
-    return;
-  }
-
-  // === FORCE YOUR 28px svgShapes GLOBALLY (overrides any other version) ===
-  window.svgShapes = {
-    mtn: `<svg class="yellow-circle-icon" width="28" height="28" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="#FFD700"/></svg>`,
-    airtel: `<svg class="airtel-rect-icon" width="28" height="28" viewBox="0 0 24 24" fill="none"><rect x="4" y="6" width="20" height="12" rx="4" fill="#e4012b"/></svg>`,
-    glo: `<svg class="glo-diamond-icon" width="28" height="28" viewBox="0 0 24 24" fill="none"><polygon points="12,2 22,12 12,22 2,12" fill="#00B13C"/></svg>`,
-    ninemobile: `<svg class="ninemobile-triangle-icon" width="28" height="28" viewBox="0 0 24 24" fill="none"><polygon points="12,3 21,21 3,21" fill="#7DB700"/></svg>`,
-    receive: `<svg class="bank-icon" width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M4 9v9h16V9l-8-5-8 5zm4 4h8v2H8v-2zm0 4h4v2H8v-2z" fill="#00cc00" stroke="#fff" stroke-width="1"/></svg>`
-  };
-
-  // --- PERMANENT RENDER FUNCTION (uses forced svgShapes) ---
-  function renderRecentTransactions(transactions = []) {
+  function renderRecentTransactions() {
     recentTransactionsList.innerHTML = '';
-
-    if (!transactions.length) {
+    if (recentTransactions.length === 0) {
       recentTransactionsSection.classList.remove('active');
-      return;
-    }
-
-    recentTransactionsSection.classList.add('active');
-
-    transactions.forEach(tx => {
-      const txDiv = document.createElement('div');
-      txDiv.className = 'recent-transaction-item';
-
-      const displayName = tx.provider === 'ninemobile'
-        ? '9mobile'
-        : tx.provider
-          ? tx.provider.charAt(0).toUpperCase() + tx.provider.slice(1).toLowerCase()
-          : 'Unknown';
-
-      // Data amount
-      let dataAmount = tx.data || '';
-      if (!dataAmount && tx.description) {
-        const match = tx.description.match(/(\d+\.?\d*\s*(?:GB|TB|MB))/i);
-        if (match) dataAmount = match[1];
-      }
-
-      // Correct key mapping + force from global svgShapes
-      const providerKey = tx.provider?.toLowerCase() === '9mobile' ? 'ninemobile' : tx.provider?.toLowerCase();
-      const svg = window.svgShapes[providerKey] || '';
-
-      // Phone + Data LEFT, SVG + Provider RIGHT
-      txDiv.innerHTML = `
-        <span class="tx-desc">${tx.phone} - ${dataAmount}</span>
-        <span class="tx-provider">${svg} ${displayName}</span>
-      `;
-
-      txDiv.setAttribute('role', 'button');
-      txDiv.setAttribute('aria-label', `Reuse transaction for ${tx.phone} on ${displayName}`);
-
-txDiv.addEventListener('click', () => {
-  const phoneInput = document.getElementById('phone-input');
-  if (!phoneInput) {
-    alert('Phone input field not found.');
-    return;
-  }
-
-  // 1. Format number
-  const result = window.formatNigeriaNumber(tx.phone);
-  phoneInput.value = result.value; // e.g., "0808 336 3636"
-
-  // 2. Normalize and detect provider
-  const normalizedPhone = tx.phone.replace(/^\+234/, '0');
-  const provider = detectProvider(normalizedPhone);
-
-  if (provider) {
-    const providerClass = provider.toLowerCase() === '9mobile' ? 'ninemobile' : provider.toLowerCase();
-    debounce(() => {
-      selectProvider(providerClass);
-      console.log('[DEBUG] Provider auto-selected:', providerClass);
-    }, 100)();
-  }
-
-  // 3. Update UI states
-  if (window.updateContactOrCancel) window.updateContactOrCancel();
-  if (window.updateContinueState) window.updateContinueState();
-  if (window.saveUserState) window.saveUserState();
-  if (window.saveCurrentAppState) window.saveCurrentAppState();
-
-  phoneInput.blur();
-});
-
-
-      recentTransactionsList.appendChild(txDiv);
-    });
-
-    console.log('[recent-tx] Rendered', transactions.length, 'transactions with correct SVGs');
-  }
-
-  // === LOAD, MERGE, DEDUPLICATE, LIMIT TO 5 ===
-  let recentTransactions = [];
-
-  try {
-    const stored = localStorage.getItem('recentTransactions');
-    if (stored) {
-      recentTransactions = JSON.parse(stored);
-      if (!Array.isArray(recentTransactions)) recentTransactions = [];
-    }
-  } catch (e) {
-    console.warn('[recent-tx] localStorage parse error', e);
-  }
-
-  recentTransactions = recentTransactions.filter(tx => tx && tx.phone && tx.phone.trim() !== '');
-
-  try {
-    const res = await fetch(`${window.__SEC_API_BASE}/api/transactions?limit=20`, {
-      credentials: 'include',
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-      const serverTxs = (data.items || []).filter(tx => tx && tx.phone && tx.phone.trim() !== '');
-
-      serverTxs.forEach(serverTx => {
-        const exists = recentTransactions.some(localTx =>
-          (localTx.id && serverTx.id && localTx.id === serverTx.id) ||
-          (localTx.phone === serverTx.phone && localTx.amount === serverTx.amount)
-        );
-
-        if (!exists) {
-          recentTransactions.push(serverTx);
-        }
+      console.log('[DEBUG] renderRecentTransactions: Section hidden, no transactions');
+    } else {
+      recentTransactionsSection.classList.add('active');
+      const maxRecent = 5; // Show last 5 transactions
+      const recentToShow = recentTransactions.slice(-maxRecent).reverse(); // Show latest at top
+      recentToShow.forEach(tx => {
+        const txDiv = document.createElement('div');
+        txDiv.className = 'recent-transaction-item';
+        const displayName = tx.provider === 'ninemobile' ? '9mobile' : tx.provider.charAt(0).toUpperCase() + tx.provider.slice(1);
+        txDiv.innerHTML = `
+          <span class="tx-desc">${tx.phone} - ${tx.data}</span>
+          <span class="tx-provider">${svgShapes[tx.provider]} ${displayName}</span>
+        `;
+        txDiv.setAttribute('role', 'button');
+        txDiv.setAttribute('aria-label', `Reuse transaction for ${tx.phone} on ${displayName}`);
+        txDiv.addEventListener('click', () => {
+          const phoneInput = document.getElementById('phone-input');
+          if (!phoneInput) {
+            console.error('[ERROR] recentTransaction click: #phone-input not found in DOM');
+            alert('Error: Phone input field not found.');
+            return;
+          }
+          const formattedNumber = formatNigeriaNumber(tx.phone);
+          if (!formattedNumber.valid) {
+            console.error('[ERROR] recentTransaction click: Invalid phone number:', tx.phone);
+            alert('Invalid phone number in transaction. Please try another.');
+            return;
+          }
+          phoneInput.value = formattedNumber.value; // Set formatted number (e.g., "0803 123 4567")
+          selectProvider(tx.provider); // Select provider
+          updateContactOrCancel();
+          updateContinueState();
+          saveUserState();
+          saveCurrentAppState();
+          if (formattedNumber.valid && tx.phone.length === 11 && isNigeriaMobile(tx.phone)) {
+            phoneInput.blur(); // Close the keyboard immediately
+            console.log('[RAW LOG] recentTransaction click: Keyboard closed, valid Nigeria number:', tx.phone);
+          }
+          console.log('[DEBUG] recentTransaction click: Set phone:', formattedNumber.value, 'Raw:', tx.phone, 'Provider:', tx.provider);
+        });
+        recentTransactionsList.appendChild(txDiv);
       });
+      console.log('[DEBUG] renderRecentTransactions: Rendered', recentToShow.length, 'recent transactions', recentToShow);
     }
-  } catch (err) {
-    console.error('[recent-tx] Server fetch failed', err);
-  }
-
-  recentTransactions.sort((a, b) => {
-    const timeA = new Date(a.timestamp || a.created_at || 0).getTime();
-    const timeB = new Date(b.timestamp || b.created_at || 0).getTime();
-    return timeB - timeA;
-  });
-
-  recentTransactions = recentTransactions.slice(0, 5);
-
-  try {
     localStorage.setItem('recentTransactions', JSON.stringify(recentTransactions));
-    window.recentTransactions = recentTransactions;
-  } catch (e) {
-    console.warn('[recent-tx] Save failed', e);
   }
 
-  renderRecentTransactions(recentTransactions);
+  // Initialize recent transactions
+ renderRecentTransactions();
 
-  window.renderRecentTransactions = renderRecentTransactions;
+//    payBtn.disabled = true;
+//  payBtn.textContent = 'Processing...';
+//  setTimeout(() => {
+//    // Payment logic
+//     payBtn.disabled = false;
+//     payBtn.textContent = 'Pay';
+//   }, 1000); 
+  // // --- ADD MONEY HANDLER ---
+  // const addMoneyBtn = document.querySelector('.card.add-money1');
+  // addMoneyBtn.addEventListener('click', () => {
+  //   const amount = prompt('Enter amount to fund (₦):', '1000');
+  //   if (!amount || isNaN(amount) || amount <= 0) {
+  //     alert('Please enter a valid amount.');
+  //     console.error('[ERROR] addMoneyBtn: Invalid amount:', amount);
+  //     return;
+  //   }
+  //   const fundAmount = parseFloat(amount);
+  //   // Mock API call
+  //   const mockResponse = { success: true, transactionId: `TX${Date.now()}` };
+  //   console.log('[DEBUG] addMoneyBtn: Mock API response:', mockResponse);
 
-  console.log('%c[recent-tx] FINAL PERMANENT SETUP — Correct 28px SVGs, max 5, no duplicates ✅', 'color:lime;font-weight:bold');
-})();
+  //   // Update balance
+  //   userBalance += fundAmount;
+  //   updateBalanceDisplay();
+
+  //   // Add to transactions
+  //   const transaction = {
+  //     type: 'receive',
+  //     description: 'Fund Wallet',
+  //     amount: fundAmount,
+  //     phone: null,
+  //     provider: null,
+  //     subType: null,
+  //     data: null,
+  //     duration: null,
+  //     timestamp: new Date().toISOString(),
+  //     status: 'success' // Mock success
+  //   };
+  //   transactions.push(transaction);
+  //   renderTransactions();
+
+  //   alert(`Successfully funded ₦${fundAmount}!`);
+  //   console.log('[DEBUG] addMoneyBtn: Funding processed, new balance:', userBalance, 'Transaction:', transaction);
+  // });
 
 /* ===========================================================
    PIN modal — unified keypad + keyboard input + toast system
@@ -6913,107 +6415,109 @@ txDiv.addEventListener('click', () => {
     let step = "create"; // "create" | "confirm" | "reauth"
     let processing = false; // prevents double submits
 
-const toastContainerId = 'flexgig_toast_container';
-let activeToast = null;
-let activeTimer = null;
-
-function ensureToast() {
-  if (!document.getElementById(toastContainerId + '_style')) {
-    const style = document.createElement('style');
-    style.id = toastContainerId + '_style';
-    style.textContent = `
-      #${toastContainerId} {
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        z-index: 999999;
-        pointer-events: none;
+    // ---------------------
+    // Toast (top-right) system
+    // ---------------------
+    const toastContainerId = 'flexgig_toast_container';
+    function ensureToastStylesAndContainer() {
+      if (!document.getElementById(toastContainerId + '_style')) {
+        const style = document.createElement('style');
+        style.id = toastContainerId + '_style';
+        style.textContent = `
+          #${toastContainerId} {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            z-index: 9999999;
+            pointer-events: none;
+          }
+          .flexgig-toast {
+            pointer-events: auto;
+            min-width: 240px;
+            max-width: 360px;
+            padding: 12px 16px;
+            border-radius: 10px;
+            color: #fff;
+            font-weight: 600;
+            box-shadow: 0 6px 18px rgba(0,0,0,0.15);
+            transform: translateX(120%);
+            opacity: 0;
+            transition: transform .36s cubic-bezier(.22,.9,.32,1), opacity .28s ease;
+            font-size: 14px;
+          }
+          .flexgig-toast.show { transform: translateX(0); opacity: 1; }
+          .flexgig-toast.success { background: linear-gradient(135deg,#4caf50,#43a047); }
+          .flexgig-toast.error   { background: linear-gradient(135deg,#f44336,#e53935); }
+          .flexgig-toast.info    { background: linear-gradient(135deg,#2196f3,#1e88e5); }
+          `;
+        document.head.appendChild(style);
       }
-      .flexgig-toast {
-        pointer-events: auto;
-        padding: 13px 18px;
-        border-radius: 10px;
-        color: #fff;
-        font-weight: 600;
-        font-size: 14.5px;
-        max-width: 85vw;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        box-shadow: 0 8px 24px rgba(0,0,0,.25);
-
-        transform: translateX(120%);
-        opacity: 0;
-        transition: transform .35s ease, opacity .25s ease;
+      let container = document.getElementById(toastContainerId);
+      if (!container) {
+        container = document.createElement('div');
+        container.id = toastContainerId;
+        document.body.appendChild(container);
       }
-      .flexgig-toast.show {
-        transform: translateX(0);
-        opacity: 1;
-      }
-      .flexgig-toast.success { background: linear-gradient(135deg,#4caf50,#43a047); }
-      .flexgig-toast.error   { background: linear-gradient(135deg,#f44336,#e53935); }
-      .flexgig-toast.info    { background: linear-gradient(135deg,#2196f3,#1e88e5); }
-    `;
-    document.head.appendChild(style);
-  }
+      return container;
+    }
 
-  let container = document.getElementById(toastContainerId);
-  if (!container) {
-    container = document.createElement('div');
-    container.id = toastContainerId;
-    document.body.appendChild(container);
-  }
-  return container;
-}
-
-function showToast(message, type = 'success', duration = 3000) {
-  const container = ensureToast();
-
-  /* 🔪 HARD RESET — THIS IS THE KEY */
-  if (activeTimer) {
-    clearTimeout(activeTimer);
-    activeTimer = null;
-  }
-  if (activeToast) {
-    activeToast.remove(); // NO delayed removal
-    activeToast = null;
-  }
-
+    function showToast(message, type = 'success', duration = 2800) {
+  const container = ensureToastStylesAndContainer();
   const toast = document.createElement('div');
   toast.className = `flexgig-toast ${type}`;
   toast.textContent = message;
-
-  container.innerHTML = '';
   container.appendChild(toast);
-  activeToast = toast;
 
-  // animate in
+  // animate in (existing behaviour)
   requestAnimationFrame(() => toast.classList.add('show'));
 
-  // start fresh timer ONLY for this toast
-  activeTimer = setTimeout(() => {
-    toast.classList.remove('show');
-    setTimeout(() => {
-      toast.remove();
-      if (activeToast === toast) activeToast = null;
-    }, 300);
-    activeTimer = null;
-  }, duration);
+  // Helper to remove this toast: slide-out if it's the top visible notification,
+  // otherwise fade and remove (no slide).
+  const removeAfter = () => {
+    try {
+      // compute "top" relative to container's visual order.
+      // Note: your container uses flex-direction: column; firstElementChild is the top-most.
+      const isTop = container.firstElementChild === toast;
 
-  // click to dismiss
-  toast.onclick = () => {
-    if (activeTimer) {
-      clearTimeout(activeTimer);
-      activeTimer = null;
+      if (isTop) {
+        // Keep existing behaviour for top toast: remove .show so CSS handles transform (slide-out) + opacity
+        toast.classList.remove('show');
+        // Give CSS time to animate the slide-out (same 420ms you used before)
+        setTimeout(() => {
+          if (toast.parentNode) toast.remove();
+        }, 420);
+      } else {
+        // Not the top: do a fade-only removal without triggering translateX reverse animation.
+        // Force the toast to have no transform and only animate opacity.
+        // Use inline style to override injected stylesheet.
+        toast.style.transition = 'opacity .28s ease';
+        toast.style.transform = 'none';
+        // trigger reflow so the browser notices the style change before we set opacity to 0
+        // (safe micro-yield)
+        // eslint-disable-next-line no-unused-expressions
+        toast.offsetHeight;
+        toast.style.opacity = '0';
+        setTimeout(() => {
+          if (toast.parentNode) toast.remove();
+        }, 320); // slightly shorter than slide duration
+      }
+    } catch (err) {
+      // fallback: remove immediately if anything goes wrong
+      if (toast.parentNode) toast.remove();
+      console.warn('showToast removeAfter failed:', err);
     }
-    toast.classList.remove('show');
-    setTimeout(() => toast.remove(), 300);
-    activeToast = null;
   };
+
+  // schedule the removal
+  setTimeout(removeAfter, duration);
+
+  // return the element in case caller wants to manipulate it (optional)
+  return toast;
 }
-
 window.showToast = showToast;
-
 
 
     // ---------------------
@@ -9817,107 +9321,45 @@ if (addressInput && !addressInput.disabled) {
 }
 
 
-function openUpdateProfileModal(profile = {}) {
-  if (!updateProfileModal || !updateProfileForm) {
-    console.error('[ERROR] openUpdateProfileModal: Modal or form not found');
-    return;
-  }
- 
-  // show modal
-  updateProfileModal.style.display = 'block';
-  setTimeout(() => {
-    updateProfileModal.classList.add('active');
-    updateProfileModal.setAttribute('aria-hidden', 'false');
-    document.body.classList.add('modal-open');
-  }, 10);
- 
-  // --- Populate form fields (prefer provided profile, then localStorage as fallback) ---
-  const fullName = profile?.fullName || localStorage.getItem('fullName') || (localStorage.getItem('userEmail') || '').split('@')[0] || '';
-  const username = profile?.username || localStorage.getItem('username') || '';
-  const phoneNumber = profile?.phoneNumber || localStorage.getItem('phoneNumber') || '';
-  const email = profile?.email || localStorage.getItem('userEmail') || '';
-  const address = profile?.address || localStorage.getItem('address') || '';
- 
-  if (fullNameInput) fullNameInput.value = fullName;
-  if (usernameInput) usernameInput.value = username;
-  if (phoneNumberInput) phoneNumberInput.value = phoneNumber ? formatNigeriaNumberProfile(phoneNumber).value : '';
-  if (emailInput) emailInput.value = email;
-  if (addressInput) addressInput.value = address;
- 
-  // --- Field enable/disable rules (server-driven) ---
-  if (fullNameInput) fullNameInput.disabled = localStorage.getItem('fullNameEdited') === 'true';
-  if (phoneNumberInput) phoneNumberInput.disabled = !!phoneNumber;
-  if (emailInput) emailInput.disabled = true;
-  if (addressInput) addressInput.disabled = !!(profile?.address || localStorage.getItem('address')?.trim());
-  if (profilePictureInput) profilePictureInput.disabled = false; // always editable
- 
-  // --- Avatar / preview ---
-  const profilePicture = localStorage.getItem('profilePicture') || '';
-  const isValidProfilePicture = !!profilePicture && /^(data:image\/|https?:\/\/|\/|blob:)/i.test(profilePicture);
-  const displayName = username || (fullName.split(' ')[0] || 'User');
- 
-  if (profilePicturePreview) {
-    if (isValidProfilePicture) {
-      profilePicturePreview.innerHTML = `<img src="${profilePicture}" alt="Profile Picture" class="avatar-img" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`;
-    } else {
-      profilePicturePreview.innerHTML = '';
-      profilePicturePreview.textContent = displayName.charAt(0).toUpperCase();
-    }
-  }
- 
-  // --- Reset error UI, invalid classes and touched flags ---
-  [fullNameError, usernameError, phoneNumberError, addressError, profilePictureError].forEach(errEl => {
-    if (errEl) {
-      errEl.textContent = '';
-      errEl.classList.remove('active', 'error', 'checking', 'available');
-    }
+
+
+// ===== FINAL CLEAN VERSION — DELETE EVERYTHING BELOW THIS LINE IN YOUR FILE =====
+
+// 1. Remove the entire openUpdateProfileModal() function
+// 2. Remove closeUpdateProfileModal()
+// 3. Remove the manual popstate listener
+// 4. Remove all manual .active / display / aria-hidden manipulation
+
+// → ONLY keep this: let ModalManager do 100% of the work
+
+if (settingsUpdateBtn) {
+  settingsUpdateBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    lastModalSource = 'settings';
+    window.ModalManager?.openModal('updateProfileModal');
+
+    // Run validation after transition (ModalManager uses 0.3s)
+    setTimeout(() => validateProfileForm(true), 450);
   });
- 
-  [fullNameInput, usernameInput, phoneNumberInput, addressInput].forEach(inp => {
-    if (inp) inp.classList.remove('invalid');
-  });
- 
-  Object.keys(fieldTouched).forEach(k => fieldTouched[k] = false);
- 
-  // --- Ensure no duplicate listeners: detach previous, then attach fresh handlers ---
-  detachProfileListeners();
-  attachProfileListeners(); // attachProfileListeners should add input/blur/paste handlers for fullName/username/phone/address/profilePicture
- 
-  // NOTE: Do NOT add inline input listeners for validation here.
-  // The attachProfileListeners() function is the single source of truth and
-  // is responsible for adding the input + blur handlers that follow the
-  // "live rules vs blur-on-length" pattern (so length errors only show on blur/submit).
- 
-  // Re-run initial validation to set the save button state correctly
-  validateProfileForm(false);
- 
-  console.log('[DEBUG] openUpdateProfileModal: Modal opened', { fullName, username, phoneNumber, email });
-}
-window.openUpdateProfileModal = openUpdateProfileModal;
-
-function closeUpdateProfileModal() {
-    detachProfileListeners();
-
-    // 1️⃣ Ask the ModalManager what the previous modal is BEFORE closing
-    const previousModal = ModalManager.getPreviousModal('updateProfileModal');
-
-    // 2️⃣ Close the current modal
-    ModalManager.closeModal('updateProfileModal');
-
-    // 3️⃣ If a previous modal exists and is not already open, restore it
-    if (previousModal) {
-        console.log('[DEBUG] Restoring previous modal:', previousModal);
-        ModalManager.openModal(previousModal);
-    }
-
-    console.log('[DEBUG] updateProfileModal closed via ModalManager');
 }
 
-window.closeUpdateProfileModal = closeUpdateProfileModal;
+if (updateProfileBtn) {
+  updateProfileBtn.addEventListener('click', () => {
+    lastModalSource = 'dashboard';
+    window.ModalManager?.openModal('updateProfileModal');
+    setTimeout(() => validateProfileForm(true), 450);
+  });
+}
 
+// Optional: If you have a dashboard card with class .card.update-profile
+document.querySelector('.card.update-profile')?.addEventListener('click', () => {
+  lastModalSource = 'dashboard';
+  window.ModalManager?.openModal('updateProfileModal');
+  setTimeout(() => validateProfileForm(true), 450);
+});
 
-
-
+// That's it. Nothing else needed.
 
 if (profilePictureInput && profilePicturePreview) {
   profilePictureInput.addEventListener('change', (e) => {
@@ -10059,27 +9501,18 @@ if (profilePictureInput && profilePicturePreview) {
   // helper to update avatar without flicker
 function updateAvatar(el, newUrl, fallbackLetter) {
   if (!isValidImageSource(newUrl)) {
-    // Only update if content is different
-    if (el.innerHTML !== fallbackLetter) {
-      el.innerHTML = fallbackLetter;
-      el.classList.add('fade-in');
-    }
+    el.innerHTML = fallbackLetter;
+    el.classList.add('fade-in');
     return;
   }
 
-  // Check if same image already loaded (normalize URLs for comparison)
+  // If same image already exists → don’t reload
   const currentImg = el.querySelector('img');
-  if (currentImg) {
-    const currentSrc = currentImg.src.split('?')[0]; // Remove query params
-    const newSrc = (newUrl.startsWith('http') ? newUrl : `${location.origin}${newUrl}`).split('?')[0];
-    
-    if (currentSrc === newSrc) {
-      console.log('[updateAvatar] Same image already loaded, skipping');
-      return;
-    }
+  if (currentImg && currentImg.src === newUrl) {
+    return; // ✅ stays stable
   }
 
-  // Preload new image
+  // Preload new image before swapping
   const img = new Image();
   img.src = newUrl.startsWith('/')
     ? `${location.protocol}//${location.host}${newUrl}`
@@ -10093,15 +9526,13 @@ function updateAvatar(el, newUrl, fallbackLetter) {
     el.innerHTML = "";
     el.appendChild(img);
     requestAnimationFrame(() => {
-      img.style.opacity = "1";
+      img.style.opacity = "1"; // fade-in after insert
     });
   };
 
   img.onerror = () => {
-    if (el.innerHTML !== fallbackLetter) {
-      el.innerHTML = fallbackLetter;
-      el.classList.add("fade-in");
-    }
+    el.innerHTML = fallbackLetter;
+    el.classList.add("fade-in");
   };
 }
 
@@ -10137,11 +9568,7 @@ window.addEventListener('storage', (ev) => {
   }
 });
 
-// At module level
-let _profileLoadInProgress = false;
-let _lastProfileLoadTime = 0;
-const PROFILE_LOAD_COOLDOWN = 1000; // Don't reload within 1 second
-
+// loadProfileToSettings: prefer cache; fetch only when needed or forced
 async function loadProfileToSettings(force = false) {
   const settingsAvatar = document.getElementById('settingsAvatar');
   const settingsUsername = document.getElementById('settingsUsername');
@@ -10152,159 +9579,211 @@ async function loadProfileToSettings(force = false) {
     return;
   }
 
-  // Prevent rapid successive calls
-  const now = Date.now();
-  if (!force && _profileLoadInProgress) {
-    console.log('[loadProfileToSettings] Already loading, skipping');
-    return;
-  }
-  
-  if (!force && (now - _lastProfileLoadTime) < PROFILE_LOAD_COOLDOWN) {
-    console.log('[loadProfileToSettings] Cooldown active, skipping');
-    return;
-  }
+  // Read cached profile from localStorage (instant)
+  const localProfile = {
+    profilePicture: localStorage.getItem('profilePicture') || '',
+    username: localStorage.getItem('username') || '',
+    fullName: localStorage.getItem('fullName') || '',
+    firstName: localStorage.getItem('firstName') || '',
+    email: localStorage.getItem('userEmail') || '',
+  };
 
-  _profileLoadInProgress = true;
-  _lastProfileLoadTime = now;
+  const hasUsefulCache = !!(localProfile.profilePicture || localProfile.username || localProfile.fullName || localProfile.email);
 
-  try {
-    // Read cached profile from localStorage
-    const localProfile = {
-      profilePicture: localStorage.getItem('profilePicture') || '',
-      username: localStorage.getItem('username') || '',
-      fullName: localStorage.getItem('fullName') || '',
-      firstName: localStorage.getItem('firstName') || '',
-      email: localStorage.getItem('userEmail') || '',
-    };
+  // Render from cache immediately (no fetch)
+  const displayName =
+    localProfile.username ||
+    localProfile.firstName ||
+    (localProfile.email ? localProfile.email.split('@')[0] : 'User');
 
-    const hasUsefulCache = !!(localProfile.profilePicture || localProfile.username || localProfile.fullName || localProfile.email);
+  const avatarUrl = localProfile.profilePicture || '/frontend/img/avatar-placeholder.png';
+  const fallbackLetter = (displayName.charAt(0) || 'U').toUpperCase();
 
-    // Helper to update UI - only update if values actually changed
-    const updateUI = (profile, useCacheBuster = false) => {
-      const displayName =
-        profile.username ||
-        profile.firstName ||
-        (profile.email ? profile.email.split('@')[0] : 'User');
+  // show cached avatar (no cache-buster here to avoid re-request)
+  updateAvatar(settingsAvatar, avatarUrl, fallbackLetter);
+  settingsUsername.textContent = displayName;
+  settingsUsername.classList.add('fade-in');
+  settingsEmail.textContent = localProfile.email || 'Not set';
+  settingsEmail.classList.add('fade-in');
 
-      const avatarUrl = profile.profilePicture || '/frontend/img/avatar-placeholder.png';
-      const fallbackLetter = (displayName.charAt(0) || 'U').toUpperCase();
-      const finalAvatarUrl = useCacheBuster ? addCacheBuster(avatarUrl) : avatarUrl;
+  // If we have cache and not forced, do NOT fetch now.
+  // Instead, kick off a background fetch (non-blocking) that updates only if changed.
+  if (hasUsefulCache && !force) {
+    // Start background refresh but do not await it
+    (async () => {
+      try {
+        // reuse your cached-promise logic to avoid duplicate server calls
+        if (typeof _cachedProfilePromise === 'undefined' || _cachedProfilePromise === null) {
+          // create the cached promise if absent
+          _cachedProfilePromise = (async () => {
+            try {
+              const resp = await fetch(`https://api.flexgig.com.ng/api/profile?_${Date.now()}`, {
+                credentials: 'include',
+                headers: { Authorization: `Bearer ${localStorage.getItem('authToken') || ''}` },
+                cache: 'no-store'
+              });
+              const serverProfile = resp.ok ? await resp.json().catch(() => ({})) : {};
+              // Merge & save as your earlier logic (sync hasPin, etc.)
+              const mergedProfile = {
+                profilePicture:
+                  serverProfile.profilePicture ||
+                  serverProfile.profile_picture ||
+                  serverProfile.avatar_url ||
+                  localProfile.profilePicture ||
+                  '',
+                username: serverProfile.username || localProfile.username || '',
+                fullName: serverProfile.fullName || serverProfile.full_name || localProfile.fullName || '',
+                firstName:
+                  (serverProfile.fullName && serverProfile.fullName.split(' ')[0]) ||
+                  (serverProfile.full_name && serverProfile.full_name.split(' ')[0]) ||
+                  localProfile.firstName ||
+                  '',
+                email: serverProfile.email || localProfile.email || '',
+              };
 
-      // Only update if changed to prevent unnecessary re-renders
-      const currentUsername = settingsUsername.textContent;
-      const currentEmail = settingsEmail.textContent;
+              // Sync hasPin if present
+              const serverHasPin = serverProfile.hasPin ?? serverProfile.has_pin ?? serverProfile.hasPIN ?? null;
+              if (serverHasPin !== null) {
+                localStorage.setItem('hasPin', serverHasPin ? 'true' : 'false');
+                if (serverHasPin && typeof setupInactivity === 'function') {
+                  try { setupInactivity(); } catch(e){ console.warn('setupInactivity failed', e); }
+                }
+              }
 
-      if (currentUsername !== displayName) {
-        settingsUsername.textContent = displayName;
-        // Only add fade-in if this is first load or actual change
-        if (currentUsername && currentUsername !== 'Loading...') {
-          settingsUsername.classList.add('fade-in');
-        }
-      }
+              // Save changed fields only
+              try {
+                if (mergedProfile.profilePicture && mergedProfile.profilePicture !== localProfile.profilePicture) {
+                  localStorage.setItem('profilePicture', mergedProfile.profilePicture);
+                }
+                if (mergedProfile.username && mergedProfile.username !== localProfile.username) {
+                  localStorage.setItem('username', mergedProfile.username);
+                }
+                if (mergedProfile.fullName && mergedProfile.fullName !== localProfile.fullName) {
+                  localStorage.setItem('fullName', mergedProfile.fullName);
+                  localStorage.setItem('firstName', (mergedProfile.fullName.split && mergedProfile.fullName.split(' ')[0]) || '');
+                }
+                if (mergedProfile.email && mergedProfile.email !== localProfile.email) {
+                  localStorage.setItem('userEmail', mergedProfile.email);
+                }
+                try { localStorage.setItem('profile_refreshed_at', Date.now().toString()); } catch(_) {}
+              } catch (e) { console.warn('Could not save mergedProfile to localStorage', e); }
 
-      if (currentEmail !== (profile.email || 'Not set')) {
-        settingsEmail.textContent = profile.email || 'Not set';
-        if (currentEmail && currentEmail !== 'Loading...') {
-          settingsEmail.classList.add('fade-in');
-        }
-      }
-
-      // Update avatar (this function already has duplicate check)
-      updateAvatar(settingsAvatar, finalAvatarUrl, fallbackLetter);
-    };
-
-    // Render from cache immediately if available
-    if (hasUsefulCache) {
-      updateUI(localProfile, false);
-    }
-
-    // If forced, clear cache
-    if (force) {
-      _cachedProfilePromise = null;
-    }
-
-    // Only fetch if no cache or forced
-    if (!hasUsefulCache || force) {
-      if (!_cachedProfilePromise || force) {
-        _cachedProfilePromise = (async () => {
-          try {
-            const resp = await fetch(`https://api.flexgig.com.ng/api/profile?_=${Date.now()}`, {
-              credentials: 'include',
-              headers: { Authorization: `Bearer ${localStorage.getItem('authToken') || ''}` },
-              cache: 'no-store'
-            });
-
-            if (!resp.ok) {
-              console.warn('[loadProfileToSettings] Server returned non-OK:', resp.status);
+              return mergedProfile;
+            } catch (err) {
+              console.warn('[background refresh] profile fetch failed', err);
               return localProfile;
             }
+          })();
+        }
 
-            const serverProfile = await resp.json().catch(() => ({}));
+        const finalProfile = await _cachedProfilePromise;
 
-            const mergedProfile = {
-              profilePicture:
-                serverProfile.profilePicture ||
-                serverProfile.profile_picture ||
-                serverProfile.avatar_url ||
-                '',
-              username: serverProfile.username || '',
-              fullName: serverProfile.fullName || serverProfile.full_name || '',
-              firstName:
-                (serverProfile.fullName && serverProfile.fullName.split(' ')[0]) ||
-                (serverProfile.full_name && serverProfile.full_name.split(' ')[0]) ||
-                '',
-              email: serverProfile.email || '',
-            };
+        // Only update UI if something changed vs what we already rendered
+        const currentRendered = {
+          profilePicture: localProfile.profilePicture || '',
+          username: localProfile.username || '',
+          email: localProfile.email || ''
+        };
 
-            // Sync hasPin
-            const serverHasPin = serverProfile.hasPin ?? serverProfile.has_pin ?? serverProfile.hasPIN ?? null;
-            if (serverHasPin !== null) {
-              localStorage.setItem('hasPin', serverHasPin ? 'true' : 'false');
-            }
+        const changed =
+          (finalProfile.profilePicture || '') !== currentRendered.profilePicture ||
+          (finalProfile.username || '') !== currentRendered.username ||
+          (finalProfile.email || '') !== currentRendered.email;
 
-            // Save to localStorage
-            try {
-              if (mergedProfile.profilePicture) localStorage.setItem('profilePicture', mergedProfile.profilePicture);
-              if (mergedProfile.username) localStorage.setItem('username', mergedProfile.username);
-              if (mergedProfile.fullName) {
-                localStorage.setItem('fullName', mergedProfile.fullName);
-                localStorage.setItem('firstName', mergedProfile.firstName || mergedProfile.fullName.split(' ')[0] || '');
-              }
-              if (mergedProfile.email) localStorage.setItem('userEmail', mergedProfile.email);
-              localStorage.setItem('profile_refreshed_at', Date.now().toString());
-            } catch (e) {
-              console.warn('Could not save to localStorage', e);
-            }
-
-            return mergedProfile;
-          } catch (err) {
-            console.error('[ERROR] loadProfileToSettings fetch failed:', err);
-            return localProfile;
-          }
-        })();
+        if (changed) {
+          // update avatar with cache-buster so browser fetches the new image
+          updateAvatar(settingsAvatar, addCacheBuster(finalProfile.profilePicture || '/frontend/img/avatar-placeholder.png'), (finalProfile.username || finalProfile.firstName || 'U').charAt(0).toUpperCase());
+          settingsUsername.textContent = finalProfile.username || finalProfile.firstName || (finalProfile.email ? finalProfile.email.split('@')[0] : 'User');
+          settingsEmail.textContent = finalProfile.email || 'Not set';
+        }
+      } catch (e) {
+        // silent fail for background refresh
+        console.debug('[background refresh] failed', e);
       }
+    })();
 
-      const finalProfile = await _cachedProfilePromise;
-
-      // Verify DOM elements still exist
-      if (!document.getElementById('settingsAvatar')) {
-        console.warn('[loadProfileToSettings] DOM removed during fetch');
-        return finalProfile;
-      }
-
-      // Update with fresh data
-      updateUI(finalProfile, true);
-
-      return finalProfile;
-    }
-
+    // Return early — do not await network call
     return localProfile;
-
-  } finally {
-    _profileLoadInProgress = false;
   }
-}
 
+  // If here: either no cache or force === true => perform normal (blocking) fetch path
+  if (force) _cachedProfilePromise = null; // clear any previous cached promise
+
+  if (!_cachedProfilePromise) {
+    _cachedProfilePromise = (async () => {
+      try {
+        const resp = await fetch(`https://api.flexgig.com.ng/api/profile?_${Date.now()}`, {
+          credentials: 'include',
+          headers: { Authorization: `Bearer ${localStorage.getItem('authToken') || ''}` },
+          cache: 'no-store'
+        });
+        const serverProfile = resp.ok ? await resp.json().catch(() => ({})) : {};
+
+        const mergedProfile = {
+          profilePicture:
+            serverProfile.profilePicture ||
+            serverProfile.profile_picture ||
+            serverProfile.avatar_url ||
+            localProfile.profilePicture ||
+            '',
+          username: serverProfile.username || localProfile.username || '',
+          fullName: serverProfile.fullName || serverProfile.full_name || localProfile.fullName || '',
+          firstName:
+            (serverProfile.fullName && serverProfile.fullName.split(' ')[0]) ||
+            (serverProfile.full_name && serverProfile.full_name.split(' ')[0]) ||
+            localProfile.firstName ||
+            '',
+          email: serverProfile.email || localProfile.email || '',
+        };
+
+        // Save to localStorage (only if changed)
+        try {
+          if (mergedProfile.profilePicture && mergedProfile.profilePicture !== localProfile.profilePicture) {
+            localStorage.setItem('profilePicture', mergedProfile.profilePicture);
+          }
+          if (mergedProfile.username && mergedProfile.username !== localProfile.username) {
+            localStorage.setItem('username', mergedProfile.username);
+          }
+          if (mergedProfile.fullName && mergedProfile.fullName !== localProfile.fullName) {
+            localStorage.setItem('fullName', mergedProfile.fullName);
+            localStorage.setItem('firstName', (mergedProfile.fullName.split && mergedProfile.fullName.split(' ')[0]) || '');
+          }
+          if (mergedProfile.email && mergedProfile.email !== localProfile.email) {
+            localStorage.setItem('userEmail', mergedProfile.email);
+          }
+          try { localStorage.setItem('profile_refreshed_at', Date.now().toString()); } catch(_) {}
+        } catch (e) {
+          console.warn('Could not save mergedProfile to localStorage', e);
+        }
+
+        return mergedProfile;
+      } catch (err) {
+        console.error('[ERROR] loadProfileToSettings server fetch failed', err);
+        return localProfile; // fallback
+      }
+    })();
+  }
+
+  const finalProfile = await _cachedProfilePromise;
+
+  // update UI (blocking) — only update if different to avoid flicker
+  const avatarChanged = (finalProfile.profilePicture || '') !== (localProfile.profilePicture || '');
+  if (avatarChanged) {
+    updateAvatar(settingsAvatar, addCacheBuster(finalProfile.profilePicture || '/frontend/img/avatar-placeholder.png'), (finalProfile.username || finalProfile.firstName || 'U').charAt(0).toUpperCase());
+  }
+  const nameChanged = (finalProfile.username || finalProfile.firstName || '') !== (localProfile.username || localProfile.firstName || '');
+  if (nameChanged) {
+    settingsUsername.textContent = finalProfile.username || finalProfile.firstName || (finalProfile.email ? finalProfile.email.split('@')[0] : 'User');
+    settingsUsername.classList.add('fade-in');
+  }
+  const emailChanged = (finalProfile.email || '') !== (localProfile.email || '');
+  if (emailChanged) {
+    settingsEmail.textContent = finalProfile.email || 'Not set';
+    settingsEmail.classList.add('fade-in');
+  }
+
+  return finalProfile;
+}
 
 window.loadProfileToSettings = window.loadProfileToSettings || loadProfileToSettings;
 
@@ -10415,20 +9894,11 @@ window.addEventListener('storage', (e) => {
     });
   }
 
-  // Update the MutationObserver to debounce
-let _modalOpenTimer = null;
-const obs = new MutationObserver(() => {
-  if (settingsModal.style.display === 'flex') {
-    // Clear any pending timer
-    if (_modalOpenTimer) clearTimeout(_modalOpenTimer);
-    
-    // Only load after modal is fully open (debounced)
-    _modalOpenTimer = setTimeout(() => {
-      loadProfileToSettings();
-    }, 100); // Small delay to let modal finish opening
-  }
-});
-obs.observe(settingsModal, { attributes: true, attributeFilter: ['style'] });
+  // when the modal opens, refresh profile
+  const obs = new MutationObserver(() => {
+    if (settingsModal.style.display === 'flex') loadProfileToSettings();
+  });
+  obs.observe(settingsModal, { attributes: true, attributeFilter: ['style'] });
 })();
 
 // ---------- Help & Support (inside settings modal) ----------
@@ -17307,9 +16777,11 @@ async function prefetchAuthOptionsFor(uid, context = 'reauth') {
 
 
 
-// 🔹 FINAL PERMANENTLY FIXED verifyBiometrics
-// Ensures correct BufferSource types (Uint8Array) for challenge and credential IDs
-// No more reliance on broken localStorage cache
+
+// 🔹 Main verifyBiometrics (robust: fresh challenge + withLoader + debug logs + safe PIN simulation)
+// 🔹 Main verifyBiometrics (always fresh: invalidate cache + fetch new + debug + safe PIN fallback)
+// Updated verifyBiometrics function
+// ----- Updated implementation with proper reauth flow -----
 async function verifyBiometrics(uid, context = 'reauth') {
   if (window.__biometricInFlight) {
     console.warn('[verifyBiometrics] Blocked: biometric already in flight');
@@ -17317,7 +16789,7 @@ async function verifyBiometrics(uid, context = 'reauth') {
   }
 
   window.__biometricInFlight = true;
-  console.log('%c[verifyBiometrics] Called', 'color:#0ff;font-weight:bold');
+  console.log('%c[verifyBiometrics] Called (always fresh)', 'color:#0ff;font-weight:bold');
 
   try {
     // Resolve userId if not provided
@@ -17345,79 +16817,62 @@ async function verifyBiometrics(uid, context = 'reauth') {
     if (!userId) throw new Error('No user ID available for biometric verification');
 
     // -------------------------------
-    // Use pre-warmed options (from Pay click pre-warm via getAuthOptionsWithCache)
-    // Fall back to fresh fetch if missing/invalid
+    // Persistent cache logic
     // -------------------------------
-    let publicKey = window.__cachedAuthOptions;
+    const now = Date.now();
+    let publicKeys = null;
 
+    try {
+      const cached = JSON.parse(localStorage.getItem('__cachedAuthOptions'));
+      if (cached && now - cached.fetchedAt < BIOMETRIC_TTL) {
+        console.log('[verifyBiometrics] Using cached options from localStorage');
+        publicKeys = structuredClone(cached.opts);
+        window.__cachedAuthOptions = cached.opts;
+        window.__cachedAuthOptionsFetchedAt = cached.fetchedAt;
+      }
+    } catch (e) {
+      console.warn('[verifyBiometrics] Failed to parse localStorage cache', e);
+    }
+
+    if (!publicKeys) {
+      console.log('[verifyBiometrics] Cache missing or expired → fetching fresh');
+      publicKeys = await warmBiometricOptions(userId, context, { force: true });
+
+      // Save to localStorage for reload persistence
+      if (publicKeys) {
+        localStorage.setItem(
+          '__cachedAuthOptions',
+          JSON.stringify({ opts: publicKeys, fetchedAt: Date.now() })
+        );
+      }
+    }
+
+    const publicKey = structuredClone(publicKeys);
     if (!publicKey || !publicKey.challenge) {
-      console.log('[verifyBiometrics] No valid pre-warmed options → fetching fresh');
-      publicKey = await warmBiometricOptions(userId, context, { force: true });
+      throw new Error('Invalid WebAuthn options received');
     }
 
-    if (!publicKey || !publicKey.challenge) {
-      throw new Error('Failed to obtain WebAuthn options from server');
-    }
-
-    // Clone for modification
-    const pk = structuredClone(publicKey);
-
-    // FORCE challenge to Uint8Array
-    if (!(pk.challenge instanceof Uint8Array)) {
-      console.warn('[verifyBiometrics] Fixing challenge type:', typeof pk.challenge);
-      const converted = fromBase64Url(pk.challenge);
-      if (!(converted instanceof ArrayBuffer) || converted.byteLength === 0) {
-        throw new Error('Invalid challenge: could not convert to valid buffer');
-      }
-      pk.challenge = new Uint8Array(converted);
-    }
-
-    // FORCE allowCredentials[].id to Uint8Array
-    if (Array.isArray(pk.allowCredentials) && pk.allowCredentials.length > 0) {
-      const fixedCreds = [];
-      for (const cred of pk.allowCredentials) {
-        if (!cred.id) {
-          console.warn('[verifyBiometrics] Skipping credential with missing id');
-          continue;
-        }
-        if (!(cred.id instanceof Uint8Array)) {
-          console.warn('[verifyBiometrics] Fixing credential id type:', typeof cred.id);
-          const converted = fromBase64Url(cred.id);
-          if (!(converted instanceof ArrayBuffer) || converted.byteLength === 0) {
-            console.warn('[verifyBiometrics] Skipping invalid credential id');
-            continue;
-          }
-          cred.id = new Uint8Array(converted);
-        }
-        fixedCreds.push(cred);
-      }
-      pk.allowCredentials = fixedCreds;
-
-      if (pk.allowCredentials.length === 0) {
-        throw new Error('No valid registered credentials found');
-      }
-    }
-
-    // Required fields
-    pk.userVerification = 'required';
-    pk.timeout = 60000;
-
-    // Detailed debug log
-    console.log('[verifyBiometrics] Final options ready for prompt', {
-      challengeLength: pk.challenge.byteLength,
-      challengeType: pk.challenge.constructor.name,
-      allowCredCount: pk.allowCredentials?.length || 0,
-      allowCredIdsValid: pk.allowCredentials?.every(c => c.id instanceof Uint8Array) || false
+    console.log('[verifyBiometrics] Options ready', {
+      challenge: publicKey.challenge?.slice?.(0, 10) + '...',
+      allowCredCount: publicKey.allowCredentials?.length || 0
     });
 
-    // Trigger biometric prompt
-    const assertion = await navigator.credentials.get({ publicKey: pk });
-
-    if (!assertion) {
-      throw new Error('No assertion returned from authenticator');
+    // Convert base64url to buffers
+    publicKey.challenge = fromBase64Url(publicKey.challenge);
+    if (Array.isArray(publicKey.allowCredentials)) {
+      publicKey.allowCredentials = publicKey.allowCredentials.map(c => ({
+        ...c,
+        id: fromBase64Url(c.id)
+      }));
     }
+    publicKey.userVerification = 'required';
+    publicKey.timeout = 60000;
 
-    // Server verification
+    // Prompt user for biometrics
+    const assertion = await navigator.credentials.get({ publicKey });
+    if (!assertion) throw new Error('No assertion from authenticator');
+
+    // Show loader during verify
     return await withLoader(async () => {
       const payload = {
         id: assertion.id,
@@ -17450,7 +16905,6 @@ async function verifyBiometrics(uid, context = 'reauth') {
       const verifyData = await verifyRes.json();
       console.log('[verifyBiometrics] Verify success', verifyData);
 
-      // Success callbacks
       try {
         if (typeof onSuccessfulReauth === 'function') await onSuccessfulReauth();
         if (typeof guardedHideReauthModal === 'function') await guardedHideReauthModal();
@@ -17470,7 +16924,6 @@ async function verifyBiometrics(uid, context = 'reauth') {
 
       return { success: true, data: verifyData };
     });
-
   } catch (err) {
     console.error('[verifyBiometrics] Error', err);
     if (typeof notify === 'function') notify(`Biometric error: ${err.message}`, 'error');
@@ -17482,7 +16935,7 @@ async function verifyBiometrics(uid, context = 'reauth') {
   }
 }
 
-window.verifyBiometrics = window.verifyBiometrics || verifyBiometrics;
+window.verifyBiometrics = window.verifyBiometrics = verifyBiometrics;
 
 // 🔹 Improved simulatePinEntry with verbose debug logs and Promise-based completion
 // ---- REPLACE existing simulatePinEntry(...) with this improved version ----
