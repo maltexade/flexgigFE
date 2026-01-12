@@ -73,6 +73,140 @@ const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     })();
 
 
+    // ────────────────────────────────────────────────
+// MODERN STATUS SYSTEM – direct Supabase + Realtime
+// No more backend /api/status calls
+// ────────────────────────────────────────────────
+
+window.pollStatus = async function pollStatus(force = false) {
+  const now = Date.now();
+
+  // Throttle unless forced
+  if (!force && now - (window.__fg_last_poll_ts || 0) < 30000) {
+    console.debug('[STATUS] Skipped – too soon');
+    return;
+  }
+
+  window.__fg_last_poll_ts = now;
+
+  try {
+    const { data, error } = await supabaseClient
+      .from('notifications')
+      .select('id, status, message, sticky, level')  // ← added level & id
+      .eq('active', true)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      console.error('[STATUS] Supabase query failed:', error);
+      return;
+    }
+
+    // Default: all clear
+    let status = 'up';
+    let message = '';
+    let level = 'info';
+    let serverId = null;
+    let isSticky = false;
+
+    if (data) {
+      status = data.status || 'up';
+      message = data.message || '';
+      level = ['info', 'warning', 'error'].includes(data.level) ? data.level : 'info';
+      serverId = data.id;
+      isSticky = !!data.sticky;
+
+      // Apply banner
+      if (message) {
+        showBanner(message, {
+          persistent: isSticky,
+          serverId,
+          type: level
+        });
+
+        // Update global state
+        window.__fg_currentBanner = window.__fg_currentBanner || {};
+        window.__fg_currentBanner.id = serverId;
+        window.__fg_currentBanner.message = message;
+        window.__fg_currentBanner.level = level;
+        window.__fg_currentBanner.sticky = isSticky;
+        window.__fg_currentBanner.clientSticky = false;
+
+        // Persist active ID (used in hide logic)
+        if (serverId) {
+          localStorage.setItem('active_broadcast_id', String(serverId));
+        }
+      }
+    } else {
+      // No active notification → hide unless client-sticky
+      if (!window.__fg_currentBanner?.clientSticky) {
+        hideBanner();
+        localStorage.removeItem('active_broadcast_id');
+      }
+    }
+
+    console.debug('[STATUS] Updated:', { status, message: message.slice(0, 60), level, sticky: isSticky });
+
+  } catch (err) {
+    console.error('[STATUS] Unexpected error:', err);
+  }
+};
+
+// ────────────────────────────────────────────────
+// REALTIME SUBSCRIPTION – instant updates, no polling needed
+// ────────────────────────────────────────────────
+
+function setupStatusRealtime() {
+  // Clean up any old subscription
+  if (window.__status_channel) {
+    window.__status_channel.unsubscribe().catch(() => {});
+  }
+
+  window.__status_channel = supabaseClient.channel('public:notifications-changes');
+
+  window.__status_channel
+    .on('postgres_changes', {
+      event: '*',
+      schema: 'public',
+      table: 'notifications'
+    }, (payload) => {
+      console.log('[STATUS REALTIME] Change detected:', payload.eventType, payload.new || payload.old);
+      // Immediate refresh on any change
+      pollStatus(true); // force = true to skip throttle
+    })
+    .subscribe((status) => {
+      console.log('[STATUS REALTIME] Subscription status:', status);
+    });
+}
+
+// ────────────────────────────────────────────────
+// Initialize on dashboard load
+// ────────────────────────────────────────────────
+
+if (typeof onDashboardLoad === 'function') {
+  const originalOnDashboardLoad = onDashboardLoad;
+  onDashboardLoad = async function (...args) {
+    await originalOnDashboardLoad(...args);
+
+    // Start realtime + initial fetch
+    setupStatusRealtime();
+    pollStatus(true);           // initial force fetch
+    // Optional light polling as fallback (very gentle)
+    setInterval(() => pollStatus(), 60000); // every 60s
+  };
+} else {
+  // Fallback if no onDashboardLoad wrapper exists yet
+  console.warn('[STATUS] No onDashboardLoad found – running standalone init');
+  setupStatusRealtime();
+  pollStatus(true);
+  setInterval(() => pollStatus(), 60000);
+}
+
+// Expose globally for manual calls (debug console, etc.)
+window.forceStatusCheck = () => pollStatus(true);
+
+
     function saveCurrentAppState() {
   const state = {
     // ==================== MODALS – FIXED & BULLETPROOF ====================
@@ -3154,73 +3288,73 @@ async function handleBioToggle(e) {
 }
 
 
-// // === Safety shim: ensure pollStatus exists (place this near top, before onDashboardLoad runs) ===
-if (typeof pollStatus === 'undefined') {
-  // keep minimal global guards
-  window.__fg_poll_inflight = window.__fg_poll_inflight || null;
-  window.__fg_last_poll_ts = window.__fg_last_poll_ts || 0;
-  window.FG_POLL_MIN_MS = window.FG_POLL_MIN_MS || 600;
+// // // === Safety shim: ensure pollStatus exists (place this near top, before onDashboardLoad runs) ===
+// if (typeof pollStatus === 'undefined') {
+//   // keep minimal global guards
+//   window.__fg_poll_inflight = window.__fg_poll_inflight || null;
+//   window.__fg_last_poll_ts = window.__fg_last_poll_ts || 0;
+//   window.FG_POLL_MIN_MS = window.FG_POLL_MIN_MS || 600;
 
-  window.pollStatus = async function pollStatus() {
-    const now = Date.now();
+//   window.pollStatus = async function pollStatus() {
+//     const now = Date.now();
 
-    // dedupe in-flight
-    if (window.__fg_poll_inflight) {
-      console.debug('pollStatus shim: reusing in-flight');
-      return window.__fg_poll_inflight;
-    }
+//     // dedupe in-flight
+//     if (window.__fg_poll_inflight) {
+//       console.debug('pollStatus shim: reusing in-flight');
+//       return window.__fg_poll_inflight;
+//     }
 
-    // throttle
-    if (now - (window.__fg_last_poll_ts || 0) < (window.FG_POLL_MIN_MS || 600)) {
-      console.debug('pollStatus shim: called too soon — skipping');
-      return Promise.resolve();
-    }
+//     // throttle
+//     if (now - (window.__fg_last_poll_ts || 0) < (window.FG_POLL_MIN_MS || 600)) {
+//       console.debug('pollStatus shim: called too soon — skipping');
+//       return Promise.resolve();
+//     }
 
-    window.__fg_poll_inflight = (async () => {
-      try {
-        if (typeof _pollStatus_internal === 'function') {
-          // preferred: call your internal implementation
-          return await _pollStatus_internal();
-        }
+//     window.__fg_poll_inflight = (async () => {
+//       try {
+//         if (typeof _pollStatus_internal === 'function') {
+//           // preferred: call your internal implementation
+//           return await _pollStatus_internal();
+//         }
 
-        // fallback: simple processable fetch (keeps UI stable until real implementation available)
-        try {
-          const apiBase = (window.__SEC_API_BASE || (typeof API_BASE !== 'undefined' ? API_BASE : ''));
-          const url = apiBase ? `${apiBase}/api/status` : '/api/status';
-          const res = await fetch(url, { credentials: 'include', cache: 'no-store' });
-          let body = null;
-          try {
-            const ct = res.headers && typeof res.headers.get === 'function' ? res.headers.get('content-type') : null;
-            if (res.status !== 204 && ct && ct.toLowerCase().includes('application/json')) {
-              body = await res.json();
-            }
-          } catch (e) { /* ignore parse */ }
+//         // fallback: simple processable fetch (keeps UI stable until real implementation available)
+//         try {
+//           const apiBase = (window.__SEC_API_BASE || (typeof API_BASE !== 'undefined' ? API_BASE : ''));
+//           const url = apiBase ? `${apiBase}/api/status` : '/api/status';
+//           const res = await fetch(url, { credentials: 'include', cache: 'no-store' });
+//           let body = null;
+//           try {
+//             const ct = res.headers && typeof res.headers.get === 'function' ? res.headers.get('content-type') : null;
+//             if (res.status !== 204 && ct && ct.toLowerCase().includes('application/json')) {
+//               body = await res.json();
+//             }
+//           } catch (e) { /* ignore parse */ }
 
-          if (body && body.notification) {
-            const notif = Array.isArray(body.notification) ? (body.notification[0] || null) : body.notification;
-            if (notif) {
-              try {
-                showBanner(notif.message || '', { persistent: !!notif.sticky, serverId: notif.id });
-                window.__fg_currentBanner = window.__fg_currentBanner || {};
-                window.__fg_currentBanner.serverId = notif.id;
-                localStorage.setItem('active_broadcast_id', String(notif.id));
-              } catch (e) { console.warn('pollStatus shim: showBanner failed', e); }
-            }
-          }
-          return res;
-        } catch (e) {
-          console.debug('pollStatus shim: fallback fetch failed', e);
-          return null;
-        }
-      } finally {
-        window.__fg_last_poll_ts = Date.now();
-        window.__fg_poll_inflight = null;
-      }
-    })();
+//           if (body && body.notification) {
+//             const notif = Array.isArray(body.notification) ? (body.notification[0] || null) : body.notification;
+//             if (notif) {
+//               try {
+//                 showBanner(notif.message || '', { persistent: !!notif.sticky, serverId: notif.id });
+//                 window.__fg_currentBanner = window.__fg_currentBanner || {};
+//                 window.__fg_currentBanner.serverId = notif.id;
+//                 localStorage.setItem('active_broadcast_id', String(notif.id));
+//               } catch (e) { console.warn('pollStatus shim: showBanner failed', e); }
+//             }
+//           }
+//           return res;
+//         } catch (e) {
+//           console.debug('pollStatus shim: fallback fetch failed', e);
+//           return null;
+//         }
+//       } finally {
+//         window.__fg_last_poll_ts = Date.now();
+//         window.__fg_poll_inflight = null;
+//       }
+//     })();
 
-    return window.__fg_poll_inflight;
-  };
-}
+//     return window.__fg_poll_inflight;
+//   };
+// }
 
 
 // After getSession succeeds
