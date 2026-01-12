@@ -140,7 +140,7 @@ window.pollStatus = async function pollStatus(force = false) {
     } else {
       // No active broadcast → hide unless client made it sticky
       if (!window.__fg_currentBanner?.clientSticky) {
-        hideBanner();
+        hideBanner(true);
         localStorage.removeItem('active_broadcast_id');
       }
     }
