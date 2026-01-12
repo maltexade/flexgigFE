@@ -74,8 +74,8 @@ const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 
     // ────────────────────────────────────────────────
-// MODERN STATUS SYSTEM – direct Supabase + Realtime
-// No more backend /api/status calls
+// STATUS / BROADCAST SYSTEM – uses broadcasts table
+// Direct Supabase + Realtime – no backend calls
 // ────────────────────────────────────────────────
 
 window.pollStatus = async function pollStatus(force = false) {
@@ -83,7 +83,7 @@ window.pollStatus = async function pollStatus(force = false) {
 
   // Throttle unless forced
   if (!force && now - (window.__fg_last_poll_ts || 0) < 30000) {
-    console.debug('[STATUS] Skipped – too soon');
+    console.debug('[BROADCAST] Skipped – too soon');
     return;
   }
 
@@ -91,38 +91,38 @@ window.pollStatus = async function pollStatus(force = false) {
 
   try {
     const { data, error } = await supabaseClient
-      .from('notifications')
-      .select('id, status, message, sticky, level')  // ← added level & id
+      .from('broadcasts')
+      .select('id, message, level, url, meta, active, starts_at, expire_at')
       .eq('active', true)
-      .order('created_at', { ascending: false })
+      .lte('starts_at', new Date().toISOString())           // already started or no start time
+      .or(`expire_at.is.null,expire_at.gt.${new Date().toISOString()}`)  // not expired
+      .order('starts_at', { ascending: true })              // earliest first
       .limit(1)
       .maybeSingle();
 
     if (error) {
-      console.error('[STATUS] Supabase query failed:', error);
+      console.error('[BROADCAST] Supabase query failed:', error);
       return;
     }
 
-    // Default: all clear
-    let status = 'up';
+    // Default: no broadcast
     let message = '';
     let level = 'info';
     let serverId = null;
-    let isSticky = false;
+    let isPersistent = false;  // we'll treat no expire_at as persistent for now
 
     if (data) {
-      status = data.status || 'up';
       message = data.message || '';
       level = ['info', 'warning', 'error'].includes(data.level) ? data.level : 'info';
       serverId = data.id;
-      isSticky = !!data.sticky;
+      isPersistent = !data.expire_at;  // no expiry → treat as sticky/persistent
 
-      // Apply banner
       if (message) {
         showBanner(message, {
-          persistent: isSticky,
+          persistent: isPersistent,
           serverId,
-          type: level
+          type: level,
+          url: data.url || null   // optional: make banner clickable if url exists
         });
 
         // Update global state
@@ -130,81 +130,80 @@ window.pollStatus = async function pollStatus(force = false) {
         window.__fg_currentBanner.id = serverId;
         window.__fg_currentBanner.message = message;
         window.__fg_currentBanner.level = level;
-        window.__fg_currentBanner.sticky = isSticky;
+        window.__fg_currentBanner.persistent = isPersistent;
         window.__fg_currentBanner.clientSticky = false;
 
-        // Persist active ID (used in hide logic)
         if (serverId) {
           localStorage.setItem('active_broadcast_id', String(serverId));
         }
       }
     } else {
-      // No active notification → hide unless client-sticky
+      // No active broadcast → hide unless client made it sticky
       if (!window.__fg_currentBanner?.clientSticky) {
         hideBanner();
         localStorage.removeItem('active_broadcast_id');
       }
     }
 
-    console.debug('[STATUS] Updated:', { status, message: message.slice(0, 60), level, sticky: isSticky });
+    console.debug('[BROADCAST] Updated:', { 
+      message: message.slice(0, 60), 
+      level, 
+      persistent: isPersistent 
+    });
 
   } catch (err) {
-    console.error('[STATUS] Unexpected error:', err);
+    console.error('[BROADCAST] Unexpected error:', err);
   }
 };
 
 // ────────────────────────────────────────────────
-// REALTIME SUBSCRIPTION – instant updates, no polling needed
+// REALTIME SUBSCRIPTION – instant updates
 // ────────────────────────────────────────────────
 
-function setupStatusRealtime() {
-  // Clean up any old subscription
-  if (window.__status_channel) {
-    window.__status_channel.unsubscribe().catch(() => {});
+function setupBroadcastRealtime() {
+  // Clean up old channel
+  if (window.__broadcast_channel) {
+    window.__broadcast_channel.unsubscribe().catch(() => {});
   }
 
-  window.__status_channel = supabaseClient.channel('public:notifications-changes');
+  window.__broadcast_channel = supabaseClient.channel('public:broadcasts-changes');
 
-  window.__status_channel
+  window.__broadcast_channel
     .on('postgres_changes', {
       event: '*',
       schema: 'public',
-      table: 'notifications'
+      table: 'broadcasts'
     }, (payload) => {
-      console.log('[STATUS REALTIME] Change detected:', payload.eventType, payload.new || payload.old);
-      // Immediate refresh on any change
-      pollStatus(true); // force = true to skip throttle
+      console.log('[BROADCAST REALTIME] Change:', payload.eventType, payload.new || payload.old);
+      pollStatus(true); // force refresh
     })
     .subscribe((status) => {
-      console.log('[STATUS REALTIME] Subscription status:', status);
+      console.log('[BROADCAST REALTIME] Subscription:', status);
     });
 }
 
 // ────────────────────────────────────────────────
-// Initialize on dashboard load
+// Initialize in onDashboardLoad
 // ────────────────────────────────────────────────
 
 if (typeof onDashboardLoad === 'function') {
-  const originalOnDashboardLoad = onDashboardLoad;
+  const original = onDashboardLoad;
   onDashboardLoad = async function (...args) {
-    await originalOnDashboardLoad(...args);
+    await original(...args);
 
-    // Start realtime + initial fetch
-    setupStatusRealtime();
-    pollStatus(true);           // initial force fetch
-    // Optional light polling as fallback (very gentle)
-    setInterval(() => pollStatus(), 60000); // every 60s
+    setupBroadcastRealtime();
+    pollStatus(true);                // initial fetch
+    // Light fallback polling (optional – realtime should suffice)
+    // setInterval(() => pollStatus(), 120000); // every 2 min
   };
 } else {
-  // Fallback if no onDashboardLoad wrapper exists yet
-  console.warn('[STATUS] No onDashboardLoad found – running standalone init');
-  setupStatusRealtime();
+  console.warn('[BROADCAST] No onDashboardLoad – running standalone');
+  setupBroadcastRealtime();
   pollStatus(true);
-  setInterval(() => pollStatus(), 60000);
 }
 
-// Expose globally for manual calls (debug console, etc.)
-window.forceStatusCheck = () => pollStatus(true);
+// For manual debug calls
+window.forceBroadcastCheck = () => pollStatus(true);
 
 
     function saveCurrentAppState() {
