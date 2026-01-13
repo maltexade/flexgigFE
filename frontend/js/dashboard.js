@@ -225,32 +225,34 @@ window.forceBroadcastCheck = () => pollStatus(true);
 const REAUTH_TTL_MINUTES = 60;
 
 async function requireReauthLock(reason = 'soft_idle_timeout') {
-  console.log('[REAUTH] requireReauthLock called for reason:', reason);
+  console.log('[REAUTH] requireReauthLock called → reason:', reason);
 
   try {
-    // Get uid from your working /api/session endpoint
-    const res = await fetch('/api/session', {
-      credentials: 'include'  // important: sends cookies
+    // Use your working backend endpoint to get the real user uid
+    const res = await fetch(window.__SEC_API_BASE + '/api/session', {
+      method: 'GET',
+      credentials: 'include',           // sends cookies (token/rt)
+      headers: { 'Cache-Control': 'no-cache' }
     });
-    
 
     if (!res.ok) {
-      console.error('[REAUTH] /api/session failed:', res.status, res.statusText);
+      console.error('[REAUTH] /api/session failed:', res.status, await res.text());
       return false;
     }
 
     const sessionData = await res.json();
     const uid = sessionData.uid;
 
-    if (!uid || typeof uid !== 'string') {
-      console.error('[REAUTH] No valid uid from /api/session:', sessionData);
+    if (!uid || typeof uid !== 'string' || !uid.includes('-')) {
+      console.error('[REAUTH] Invalid or missing uid from /api/session:', sessionData);
       return false;
     }
 
-    console.log('[REAUTH] Got uid from backend:', uid);
+    console.log('[REAUTH] Successfully got uid from backend:', uid);
 
     const expiresAt = new Date(Date.now() + REAUTH_TTL_MINUTES * 60 * 1000).toISOString();
 
+    // Now upsert using the uid we trust from backend
     const { data, error } = await supabaseClient
       .from('reauth_locks')
       .upsert({
@@ -262,15 +264,27 @@ async function requireReauthLock(reason = 'soft_idle_timeout') {
       }, { onConflict: 'user_uid' });
 
     if (error) {
-      console.error('[REAUTH] Supabase upsert ERROR:', error.message, error.details, error.hint, error.code);
+      console.error('[REAUTH] Supabase upsert ERROR:', {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code
+      });
       return false;
     }
 
-    console.log('[REAUTH] Lock upsert SUCCESS for uid:', uid);
-    localStorage.setItem('fg_reauth_required_v1', JSON.stringify({ reason, expiresAt, ts: Date.now() }));
+    console.log('[REAUTH] Lock row created/updated successfully for uid:', uid);
+    
+    // Keep your local flag
+    localStorage.setItem('fg_reauth_required_v1', JSON.stringify({
+      reason,
+      expiresAt,
+      ts: Date.now()
+    }));
+
     return true;
   } catch (err) {
-    console.error('[REAUTH] requireReauthLock failed:', err.message || err);
+    console.error('[REAUTH] requireReauthLock crashed:', err.message || err);
     return false;
   }
 }
