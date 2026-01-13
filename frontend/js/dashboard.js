@@ -228,10 +228,9 @@ async function requireReauthLock(reason = 'soft_idle_timeout') {
   console.log('[REAUTH] requireReauthLock called → reason:', reason);
 
   try {
-    // Use your working backend endpoint to get the real user uid
     const res = await fetch(window.__SEC_API_BASE + '/api/session', {
       method: 'GET',
-      credentials: 'include',           // sends cookies (token/rt)
+      credentials: 'include',
       headers: { 'Cache-Control': 'no-cache' }
     });
 
@@ -241,7 +240,9 @@ async function requireReauthLock(reason = 'soft_idle_timeout') {
     }
 
     const sessionData = await res.json();
-    const uid = sessionData.uid;
+    
+    // FIXED: uid is inside sessionData.user.uid
+    const uid = sessionData?.user?.uid;
 
     if (!uid || typeof uid !== 'string' || !uid.includes('-')) {
       console.error('[REAUTH] Invalid or missing uid from /api/session:', sessionData);
@@ -252,7 +253,6 @@ async function requireReauthLock(reason = 'soft_idle_timeout') {
 
     const expiresAt = new Date(Date.now() + REAUTH_TTL_MINUTES * 60 * 1000).toISOString();
 
-    // Now upsert using the uid we trust from backend
     const { data, error } = await supabaseClient
       .from('reauth_locks')
       .upsert({
@@ -274,8 +274,6 @@ async function requireReauthLock(reason = 'soft_idle_timeout') {
     }
 
     console.log('[REAUTH] Lock row created/updated successfully for uid:', uid);
-    
-    // Keep your local flag
     
     localStorage.setItem('fg_reauth_required_v1', JSON.stringify({
       reason,
