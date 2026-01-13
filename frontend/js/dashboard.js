@@ -232,6 +232,7 @@ async function requireReauthLock(reason = 'soft_idle_timeout') {
     const res = await fetch('/api/session', {
       credentials: 'include'  // important: sends cookies
     });
+    
 
     if (!res.ok) {
       console.error('[REAUTH] /api/session failed:', res.status, res.statusText);
