@@ -216,13 +216,18 @@ const REAUTH_TTL_MINUTES = 60;
 
 async function requireReauthLock(reason = 'soft_idle_timeout') {
   const { data: { user } } = await supabaseClient.auth.getUser();
-  if (!user) return false;
+  if (!user) {
+    console.error('[REAUTH] No authenticated user – cannot create lock');
+    return false;
+  }
 
   const uid = user.id;
   const expiresAt = new Date(Date.now() + REAUTH_TTL_MINUTES * 60 * 1000).toISOString();
 
+  console.log('[REAUTH] Attempting Supabase upsert for user:', uid, 'reason:', reason);
+
   try {
-    const { error } = await supabaseClient
+    const { data, error } = await supabaseClient
       .from('reauth_locks')
       .upsert({
         user_uid: uid,
@@ -232,20 +237,16 @@ async function requireReauthLock(reason = 'soft_idle_timeout') {
         metadata: { triggered_by: 'client_idle', at: new Date().toISOString() }
       }, { onConflict: 'user_uid' });
 
-    if (error) throw error;
+    if (error) {
+      console.error('[REAUTH] Supabase upsert ERROR:', error.message, error.details, error.hint);
+      return false;
+    }
 
-    console.log('[REAUTH] Lock created/updated in Supabase:', { uid, reason });
-    
-    // Keep your local flag for instant UI
-    localStorage.setItem('fg_reauth_required_v1', JSON.stringify({
-      reason,
-      expiresAt,
-      ts: Date.now()
-    }));
-
+    console.log('[REAUTH] Lock upsert success:', data);
+    localStorage.setItem('fg_reauth_required_v1', JSON.stringify({ reason, expiresAt, ts: Date.now() }));
     return true;
   } catch (err) {
-    console.error('[REAUTH] Supabase upsert failed:', err);
+    console.error('[REAUTH] Supabase upsert failed:', err.message || err);
     return false;
   }
 }
