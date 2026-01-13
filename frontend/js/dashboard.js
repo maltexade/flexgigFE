@@ -26,9 +26,17 @@ const SUPABASE_URL = 'https://bwmappzvptcjxlukccux.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ3bWFwcHp2cHRjanhsdWtjY3V4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTU0OTMzMjcsImV4cCI6MjA3MTA2OTMyN30.Ra7k6Br6nl1huQQi5DpDuOQSDE-6N1qlhUIvIset0mc';
 
 const { createClient } = supabase;
-const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: {
+    autoRefreshToken: true,          // Automatically refresh expired tokens
+    persistSession: true,            // Save session in localStorage
+    storage: localStorage,           // Explicitly use localStorage
+    detectSessionInUrl: true,        // Handle OAuth redirects (good for Google)
+    flowType: 'pkce'                 // Modern, secure flow (recommended)
+  }
+});
 
-window.supabaseClient = supabaseClient;   
+window.supabaseClient = supabaseClient;  // Keep this for console
 
 
     // NUCLEAR OPTION: Total scroll control - disables restore, forces top, blocks jumps
