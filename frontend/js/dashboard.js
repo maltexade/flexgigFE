@@ -27,6 +27,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 
 const { createClient } = supabase;
 const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
 window.supabaseClient = supabaseClient;   
 
 
@@ -208,122 +209,7 @@ window.forceBroadcastCheck = () => pollStatus(true);
 
 
 
-// ────────────────────────────────────────────────
-// DIRECT SUPABASE REAUTH LOCK HELPERS
-// No more /reauth/require, /reauth/status, /reauth/complete
-// ────────────────────────────────────────────────
 
-const REAUTH_TTL_MINUTES = 60;
-
-async function requireReauthLock(reason = 'soft_idle_timeout') {
-  const { data: { user } } = await supabaseClient.auth.getUser();
-  if (!user) {
-    console.error('[REAUTH] No authenticated user – cannot create lock');
-    return false;
-  }
-
-  const uid = user.id;
-  const expiresAt = new Date(Date.now() + REAUTH_TTL_MINUTES * 60 * 1000).toISOString();
-
-  console.log('[REAUTH] Attempting Supabase upsert for user:', uid, 'reason:', reason);
-
-  try {
-    const { data, error } = await supabaseClient
-      .from('reauth_locks')
-      .upsert({
-        user_uid: uid,
-        reason,
-        expires_at: expiresAt,
-        created_at: new Date().toISOString(),
-        metadata: { triggered_by: 'client_idle', at: new Date().toISOString() }
-      }, { onConflict: 'user_uid' });
-
-    if (error) {
-      console.error('[REAUTH] Supabase upsert ERROR:', error.message, error.details, error.hint);
-      return false;
-    }
-
-    console.log('[REAUTH] Lock upsert success:', data);
-    localStorage.setItem('fg_reauth_required_v1', JSON.stringify({ reason, expiresAt, ts: Date.now() }));
-    return true;
-  } catch (err) {
-    console.error('[REAUTH] Supabase upsert failed:', err.message || err);
-    return false;
-  }
-}
-
-async function checkReauthLock() {
-  const { data: { user } } = await supabaseClient.auth.getUser();
-  if (!user) return { required: false };
-
-  const uid = user.id;
-
-  try {
-    const { data, error } = await supabaseClient
-      .from('reauth_locks')
-      .select('reason, expires_at')
-      .eq('user_uid', uid)
-      .maybeSingle();
-
-    if (error) throw error;
-
-    if (!data) {
-      localStorage.removeItem('fg_reauth_required_v1');
-      return { required: false };
-    }
-
-    const now = new Date();
-    const expires = new Date(data.expires_at);
-
-    if (now > expires) {
-      await supabaseClient.from('reauth_locks').delete().eq('user_uid', uid);
-      localStorage.removeItem('fg_reauth_required_v1');
-      return { required: false };
-    }
-
-    localStorage.setItem('fg_reauth_required_v1', JSON.stringify({
-      reason: data.reason,
-      expiresAt: data.expires_at,
-      ts: Date.now()
-    }));
-
-    return {
-      required: true,
-      reason: data.reason || 'timeout',
-      expiresAt: data.expires_at
-    };
-  } catch (err) {
-    console.error('[REAUTH] Supabase check failed:', err);
-    return { required: false };
-  }
-}
-
-async function clearReauthLock() {
-  const { data: { user } } = await supabaseClient.auth.getUser();
-  if (!user) return false;
-
-  const uid = user.id;
-
-  try {
-    const { error } = await supabaseClient
-      .from('reauth_locks')
-      .delete()
-      .eq('user_uid', uid);
-
-    if (error) throw error;
-
-    console.log('[REAUTH] Lock cleared in Supabase:', uid);
-    localStorage.removeItem('fg_reauth_required_v1');
-    return true;
-  } catch (err) {
-    console.error('[REAUTH] Supabase clear failed:', err);
-    return false;
-  }
-}
-
-window.requireReauthLock = requireReauthLock;
-window.checkReauthLock = checkReauthLock;
-window.clearReauthLock = clearReauthLock;
 
 
     function saveCurrentAppState() {
@@ -3739,6 +3625,124 @@ setInterval(() => pollStatus(), 30000);
 
 
 }
+
+
+// ────────────────────────────────────────────────
+// DIRECT SUPABASE REAUTH LOCK HELPERS
+// No more /reauth/require, /reauth/status, /reauth/complete
+// ────────────────────────────────────────────────
+
+const REAUTH_TTL_MINUTES = 60;
+
+async function requireReauthLock(reason = 'soft_idle_timeout') {
+  const { data: { user } } = await supabaseClient.auth.getUser();
+  if (!user) {
+    console.error('[REAUTH] No authenticated user – cannot create lock');
+    return false;
+  }
+
+  const uid = user.id;
+  const expiresAt = new Date(Date.now() + REAUTH_TTL_MINUTES * 60 * 1000).toISOString();
+
+  console.log('[REAUTH] Attempting Supabase upsert for user:', uid, 'reason:', reason);
+
+  try {
+    const { data, error } = await supabaseClient
+      .from('reauth_locks')
+      .upsert({
+        user_uid: uid,
+        reason,
+        expires_at: expiresAt,
+        created_at: new Date().toISOString(),
+        metadata: { triggered_by: 'client_idle', at: new Date().toISOString() }
+      }, { onConflict: 'user_uid' });
+
+    if (error) {
+      console.error('[REAUTH] Supabase upsert ERROR:', error.message, error.details, error.hint);
+      return false;
+    }
+
+    console.log('[REAUTH] Lock upsert success:', data);
+    localStorage.setItem('fg_reauth_required_v1', JSON.stringify({ reason, expiresAt, ts: Date.now() }));
+    return true;
+  } catch (err) {
+    console.error('[REAUTH] Supabase upsert failed:', err.message || err);
+    return false;
+  }
+}
+
+async function checkReauthLock() {
+  const { data: { user } } = await supabaseClient.auth.getUser();
+  if (!user) return { required: false };
+
+  const uid = user.id;
+
+  try {
+    const { data, error } = await supabaseClient
+      .from('reauth_locks')
+      .select('reason, expires_at')
+      .eq('user_uid', uid)
+      .maybeSingle();
+
+    if (error) throw error;
+
+    if (!data) {
+      localStorage.removeItem('fg_reauth_required_v1');
+      return { required: false };
+    }
+
+    const now = new Date();
+    const expires = new Date(data.expires_at);
+
+    if (now > expires) {
+      await supabaseClient.from('reauth_locks').delete().eq('user_uid', uid);
+      localStorage.removeItem('fg_reauth_required_v1');
+      return { required: false };
+    }
+
+    localStorage.setItem('fg_reauth_required_v1', JSON.stringify({
+      reason: data.reason,
+      expiresAt: data.expires_at,
+      ts: Date.now()
+    }));
+
+    return {
+      required: true,
+      reason: data.reason || 'timeout',
+      expiresAt: data.expires_at
+    };
+  } catch (err) {
+    console.error('[REAUTH] Supabase check failed:', err);
+    return { required: false };
+  }
+}
+
+async function clearReauthLock() {
+  const { data: { user } } = await supabaseClient.auth.getUser();
+  if (!user) return false;
+
+  const uid = user.id;
+
+  try {
+    const { error } = await supabaseClient
+      .from('reauth_locks')
+      .delete()
+      .eq('user_uid', uid);
+
+    if (error) throw error;
+
+    console.log('[REAUTH] Lock cleared in Supabase:', uid);
+    localStorage.removeItem('fg_reauth_required_v1');
+    return true;
+  } catch (err) {
+    console.error('[REAUTH] Supabase clear failed:', err);
+    return false;
+  }
+}
+
+window.requireReauthLock = requireReauthLock;
+window.checkReauthLock = checkReauthLock;
+window.clearReauthLock = clearReauthLock;
 
 
 // ============================================
