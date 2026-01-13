@@ -276,6 +276,7 @@ async function requireReauthLock(reason = 'soft_idle_timeout') {
     console.log('[REAUTH] Lock row created/updated successfully for uid:', uid);
     
     // Keep your local flag
+    
     localStorage.setItem('fg_reauth_required_v1', JSON.stringify({
       reason,
       expiresAt,
