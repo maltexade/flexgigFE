@@ -16432,6 +16432,7 @@ async function checkServerReauthStatus() {
     return { needsReauth: false };
   }
 }
+window.checkServerReauthStatus = checkServerReauthStatus; // expose globally if needed
   
   // ============================================
   // SETUP FUNCTION (call once on dashboard load)
@@ -16667,6 +16668,7 @@ async function checkServerLock() {
     return null; // fail open — assume no lock
   }
 }
+window.checkServerLock = checkServerLock; // expose globally if needed
   
   /**
  * Notify "server" (now Supabase) to set reauth lock
