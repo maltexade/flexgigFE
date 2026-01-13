@@ -27,6 +27,7 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 
 const { createClient } = supabase;
 const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+window.supabaseClient = supabaseClient;   // ← Make it global for console + future use
 
 
     // NUCLEAR OPTION: Total scroll control - disables restore, forces top, blocks jumps
