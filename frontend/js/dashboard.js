@@ -319,6 +319,10 @@ async function clearReauthLock() {
   }
 }
 
+window.requireReauthLock = requireReauthLock;
+window.checkReauthLock = checkReauthLock;
+window.clearReauthLock = clearReauthLock;
+
 
     function saveCurrentAppState() {
   const state = {
