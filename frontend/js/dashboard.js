@@ -206,13 +206,124 @@ if (typeof onDashboardLoad === 'function') {
 window.forceBroadcastCheck = () => pollStatus(true);
 
 
+
+// ────────────────────────────────────────────────
+// DIRECT SUPABASE REAUTH LOCK HELPERS
+// No more /reauth/require, /reauth/status, /reauth/complete
+// ────────────────────────────────────────────────
+
+const REAUTH_TTL_MINUTES = 60;
+
+async function requireReauthLock(reason = 'soft_idle_timeout') {
+  const { data: { user } } = await supabaseClient.auth.getUser();
+  if (!user) return false;
+
+  const uid = user.id;
+  const expiresAt = new Date(Date.now() + REAUTH_TTL_MINUTES * 60 * 1000).toISOString();
+
+  try {
+    const { error } = await supabaseClient
+      .from('reauth_locks')
+      .upsert({
+        user_uid: uid,
+        reason,
+        expires_at: expiresAt,
+        created_at: new Date().toISOString(),
+        metadata: { triggered_by: 'client_idle', at: new Date().toISOString() }
+      }, { onConflict: 'user_uid' });
+
+    if (error) throw error;
+
+    console.log('[REAUTH] Lock created/updated in Supabase:', { uid, reason });
+    
+    // Keep your local flag for instant UI
+    localStorage.setItem('fg_reauth_required_v1', JSON.stringify({
+      reason,
+      expiresAt,
+      ts: Date.now()
+    }));
+
+    return true;
+  } catch (err) {
+    console.error('[REAUTH] Supabase upsert failed:', err);
+    return false;
+  }
+}
+
+async function checkReauthLock() {
+  const { data: { user } } = await supabaseClient.auth.getUser();
+  if (!user) return { required: false };
+
+  const uid = user.id;
+
+  try {
+    const { data, error } = await supabaseClient
+      .from('reauth_locks')
+      .select('reason, expires_at')
+      .eq('user_uid', uid)
+      .maybeSingle();
+
+    if (error) throw error;
+
+    if (!data) {
+      localStorage.removeItem('fg_reauth_required_v1');
+      return { required: false };
+    }
+
+    const now = new Date();
+    const expires = new Date(data.expires_at);
+
+    if (now > expires) {
+      await supabaseClient.from('reauth_locks').delete().eq('user_uid', uid);
+      localStorage.removeItem('fg_reauth_required_v1');
+      return { required: false };
+    }
+
+    localStorage.setItem('fg_reauth_required_v1', JSON.stringify({
+      reason: data.reason,
+      expiresAt: data.expires_at,
+      ts: Date.now()
+    }));
+
+    return {
+      required: true,
+      reason: data.reason || 'timeout',
+      expiresAt: data.expires_at
+    };
+  } catch (err) {
+    console.error('[REAUTH] Supabase check failed:', err);
+    return { required: false };
+  }
+}
+
+async function clearReauthLock() {
+  const { data: { user } } = await supabaseClient.auth.getUser();
+  if (!user) return false;
+
+  const uid = user.id;
+
+  try {
+    const { error } = await supabaseClient
+      .from('reauth_locks')
+      .delete()
+      .eq('user_uid', uid);
+
+    if (error) throw error;
+
+    console.log('[REAUTH] Lock cleared in Supabase:', uid);
+    localStorage.removeItem('fg_reauth_required_v1');
+    return true;
+  } catch (err) {
+    console.error('[REAUTH] Supabase clear failed:', err);
+    return false;
+  }
+}
+
+
     function saveCurrentAppState() {
   const state = {
     // ==================== MODALS – FIXED & BULLETPROOF ====================
     
-
-
-
 
     // Form inputs
     phoneNumber: document.getElementById('phone-input')?.value || '',
@@ -1269,33 +1380,23 @@ async function fullClientLogout() {
 }
 
 /**
- * Notify server that reauth is complete and clear the lock
+ * Notify that reauth is complete and clear the lock — now uses direct Supabase
  */
 async function notifyReauthComplete() {
   try {
-    const apiBase = window.__SEC_API_BASE || window.API_BASE || '';
-    const url = `${apiBase}/reauth/complete`;
-    
-    const res = await fetch(url, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 
-        'Content-Type': 'application/json',
-        'Cache-Control': 'no-cache'
-      }
-    });
-    
-    if (!res.ok) {
-      console.warn('[REAUTH] Failed to notify server of completion:', res.status);
+    console.log('[REAUTH] Clearing lock via Supabase (notifyReauthComplete)');
+
+    const success = await clearReauthLock();
+
+    if (success) {
+      console.log('[REAUTH] ✅ Supabase lock cleared successfully');
+      return true;
+    } else {
+      console.warn('[REAUTH] Supabase lock clear returned false');
       return false;
     }
-    
-    const data = await res.json();
-    console.log('[REAUTH] ✅ Server lock cleared:', data);
-    return data.ok || false;
-    
   } catch (err) {
-    console.error('[REAUTH] Failed to call /reauth/complete:', err);
+    console.error('[REAUTH] Supabase clear failed in notifyReauthComplete:', err);
     return false;
   }
 }
@@ -15920,28 +16021,19 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
   // ============================================
 // HELPER: CREATE SERVER LOCK IN BACKGROUND
 // ============================================
-function createServerLockInBackground(reason) {
-  // Fire-and-forget (don't block UI)
-  const apiBase = window.__SEC_API_BASE || window.API_BASE || '';
-  
-  fetch(`${apiBase}/reauth/require`, {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ reason })
-  })
-    .then(res => {
-      if (res.ok) {
-        return res.json();
-      }
-      throw new Error(`Server returned ${res.status}`);
-    })
-    .then(data => {
-      console.log(`[LOCK] ✅ Server lock created (reason: ${reason}):`, data);
-    })
-    .catch(err => {
-      console.error(`[LOCK] ❌ Failed to create server lock (reason: ${reason}):`, err);
-    });
+// Fire-and-forget wrapper — doesn't block UI, logs result
+async function createServerLockInBackground(reason) {
+  try {
+    const success = await requireReauthLock(reason);
+    
+    if (success) {
+      console.log(`[LOCK] ✅ Supabase lock created (reason: ${reason})`);
+    } else {
+      console.warn(`[LOCK] ⚠️ Supabase lock creation returned false (reason: ${reason})`);
+    }
+  } catch (err) {
+    console.error(`[LOCK] ❌ Failed to create Supabase lock (reason: ${reason}):`, err);
+  }
 }
   
   // ============================================
@@ -16317,30 +16409,25 @@ setInterval(() => {
     }
   }
   
-  async function checkServerReauthStatus() {
-    try {
-      if (typeof window.checkServerReauthStatus === 'function') {
-        return await window.checkServerReauthStatus();
-      }
-      
-      // Fallback: direct fetch
-      const apiBase = window.__SEC_API_BASE || window.API_BASE || '';
-      const url = `${apiBase}/reauth/status`;
-      const res = await fetch(url, {
-        method: 'GET',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' }
-      });
-      
-      if (!res.ok) return { needsReauth: false };
-      
-      const data = await res.json();
-      return data || { needsReauth: false };
-    } catch (e) {
-      console.warn('[IDLE] Server check failed', e);
-      return { needsReauth: false };
-    }
+async function checkServerReauthStatus() {
+  console.log('[IDLE] Checking reauth status via Supabase (direct)');
+
+  try {
+    // Use the direct Supabase helper we already have
+    const result = await checkReauthLock();
+
+    // Convert to the shape your code expects ({ needsReauth: true/false })
+    return {
+      needsReauth: result.required,
+      reason: result.reason || null,
+      expiresAt: result.expiresAt || null
+    };
+  } catch (err) {
+    console.warn('[IDLE] Supabase reauth check failed', err);
+    // Fail open: assume no reauth needed (safe default)
+    return { needsReauth: false };
   }
+}
   
   // ============================================
   // SETUP FUNCTION (call once on dashboard load)
@@ -16549,102 +16636,69 @@ setInterval(() => {
   // SERVER SYNC
   // ============================================
   
-  /**
-   * Check server for active reauth lock
-   */
-  async function checkServerLock() {
-    try {
-      const apiBase = window.__SEC_API_BASE || window.API_BASE || '';
-      const url = `${apiBase}/reauth/status`;
-      
-      const res = await fetch(url, {
-        method: 'GET',
-        credentials: 'include',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Cache-Control': 'no-cache' 
-        }
-      });
-      
-      if (!res.ok) {
-        console.warn('[REAUTH-LOCK] Server check returned', res.status);
-        return null;
-      }
-      
-      const data = await res.json();
-      
-      // Server returns { reauthRequired: true/false, token?, reason? }
-      if (data && data.reauthRequired) {
-        return {
-          locked: true,
-          reason: data.reason || 'server-timeout',
-          token: data.token || null
-        };
-      }
-      
-      return null;
-    } catch (e) {
-      console.error('[REAUTH-LOCK] Failed to check server lock:', e);
-      return null;
+/**
+ * Check for active reauth lock — now uses Supabase directly (no /reauth/status endpoint)
+ * Returns the same shape as before for compatibility
+ */
+async function checkServerLock() {
+  console.log('[REAUTH-LOCK] Checking lock status via Supabase');
+
+  try {
+    const result = await checkReauthLock(); // ← uses your existing direct helper
+
+    if (result.required) {
+      return {
+        locked: true,
+        reason: result.reason || 'timeout',
+        token: null, // no token needed anymore (Supabase row acts as token)
+        expiresAt: result.expiresAt // optional: pass expiry if you want to use it
+      };
     }
+
+    // No lock found
+    console.log('[REAUTH-LOCK] No active lock found');
+    return null;
+  } catch (err) {
+    console.error('[REAUTH-LOCK] Supabase lock check failed:', err);
+    return null; // fail open — assume no lock
   }
+}
   
   /**
-   * Notify server to set reauth lock
-   */
-  async function setServerLock(reason = 'client-idle') {
-    try {
-      const apiBase = window.__SEC_API_BASE || window.API_BASE || '';
-      const url = `${apiBase}/reauth/require`;
-      
-      const res = await fetch(url, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason })
-      });
-      
-      if (!res.ok) {
-        console.warn('[REAUTH-LOCK] Server lock set failed:', res.status);
-        return null;
-      }
-      
-      const data = await res.json();
-      console.log('[REAUTH-LOCK] Server lock set successfully:', data);
-      return data;
-    } catch (e) {
-      console.error('[REAUTH-LOCK] Failed to set server lock:', e);
-      return null;
-    }
-  }
+ * Notify "server" (now Supabase) to set reauth lock
+ * - This is now a thin wrapper around the direct Supabase upsert
+ */
+async function setServerLock(reason = 'client-idle') {
+  console.log('[REAUTH-LOCK] Setting lock via Supabase (reason:', reason, ')');
   
-  /**
-   * Notify server to clear reauth lock
-   */
-  async function clearServerLock() {
-    try {
-      const apiBase = window.__SEC_API_BASE || window.API_BASE || '';
-      const url = `${apiBase}/reauth/complete`;
-      
-      const res = await fetch(url, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' }
-      });
-      
-      if (!res.ok) {
-        console.warn('[REAUTH-LOCK] Server lock clear failed:', res.status);
-        return false;
-      }
-      
-      const data = await res.json();
-      console.log('[REAUTH-LOCK] Server lock cleared successfully:', data);
-      return data.ok || false;
-    } catch (e) {
-      console.error('[REAUTH-LOCK] Failed to clear server lock:', e);
-      return false;
-    }
+  const success = await requireReauthLock(reason);
+  
+  if (success) {
+    console.log('[REAUTH-LOCK] Supabase lock set successfully');
+    return { ok: true }; // mimic old return shape for compatibility
+  } else {
+    console.warn('[REAUTH-LOCK] Supabase lock set failed');
+    return null;
   }
+}
+
+/**
+ * Notify "server" (now Supabase) to clear reauth lock
+ * - Thin wrapper around direct Supabase delete
+ */
+async function clearServerLock() {
+  console.log('[REAUTH-LOCK] Clearing lock via Supabase');
+  
+  const success = await clearReauthLock();
+  
+  if (success) {
+    console.log('[REAUTH-LOCK] Supabase lock cleared successfully');
+    return true; // mimic old return shape
+  } else {
+    console.warn('[REAUTH-LOCK] Supabase lock clear failed');
+    return false;
+  }
+}
   
   // ============================================
   // LOCK MANAGEMENT (updated to sync with server)
@@ -17865,16 +17919,16 @@ async function showReauthModal(context = 'reauth') {
 
 
 /* ---------------------------
-   Reauth cross-tab sync module
+   Reauth cross-tab sync module – fully Supabase-native
    - uses BroadcastChannel + storage event fallback
    - persists reauth state across reloads / hard reloads
-   - expects server endpoints: /reauth/status and /reauth/complete (see server snippet)
+   - NO backend fetches anymore (all via Supabase reauth_locks)
 ----------------------------*/
 (function () {
   const LOCAL_KEY = 'fg_reauth_required_v1';       // storage key
   const BC_NAME = 'fg-reauth';                     // BroadcastChannel name
-  const CHECK_STATUS_INTERVAL_MS = 5000;           // optional background poll
-  const STALE_MS = 1000 * 60 * 10;                 // consider stale after 10min (tunable)
+  const CHECK_STATUS_INTERVAL_MS = 5000;           // optional background poll (now Supabase)
+  const STALE_MS = 1000 * 60 * 10;                 // consider stale after 10min
 
   // try BroadcastChannel if available
   let bc = null;
@@ -17895,12 +17949,11 @@ async function showReauthModal(context = 'reauth') {
     try { localStorage.setItem(LOCAL_KEY, JSON.stringify(obj)); } catch (e) {}
     // broadcast
     try { if (bc) bc.postMessage({ type: 'require', payload: obj }); } catch (e) {}
-    // storage event fallback (other tabs will pick this up)
+    // storage event fallback
     try { window.dispatchEvent(new StorageEvent('storage', { key: LOCAL_KEY, newValue: JSON.stringify(obj) })); } catch(e){}
   }
 
   function clearLocal(token) {
-    // if token provided, only clear if matches (prevents races)
     try {
       const cur = JSON.parse(localStorage.getItem(LOCAL_KEY) || 'null');
       if (!cur) { localStorage.removeItem(LOCAL_KEY); }
@@ -17917,93 +17970,80 @@ async function showReauthModal(context = 'reauth') {
   // show the modal and set reauth active state in this tab
   async function showReauthModalLocal({ fromStorageObj } = {}) {
     try {
-      // only open once in this tab
       cacheDomRefs();
-      // ensure our modal wiring is initialized
       if (typeof initReauthModal === 'function') {
         await initReauthModal({ show: true, context: 'reauth' });
       } else {
-        // fallback: directly unhide modal
         if (reauthModal && reauthModal.classList) reauthModal.classList.remove('hidden');
       }
-      // mark active in-memory (ensures keydown handler will attach)
       try { reauthModalOpen = true; setReauthActive(true); } catch (e) {}
-      // store a pending marker to help other tabs see we are reauth-ing
       try { localStorage.setItem('fg_reauth_active_tab', (fromStorageObj && fromStorageObj.token) || makeToken()); } catch(e){}
     } catch (e) {}
   }
 
   // hide the modal UI in this tab
   function hideReauthModalLocal() {
-  try {
-    // prefer the canonical async success flow + guarded hide
-    (async () => {
-      try { await guardedHideReauthModal(); } catch (e) { console.warn('[reauth] hideReauthModalLocal guard error', e); }
-    })();
-  } catch (e) { console.warn('[reauth] hideReauthModalLocal error', e); }
-}
+    try {
+      (async () => {
+        try { await guardedHideReauthModal(); } catch (e) { console.warn('[reauth] hideReauthModalLocal guard error', e); }
+      })();
+    } catch (e) { console.warn('[reauth] hideReauthModalLocal error', e); }
+  }
 
+  // When reauth is required: set local + Supabase
+  async function requireReauth(reason) {
+    const obj = buildStoredObj({ reason });
+    writeLocal(obj);
 
+    try { setExpectedReauthAt(Date.now()); } catch (e) { /* ignore */ }
 
-  // When reauth is required: set local + server (server optional)
-async function requireReauth(reason) {
-  // Create token + write local state
-  const obj = buildStoredObj({ reason });
-  writeLocal(obj);
+    // Direct Supabase (replaces /reauth/require)
+    try {
+      const success = await requireReauthLock(reason);
+      if (success) {
+        console.log('[REAUTH] Supabase lock set successfully (reason:', reason, ')');
+      } else {
+        console.warn('[REAUTH] Supabase lock set returned false (reason:', reason, ')');
+      }
+    } catch (err) {
+      console.error('[REAUTH] Supabase requireReauth failed:', err);
+      // Continue — local state still triggers modal
+    }
 
-  // 💡 NEW: mark local expected reauth timestamp so hard-idle logic knows immediately
-  try { setExpectedReauthAt(Date.now()); } catch (e) { /* ignore */ }
+    showReauthModalLocal({ fromStorageObj: obj });
+  }
 
-  // Optionally notify server to set authoritative session flag (recommended)
-  try {
-    await fetch((window.__SEC_API_BASE || API_BASE) + '/reauth/require', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reason, token: obj.token })
-    }).catch(()=>{});
-  } catch (e) {}
+  // Call after successful reauth in current tab
+  async function completeReauth() {
+    let ok = false;
+    try {
+      ok = await clearReauthLock();
+      if (ok) {
+        console.log('[REAUTH] Supabase lock cleared successfully');
+      } else {
+        console.warn('[REAUTH] Supabase clear returned false');
+      }
+    } catch (err) {
+      console.error('[REAUTH] Supabase completeReauth failed:', err);
+      ok = false;
+    }
 
-  // Immediately show in this tab (if not already shown)
-  showReauthModalLocal({ fromStorageObj: obj });
-}
+    const stored = readLocal();
+    clearLocal(stored && stored.token);
 
+    try { clearExpectedReauthAt(); } catch (e) { /* ignore */ }
 
-  // call this after a successful reauth in the current tab
-async function completeReauth() {
-  // call server to clear session flag
-  let ok = false;
-  try {
-    const res = await fetch((window.__SEC_API_BASE || API_BASE) + '/reauth/complete', {
-      method: 'POST',
-      credentials: 'include',
-      headers: {'Content-Type':'application/json'}
-    });
-    ok = res && res.ok;
-  } catch (e) { ok = false; }
-
-  // clear local state and broadcast clear
-  const stored = readLocal();
-  clearLocal(stored && stored.token);
-
-  // **important**: clear the expected reauth timestamp so we don't retrigger hard reauth locally
-  try { clearExpectedReauthAt(); } catch (e) { /* ignore */ }
-
-  // hide this tab modal UI
-  hideReauthModalLocal();
-  return ok;
-}
-
+    hideReauthModalLocal();
+    return ok;
+  }
 
   // react to storage events (fallback) and broadcast messages
   function onStorageEvent(e) {
     if (e.key !== LOCAL_KEY) return;
     const newVal = e.newValue ? JSON.parse(e.newValue) : null;
     if (newVal) {
-      // require: show modal
       showReauthModalLocal({ fromStorageObj: newVal });
     } else {
-      // cleared: hide modal
       hideReauthModalLocal();
     }
   }
@@ -18022,54 +18062,59 @@ async function completeReauth() {
 
   // on load: if localStorage says reauth required show modal.
   async function initCrossTabReauth() {
-    console.debug('BOOT LOG: initCrossTabReauth init'); // at top of initCrossTabReauth
+    console.debug('BOOT LOG: initCrossTabReauth init');
     window.addEventListener('storage', onStorageEvent, false);
     if (bc) bc.onmessage = onBroadcastMessage;
 
     // immediate localStorage check
     const stored = readLocal();
     if (stored) {
-      // If token is stale, optionally verify with server
+      // If token is stale, check Supabase for authoritative decision (replaces /reauth/status)
       if (Date.now() - (stored.ts || 0) > STALE_MS) {
-        // check server for authoritative decision
         try {
-          const res = await fetch((window.__SEC_API_BASE || API_BASE) + '/reauth/status', { credentials: 'include' });
-          if (res && res.ok) {
-            const j = await res.json().catch(()=>null);
-            if (j && j.reauthRequired) {
-              writeLocal(buildStoredObj({ token: j.token || stored.token, ts: j.ts || stored.ts, reason: j.reason || stored.reason }));
-              showReauthModalLocal({ fromStorageObj: j });
-              return;
-            }
+          const lockStatus = await checkReauthLock();
+          if (lockStatus.required) {
+            // Supabase says still locked → keep/refresh local state
+            writeLocal(buildStoredObj({ 
+              token: stored.token, 
+              ts: Date.now(), 
+              reason: lockStatus.reason || stored.reason 
+            }));
+            showReauthModalLocal({ fromStorageObj: lockStatus });
+            return;
           }
-        } catch (e) {}
-        // If server unreachable, keep local instruction (safer)
+          // Supabase says no lock → clear local
+          clearLocal(stored.token);
+        } catch (e) {
+          console.warn('[REAUTH] Stale check via Supabase failed:', e);
+          // If Supabase unreachable, keep local instruction (safer)
+        }
       }
       showReauthModalLocal({ fromStorageObj: stored });
     }
 
-    // Optional: poll server to detect reauthRequired cleared by other factors (tune as desired)
+    // Optional: periodic Supabase check to detect cleared locks (replaces /reauth/status poll)
     setInterval(async () => {
       try {
         const storedNow = readLocal();
-        // if nothing local, no need to poll
-        if (!storedNow) return;
-        const res = await fetch((window.__SEC_API_BASE || API_BASE) + '/reauth/status', { credentials: 'include' });
-        if (!res) return;
-        const j = await res.json().catch(()=>null);
-        if (j && !j.reauthRequired) {
-          // server says cleared -> perform local clear
-          clearLocal(j.token);
+        if (!storedNow) return; // nothing to check
+
+        const lockStatus = await checkReauthLock();
+        if (!lockStatus.required) {
+          // Supabase says cleared → perform local clear
+          clearLocal(storedNow.token);
           hideReauthModalLocal();
         }
-      } catch (e) {}
+      } catch (e) {
+        console.warn('[REAUTH] Periodic Supabase check failed:', e);
+      }
     }, CHECK_STATUS_INTERVAL_MS);
   }
 
   // expose API hooks for your code
   window.fgReauth = {
-    requireReauth,    // call to set the lock (optionally call server /reauth/require)
-    completeReauth,   // call after reauth success (will call server /reauth/complete and clear local)
+    requireReauth,
+    completeReauth,
     isReauthRequired: () => !!readLocal()
   };
 
@@ -18091,13 +18136,14 @@ async function completeReauth() {
     await showInactivityPrompt();
   }
 
-// Robust async onSuccessfulReauth — updated: clears fg_expected_reauth_at appropriately
+// Robust async onSuccessfulReauth — now fully Supabase-native
 async function onSuccessfulReauth() {
-    // Clear persistent lock first
+  // Clear persistent lock first (your existing cross-tab helper)
   if (window.__persistentReauthLock) {
     window.__persistentReauthLock.clearLock();
     console.log('[reauth] persistent reauth lock cleared');
   }
+
   try {
     // mark modal closed locally (UI state)
     reauthModalOpen = false;
@@ -18110,70 +18156,63 @@ async function onSuccessfulReauth() {
     try { stored = JSON.parse(localStorage.getItem('fg_reauth_required_v1') || 'null'); } catch (e) { stored = null; }
     const token = stored && stored.token ? String(stored.token) : null;
 
-    // Attempt to clear authoritative (server + broadcast) state first.
-    // Prefer window.fgReauth.completeReauth() if present (cross-tab helper).
+    // Attempt to clear authoritative state first
     let serverCleared = false;
     try {
       if (window.fgReauth && typeof window.fgReauth.completeReauth === 'function') {
-        // await so we know server/session is cleared before touching local canonical flag
+        // Prefer your cross-tab helper if available
         const p = window.fgReauth.completeReauth();
         if (p && typeof p.then === 'function') {
-          // await promise and interpret truthy result as success when possible
           try {
             const r = await p.catch(() => null);
             serverCleared = (r === true || r === undefined || r === null) ? true : Boolean(r);
           } catch (e) { serverCleared = false; }
         } else {
-          // it's not a promise, assume it attempted to clear (best-effort)
-          serverCleared = true;
+          serverCleared = true; // assume best-effort success
         }
       } else {
-        // fallback: call the server endpoint directly (best-effort)
-        try {
-          const res = await fetch((window.__SEC_API_BASE || API_BASE) + '/reauth/complete', {
-            method: 'POST',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' }
-          });
-          serverCleared = !!(res && res.ok);
-        } catch (e) {
-          serverCleared = false;
+        // Fallback: direct Supabase clear (replaces /reauth/complete)
+        serverCleared = await clearReauthLock();
+        if (serverCleared) {
+          console.log('[reauth] Supabase fallback clear succeeded');
+        } else {
+          console.warn('[reauth] Supabase fallback clear returned false');
         }
       }
     } catch (e) {
       serverCleared = false;
+      console.error('[reauth] Clear authoritative state failed:', e);
     }
 
-    // Clear the local expected reauth timestamp - user just reauthenticated.
-    // Do this regardless of whether server cleared canonical state, so we don't auto-trigger hard reauth now.
+    // Clear the local expected reauth timestamp - always do this
     try { clearExpectedReauthAt(); } catch (e) { /* ignore */ }
 
-    // If server cleared the authoritative flag, remove the canonical local marker.
-    // If server clearing failed, KEEP the canonical flag so other tabs / reloads still show modal.
+    // If cleared successfully, remove canonical local marker
     if (serverCleared) {
       try {
-        // only remove canonical key if token matches (defensive against races)
         const cur = JSON.parse(localStorage.getItem('fg_reauth_required_v1') || 'null');
         if (!token || !cur || String(cur.token) === String(token)) {
           try { localStorage.removeItem('fg_reauth_required_v1'); } catch (e) {}
           try { localStorage.removeItem('reauthPending'); } catch (e) {}
-          // broadcast fallback (if you have cross-tab code expecting it)
-          try { if (typeof window.BroadcastChannel !== 'undefined') { const bc = new BroadcastChannel('fg-reauth'); bc.postMessage({ type: 'clear', payload: { token } }); } } catch(e){}
+          // broadcast fallback
+          try { 
+            if (typeof BroadcastChannel !== 'undefined') { 
+              const bc = new BroadcastChannel('fg-reauth'); 
+              bc.postMessage({ type: 'clear', payload: { token } }); 
+            } 
+          } catch(e){}
           try { window.dispatchEvent(new StorageEvent('storage', { key: 'fg_reauth_required_v1', newValue: null })); } catch(e){}
         } else {
-          // token mismatch — do not clear; another require may have replaced the token
           console.warn('[reauth] canonical token mismatch; skipping local clear to avoid race');
         }
       } catch (e) {
-        // if any error removing, just log and continue; keep canonical
         console.warn('[reauth] failed to clear local canonical flag', e);
       }
     } else {
-      // If we could not clear server state, do not remove local flag — keep modal persistently visible across reloads
-      console.debug('[reauth] server clear failed or unreachable — keeping canonical local flag so modal remains persistent');
+      console.debug('[reauth] clear failed or unreachable — keeping canonical flag for persistence');
     }
 
-    // Now hide UI only if canonical key is no longer present
+    // Hide UI only if canonical key is gone
     function isCanonicalPending() {
       try { return !!JSON.parse(localStorage.getItem('fg_reauth_required_v1') || 'null'); } catch (e) { return false; }
     }
@@ -18190,14 +18229,14 @@ async function onSuccessfulReauth() {
             try { reauthModal.removeAttribute('aria-hidden'); reauthModal.style.pointerEvents = ''; } catch (e) {}
           }
         }
-        // simple and safe: don't touch the promptModal binding, read from the DOM
-        const _pm = (typeof document !== 'undefined') ? document.getElementById('promptModal') : null;
+
+        const _pm = document.getElementById('promptModal');
         if (_pm) {
           try {
             _pm.classList.add('hidden');
             _pm.removeAttribute('aria-hidden');
             _pm.style.pointerEvents = '';
-          } catch (e) { /* ignore DOM errors */ }
+          } catch (e) {}
         }
 
         reauthModalOpen = false;
@@ -18211,9 +18250,12 @@ async function onSuccessfulReauth() {
     // turn off global reauth active state
     try { setReauthActive(false); } catch (e) {}
 
-    // cleanup timers / locks (same as before)
+    // cleanup timers / locks
     try {
-      if (window.__cachedAuthOptionsLock) { window.__cachedAuthOptionsLock = false; window.__cachedAuthOptionsLockSince = 0; }
+      if (window.__cachedAuthOptionsLock) { 
+        window.__cachedAuthOptionsLock = false; 
+        window.__cachedAuthOptionsLockSince = 0; 
+      }
     } catch (e) {}
     try {
       if (window.__simulatePinInterval) { clearInterval(window.__simulatePinInterval); window.__simulatePinInterval = null; }
@@ -18224,16 +18266,16 @@ async function onSuccessfulReauth() {
     try { if (typeof resetReauthInputs === 'function') resetReauthInputs(); } catch (e) {}
     try { if (typeof disableReauthInputs === 'function') disableReauthInputs(false); } catch (e) {}
 
-    // Hide any loader that may be left showing
+    // Hide loader
     try { if (typeof hideLoader === 'function') hideLoader(); } catch (e) {}
 
     // Restart idle timer
     if (window.__idleDetection) {
-    window.__idleDetection.reset();
-  }
+      window.__idleDetection.reset();
+    }
     try { if (typeof resetIdleTimer === 'function') resetIdleTimer(); } catch (e) {}
 
-    // restore focus to main app
+    // restore focus
     try {
       const appRoot = document.querySelector('main') || document.body;
       if (appRoot && typeof appRoot.focus === 'function') appRoot.focus();
@@ -18241,7 +18283,7 @@ async function onSuccessfulReauth() {
 
     return true;
   } catch (err) {
-    // fail-safe: ensure active state is off and idle timer restarted
+    // fail-safe
     try { setReauthActive(false); } catch (e) {}
     try { if (typeof resetIdleTimer === 'function') resetIdleTimer(); } catch (e) {}
     console.warn('[reauth] onSuccessfulReauth unexpected error', err);
