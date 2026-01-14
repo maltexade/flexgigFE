@@ -3246,33 +3246,45 @@ async function handleBioToggle(e) {
 
 
 async function onDashboardLoad() {
-  // 1. Instant cache render first (your original logic)
+  // 1. Instant cache render first
   const cachedUserData = localStorage.getItem('userData');
   if (cachedUserData) {
     try {
       const parsed = JSON.parse(cachedUserData);
-      if (Date.now() - parsed.cachedAt < 300000) { // 5 min TTL
+      if (Date.now() - parsed.cachedAt < 300000) {
         const firstName = parsed.fullName?.split(' ')[0] || 'User';
-        const domReady = await waitForDomReady(); // Reuse your func
+        const domReady = await waitForDomReady();
         if (domReady) applySessionToDOM(parsed, firstName);
       }
     } catch (e) { /* ignore */ }
   }
 
-  // 2. Load full profile + balance from Supabase (replaces all /api/session calls)
+  // 2. Load full profile + balance from Supabase (replaces getSession + extra fetches)
   let profile = null;
   try {
-    profile = await loadUserProfile(true); // force fresh from Supabase
+    profile = await loadUserProfile(true); // force fresh
     console.log('[BOOT] Profile loaded from Supabase:', profile.firstName, profile.wallet_balance);
 
-    // Sync PIN/bio flags directly from profile (no extra fetch)
-    const hasPin = profile.hasPin || false;
+    // Sync PIN/bio flags directly from profile (no extra /api/session)
+    const hasPin = profile.hasPin || localStorage.getItem('hasPin') === 'true' || false;
     localStorage.setItem('hasPin', hasPin ? 'true' : 'false');
 
     const biometricsEnabled = profile.hasBiometrics || localStorage.getItem('biometricsEnabled') === 'true' || false;
     localStorage.setItem('biometricsEnabled', biometricsEnabled ? 'true' : 'false');
 
-    // Prefetch bio if enabled
+    if (biometricsEnabled) {
+      const storedLogin = localStorage.getItem('biometricForLogin');
+      const storedTx = localStorage.getItem('biometricForTx');
+
+      if (storedLogin === null) localStorage.setItem('biometricForLogin', 'true');
+      if (storedTx === null) localStorage.setItem('biometricForTx', 'true');
+
+      console.log('[DEBUG-SYNC] Sub-flags preserved/defaulted:', {
+        bioForLogin: localStorage.getItem('biometricForLogin') === 'true',
+        bioForTx: localStorage.getItem('biometricForTx') === 'true'
+      });
+    }
+
     if (biometricsEnabled && localStorage.getItem('credentialId')) {
       prefetchAuthOptions?.();
     }
@@ -3280,14 +3292,14 @@ async function onDashboardLoad() {
 
   } catch (err) {
     console.warn('[BOOT] Profile load failed:', err);
-    // Fallback to localStorage values
+    // Fallback: keep existing localStorage values
   }
 
-  // 3. Setup broadcast realtime (already direct Supabase)
-  setupBroadcastRealtime?.();
-  pollStatus?.(true); // initial broadcast fetch
+  // 3. Broadcast realtime + initial fetch
+  setupBroadcastSubscription?.();
+  pollStatus?.(true); // initial only
 
-  // 4. Reauth / inactivity setup (already migrated)
+  // 4. Reauth / inactivity setup
   if (window.__reauth?.initReauthModal) {
     await window.__reauth.initReauthModal();
   }
@@ -3297,47 +3309,65 @@ async function onDashboardLoad() {
 
   // 5. Boot-time reauth check (Supabase direct)
   const lastActive = Number(localStorage.getItem('lastActive')) || 0;
-  const IDLE_TIME = 30 * 60 * 1000; // 30 min
+  const IDLE_TIME = 30 * 60 * 1000;
   if (Date.now() - lastActive > IDLE_TIME) {
-    const reauthStatus = await checkReauthLock();
-    if (reauthStatus.required) {
-      // Show modal immediately
-      showReauthModalLocal?.({ fromStorageObj: { reason: reauthStatus.reason } });
+    let reauthCheck = null;
+    try {
+      reauthCheck = await checkReauthLock();
+    } catch (e) {
+      console.warn('boot-time reauth check failed', e);
+    }
+
+    if (reauthCheck?.required) {
+      showReauthModalLocal?.({ fromStorageObj: { reason: reauthCheck.reason } });
     } else {
       resetIdleTimer?.();
     }
   }
 
-  // 6. Idle detection + other init
+  // 6. Idle detection
   if (window.__idleDetection) {
     await window.__idleDetection.setup?.();
   }
 
-  // 7. SW + manifest check (unchanged)
-  registerSW?.();
-  checkForUpdates?.();
+  // 7. SW + manifest check (safe call)
+  if (typeof registerSW === 'function') {
+    registerSW();
+  } else {
+    console.debug('[SW] registerSW not defined – skipping');
+  }
 
-  // 8. Initial broadcast fetch (keep until full realtime migration)
+  if (typeof checkForUpdates === 'function') {
+    checkForUpdates();
+  }
+
+  // 8. Initial broadcast fetch
   try {
     await fetchActiveBroadcasts?.();
   } catch (err) {
     console.warn('[BCAST] Initial fetch failed', err);
   }
 
-  // 9. React to successful reauth (unchanged)
+  // 9. Reauth success listener (unchanged)
   (function(){
     let __fg_reauth_timer = null;
     const __fg_reauth_debounce_ms = 600;
+    const MIN_REAUTH_POLL_MS = 700;
+    let __fg_last_reauth_poll = 0;
 
     window.addEventListener('fg:reauth-success', (ev) => {
       try {
-        if (typeof hideTinyReauthNotice === 'function') {
-          hideTinyReauthNotice();
-        }
+        hideTinyReauthNotice?.();
 
         if (__fg_reauth_timer) clearTimeout(__fg_reauth_timer);
         __fg_reauth_timer = setTimeout(() => {
           __fg_reauth_timer = null;
+          const now = Date.now();
+          if (now - __fg_last_reauth_poll < MIN_REAUTH_POLL_MS) {
+            console.debug('fg:reauth-success: recent poll skipped');
+            return;
+          }
+          __fg_last_reauth_poll = now;
           pollStatus?.();
         }, __fg_reauth_debounce_ms);
       } catch (err) {
@@ -3346,9 +3376,15 @@ async function onDashboardLoad() {
     }, { passive: true });
   })();
 
-  // 10. Final UI + state sync
+  // 10. Final UI sync
   await renderDashboardCardsFromState?.({ preferServer: true });
   initializeSmartAccountPinButton?.();
+
+  // Post-login re-sync
+  if (localStorage.getItem('justLoggedIn') === 'true') {
+    localStorage.removeItem('justLoggedIn');
+    setupInactivity?.();
+  }
 }
 
 
@@ -3969,7 +4005,7 @@ async function loadUserProfile(noCache = false) {
       .select(`
         uid, email, username, fullName, phoneNumber, address, profilePicture,
         fullNameEdited, lastUsernameUpdate, pin,
-        user_wallets!inner(balance, currency, seq)
+        user_wallets!inner(balance, currency)
       `)
       .eq('uid', uid)
       .single();
