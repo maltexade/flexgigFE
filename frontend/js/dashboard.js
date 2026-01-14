@@ -3909,14 +3909,14 @@ var __fg_pin_resetPinBtn = null;
 
 
 
-// Lazy loadUserProfile – now direct Supabase + realtime cache refresh
+// Lazy loadUserProfile – Supabase direct + backend fallback for uid
 async function loadUserProfile(noCache = false) {
   const now = Date.now();
   const cached = localStorage.getItem('fg_cached_profile');
   const lastLoad = Number(localStorage.getItem('fg_profile_last_load') || 0);
 
   // Use cache if fresh and not forced
-  if (!noCache && cached && now - lastLoad < 5 * 60 * 1000) { // 5 min TTL
+  if (!noCache && cached && now - lastLoad < 5 * 60 * 1000) {
     try {
       const parsed = JSON.parse(cached);
       console.debug('[PROFILE] Using fresh cache');
@@ -3927,28 +3927,43 @@ async function loadUserProfile(noCache = false) {
   }
 
   try {
-    // Get current uid (temporary bridge — we can get from Supabase auth later)
     let uid;
+
+    // Primary: Try Supabase auth (preferred once we sync sessions)
     try {
       const { data: { user } } = await supabaseClient.auth.getUser();
-      uid = user?.id;
+      if (user?.id) {
+        uid = user.id;
+        console.log('[PROFILE] UID from Supabase auth:', uid);
+      }
     } catch (e) {
-      console.warn('[PROFILE] Supabase auth getUser failed, using fallback');
-      // Fallback to /api/session if needed (remove later)
+      console.debug('[PROFILE] Supabase getUser failed, using backend fallback');
+    }
+
+    // Fallback: Get uid from your working /api/session
+    if (!uid) {
       const res = await fetch(window.__SEC_API_BASE + '/api/session', {
         credentials: 'include',
         headers: { 'Cache-Control': 'no-cache' }
       });
-      if (!res.ok) throw new Error('Session fetch failed');
+
+      if (!res.ok) {
+        throw new Error(`Session fetch failed: ${res.status}`);
+      }
+
       const data = await res.json();
       uid = data?.user?.uid;
+
+      if (!uid) {
+        throw new Error('No uid in /api/session response');
+      }
+
+      console.log('[PROFILE] UID from backend fallback:', uid);
     }
 
-    if (!uid) throw new Error('No uid available');
+    // Now query Supabase with the uid we trust
+    console.log('[PROFILE] Querying Supabase for uid:', uid);
 
-    console.log('[PROFILE] Loading profile for uid:', uid);
-
-    // Direct Supabase query – users + wallet join
     const { data: profile, error } = await supabaseClient
       .from('users')
       .select(`
@@ -3961,7 +3976,7 @@ async function loadUserProfile(noCache = false) {
 
     if (error) throw error;
 
-    // Normalize same as your original
+    // Normalize (same as your original)
     const normalized = {
       uid: profile.uid,
       email: profile.email,
@@ -3972,7 +3987,7 @@ async function loadUserProfile(noCache = false) {
       address: profile.address || null,
       profilePicture: profile.profilePicture || '',
       hasPin: !!profile.pin,
-      hasBiometrics: false, // fetch separately if needed
+      hasBiometrics: false, // Add query if you have authenticators table
       profileCompleted: !!(profile.username && profile.fullName && profile.phoneNumber),
       wallet_balance: Number(profile.user_wallets?.balance || 0),
       wallet_currency: profile.user_wallets?.currency || 'NGN',
@@ -3980,22 +3995,22 @@ async function loadUserProfile(noCache = false) {
       cachedAt: now
     };
 
-    // Cache it
+    // Cache
     localStorage.setItem('fg_cached_profile', JSON.stringify(normalized));
     localStorage.setItem('fg_profile_last_load', String(now));
 
-    // Update localStorage keys (keep your existing logic)
+    // Update your localStorage keys (your original logic)
     if (normalized.username) localStorage.setItem('username', normalized.username);
     if (normalized.phoneNumber) localStorage.setItem('phoneNumber', normalized.phoneNumber);
     if (normalized.address) localStorage.setItem('address', normalized.address);
     if (normalized.profilePicture) localStorage.setItem('profilePicture', normalized.profilePicture);
     if (normalized.fullName) {
       localStorage.setItem('fullName', normalized.fullName);
-      localStorage.setItem('fullNameEdited', 'false'); // adjust if needed
+      localStorage.setItem('fullNameEdited', normalized.fullNameEdited ? 'true' : 'false');
       localStorage.setItem('firstName', normalized.firstName);
     }
 
-    // Update DOM (your existing diff logic)
+    // DOM updates (your diff logic)
     const firstnameEl = document.getElementById('firstname');
     const avatarEl = document.getElementById('avatar');
     if (firstnameEl && avatarEl) {
@@ -4014,12 +4029,12 @@ async function loadUserProfile(noCache = false) {
       }
     }
 
-    console.log('[PROFILE] Loaded from Supabase:', normalized.firstName, `₦${normalized.wallet_balance.toLocaleString()}`);
+    console.log('[PROFILE] Loaded successfully:', normalized.firstName, `₦${normalized.wallet_balance.toLocaleString()}`);
 
     return normalized;
   } catch (err) {
-    console.error('[PROFILE] Load failed:', err);
-    // Fallback to cache
+    console.error('[PROFILE] Load failed:', err.message || err);
+    // Fallback to cache if available
     if (cached) {
       try {
         return JSON.parse(cached);
