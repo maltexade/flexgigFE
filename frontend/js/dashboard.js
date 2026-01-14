@@ -289,21 +289,28 @@ async function requireReauthLock(reason = 'soft_idle_timeout') {
 }
 
 async function checkReauthLock() {
-  const { data: { user } } = await supabaseClient.auth.getUser();
-  if (!user) return { required: false };
-
-  const uid = user.id;
+  console.log('[REAUTH] checkReauthLock called');
 
   try {
+    const res = await fetch(window.__SEC_API_BASE + '/api/session', {
+      credentials: 'include',
+      headers: { 'Cache-Control': 'no-cache' }
+    });
+
+    if (!res.ok) return { required: false };
+
+    const sessionData = await res.json();
+    const uid = sessionData?.user?.uid;
+
+    if (!uid) return { required: false };
+
     const { data, error } = await supabaseClient
       .from('reauth_locks')
       .select('reason, expires_at')
       .eq('user_uid', uid)
       .maybeSingle();
 
-    if (error) throw error;
-
-    if (!data) {
+    if (error || !data) {
       localStorage.removeItem('fg_reauth_required_v1');
       return { required: false };
     }
@@ -323,36 +330,43 @@ async function checkReauthLock() {
       ts: Date.now()
     }));
 
-    return {
-      required: true,
-      reason: data.reason || 'timeout',
-      expiresAt: data.expires_at
-    };
+    return { required: true, reason: data.reason, expiresAt: data.expires_at };
   } catch (err) {
-    console.error('[REAUTH] Supabase check failed:', err);
+    console.error('[REAUTH] check failed:', err);
     return { required: false };
   }
 }
 
 async function clearReauthLock() {
-  const { data: { user } } = await supabaseClient.auth.getUser();
-  if (!user) return false;
-
-  const uid = user.id;
+  console.log('[REAUTH] clearReauthLock called');
 
   try {
+    const res = await fetch(window.__SEC_API_BASE + '/api/session', {
+      credentials: 'include'
+    });
+
+    if (!res.ok) return false;
+
+    const sessionData = await res.json();
+    const uid = sessionData?.user?.uid;
+
+    if (!uid) return false;
+
     const { error } = await supabaseClient
       .from('reauth_locks')
       .delete()
       .eq('user_uid', uid);
 
-    if (error) throw error;
+    if (error) {
+      console.error('[REAUTH] clear error:', error);
+      return false;
+    }
 
-    console.log('[REAUTH] Lock cleared in Supabase:', uid);
     localStorage.removeItem('fg_reauth_required_v1');
+    console.log('[REAUTH] Lock cleared for uid:', uid);
     return true;
   } catch (err) {
-    console.error('[REAUTH] Supabase clear failed:', err);
+    console.error('[REAUTH] clear crashed:', err);
     return false;
   }
 }
