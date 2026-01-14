@@ -2668,185 +2668,42 @@ window.updateAllBalances = function(newBalance, skipAnimation = false) {
 
 window.applyBalanceVisibility = applyBalanceVisibility;
 // ===============================================================
-//  UNIFIED REAL-TIME BALANCE SYSTEM (Mobile-Safe Version)
-//  - Guaranteed to work on iOS, Android, Desktop
-//  - WebSocket + Polling Fallback
-//  - Global "balance_update" event
-//  - Success Toast + Modal Close
-//  - ON-SCREEN DEBUG LOG (for mobile debugging)
+//  UNIFIED REAL-TIME BALANCE SYSTEM – Supabase Realtime + WS
+//  - Polling REMOVED – data savings
+//  - WebSocket kept for legacy
+//  - Supabase realtime subscription for wallet_balance
+//  - Cache + visibility handling
+//  - Works with existing debug console
 // ===============================================================
 
 (function () {
-  // ========== DEBUG LOG TOGGLE ==========
-  const ENABLE_DEBUG_LOG = true;  // KEEP THIS TRUE - keeps polling/WS alive
-  const SHOW_DEBUG_UI = false;    // Set to true only when YOU need to debug
-  // ======================================
-
   const uid = window.__USER_UID || localStorage.getItem('userId');
-  if (!uid) return;
-
-  // Initialize on-screen debug log
-  let debugLog = null;
-  let debugLogVisible = false;
-
-  function initDebugLog() {
-    if (!ENABLE_DEBUG_LOG || !SHOW_DEBUG_UI) return; // Only create UI if SHOW_DEBUG_UI is true
-
-    // Create log container
-    debugLog = document.createElement('div');
-    debugLog.id = 'balance-debug-log';
-    debugLog.style.cssText = `
-      position: fixed;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      max-height: 40vh;
-      background: rgba(0, 0, 0, 0.95);
-      color: #0f0;
-      font-family: monospace;
-      font-size: 11px;
-      padding: 10px;
-      overflow-y: auto;
-      z-index: 999999;
-      border-top: 2px solid #0f0;
-      display: none;
-    `;
-
-    // Create toggle button
-    const toggleBtn = document.createElement('button');
-    toggleBtn.textContent = '🐛 LOG';
-    toggleBtn.style.cssText = `
-      position: fixed;
-      bottom: 10px;
-      right: 10px;
-      background: rgba(0, 255, 0, 0.2);
-      color: #0f0;
-      border: 2px solid #0f0;
-      border-radius: 50%;
-      width: 50px;
-      height: 50px;
-      font-size: 18px;
-      z-index: 9999999;
-      cursor: pointer;
-      box-shadow: 0 4px 12px rgba(0, 255, 0, 0.3);
-    `;
-
-    toggleBtn.onclick = () => {
-      debugLogVisible = !debugLogVisible;
-      debugLog.style.display = debugLogVisible ? 'block' : 'none';
-      toggleBtn.style.background = debugLogVisible ? 'rgba(0, 255, 0, 0.4)' : 'rgba(0, 255, 0, 0.2)';
-    };
-
-    // Create copy button inside log
-    const copyBtn = document.createElement('button');
-    copyBtn.textContent = '📋 COPY ALL';
-    copyBtn.style.cssText = `
-      position: sticky;
-      top: 0;
-      background: #0f0;
-      color: black;
-      border: none;
-      padding: 5px 10px;
-      margin-bottom: 10px;
-      cursor: pointer;
-      font-weight: bold;
-      border-radius: 4px;
-      width: 100%;
-    `;
-    copyBtn.onclick = () => {
-      const text = Array.from(debugLog.querySelectorAll('.log-entry'))
-        .map(el => el.textContent)
-        .join('\n');
-      
-      navigator.clipboard.writeText(text).then(() => {
-        copyBtn.textContent = '✓ COPIED!';
-        setTimeout(() => { copyBtn.textContent = '📋 COPY ALL'; }, 2000);
-      }).catch(() => {
-        // Fallback for older browsers
-        const textarea = document.createElement('textarea');
-        textarea.value = text;
-        document.body.appendChild(textarea);
-        textarea.select();
-        document.execCommand('copy');
-        document.body.removeChild(textarea);
-        copyBtn.textContent = '✓ COPIED!';
-        setTimeout(() => { copyBtn.textContent = '📋 COPY ALL'; }, 2000);
-      });
-    };
-
-    debugLog.appendChild(copyBtn);
-    document.body.appendChild(debugLog);
-    document.body.appendChild(toggleBtn);
-
-    log('🟢 Debug log initialized');
+  if (!uid) {
+    console.warn('[BALANCE] No UID – skipping realtime setup');
+    return;
   }
-
-  function log(message, type = 'info') {
-    // Always log to console for debugging
-    console.log(`[Balance Debug] ${message}`);
-    
-    // Only show on-screen UI if SHOW_DEBUG_UI is enabled
-    if (!SHOW_DEBUG_UI || !debugLog) return;
-
-    const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 });
-    const colors = {
-      info: '#0f0',
-      warn: '#ff0',
-      error: '#f00',
-      success: '#0ff'
-    };
-
-    const entry = document.createElement('div');
-    entry.className = 'log-entry';
-    entry.style.cssText = `
-      color: ${colors[type] || colors.info};
-      margin-bottom: 3px;
-      padding: 2px 0;
-      border-bottom: 1px solid rgba(0, 255, 0, 0.1);
-    `;
-    entry.textContent = `[${timestamp}] ${message}`;
-
-    debugLog.appendChild(entry);
-
-    // Auto-scroll to bottom
-    debugLog.scrollTop = debugLog.scrollHeight;
-
-    // Keep only last 100 entries
-    const entries = debugLog.querySelectorAll('.log-entry');
-    if (entries.length > 100) {
-      entries[0].remove();
-    }
-  }
-
-  // Expose log function globally
-  window.__balanceLog = log;
-
-  // Initialize log UI only if SHOW_DEBUG_UI is enabled
-  if (ENABLE_DEBUG_LOG && SHOW_DEBUG_UI) {
-    setTimeout(initDebugLog, 500);
-  }
-  
-  // Always log that system is starting
-  log('🚀 Balance system initializing...', 'info');
 
   let ws = null;
-  let pollTimer = null;
+  let supabaseSubscription = null;
   let lastKnownBalance = null;
-  let hasProcessedPayment = false; // prevent double toast/close
+  let hasProcessedPayment = false;
 
-  // Central handler — called from WS, polling, AND page visibility
+  // Reuse your existing log if debug console is enabled
+  const log = window.__balanceLog || console.log.bind(console, '[Balance]');
+
+  // Central handler – same as before
   function handleNewBalance(newBalance, source = 'unknown') {
     newBalance = Number(newBalance) || 0;
 
     if (lastKnownBalance === null) {
       lastKnownBalance = newBalance;
-      window.updateAllBalances(newBalance, true);
+      window.updateAllBalances?.(newBalance, true);
       return;
     }
 
     if (newBalance <= lastKnownBalance) {
       lastKnownBalance = newBalance;
-      window.updateAllBalances(newBalance);
+      window.updateAllBalances?.(newBalance);
       return;
     }
 
@@ -2855,252 +2712,127 @@ window.applyBalanceVisibility = applyBalanceVisibility;
 
     log(`💰 +₦${amountAdded.toLocaleString()} (from ${source}) → ₦${newBalance.toLocaleString()}`, 'success');
 
-    // Update UI
-    window.updateAllBalances(newBalance);
+    window.updateAllBalances?.(newBalance);
 
-    // ONLY if payment just arrived → close modal + toast
     if (!hasProcessedPayment && amountAdded > 0) {
       hasProcessedPayment = true;
 
-      // Clear local pending tx storage immediately so UI won't resurrect old tx
       try {
-        if (typeof removePendingTxFromStorage === 'function') {
-          removePendingTxFromStorage();
-          log('✓ Cleared pending tx storage', 'success');
-        } else {
-          // defensive: try to remove directly if helper not present
-          localStorage.removeItem('flexgig.pending_fund_tx');
-          log('✓ Cleared pending tx storage (direct)', 'success');
-        }
-      } catch (e) {
-        log(`⚠️ Failed to clear pending tx: ${e.message}`, 'warn');
-      }
+        localStorage.removeItem('flexgig.pending_fund_tx');
+        log('✓ Cleared pending tx storage', 'success');
+      } catch (e) {}
 
-      // Dispatch event (for any other listeners)
-      window.dispatchEvent(new CustomEvent('balance_update', {
+      window.dispatchEvent?.(new CustomEvent('balance_update', {
         detail: { type: 'balance_update', balance: newBalance, amount: amountAdded }
       }));
 
-      // Close modal SAFELY via ModalManager with correct ID
       setTimeout(() => {
-        if (window.ModalManager?.closeModal) {
-          window.ModalManager.closeModal('addMoneyModal');
-          log('✓ Modal closed via ModalManager', 'success');
-        } else {
-          log('⚠️ ModalManager not available', 'warn');
-        }
+        window.ModalManager?.closeModal?.('addMoneyModal');
+        log('✓ Modal closed', 'success');
       }, 300);
 
-      // Re-open the add-money content (this will now NOT find the old tx in localStorage)
-      window.openAddMoneyModalContent();
+      window.openAddMoneyModalContent?.();
 
-      // Show toast
-      if (typeof window.notify === 'function') {
-        window.notify(`₦${amountAdded.toLocaleString()} received!`, 'success');
-      } else {
-        // Fallback beautiful toast
-        const t = document.createElement('div');
-        t.textContent = `✓ ₦${amountAdded.toLocaleString()} credited!`;
-        Object.assign(t.style, {
-          position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)',
-          background: '#10b981', color: 'white', padding: '16px 24px', borderRadius: '16px',
-          zIndex: 999999, fontWeight: 'bold', boxShadow: '0 10px 30px rgba(0,0,0,0.3)'
-        });
-        document.body.appendChild(t);
-        setTimeout(() => t.remove(), 4000);
-      }
+      window.notify?.(`₦${amountAdded.toLocaleString()} received!`, 'success');
 
-      // Allow next payment after 30s
       setTimeout(() => { hasProcessedPayment = false; }, 30000);
     }
   }
 
-  window.handleNewBalance = window.handleNewBalance || handleNewBalance;
+  window.handleNewBalance = handleNewBalance;
 
-  // AGGRESSIVE Polling fallback (mobile-first: checks every 3s)
-  async function startPolling() {
-    if (pollTimer) clearTimeout(pollTimer);
+  // WebSocket (kept as fallback/legacy)
+  function connectWS() {
+    if (ws?.readyState === WebSocket.OPEN) return;
 
-    const poll = async () => {
-      try {
-        log('🔄 Polling balance...', 'info');
-        // REMOVED light=true — we need the full user object with wallet_balance
-        const res = await fetch(`${window.__SEC_API_BASE}/api/session?t=${Date.now()}`, {
-          credentials: 'include',
-          cache: 'no-store',
-          headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' }
-        });
-        if (res.ok) {
-          const json = await res.json();
-          log(`📦 Poll response: ${JSON.stringify(json).substring(0, 200)}...`, 'info');
-          const bal = json.user?.wallet_balance ?? json.wallet_balance ?? json.balance;
-          log(`✓ Poll success: ₦${bal?.toLocaleString() || 'N/A'} (from ${json.user?.wallet_balance !== undefined ? 'user.wallet_balance' : json.wallet_balance !== undefined ? 'wallet_balance' : json.balance !== undefined ? 'balance' : 'NONE'})`, 'success');
-          if (bal !== undefined && bal !== lastKnownBalance) {
-            handleNewBalance(bal, 'polling');
-          }
+    log('🔌 WS: Connecting...', 'info');
+    ws = new WebSocket('wss://api.flexgig.com.ng/ws/wallet');
+
+    ws.onopen = () => {
+      log('✅ WS: Connected – subscribing', 'success');
+      ws.send(JSON.stringify({ type: 'subscribe', user_uid: uid }));
+
+      // Heartbeat every 30s (less aggressive)
+      const hb = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'ping' }));
+          log('💓 WS: Heartbeat', 'info');
         } else {
-          log(`⚠️ Poll failed: ${res.status}`, 'warn');
+          clearInterval(hb);
         }
-      } catch (e) { 
-        log(`❌ Poll error: ${e.message}`, 'error');
-      }
-
-      // Termux-optimized: poll every 15s (gentle on device + still responsive)
-      pollTimer = setTimeout(poll, 15000);
+      }, 30000);
     };
-    poll();
+
+    ws.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.type === 'balance_update' && data.balance !== undefined) {
+          log(`💰 WS: Balance update: ₦${data.balance.toLocaleString()}`, 'success');
+          handleNewBalance(data.balance, 'websocket');
+        }
+      } catch (err) {
+        log(`❌ WS parse error: ${err.message}`, 'error');
+      }
+    };
+
+    ws.onclose = () => {
+      log('🔴 WS: Closed – reconnecting in 5s', 'warn');
+      setTimeout(connectWS, 5000);
+    };
   }
 
-  // WebSocket (best effort)
-  function connectWS() {
+  // Supabase Realtime Subscription (main data saver)
+  function setupSupabaseRealtime() {
+    if (supabaseSubscription) return;
+
+    log('🟢 Setting up Supabase realtime for wallet', 'success');
+
+    supabaseSubscription = supabaseClient
+      .channel('wallet-balance')
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'user_wallets',
+        filter: `user_uid=eq.${uid}`
+      }, (payload) => {
+        const newBalance = Number(payload.new?.balance || 0);
+        log(`💰 Supabase realtime: Balance update ₦${newBalance.toLocaleString()}`, 'success');
+        handleNewBalance(newBalance, 'supabase-realtime');
+      })
+      .subscribe((status) => {
+        log(`[REALTIME] Subscription status: ${status}`, status === 'SUBSCRIBED' ? 'success' : 'warn');
+      });
+  }
+
+  // One-time fetch on load / visibility
+  async function fetchBalanceOnce() {
+    log('🔄 Fetching balance once...', 'info');
     try {
-      if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
-        log('⚠️ WS already connecting/open', 'warn');
-        return; // Already connecting/open
+      const profile = await loadUserProfile?.(true); // If you have this from earlier
+      if (profile?.wallet_balance !== undefined) {
+        handleNewBalance(profile.wallet_balance, 'initial-fetch');
       }
-
-      log('🔌 WS: Connecting to wss://api.flexgig.com.ng/ws/wallet...', 'info');
-      ws = new WebSocket('wss://api.flexgig.com.ng/ws/wallet');
-
-      let heartbeatInterval = null;
-
-      // Update global reference every time we create a new WS
-      window.__current_ws = ws;
-      log('✓ WS instance exposed to window.__current_ws', 'success');
-
-      ws.onopen = () => {
-        log('✅ WS: Connected! Subscribing...', 'success');
-        ws.send(JSON.stringify({ type: 'subscribe', user_uid: uid }));
-        log(`📤 WS: Sent subscribe for user ${uid}`, 'info');
-
-        // AGGRESSIVE heartbeat: every 15s to fight mobile connection drops
-        clearInterval(heartbeatInterval);
-        heartbeatInterval = setInterval(() => {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'ping' }));
-            log('💓 WS: Heartbeat sent', 'info');
-          } else {
-            log('❌ WS: Connection dead, attempting reconnect...', 'error');
-            clearInterval(heartbeatInterval);
-            connectWS();
-          }
-        }, 15000);
-
-        if (pollTimer) clearTimeout(pollTimer);
-      };
-
-      ws.onmessage = (e) => {
-        try {
-          const data = JSON.parse(e.data);
-          log(`📨 WS: Received message: ${JSON.stringify(data)}`, 'info');
-
-          if (data.type === 'balance_update' && data.balance !== undefined) {
-            log(`💰 WS: Balance update received: ₦${data.balance.toLocaleString()}`, 'success');
-            handleNewBalance(data.balance, 'websocket');
-          }
-
-          // Dispatch transaction if present
-          let txDetail = data.transaction || (data.type === 'transaction' ? data : null);
-          if (txDetail) {
-            log(`📝 WS: Transaction update dispatched`, 'info');
-            document.dispatchEvent(new CustomEvent('transaction_update', { detail: txDetail }));
-          }
-        } catch (err) {
-          log(`❌ WS: Parse error: ${err.message}`, 'error');
-        }
-      };
-
-      ws.onerror = (e) => {
-        log(`❌ WS: Error occurred`, 'error');
-      };
-
-      ws.onclose = (e) => {
-        log(`🔴 WS: Closed (code: ${e.code}, reason: ${e.reason}) — reconnecting in 1s`, 'warn');
-        clearInterval(heartbeatInterval);
-
-        // IMMEDIATE reconnect for mobile + ensure polling continues
-        setTimeout(() => {
-          connectWS();
-          startPolling(); // restart polling if it died
-        }, 1000);
-      };
-
     } catch (err) {
-      log(`❌ WS: Failed to create: ${err.message}`, 'error');
-      setTimeout(connectWS, 3000);
+      log(`❌ Balance fetch failed: ${err.message}`, 'error');
     }
   }
 
-  // CRITICAL: Re-check balance when user returns to app (iOS/Android fix)
+  // Visibility handling (mobile resume)
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
-      log('👁️ Page visible → force balance check + WS reconnect', 'info');
-      
-      // Immediate balance check
-      fetch(`${window.__SEC_API_BASE}/api/session?t=${Date.now()}`, { 
-        credentials: 'include',
-        cache: 'no-store',
-        headers: { 'Cache-Control': 'no-cache' }
-      })
-        .then(r => r.ok ? r.json() : null)
-        .then(j => {
-          if (j?.user?.wallet_balance !== undefined) {
-            log(`✓ Visibility check: ₦${j.user.wallet_balance.toLocaleString()}`, 'success');
-            handleNewBalance(j.user.wallet_balance, 'visibility');
-          }
-        })
-        .catch(e => log(`❌ Visibility check failed: ${e.message}`, 'error'));
-
-      // Force WebSocket reconnect if dead
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        log('🔌 WS dead, reconnecting...', 'warn');
-        connectWS();
-      }
-
-      // Restart polling
-      startPolling();
+      log('👁️ Visible → force balance check', 'info');
+      fetchBalanceOnce();
+      if (!ws || ws.readyState !== WebSocket.OPEN) connectWS();
     }
-  });
-
-  // Also on resume, focus, pageshow (covers all mobile scenarios)
-  ['resume', 'focus', 'pageshow'].forEach(event => {
-    window.addEventListener(event, () => {
-      log(`🔄 [${event}] Forcing balance check + WS reconnect`, 'info');
-      
-      // Triple guarantee: fetch + WS + polling
-      fetch(`${window.__SEC_API_BASE}/api/session?t=${Date.now()}`, { 
-        credentials: 'include',
-        cache: 'no-store' 
-      })
-        .then(r => r.ok ? r.json() : null)
-        .then(j => {
-          if (j?.user?.wallet_balance !== undefined) {
-            log(`✓ [${event}] Balance: ₦${j.user.wallet_balance.toLocaleString()}`, 'success');
-            handleNewBalance(j.user.wallet_balance, event);
-          }
-        })
-        .catch(e => log(`❌ [${event}] Check failed: ${e.message}`, 'error'));
-
-      connectWS();
-      startPolling();
-    });
   });
 
   // Start everything
   setTimeout(() => {
-    log('🚀 Starting balance monitoring system...', 'info');
+    log('🚀 Balance system starting (no polling)...', 'success');
     connectWS();
-    startPolling(); // run polling always on mobile
+    setupSupabaseRealtime();
+    fetchBalanceOnce();
   }, 800);
-
-  // Initial load
-  getSession().then(s => {
-    if (s?.user?.wallet_balance !== undefined) {
-      log(`💰 Initial balance: ₦${s.user.wallet_balance.toLocaleString()}`, 'success');
-      handleNewBalance(s.user.wallet_balance, 'initial');
-    }
-  }).catch(e => log(`❌ Initial session failed: ${e.message}`, 'error'));
-
 })();
 
 // Run observer only on dashboard
@@ -3513,15 +3245,13 @@ async function handleBioToggle(e) {
 // }
 
 
-// After getSession succeeds
-// After getSession succeeds (now cache-first)
 async function onDashboardLoad() {
-  // Instant cache render first
+  // 1. Instant cache render first (your original logic)
   const cachedUserData = localStorage.getItem('userData');
   if (cachedUserData) {
     try {
       const parsed = JSON.parse(cachedUserData);
-      if (Date.now() - parsed.cachedAt < 300000) {
+      if (Date.now() - parsed.cachedAt < 300000) { // 5 min TTL
         const firstName = parsed.fullName?.split(' ')[0] || 'User';
         const domReady = await waitForDomReady(); // Reuse your func
         if (domReady) applySessionToDOM(parsed, firstName);
@@ -3529,157 +3259,86 @@ async function onDashboardLoad() {
     } catch (e) { /* ignore */ }
   }
 
-  // --- SINGLE getSession() call (capture result) ---
-  let session = null;
+  // 2. Load full profile + balance from Supabase (replaces all /api/session calls)
+  let profile = null;
   try {
-    session = await getSession(); // <-- only one call in the entire function
-  } catch (err) {
-    console.warn('[onDashboardLoad] getSession() failed:', err);
-    session = null;
-  }
-  setupBroadcastSubscription();
+    profile = await loadUserProfile(true); // force fresh from Supabase
+    console.log('[BOOT] Profile loaded from Supabase:', profile.firstName, profile.wallet_balance);
 
-
-  // 🔥 ADD THESE TWO LINES (after the single getSession)
-  await renderDashboardCardsFromState({ preferServer: true });
-
-  initializeSmartAccountPinButton();
-
-  // fetch active broadcasts (separate; doesn't call getSession)
-  try {
-    const broadcasts = await fetchActiveBroadcasts(); // this already shows banner & sets active_broadcast_id
-    console.debug('[BCAST] fetchActiveBroadcasts returned', broadcasts.length);
-  } catch (err) {
-    console.warn('[BCAST] fetchActiveBroadcasts failed at login', err);
-  }
-
-  // Securely sync PIN/bio flags to storage on load
-  try {
-    // 🔹 Force fresh fetch for flags (bypass 5min cache — add Cache-Control: no-cache to bust browser cache)
-    const freshRes = await fetch(`${window.__SEC_API_BASE}/api/session`, {
-      method: 'GET',
-      credentials: 'include',
-      headers: {
-        'Accept': 'application/json',
-        'Cache-Control': 'no-cache'  // Ensure fresh server data
-      }
-    });
-    if (!freshRes.ok) throw new Error(`Fresh session fetch failed: ${freshRes.status}`);
-    const freshPayload = await freshRes.json();
-    const freshSession = { user: freshPayload.user || {} };  // Mimic getSession structure
-
-    // 🔹 DEBUG: Log raw fresh session for bio/pin (remove after fix)
-    console.log('[DEBUG-SYNC-FRESH] Raw fresh session.user:', {
-      hasPin: freshSession?.user?.hasPin,
-      hasBiometrics: freshSession?.user?.hasBiometrics,
-      uid: freshSession?.user?.uid,
-      email: freshSession?.user?.email
-    });
-
-    const hasPin = freshSession?.user?.hasPin || localStorage.getItem('hasPin') === 'true' || false;
+    // Sync PIN/bio flags directly from profile (no extra fetch)
+    const hasPin = profile.hasPin || false;
     localStorage.setItem('hasPin', hasPin ? 'true' : 'false');
 
-    // 🔹 Align biometrics with fresh server fallback (uses backend's hasBiometrics count)
-    const biometricsEnabled = freshSession?.user?.hasBiometrics || localStorage.getItem('biometricsEnabled') === 'true' || false;
+    const biometricsEnabled = profile.hasBiometrics || localStorage.getItem('biometricsEnabled') === 'true' || false;
     localStorage.setItem('biometricsEnabled', biometricsEnabled ? 'true' : 'false');
 
-    // 🔹 DEBUG: Log post-sync localStorage (remove after fix)
-    console.log('[DEBUG-SYNC-FRESH] Post-sync localStorage:', {
-      hasPin: localStorage.getItem('hasPin'),
-      biometricsEnabled: localStorage.getItem('biometricsEnabled'),
-      credentialId: localStorage.getItem('credentialId')
-    });
-
-    if (biometricsEnabled) {
-      const storedLogin = localStorage.getItem('biometricForLogin');
-      const storedTx = localStorage.getItem('biometricForTx');
-
-      if (storedLogin === null) localStorage.setItem('biometricForLogin', 'true');
-      if (storedTx === null) localStorage.setItem('biometricForTx', 'true');
-
-      console.log('[DEBUG-SYNC] Sub-flags preserved/defaulted:', {
-        bioForLogin: localStorage.getItem('biometricForLogin') === 'true',
-        bioForTx: localStorage.getItem('biometricForTx') === 'true'
-      });
+    // Prefetch bio if enabled
+    if (biometricsEnabled && localStorage.getItem('credentialId')) {
+      prefetchAuthOptions?.();
     }
-
-    // If bio enabled and credentialId exists, prefetch immediately
-    if (localStorage.getItem('biometricsEnabled') === 'true' && localStorage.getItem('credentialId')) {
-      prefetchAuthOptions();
-    }
-    await restoreBiometricUI();
+    await restoreBiometricUI?.();
 
   } catch (err) {
-    console.warn('[onDashboardLoad] Flag sync error', err);
-    // Fallback: Use the single-session result captured earlier (if any),
-    // otherwise leave localStorage as-is or apply conservative defaults.
-    try {
-      const useSession = session; // reuse single call result (may be null)
-      const hasPin = useSession?.user?.hasPin || localStorage.getItem('hasPin') === 'true' || false;
-      localStorage.setItem('hasPin', hasPin ? 'true' : 'false');
+    console.warn('[BOOT] Profile load failed:', err);
+    // Fallback to localStorage values
+  }
 
-      const biometricsEnabled = useSession?.user?.hasBiometrics || localStorage.getItem('biometricsEnabled') === 'true' || false;
-      localStorage.setItem('biometricsEnabled', biometricsEnabled ? 'true' : 'false');
+  // 3. Setup broadcast realtime (already direct Supabase)
+  setupBroadcastRealtime?.();
+  pollStatus?.(true); // initial broadcast fetch
 
-      // When biometrics not enabled, don't leave children in an indeterminate state:
-      if (!biometricsEnabled) {
-        localStorage.setItem('biometricForLogin', 'false');
-        localStorage.setItem('biometricForTx', 'false');
-      }
+  // 4. Reauth / inactivity setup (already migrated)
+  if (window.__reauth?.initReauthModal) {
+    await window.__reauth.initReauthModal();
+  }
+  if (window.__reauth?.setupInactivity) {
+    window.__reauth.setupInactivity();
+  }
 
-      if (biometricsEnabled && localStorage.getItem('credentialId')) {
-        prefetchAuthOptions();
-      }
-      await restoreBiometricUI();
-    } catch (fallbackErr) {
-      console.error('[onDashboardLoad] Fallback sync failed too', fallbackErr);
+  // 5. Boot-time reauth check (Supabase direct)
+  const lastActive = Number(localStorage.getItem('lastActive')) || 0;
+  const IDLE_TIME = 30 * 60 * 1000; // 30 min
+  if (Date.now() - lastActive > IDLE_TIME) {
+    const reauthStatus = await checkReauthLock();
+    if (reauthStatus.required) {
+      // Show modal immediately
+      showReauthModalLocal?.({ fromStorageObj: { reason: reauthStatus.reason } });
+    } else {
+      resetIdleTimer?.();
     }
   }
 
-
-  if (window.__reauth && typeof window.__reauth.initReauthModal === 'function') {
-    await window.__reauth.initReauthModal();
-  } else {
-    console.warn('initReauthModal not available - skipping');
-  }
-  if (window.__reauth && typeof window.__reauth.setupInactivity === 'function') {
-    window.__reauth.setupInactivity();
-  } else {
-    console.warn('setupInactivity not available - skipping');
+  // 6. Idle detection + other init
+  if (window.__idleDetection) {
+    await window.__idleDetection.setup?.();
   }
 
-  // --------------------------
-  // React to successful reauth
-  // --------------------------
+  // 7. SW + manifest check (unchanged)
+  registerSW?.();
+  checkForUpdates?.();
+
+  // 8. Initial broadcast fetch (keep until full realtime migration)
+  try {
+    await fetchActiveBroadcasts?.();
+  } catch (err) {
+    console.warn('[BCAST] Initial fetch failed', err);
+  }
+
+  // 9. React to successful reauth (unchanged)
   (function(){
     let __fg_reauth_timer = null;
-    const __fg_reauth_debounce_ms = 600; // slightly larger debounce to allow server to settle
-    // Short-circuit: do not start a new poll if one started recently
-    const MIN_REAUTH_POLL_MS = 700;
-    let __fg_last_reauth_poll = 0;
+    const __fg_reauth_debounce_ms = 600;
 
     window.addEventListener('fg:reauth-success', (ev) => {
       try {
         if (typeof hideTinyReauthNotice === 'function') {
-          try { hideTinyReauthNotice(); } catch (e) { /* swallow */ }
+          hideTinyReauthNotice();
         }
 
         if (__fg_reauth_timer) clearTimeout(__fg_reauth_timer);
         __fg_reauth_timer = setTimeout(() => {
           __fg_reauth_timer = null;
-          const now = Date.now();
-          if (now - __fg_last_reauth_poll < MIN_REAUTH_POLL_MS) {
-            console.debug('fg:reauth-success: recent poll already run — skipping immediate poll');
-            return;
-          }
-          __fg_last_reauth_poll = now;
-          try {
-            if (typeof pollStatus === 'function') {
-              pollStatus();
-            }
-          } catch (e) {
-            console.warn('fg:reauth-success -> pollStatus failed', e);
-          }
+          pollStatus?.();
         }, __fg_reauth_debounce_ms);
       } catch (err) {
         console.warn('fg:reauth-success handler error', err);
@@ -3687,107 +3346,9 @@ async function onDashboardLoad() {
     }, { passive: true });
   })();
 
-  // Boot-time: decide soft vs hard reauth using server authoritive check.
-// If we were away long enough, ask server whether session is locked.
-// If locked -> open the full reauth modal immediately. Otherwise fall back to soft prompt.
-try {
-  const IDLE_TIME = 30 * 60 * 1000; // 30 minutes
-  const last = parseInt(localStorage.getItem('lastActive')) || 0;
-  if (Date.now() - last > IDLE_TIME) {
-    let reauthCheck = null;
-    try {
-      reauthCheck = await shouldReauth(); // shouldReauth talks to /reauth/status
-    } catch (e) {
-      console.warn('boot-time shouldReauth failed, falling back to soft prompt', e);
-    }
-
-    if (reauthCheck && reauthCheck.needsReauth) {
-      // Server says reauth required -> open authoritative reauth modal immediately
-      try {
-        if (window.__reauth && typeof window.__reauth.showReauthModal === 'function') {
-          await window.__reauth.showReauthModal('reauth');
-        } else {
-          await showReauthModal('reauth');
-        }
-      } catch (e) {
-        console.warn('Failed to show reauth modal on boot; falling back to inactivity prompt', e);
-        await showInactivityPrompt();
-      }
-    } else {
-      // session still OK -> soft inactivity or just reset timer
-      try { resetIdleTimer(); } catch (e) { console.warn('resetIdleTimer on boot failed', e); }
-    }
-  }
-} catch (e) {
-  console.warn('boot-time inactivity check failed', e);
-}
-
-  if (window.__idleDetection) {
-    await window.__idleDetection.setup();
-  }
-
-  // Initial status fetch
-if (typeof pollStatus === 'function') pollStatus();
-
-// Start polling
-setInterval(() => pollStatus(), 30000);
-
-
-  // Rocket: register SW, start pollStatus, etc.
-  async function registerSW() {
-    if ('serviceWorker' in navigator) {
-      try {
-        const reg = await navigator.serviceWorker.register('/service-worker.js');
-        console.log('[DEBUG] SW registered', reg);
-        reg.addEventListener('updatefound', () => {
-          const newWorker = reg.installing;
-          newWorker.addEventListener('statechange', () => {
-            if (newWorker.state === 'installed') {
-              if (navigator.serviceWorker.controller) {
-                setTimeout(() => {
-                  if (confirm('Update available! Reload for latest features?')) {
-                    window.location.reload();
-                  }
-                }, 2000);
-              } else {
-                window.location.reload();
-              }
-            }
-          });
-        });
-
-        reg.addEventListener('activated', (e) => {
-          if (e.isUpdate) console.log('[DEBUG] SW activated - new cache loaded');
-        });
-      } catch (err) {
-        console.warn('[WARN] SW registration failed', err);
-      }
-    }
-  }
-
-  // Post-login re-sync
-  if (localStorage.getItem('justLoggedIn') === 'true') {
-    localStorage.removeItem('justLoggedIn');
-    setupInactivity();
-  }
-
-  async function checkForUpdates() {
-    try {
-      const res = await fetch(`/frontend/pwa/manifest.json?v=${APP_VERSION}`);
-      if (!res.ok) throw new Error('Version check failed');
-      console.log('[DEBUG] App up-to-date');
-    } catch (err) {
-      console.log('[DEBUG] Version mismatch - triggering reload');
-      window.location.reload();
-    }
-  }
-
-  registerSW();
-  checkForUpdates();
-  pollStatus(); // Initial
-  setInterval(pollStatus, 30000); // Every 30s
-
-
+  // 10. Final UI + state sync
+  await renderDashboardCardsFromState?.({ preferServer: true });
+  initializeSmartAccountPinButton?.();
 }
 
 
@@ -4348,142 +3909,127 @@ var __fg_pin_resetPinBtn = null;
 
 
 
-// Call in load: onDashboardLoad();
-
-// Remove fetchUserData and consolidate into getSession
-// --- Lazy loadUserProfile with cache check ---
+// Lazy loadUserProfile – now direct Supabase + realtime cache refresh
 async function loadUserProfile(noCache = false) {
-  // NEW: Early bail if cache is fresh and not forced
-  const cachedUserData = localStorage.getItem('userData');
-  if (!noCache && cachedUserData) {
+  const now = Date.now();
+  const cached = localStorage.getItem('fg_cached_profile');
+  const lastLoad = Number(localStorage.getItem('fg_profile_last_load') || 0);
+
+  // Use cache if fresh and not forced
+  if (!noCache && cached && now - lastLoad < 5 * 60 * 1000) { // 5 min TTL
     try {
-      const parsed = JSON.parse(cachedUserData);
-      if (Date.now() - parsed.cachedAt < 300000) { // 5min TTL
-        console.log('[DEBUG] loadUserProfile: Fresh cache, skipping fetch');
-        return parsed; // Return cache instead of fetching
-      }
+      const parsed = JSON.parse(cached);
+      console.debug('[PROFILE] Using fresh cache');
+      return parsed;
     } catch (e) {
-      console.warn('[WARN] loadUserProfile: Invalid cache, proceeding to fetch');
+      console.warn('[PROFILE] Invalid cache, fetching fresh');
     }
   }
 
   try {
-    console.log('[DEBUG] loadUserProfile: Initiating fetch, credentials: include, time:', new Date().toISOString());
-
-    // Cookie-first: do not use localStorage tokens. Browser will send httpOnly cookies automatically.
-    const headers = { 'Accept': 'application/json' };
-
-    let url = 'https://api.flexgig.com.ng/api/profile';
-    if (noCache) {
-      url += `?_${Date.now()}`;
-    }
-
-    // Use helper for auto-refresh on 401
-    const response = await fetchWithAutoRefresh(url, { method: 'GET', headers });
-
-    console.log('[DEBUG] loadUserProfile: Response status', response.status, 'Headers', [...response.headers]);
-
-    let parsedData = null;
+    // Get current uid (temporary bridge — we can get from Supabase auth later)
+    let uid;
     try {
-      // prefer .json() but guard for empty body / invalid json
-      const txt = await response.text();
-      parsedData = txt ? JSON.parse(txt) : null;
+      const { data: { user } } = await supabaseClient.auth.getUser();
+      uid = user?.id;
     } catch (e) {
-      console.warn('[WARN] loadUserProfile: Response not valid JSON or empty');
-      parsedData = null;
+      console.warn('[PROFILE] Supabase auth getUser failed, using fallback');
+      // Fallback to /api/session if needed (remove later)
+      const res = await fetch(window.__SEC_API_BASE + '/api/session', {
+        credentials: 'include',
+        headers: { 'Cache-Control': 'no-cache' }
+      });
+      if (!res.ok) throw new Error('Session fetch failed');
+      const data = await res.json();
+      uid = data?.user?.uid;
     }
 
-    if (!response.ok) {
-      const serverMsg = (parsedData && (parsedData.error || parsedData.message)) || `HTTP ${response.status}`;
-      console.error('[ERROR] Profile update failed.', serverMsg);
-      throw new Error(serverMsg);
+    if (!uid) throw new Error('No uid available');
+
+    console.log('[PROFILE] Loading profile for uid:', uid);
+
+    // Direct Supabase query – users + wallet join
+    const { data: profile, error } = await supabaseClient
+      .from('users')
+      .select(`
+        uid, email, username, fullName, phoneNumber, address, profilePicture,
+        fullNameEdited, lastUsernameUpdate, pin,
+        user_wallets!inner(balance, currency, seq)
+      `)
+      .eq('uid', uid)
+      .single();
+
+    if (error) throw error;
+
+    // Normalize same as your original
+    const normalized = {
+      uid: profile.uid,
+      email: profile.email,
+      username: profile.username || null,
+      fullName: profile.fullName || 'User',
+      firstName: profile.fullName?.split(' ')[0] || 'User',
+      phoneNumber: profile.phoneNumber || null,
+      address: profile.address || null,
+      profilePicture: profile.profilePicture || '',
+      hasPin: !!profile.pin,
+      hasBiometrics: false, // fetch separately if needed
+      profileCompleted: !!(profile.username && profile.fullName && profile.phoneNumber),
+      wallet_balance: Number(profile.user_wallets?.balance || 0),
+      wallet_currency: profile.user_wallets?.currency || 'NGN',
+      wallet_seq: profile.user_wallets?.seq || 0,
+      cachedAt: now
+    };
+
+    // Cache it
+    localStorage.setItem('fg_cached_profile', JSON.stringify(normalized));
+    localStorage.setItem('fg_profile_last_load', String(now));
+
+    // Update localStorage keys (keep your existing logic)
+    if (normalized.username) localStorage.setItem('username', normalized.username);
+    if (normalized.phoneNumber) localStorage.setItem('phoneNumber', normalized.phoneNumber);
+    if (normalized.address) localStorage.setItem('address', normalized.address);
+    if (normalized.profilePicture) localStorage.setItem('profilePicture', normalized.profilePicture);
+    if (normalized.fullName) {
+      localStorage.setItem('fullName', normalized.fullName);
+      localStorage.setItem('fullNameEdited', 'false'); // adjust if needed
+      localStorage.setItem('firstName', normalized.firstName);
     }
 
-    const data = parsedData || {};
-    console.log('[DEBUG] loadUserProfile: Parsed response data', data);
-
-    // Your existing localStorage updates (only if changed)...
-    const currentUsername = localStorage.getItem('username') || '';
-    const currentProfilePicture = localStorage.getItem('profilePicture') || '';
-    if (data.username && data.username !== currentUsername) {
-      localStorage.setItem('username', data.username);
-    }
-    if (data.phoneNumber) {
-      localStorage.setItem('phoneNumber', data.phoneNumber);
-    }
-    if (data.address) {
-      localStorage.setItem('address', data.address);
-    }
-    if (data.profilePicture && data.profilePicture !== currentProfilePicture) {
-      localStorage.setItem('profilePicture', data.profilePicture);
-    }
-    if (data.fullName) {
-      localStorage.setItem('fullName', data.fullName);
-      localStorage.setItem('fullNameEdited', data.fullNameEdited ? 'true' : 'false');
-      localStorage.setItem('firstName', data.fullName.split(' ')[0] || localStorage.getItem('firstName') || 'User');
-    }
-    if (data.lastUsernameUpdate) {
-      localStorage.setItem('lastUsernameUpdate', data.lastUsernameUpdate);
-    }
-
-    // Update userData cache with new profile info
-    const userData = JSON.parse(localStorage.getItem('userData') || '{}');
-    userData.username = data.username || userData.username;
-    userData.fullName = data.fullName || userData.fullName;
-    userData.profilePicture = data.profilePicture || userData.profilePicture;
-    userData.cachedAt = Date.now();
-    localStorage.setItem('userData', JSON.stringify(userData));
-
-    // Your existing DOM update logic (only if changed)...
+    // Update DOM (your existing diff logic)
     const firstnameEl = document.getElementById('firstname');
     const avatarEl = document.getElementById('avatar');
-    if (!firstnameEl || !avatarEl) {
-      console.error('[ERROR] loadUserProfile: Missing DOM elements', { firstnameEl: !!firstnameEl, avatarEl: !!avatarEl });
-      return data;
-    }
+    if (firstnameEl && avatarEl) {
+      const displayName = normalized.username || normalized.firstName || 'User';
+      if (firstnameEl.textContent !== displayName) {
+        firstnameEl.textContent = displayName.charAt(0).toUpperCase() + displayName.slice(1);
+      }
 
-    const firstName = data.fullName?.split(' ')[0] || localStorage.getItem('firstName') || 'User';
-    const profilePicture = data.profilePicture || localStorage.getItem('profilePicture') || '';
-    const isValidProfilePicture = profilePicture && /^(data:image\/|https?:\/\/|\/)/i.test(profilePicture);
-    const displayName = data.username || firstName || 'User';
+      const isValidPic = normalized.profilePicture && /^(data:image\/|https?:\/\/|\/)/i.test(normalized.profilePicture);
+      const newAvatar = isValidPic 
+        ? `<img src="${normalized.profilePicture}" alt="Profile" class="avatar-img" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`
+        : displayName.charAt(0).toUpperCase();
 
-    // Diff and update only if changed (your logic, but tighter checks)
-    const currentDisplay = firstnameEl.textContent?.toLowerCase() || '';
-    const newDisplay = (displayName.charAt(0).toUpperCase() + displayName.slice(1)).toLowerCase();
-    if (currentDisplay !== newDisplay) {
-      firstnameEl.textContent = displayName.charAt(0).toUpperCase() + displayName.slice(1);
-    }
-
-    const currentAvatarHTML = avatarEl.innerHTML;
-    const newAvatarHTML = isValidProfilePicture 
-      ? `<img src="${profilePicture}" alt="Profile Picture" class="avatar-img" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`
-      : displayName.charAt(0).toUpperCase();
-    if (currentAvatarHTML !== newAvatarHTML) {
-      avatarEl.innerHTML = newAvatarHTML;
-      if (isValidProfilePicture) {
-        avatarEl.removeAttribute('aria-label');
-      } else {
-        avatarEl.setAttribute('aria-label', displayName);
+      if (avatarEl.innerHTML !== newAvatar) {
+        avatarEl.innerHTML = newAvatar;
       }
     }
 
-    return data;
+    console.log('[PROFILE] Loaded from Supabase:', normalized.firstName, `₦${normalized.wallet_balance.toLocaleString()}`);
+
+    return normalized;
   } catch (err) {
-    console.error('[ERROR] loadUserProfile: Fetch failed', err);
-    // Fallback: return cached data if available
-    if (cachedUserData) {
+    console.error('[PROFILE] Load failed:', err);
+    // Fallback to cache
+    if (cached) {
       try {
-        return JSON.parse(cachedUserData);
-      } catch (e) {
-        console.warn('[WARN] loadUserProfile: Cache invalid on error fallback');
-      }
+        return JSON.parse(cached);
+      } catch {}
     }
-    throw err; // Re-throw if no fallback
+    throw err;
   }
 }
 
-
-
+window.loadUserProfile = loadUserProfile;
 
 
 
