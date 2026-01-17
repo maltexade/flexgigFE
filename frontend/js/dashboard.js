@@ -3945,7 +3945,6 @@ var __fg_pin_resetPinBtn = null;
 
 
 
-// Lazy loadUserProfile – Supabase direct + backend fallback for uid
 async function loadUserProfile(noCache = false) {
   const now = Date.now();
   const cached = localStorage.getItem('fg_cached_profile');
@@ -3965,7 +3964,7 @@ async function loadUserProfile(noCache = false) {
   try {
     let uid;
 
-    // Primary: Try Supabase auth (preferred once we sync sessions)
+    // Try Supabase auth first
     try {
       const { data: { user } } = await supabaseClient.auth.getUser();
       if (user?.id) {
@@ -3976,77 +3975,97 @@ async function loadUserProfile(noCache = false) {
       console.debug('[PROFILE] Supabase getUser failed, using backend fallback');
     }
 
-    // Fallback: Get uid from your working /api/session
+    // Fallback to /api/session
     if (!uid) {
       const res = await fetch(window.__SEC_API_BASE + '/api/session', {
         credentials: 'include',
         headers: { 'Cache-Control': 'no-cache' }
       });
 
-      if (!res.ok) {
-        throw new Error(`Session fetch failed: ${res.status}`);
-      }
+      if (!res.ok) throw new Error(`Session fetch failed: ${res.status}`);
 
       const data = await res.json();
       uid = data?.user?.uid;
 
-      if (!uid) {
-        throw new Error('No uid in /api/session response');
-      }
-
+      if (!uid) throw new Error('No uid in /api/session response');
       console.log('[PROFILE] UID from backend fallback:', uid);
     }
 
-    // Now query Supabase with the uid we trust
-    console.log('[PROFILE] Querying Supabase for uid:', uid);
-
-    const { data: profile, error } = await supabaseClient
+    // Fetch user row
+    const { data: userRow, error: userErr } = await supabaseClient
       .from('users')
-      .select(`
-        uid, email, username, fullName, phoneNumber, address, profilePicture,
-        fullNameEdited, lastUsernameUpdate, pin,
-        user_wallets!inner(balance, currency)
-      `)
+      .select('uid, email, username, fullName, phoneNumber, address, profilePicture, fullNameEdited, lastUsernameUpdate, pin')
       .eq('uid', uid)
-      .single();
+      .maybeSingle();
 
-    if (error) throw error;
+    if (userErr) throw userErr;
 
-    // Normalize (same as your original)
+    if (!userRow) {
+      console.warn('[PROFILE] No user row found in Supabase for uid:', uid);
+      // Do NOT create — just use minimal fallback data
+      const fallback = {
+        uid,
+        email: 'unknown@email.com',
+        username: null,
+        fullName: 'User',
+        firstName: 'User',
+        phoneNumber: null,
+        address: null,
+        profilePicture: '',
+        hasPin: false,
+        hasBiometrics: false,
+        profileCompleted: false,
+        wallet_balance: 0,
+        wallet_currency: 'NGN',
+        cachedAt: now
+      };
+      localStorage.setItem('fg_cached_profile', JSON.stringify(fallback));
+      localStorage.setItem('fg_profile_last_load', String(now));
+      return fallback;
+    }
+
+    // Fetch wallet separately (no join failure)
+    const { data: walletRow, error: walletErr } = await supabaseClient
+      .from('user_wallets')
+      .select('balance, currency')
+      .eq('user_uid', uid)
+      .maybeSingle();
+
+    if (walletErr) console.warn('[PROFILE] Wallet fetch warning:', walletErr.message);
+
+    // Normalize
     const normalized = {
-      uid: profile.uid,
-      email: profile.email,
-      username: profile.username || null,
-      fullName: profile.fullName || 'User',
-      firstName: profile.fullName?.split(' ')[0] || 'User',
-      phoneNumber: profile.phoneNumber || null,
-      address: profile.address || null,
-      profilePicture: profile.profilePicture || '',
-      hasPin: !!profile.pin,
-      hasBiometrics: false, // Add query if you have authenticators table
-      profileCompleted: !!(profile.username && profile.fullName && profile.phoneNumber),
-      wallet_balance: Number(profile.user_wallets?.balance || 0),
-      wallet_currency: profile.user_wallets?.currency || 'NGN',
-      wallet_seq: profile.user_wallets?.seq || 0,
+      uid: userRow.uid,
+      email: userRow.email || 'unknown@email.com',
+      username: userRow.username || null,
+      fullName: userRow.fullName || 'User',
+      firstName: userRow.fullName?.split(' ')[0] || 'User',
+      phoneNumber: userRow.phoneNumber || null,
+      address: userRow.address || null,
+      profilePicture: userRow.profilePicture || '',
+      hasPin: !!userRow.pin,
+      hasBiometrics: false,
+      profileCompleted: !!(userRow.username && userRow.fullName && userRow.phoneNumber),
+      wallet_balance: Number(walletRow?.balance || 0),
+      wallet_currency: walletRow?.currency || 'NGN',
       cachedAt: now
     };
 
-    // Cache
+    // Cache + your localStorage updates
     localStorage.setItem('fg_cached_profile', JSON.stringify(normalized));
     localStorage.setItem('fg_profile_last_load', String(now));
 
-    // Update your localStorage keys (your original logic)
     if (normalized.username) localStorage.setItem('username', normalized.username);
     if (normalized.phoneNumber) localStorage.setItem('phoneNumber', normalized.phoneNumber);
     if (normalized.address) localStorage.setItem('address', normalized.address);
     if (normalized.profilePicture) localStorage.setItem('profilePicture', normalized.profilePicture);
     if (normalized.fullName) {
       localStorage.setItem('fullName', normalized.fullName);
-      localStorage.setItem('fullNameEdited', normalized.fullNameEdited ? 'true' : 'false');
+      localStorage.setItem('fullNameEdited', 'false');
       localStorage.setItem('firstName', normalized.firstName);
     }
 
-    // DOM updates (your diff logic)
+    // DOM updates
     const firstnameEl = document.getElementById('firstname');
     const avatarEl = document.getElementById('avatar');
     if (firstnameEl && avatarEl) {
@@ -4070,13 +4089,19 @@ async function loadUserProfile(noCache = false) {
     return normalized;
   } catch (err) {
     console.error('[PROFILE] Load failed:', err.message || err);
-    // Fallback to cache if available
     if (cached) {
       try {
         return JSON.parse(cached);
       } catch {}
     }
-    throw err;
+    // Ultimate fallback: minimal object
+    return {
+      uid: 'unknown',
+      fullName: 'User',
+      firstName: 'User',
+      wallet_balance: 0,
+      cachedAt: now
+    };
   }
 }
 
