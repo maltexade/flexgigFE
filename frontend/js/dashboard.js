@@ -4005,10 +4005,10 @@ async function loadUserProfile(noCache = false) {
       console.warn('[PROFILE] Users table fetch warning:', userErr.message);
     }
 
-    // 2. Fetch balance from user_wallets (main balance table)
+    // 2. Fetch balance from user_wallets (main table, NO seq column)
     const { data: walletRow, error: walletErr } = await supabaseClient
       .from('user_wallets')
-      .select('balance, currency, seq')
+      .select('balance, currency')
       .eq('user_uid', uid)
       .maybeSingle();
 
@@ -4019,7 +4019,6 @@ async function loadUserProfile(noCache = false) {
     // Build profile – prefer Supabase, fallback to backend if missing
     let profile = userRow || {};
 
-    // If no profile row in Supabase → fallback to backend
     if (!profile.uid) {
       console.warn('[PROFILE] No users row in Supabase – falling back to backend');
       const res = await fetch(window.__SEC_API_BASE + '/api/session', {
@@ -4048,7 +4047,6 @@ async function loadUserProfile(noCache = false) {
       profileCompleted: !!(profile.username && profile.fullName && profile.phoneNumber),
       wallet_balance: Number(walletRow?.balance || profile.wallet_balance || 0),
       wallet_currency: walletRow?.currency || profile.wallet_currency || 'NGN',
-      wallet_seq: Number(walletRow?.seq || profile.wallet_seq || 0),
       cachedAt: now
     };
 
