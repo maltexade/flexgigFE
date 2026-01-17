@@ -3991,70 +3991,72 @@ async function loadUserProfile(noCache = false) {
       console.log('[PROFILE] UID from backend fallback:', uid);
     }
 
-    // Fetch user row
+    // 1. Fetch profile from users table
     const { data: userRow, error: userErr } = await supabaseClient
       .from('users')
-      .select('uid, email, username, fullName, phoneNumber, address, profilePicture, fullNameEdited, lastUsernameUpdate, pin')
+      .select(`
+        uid, email, username, "fullName", "phoneNumber", address, "profilePicture",
+        "fullNameEdited", "lastUsernameUpdate", pin
+      `)
       .eq('uid', uid)
       .maybeSingle();
 
-    if (userErr) throw userErr;
-
-    if (!userRow) {
-      console.warn('[PROFILE] No user row found in Supabase for uid:', uid);
-      // Do NOT create — just use minimal fallback data
-      const fallback = {
-        uid,
-        email: 'unknown@email.com',
-        username: null,
-        fullName: 'User',
-        firstName: 'User',
-        phoneNumber: null,
-        address: null,
-        profilePicture: '',
-        hasPin: false,
-        hasBiometrics: false,
-        profileCompleted: false,
-        wallet_balance: 0,
-        wallet_currency: 'NGN',
-        cachedAt: now
-      };
-      localStorage.setItem('fg_cached_profile', JSON.stringify(fallback));
-      localStorage.setItem('fg_profile_last_load', String(now));
-      return fallback;
+    if (userErr) {
+      console.warn('[PROFILE] Users table fetch warning:', userErr.message);
     }
 
-    // Fetch wallet separately (no join failure)
+    // 2. Fetch balance from user_wallets (main balance table)
     const { data: walletRow, error: walletErr } = await supabaseClient
       .from('user_wallets')
-      .select('balance, currency')
+      .select('balance, currency, seq')
       .eq('user_uid', uid)
       .maybeSingle();
 
-    if (walletErr) console.warn('[PROFILE] Wallet fetch warning:', walletErr.message);
+    if (walletErr) {
+      console.warn('[PROFILE] user_wallets fetch warning:', walletErr.message);
+    }
+
+    // Build profile – prefer Supabase, fallback to backend if missing
+    let profile = userRow || {};
+
+    // If no profile row in Supabase → fallback to backend
+    if (!profile.uid) {
+      console.warn('[PROFILE] No users row in Supabase – falling back to backend');
+      const res = await fetch(window.__SEC_API_BASE + '/api/session', {
+        credentials: 'include',
+        headers: { 'Cache-Control': 'no-cache' }
+      });
+
+      if (!res.ok) throw new Error('Backend fallback failed');
+
+      const sessionData = await res.json();
+      profile = sessionData?.user || {};
+    }
 
     // Normalize
     const normalized = {
-      uid: userRow.uid,
-      email: userRow.email || 'unknown@email.com',
-      username: userRow.username || null,
-      fullName: userRow.fullName || 'User',
-      firstName: userRow.fullName?.split(' ')[0] || 'User',
-      phoneNumber: userRow.phoneNumber || null,
-      address: userRow.address || null,
-      profilePicture: userRow.profilePicture || '',
-      hasPin: !!userRow.pin,
+      uid: profile.uid || uid,
+      email: profile.email || 'unknown@email.com',
+      username: profile.username || null,
+      fullName: profile.fullName || 'User',
+      firstName: profile.fullName?.split(' ')[0] || 'User',
+      phoneNumber: profile.phoneNumber || null,
+      address: profile.address || null,
+      profilePicture: profile.profilePicture || '',
+      hasPin: !!profile.pin,
       hasBiometrics: false,
-      profileCompleted: !!(userRow.username && userRow.fullName && userRow.phoneNumber),
-      wallet_balance: Number(walletRow?.balance || 0),
-      wallet_currency: walletRow?.currency || 'NGN',
+      profileCompleted: !!(profile.username && profile.fullName && profile.phoneNumber),
+      wallet_balance: Number(walletRow?.balance || profile.wallet_balance || 0),
+      wallet_currency: walletRow?.currency || profile.wallet_currency || 'NGN',
+      wallet_seq: Number(walletRow?.seq || profile.wallet_seq || 0),
       cachedAt: now
     };
 
-    // Cache + your localStorage updates
+    // Cache
     localStorage.setItem('fg_cached_profile', JSON.stringify(normalized));
     localStorage.setItem('fg_profile_last_load', String(now));
 
+    // Your localStorage updates
     if (normalized.username) localStorage.setItem('username', normalized.username);
     if (normalized.phoneNumber) localStorage.setItem('phoneNumber', normalized.phoneNumber);
     if (normalized.address) localStorage.setItem('address', normalized.address);
@@ -4094,7 +4096,6 @@ async function loadUserProfile(noCache = false) {
         return JSON.parse(cached);
       } catch {}
     }
-    // Ultimate fallback: minimal object
     return {
       uid: 'unknown',
       fullName: 'User',
