@@ -602,7 +602,450 @@ checkoutModal?.querySelector('.close-btn')?.addEventListener('click', stopModalB
 
 
 
+// ==========================================
+// 🔧 PRODUCTION-READY MOBILE DEBUG CONSOLE
+// ==========================================
+// ⚙️ SET THIS TO false IN PRODUCTION ⚙️
+const DEBUG_MODE = false; // ← Change to false to hide completely
+// ==========================================
 
+(function () {
+  if (!DEBUG_MODE) {
+    // Completely disable in production - no DOM injection, no performance impact
+    window.mobileLog = () => {}; // No-op function
+    console.log('[Debug] Console disabled (DEBUG_MODE = false)');
+    return;
+  }
+
+  if (window.mobileConsoleLoaded) {
+    const existing = document.getElementById('mobileConsole');
+    const existingBtn = document.getElementById('toggleBtn');
+    if (existing && existingBtn) {
+      const isHidden = existing.style.display === 'none';
+      existing.style.display = isHidden ? 'flex' : 'none';
+      existingBtn.textContent = isHidden ? '✖️' : '🔧';
+      return;
+    }
+    existing?.remove();
+    existingBtn?.remove();
+    delete window.mobileConsoleLoaded;
+  }
+  window.mobileConsoleLoaded = true;
+
+  // === Enhanced CSS with proper z-index ===
+  const style = document.createElement('style');
+  style.textContent = `
+    #mobileConsole{position:fixed;inset:0;display:none;flex-direction:column;background:#000;color:#0f0;z-index:2147483640;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
+    #consoleHeader{background:#1a1a1a;padding:12px;border-bottom:2px solid #0f0;display:flex;justify-content:space-between;align-items:center;z-index:2147483642}
+    #consoleHeader h3{font-size:16px;color:#0f0;margin:0}
+    #clearBtn{background:#ff0000;color:white;border:none;padding:8px 16px;border-radius:6px;font-weight:bold;font-size:12px;cursor:pointer}
+    #logOutput{flex:1;overflow-y:auto;padding:10px;font-family:'Courier New',monospace;font-size:11px;line-height:1.5;z-index:2147483641}
+    .log-entry{margin:4px 0;padding:6px;border-left:3px solid;background:rgba(255,255,255,0.03);word-wrap:break-word;word-break:break-word;font-size:11px}
+    .log-entry pre{margin:4px 0;padding:4px;background:rgba(255,255,255,0.05);border-radius:4px;overflow-x:auto;font-size:10px}
+    .log-info{border-color:#0f0;color:#0f0}
+    .log-warn{border-color:#ff0;color:#ff0}
+    .log-error{border-color:#f00;color:#f00}
+    .log-success{border-color:#0ff;color:#0ff}
+    .log-ws{border-color:#f0f;color:#f0f}
+    .log-timestamp{color:#888;font-size:10px;margin-right:8px}
+    #commandPanel{background:#1a1a1a;border-top:2px solid #0f0;padding:12px;z-index:2147483642}
+    #commandInput{width:100%;background:#000;color:#0f0;border:1px solid #0f0;padding:10px;font-family:'Courier New',monospace;font-size:13px;border-radius:6px;margin-bottom:10px}
+    #quickCommands{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    .cmd-btn{background:#0f0;color:#000;border:none;padding:10px;border-radius:6px;font-weight:bold;font-size:11px;cursor:pointer;text-align:center}
+    .cmd-btn:active{background:#0c0;transform:scale(0.98)}
+    #toggleBtn{position:fixed;bottom:20px;right:20px;width:60px;height:60px;border-radius:50%;background:#0f0;color:#000;border:none;font-size:24px;z-index:2147483647;box-shadow:0 4px 12px rgba(0,255,0,0.5);cursor:pointer;font-weight:bold}
+    #toggleBtn:active{transform:scale(0.95)}
+  `;
+  document.head.appendChild(style);
+
+  // === Inject HTML ===
+  document.body.insertAdjacentHTML('beforeend', `
+    <button id="toggleBtn" aria-label="Toggle Debug Console">🔧</button>
+    <div id="mobileConsole">
+      <div id="consoleHeader">
+        <h3>🔧 Dev Console</h3>
+        <button id="clearBtn">Clear</button>
+      </div>
+      <div id="logOutput"></div>
+      <div id="commandPanel">
+        <input type="text" id="commandInput" placeholder="Type command + Enter" autocomplete="off" autocorrect="off" autocapitalize="off">
+        <div id="quickCommands">
+          <button class="cmd-btn" data-cmd="checkPolling()">Polling</button>
+          <button class="cmd-btn" data-cmd="checkWebSocket()">WebSocket</button>
+          <button class="cmd-btn" data-cmd="testBalance()">Balance</button>
+          <button class="cmd-btn" data-cmd="forceSync()">Sync</button>
+          <button class="cmd-btn" data-cmd="getUserId()">User ID</button>
+          <button class="cmd-btn" data-cmd="checkModal()">Modal</button>
+          <button class="cmd-btn" data-cmd="testPayment()">Test Pay</button>
+          <button class="cmd-btn" data-cmd="showStatus()">Status</button>
+        </div>
+      </div>
+    </div>
+  `);
+
+  const consoleEl = document.getElementById('mobileConsole');
+  const logOutput = document.getElementById('logOutput');
+  const toggleBtn = document.getElementById('toggleBtn');
+  const clearBtn = document.getElementById('clearBtn');
+  const commandInput = document.getElementById('commandInput');
+  const quickCommands = document.getElementById('quickCommands');
+
+  // === ENHANCED LOG FUNCTION (Chrome-like) ===
+  function log(msg, type = 'info') {
+    const ts = new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3});
+    const div = document.createElement('div');
+    div.className = `log-entry log-${type}`;
+    
+    // Smart formatting for objects, arrays, errors
+    let formatted = '';
+    if (typeof msg === 'object' && msg !== null) {
+      try {
+        if (msg instanceof Error) {
+          formatted = `❌ ${msg.name}: ${msg.message}\n${msg.stack || ''}`;
+        } else if (Array.isArray(msg)) {
+          formatted = `Array(${msg.length}) ${JSON.stringify(msg, null, 2)}`;
+        } else {
+          formatted = JSON.stringify(msg, null, 2);
+        }
+        formatted = `<pre>${formatted}</pre>`;
+      } catch (e) {
+        formatted = String(msg);
+      }
+    } else {
+      formatted = String(msg);
+    }
+    
+    div.innerHTML = `<span class="log-timestamp">[${ts}]</span>${formatted}`;
+    logOutput.appendChild(div);
+    logOutput.scrollTop = logOutput.scrollHeight;
+    
+    // Also log to real console
+    console.log(`[MobileConsole ${type.toUpperCase()}]`, msg);
+  }
+  
+  window.mobileLog = log;
+
+  // === Toggle console (allows navigation when closed) ===
+  toggleBtn.onclick = () => {
+    const isVisible = consoleEl.style.display !== 'none';
+    consoleEl.style.display = isVisible ? 'none' : 'flex';
+    toggleBtn.textContent = isVisible ? '🔧' : '✖️';
+    if (!isVisible) {
+      setTimeout(() => commandInput.focus(), 100);
+    }
+  };
+
+  clearBtn.onclick = () => { 
+    logOutput.innerHTML = ''; 
+    log('Console cleared', 'success'); 
+  };
+
+  // === Enhanced execute with better error reporting ===
+  function execute(cmd) {
+    log(`> ${cmd}`, 'info');
+    try {
+      const result = eval(cmd);
+      if (result !== undefined && result !== null) {
+        if (result instanceof Promise) {
+          result
+            .then(r => {
+              if (r !== undefined) log(r, 'success');
+            })
+            .catch(e => log(e, 'error'));
+        } else {
+          log(result, 'success');
+        }
+      }
+    } catch (e) {
+      log(e, 'error');
+    }
+  }
+
+  commandInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      const cmd = commandInput.value.trim();
+      if (cmd) {
+        execute(cmd);
+        commandInput.value = '';
+      }
+    }
+  });
+
+  quickCommands.addEventListener('click', e => {
+    const btn = e.target.closest('.cmd-btn');
+    if (btn) execute(btn.dataset.cmd);
+  });
+
+  // === HELPER: Get API Base ===
+  function getApiBase() {
+    return window.__SEC_API_BASE || 'https://api.flexgig.com.ng' || window.location.origin;
+  }
+
+  // === HELPER: Get User ID ===
+  function safeGetUserId() {
+    try {
+      return window.__USER_UID || (localStorage && localStorage.getItem('userId')) || null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // === DIAGNOSTIC FUNCTIONS ===
+  
+  window.checkPolling = () => {
+    log('🔍 Checking polling...', 'ws');
+    const api = getApiBase();
+    log(`API: ${api}`, 'info');
+    
+    fetch(`${api}/api/session?light=true&t=${Date.now()}`, {
+      credentials: 'include', 
+      cache: 'no-store'
+    })
+      .then(r => {
+        log(`Status: ${r.status} ${r.statusText}`, r.ok ? 'success' : 'error');
+        return r.json();
+      })
+      .then(j => {
+        const bal = j.user?.wallet_balance;
+        log(`Balance: ₦${bal !== undefined ? bal.toLocaleString() : 'N/A'}`, 'success');
+        log(`Seq: ${j.wallet_seq || 'N/A'}`, 'info');
+        return j;
+      })
+      .catch(e => log(e, 'error'));
+  };
+
+  window.checkWebSocket = () => {
+    log('🔍 Checking WebSocket...', 'ws');
+    const uid = safeGetUserId();
+    
+    if (!uid) {
+      log('❌ No user ID found', 'error');
+      return;
+    }
+
+    log(`User ID: ${uid}`, 'success');
+    log('Connecting...', 'ws');
+    
+    let ws;
+    try {
+      ws = new WebSocket('wss://api.flexgig.com.ng/ws/wallet');
+    } catch (e) {
+      log(e, 'error');
+      return;
+    }
+
+    ws.onopen = () => {
+      log('✅ WebSocket CONNECTED!', 'success');
+      const msg = JSON.stringify({type: 'subscribe', user_uid: uid});
+      ws.send(msg);
+      log(`📤 Sent: ${msg}`, 'ws');
+    };
+    
+    ws.onmessage = e => {
+      log(`📨 Message: ${e.data}`, 'ws');
+      try {
+        const data = JSON.parse(e.data);
+        log(data, 'success');
+      } catch {}
+    };
+    
+    ws.onerror = e => log(`❌ WS Error: ${e.type}`, 'error');
+    
+    ws.onclose = e => {
+      log(`🔌 WS Closed: code=${e.code}, clean=${e.wasClean}`, e.wasClean ? 'warn' : 'error');
+    };
+    
+    setTimeout(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        log('Closing test connection...', 'info');
+        ws.close();
+      }
+    }, 10000);
+  };
+
+  window.testBalance = async () => {
+    log('🧪 Testing balance fetch...', 'ws');
+    const api = getApiBase();
+    
+    try {
+      const r = await fetch(`${api}/api/session?light=true&t=${Date.now()}`, {
+        credentials: 'include',
+        cache: 'no-store'
+      });
+      
+      log(`Status: ${r.status}`, r.ok ? 'success' : 'error');
+      
+      if (!r.ok) {
+        const text = await r.text();
+        log(`Response: ${text.substring(0, 200)}`, 'error');
+        return;
+      }
+      
+      const j = await r.json();
+      const bal = j.user?.wallet_balance;
+      
+      log(`✅ Balance: ₦${bal !== undefined ? bal.toLocaleString() : 'N/A'}`, 'success');
+      log(`Seq: ${j.wallet_seq || 'N/A'}`, 'info');
+      log(`User: ${j.user?.username || 'N/A'}`, 'info');
+      
+      return j;
+    } catch (e) { 
+      log(e, 'error'); 
+    }
+  };
+
+  window.forceSync = async () => {
+    log('🔄 Force syncing...', 'ws');
+    const api = getApiBase();
+    
+    try {
+      const r = await fetch(`${api}/api/session?light=true&t=${Date.now()}`, {
+        credentials: 'include',
+        cache: 'no-store'
+      });
+      
+      if (!r.ok) {
+        log(`❌ Sync failed: ${r.status}`, 'error');
+        return;
+      }
+      
+      const j = await r.json();
+      const bal = j.user?.wallet_balance;
+      
+      log(`✅ Synced: ₦${bal !== undefined ? bal.toLocaleString() : 'N/A'}`, 'success');
+      
+      if (typeof handleNewBalance === 'function') {
+        handleNewBalance(bal, 'dev-console');
+        log('✅ Called handleNewBalance', 'success');
+      } else if (typeof window.handleNewBalance === 'function') {
+        window.handleNewBalance(bal, 'dev-console');
+        log('✅ Called window.handleNewBalance', 'success');
+      } else {
+        log('⚠️ handleNewBalance not found', 'warn');
+      }
+      
+      return j;
+    } catch (e) { 
+      log(e, 'error'); 
+    }
+  };
+
+  window.getUserId = () => {
+    const uid = safeGetUserId();
+    log(`User ID: ${uid || 'NOT FOUND'}`, uid ? 'success' : 'error');
+    
+    if (!uid) {
+      log('Checking localStorage...', 'info');
+      try {
+        const keys = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key.includes('user') || key.includes('id')) {
+            keys.push(`${key}: ${localStorage.getItem(key).substring(0, 50)}`);
+          }
+        }
+        if (keys.length) log(keys, 'info');
+      } catch (e) {
+        log('Cannot access localStorage', 'warn');
+      }
+    }
+    
+    return uid;
+  };
+
+  window.checkModal = () => {
+    log('🔍 Checking modal...', 'info');
+    const m = document.getElementById('addMoneyModal');
+    
+    if (!m) {
+      log('❌ Modal element not found', 'error');
+      return;
+    }
+    
+    log('✅ Modal exists', 'success');
+    const style = getComputedStyle(m);
+    const result = {
+      exists: true,
+      visible: style.display !== 'none',
+      display: style.display,
+      transform: m.style.transform || 'none',
+      classes: m.className
+    };
+    log(result, 'info');
+    return result;
+  };
+
+  window.testPayment = () => {
+    log('🧪 Simulating payment...', 'ws');
+    
+    const testData = {
+      type: 'balance_update', 
+      balance: 50000, 
+      amount: 5000, 
+      seq: Date.now()
+    };
+    
+    log(testData, 'info');
+    
+    if (window.__handleBalanceUpdate) {
+      log('Calling __handleBalanceUpdate...', 'info');
+      window.__handleBalanceUpdate(testData);
+      log('✅ Handler called', 'success');
+    } else {
+      log('⚠️ __handleBalanceUpdate not found', 'warn');
+    }
+    
+    log('Dispatching event...', 'info');
+    window.dispatchEvent(new CustomEvent('balance_update', { detail: testData }));
+    log('✅ Event dispatched', 'success');
+  };
+
+  window.showStatus = () => {
+    log('📊 System Status:', 'ws');
+    
+    const status = {
+      userId: safeGetUserId() || 'NOT FOUND',
+      apiBase: getApiBase(),
+      modal: !!document.getElementById('addMoneyModal'),
+      balanceHandler: typeof window.__handleBalanceUpdate === 'function',
+      notify: typeof window.notify === 'function',
+      updateBalances: typeof window.updateAllBalances === 'function',
+      playSound: typeof window.playSuccessSound === 'function',
+      modalManager: typeof window.ModalManager !== 'undefined'
+    };
+    
+    log(status, 'info');
+    return status;
+  };
+
+  // === INITIALIZATION ===
+  log('🚀 Mobile Dev Console Ready!', 'success');
+  log('Tap 🔧 to toggle console', 'info');
+  log(`Debug Mode: ${DEBUG_MODE ? 'ENABLED' : 'DISABLED'}`, 'info');
+
+  // Auto-show on errors
+  window.addEventListener('error', e => {
+    if (consoleEl.style.display === 'none') {
+      consoleEl.style.display = 'flex';
+      toggleBtn.textContent = '✖️';
+    }
+    log({
+      message: e.message,
+      filename: e.filename,
+      lineno: e.lineno,
+      colno: e.colno,
+      error: e.error
+    }, 'error');
+  });
+
+  // Initial checks (delayed)
+  setTimeout(() => {
+    log('Running initial checks...', 'info');
+    getUserId();
+    checkModal();
+  }, 1500);
+
+})();
 
 
 let __backHandler = null;
@@ -2235,8 +2678,8 @@ window.applyBalanceVisibility = applyBalanceVisibility;
 
 (function () {
   // ========== DEBUG LOG TOGGLE ==========
-  const ENABLE_DEBUG_LOG = true;  
-  const SHOW_DEBUG_UI = true;   
+  const ENABLE_DEBUG_LOG = false;  // KEEP THIS TRUE - keeps polling/WS alive
+  const SHOW_DEBUG_UI = false;    // Set to true only when YOU need to debug
   // ======================================
 
   const uid = window.__USER_UID || localStorage.getItem('userId');
