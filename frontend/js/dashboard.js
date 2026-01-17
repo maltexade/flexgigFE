@@ -602,448 +602,439 @@ checkoutModal?.querySelector('.close-btn')?.addEventListener('click', stopModalB
 
 
 
-// ==========================================
-// 🔧 PRODUCTION-READY MOBILE DEBUG CONSOLE
-// ==========================================
-// ⚙️ SET THIS TO false IN PRODUCTION ⚙️
-const DEBUG_MODE = false; // ← Change to false to hide completely
-// ==========================================
+// ===============================================================
+//  UNIFIED REAL-TIME BALANCE SYSTEM (Mobile-Safe Version)
+//  - Guaranteed to work on iOS, Android, Desktop
+//  - WebSocket + Polling Fallback
+//  - Global "balance_update" event
+//  - Success Toast + Modal Close
+//  - ON-SCREEN DEBUG LOG (for mobile debugging)
+// ===============================================================
 
 (function () {
-  if (!DEBUG_MODE) {
-    // Completely disable in production - no DOM injection, no performance impact
-    window.mobileLog = () => {}; // No-op function
-    console.log('[Debug] Console disabled (DEBUG_MODE = false)');
-    return;
+  // ========== DEBUG LOG TOGGLE ==========
+  const ENABLE_DEBUG_LOG = true;  // KEEP THIS TRUE - keeps polling/WS alive
+  const SHOW_DEBUG_UI = false;    // Set to true only when YOU need to debug
+  // ======================================
+
+  const uid = window.__USER_UID || localStorage.getItem('userId');
+  if (!uid) return;
+
+  // Initialize on-screen debug log
+  let debugLog = null;
+  let debugLogVisible = false;
+
+  function initDebugLog() {
+    if (!ENABLE_DEBUG_LOG || !SHOW_DEBUG_UI) return; // Only create UI if SHOW_DEBUG_UI is true
+
+    // Create log container
+    debugLog = document.createElement('div');
+    debugLog.id = 'balance-debug-log';
+    debugLog.style.cssText = `
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      max-height: 40vh;
+      background: rgba(0, 0, 0, 0.95);
+      color: #0f0;
+      font-family: monospace;
+      font-size: 11px;
+      padding: 10px;
+      overflow-y: auto;
+      z-index: 999999;
+      border-top: 2px solid #0f0;
+      display: none;
+    `;
+
+    // Create toggle button
+    const toggleBtn = document.createElement('button');
+    toggleBtn.textContent = '🐛 LOG';
+    toggleBtn.style.cssText = `
+      position: fixed;
+      bottom: 10px;
+      right: 10px;
+      background: rgba(0, 255, 0, 0.2);
+      color: #0f0;
+      border: 2px solid #0f0;
+      border-radius: 50%;
+      width: 50px;
+      height: 50px;
+      font-size: 18px;
+      z-index: 9999999;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(0, 255, 0, 0.3);
+    `;
+
+    toggleBtn.onclick = () => {
+      debugLogVisible = !debugLogVisible;
+      debugLog.style.display = debugLogVisible ? 'block' : 'none';
+      toggleBtn.style.background = debugLogVisible ? 'rgba(0, 255, 0, 0.4)' : 'rgba(0, 255, 0, 0.2)';
+    };
+
+    // Create copy button inside log
+    const copyBtn = document.createElement('button');
+    copyBtn.textContent = '📋 COPY ALL';
+    copyBtn.style.cssText = `
+      position: sticky;
+      top: 0;
+      background: #0f0;
+      color: black;
+      border: none;
+      padding: 5px 10px;
+      margin-bottom: 10px;
+      cursor: pointer;
+      font-weight: bold;
+      border-radius: 4px;
+      width: 100%;
+    `;
+    copyBtn.onclick = () => {
+      const text = Array.from(debugLog.querySelectorAll('.log-entry'))
+        .map(el => el.textContent)
+        .join('\n');
+      
+      navigator.clipboard.writeText(text).then(() => {
+        copyBtn.textContent = '✓ COPIED!';
+        setTimeout(() => { copyBtn.textContent = '📋 COPY ALL'; }, 2000);
+      }).catch(() => {
+        // Fallback for older browsers
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+        copyBtn.textContent = '✓ COPIED!';
+        setTimeout(() => { copyBtn.textContent = '📋 COPY ALL'; }, 2000);
+      });
+    };
+
+    debugLog.appendChild(copyBtn);
+    document.body.appendChild(debugLog);
+    document.body.appendChild(toggleBtn);
+
+    log('🟢 Debug log initialized');
   }
 
-  if (window.mobileConsoleLoaded) {
-    const existing = document.getElementById('mobileConsole');
-    const existingBtn = document.getElementById('toggleBtn');
-    if (existing && existingBtn) {
-      const isHidden = existing.style.display === 'none';
-      existing.style.display = isHidden ? 'flex' : 'none';
-      existingBtn.textContent = isHidden ? '✖️' : '🔧';
+  function log(message, type = 'info') {
+    // Always log to console for debugging
+    console.log(`[Balance Debug] ${message}`);
+    
+    // Only show on-screen UI if SHOW_DEBUG_UI is enabled
+    if (!SHOW_DEBUG_UI || !debugLog) return;
+
+    const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 });
+    const colors = {
+      info: '#0f0',
+      warn: '#ff0',
+      error: '#f00',
+      success: '#0ff'
+    };
+
+    const entry = document.createElement('div');
+    entry.className = 'log-entry';
+    entry.style.cssText = `
+      color: ${colors[type] || colors.info};
+      margin-bottom: 3px;
+      padding: 2px 0;
+      border-bottom: 1px solid rgba(0, 255, 0, 0.1);
+    `;
+    entry.textContent = `[${timestamp}] ${message}`;
+
+    debugLog.appendChild(entry);
+
+    // Auto-scroll to bottom
+    debugLog.scrollTop = debugLog.scrollHeight;
+
+    // Keep only last 100 entries
+    const entries = debugLog.querySelectorAll('.log-entry');
+    if (entries.length > 100) {
+      entries[0].remove();
+    }
+  }
+
+  // Expose log function globally
+  window.__balanceLog = log;
+
+  // Initialize log UI only if SHOW_DEBUG_UI is enabled
+  if (ENABLE_DEBUG_LOG && SHOW_DEBUG_UI) {
+    setTimeout(initDebugLog, 500);
+  }
+  
+  // Always log that system is starting
+  log('🚀 Balance system initializing...', 'info');
+
+  let ws = null;
+  let pollTimer = null;
+  let lastKnownBalance = null;
+  let hasProcessedPayment = false; // prevent double toast/close
+
+  // Central handler — called from WS, polling, AND page visibility
+  function handleNewBalance(newBalance, source = 'unknown') {
+    newBalance = Number(newBalance) || 0;
+
+    if (lastKnownBalance === null) {
+      lastKnownBalance = newBalance;
+      window.updateAllBalances(newBalance, true);
       return;
     }
-    existing?.remove();
-    existingBtn?.remove();
-    delete window.mobileConsoleLoaded;
-  }
-  window.mobileConsoleLoaded = true;
 
-  // === Enhanced CSS with proper z-index ===
-  const style = document.createElement('style');
-  style.textContent = `
-    #mobileConsole{position:fixed;inset:0;display:none;flex-direction:column;background:#000;color:#0f0;z-index:2147483640;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
-    #consoleHeader{background:#1a1a1a;padding:12px;border-bottom:2px solid #0f0;display:flex;justify-content:space-between;align-items:center;z-index:2147483642}
-    #consoleHeader h3{font-size:16px;color:#0f0;margin:0}
-    #clearBtn{background:#ff0000;color:white;border:none;padding:8px 16px;border-radius:6px;font-weight:bold;font-size:12px;cursor:pointer}
-    #logOutput{flex:1;overflow-y:auto;padding:10px;font-family:'Courier New',monospace;font-size:11px;line-height:1.5;z-index:2147483641}
-    .log-entry{margin:4px 0;padding:6px;border-left:3px solid;background:rgba(255,255,255,0.03);word-wrap:break-word;word-break:break-word;font-size:11px}
-    .log-entry pre{margin:4px 0;padding:4px;background:rgba(255,255,255,0.05);border-radius:4px;overflow-x:auto;font-size:10px}
-    .log-info{border-color:#0f0;color:#0f0}
-    .log-warn{border-color:#ff0;color:#ff0}
-    .log-error{border-color:#f00;color:#f00}
-    .log-success{border-color:#0ff;color:#0ff}
-    .log-ws{border-color:#f0f;color:#f0f}
-    .log-timestamp{color:#888;font-size:10px;margin-right:8px}
-    #commandPanel{background:#1a1a1a;border-top:2px solid #0f0;padding:12px;z-index:2147483642}
-    #commandInput{width:100%;background:#000;color:#0f0;border:1px solid #0f0;padding:10px;font-family:'Courier New',monospace;font-size:13px;border-radius:6px;margin-bottom:10px}
-    #quickCommands{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-    .cmd-btn{background:#0f0;color:#000;border:none;padding:10px;border-radius:6px;font-weight:bold;font-size:11px;cursor:pointer;text-align:center}
-    .cmd-btn:active{background:#0c0;transform:scale(0.98)}
-    #toggleBtn{position:fixed;bottom:20px;right:20px;width:60px;height:60px;border-radius:50%;background:#0f0;color:#000;border:none;font-size:24px;z-index:2147483647;box-shadow:0 4px 12px rgba(0,255,0,0.5);cursor:pointer;font-weight:bold}
-    #toggleBtn:active{transform:scale(0.95)}
-  `;
-  document.head.appendChild(style);
+    if (newBalance <= lastKnownBalance) {
+      lastKnownBalance = newBalance;
+      window.updateAllBalances(newBalance);
+      return;
+    }
 
-  // === Inject HTML ===
-  document.body.insertAdjacentHTML('beforeend', `
-    <button id="toggleBtn" aria-label="Toggle Debug Console">🔧</button>
-    <div id="mobileConsole">
-      <div id="consoleHeader">
-        <h3>🔧 Dev Console</h3>
-        <button id="clearBtn">Clear</button>
-      </div>
-      <div id="logOutput"></div>
-      <div id="commandPanel">
-        <input type="text" id="commandInput" placeholder="Type command + Enter" autocomplete="off" autocorrect="off" autocapitalize="off">
-        <div id="quickCommands">
-          <button class="cmd-btn" data-cmd="checkPolling()">Polling</button>
-          <button class="cmd-btn" data-cmd="checkWebSocket()">WebSocket</button>
-          <button class="cmd-btn" data-cmd="testBalance()">Balance</button>
-          <button class="cmd-btn" data-cmd="forceSync()">Sync</button>
-          <button class="cmd-btn" data-cmd="getUserId()">User ID</button>
-          <button class="cmd-btn" data-cmd="checkModal()">Modal</button>
-          <button class="cmd-btn" data-cmd="testPayment()">Test Pay</button>
-          <button class="cmd-btn" data-cmd="showStatus()">Status</button>
-        </div>
-      </div>
-    </div>
-  `);
+    const amountAdded = newBalance - lastKnownBalance;
+    lastKnownBalance = newBalance;
 
-  const consoleEl = document.getElementById('mobileConsole');
-  const logOutput = document.getElementById('logOutput');
-  const toggleBtn = document.getElementById('toggleBtn');
-  const clearBtn = document.getElementById('clearBtn');
-  const commandInput = document.getElementById('commandInput');
-  const quickCommands = document.getElementById('quickCommands');
+    log(`💰 +₦${amountAdded.toLocaleString()} (from ${source}) → ₦${newBalance.toLocaleString()}`, 'success');
 
-  // === ENHANCED LOG FUNCTION (Chrome-like) ===
-  function log(msg, type = 'info') {
-    const ts = new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3});
-    const div = document.createElement('div');
-    div.className = `log-entry log-${type}`;
-    
-    // Smart formatting for objects, arrays, errors
-    let formatted = '';
-    if (typeof msg === 'object' && msg !== null) {
+    // Update UI
+    window.updateAllBalances(newBalance);
+
+    // ONLY if payment just arrived → close modal + toast
+    if (!hasProcessedPayment && amountAdded > 0) {
+      hasProcessedPayment = true;
+
+      // Clear local pending tx storage immediately so UI won't resurrect old tx
       try {
-        if (msg instanceof Error) {
-          formatted = `❌ ${msg.name}: ${msg.message}\n${msg.stack || ''}`;
-        } else if (Array.isArray(msg)) {
-          formatted = `Array(${msg.length}) ${JSON.stringify(msg, null, 2)}`;
+        if (typeof removePendingTxFromStorage === 'function') {
+          removePendingTxFromStorage();
+          log('✓ Cleared pending tx storage', 'success');
         } else {
-          formatted = JSON.stringify(msg, null, 2);
+          // defensive: try to remove directly if helper not present
+          localStorage.removeItem('flexgig.pending_fund_tx');
+          log('✓ Cleared pending tx storage (direct)', 'success');
         }
-        formatted = `<pre>${formatted}</pre>`;
       } catch (e) {
-        formatted = String(msg);
+        log(`⚠️ Failed to clear pending tx: ${e.message}`, 'warn');
       }
-    } else {
-      formatted = String(msg);
-    }
-    
-    div.innerHTML = `<span class="log-timestamp">[${ts}]</span>${formatted}`;
-    logOutput.appendChild(div);
-    logOutput.scrollTop = logOutput.scrollHeight;
-    
-    // Also log to real console
-    console.log(`[MobileConsole ${type.toUpperCase()}]`, msg);
-  }
-  
-  window.mobileLog = log;
 
-  // === Toggle console (allows navigation when closed) ===
-  toggleBtn.onclick = () => {
-    const isVisible = consoleEl.style.display !== 'none';
-    consoleEl.style.display = isVisible ? 'none' : 'flex';
-    toggleBtn.textContent = isVisible ? '🔧' : '✖️';
-    if (!isVisible) {
-      setTimeout(() => commandInput.focus(), 100);
-    }
-  };
+      // Dispatch event (for any other listeners)
+      window.dispatchEvent(new CustomEvent('balance_update', {
+        detail: { type: 'balance_update', balance: newBalance, amount: amountAdded }
+      }));
 
-  clearBtn.onclick = () => { 
-    logOutput.innerHTML = ''; 
-    log('Console cleared', 'success'); 
-  };
-
-  // === Enhanced execute with better error reporting ===
-  function execute(cmd) {
-    log(`> ${cmd}`, 'info');
-    try {
-      const result = eval(cmd);
-      if (result !== undefined && result !== null) {
-        if (result instanceof Promise) {
-          result
-            .then(r => {
-              if (r !== undefined) log(r, 'success');
-            })
-            .catch(e => log(e, 'error'));
+      // Close modal SAFELY via ModalManager with correct ID
+      setTimeout(() => {
+        if (window.ModalManager?.closeModal) {
+          window.ModalManager.closeModal('addMoneyModal');
+          log('✓ Modal closed via ModalManager', 'success');
         } else {
-          log(result, 'success');
+          log('⚠️ ModalManager not available', 'warn');
         }
-      }
-    } catch (e) {
-      log(e, 'error');
-    }
-  }
+      }, 300);
 
-  commandInput.addEventListener('keydown', e => {
-    if (e.key === 'Enter') {
-      const cmd = commandInput.value.trim();
-      if (cmd) {
-        execute(cmd);
-        commandInput.value = '';
-      }
-    }
-  });
+      // Re-open the add-money content (this will now NOT find the old tx in localStorage)
+      window.openAddMoneyModalContent();
 
-  quickCommands.addEventListener('click', e => {
-    const btn = e.target.closest('.cmd-btn');
-    if (btn) execute(btn.dataset.cmd);
-  });
-
-  // === HELPER: Get API Base ===
-  function getApiBase() {
-    return window.__SEC_API_BASE || 'https://api.flexgig.com.ng' || window.location.origin;
-  }
-
-  // === HELPER: Get User ID ===
-  function safeGetUserId() {
-    try {
-      return window.__USER_UID || (localStorage && localStorage.getItem('userId')) || null;
-    } catch (e) {
-      return null;
-    }
-  }
-
-  // === DIAGNOSTIC FUNCTIONS ===
-  
-  window.checkPolling = () => {
-    log('🔍 Checking polling...', 'ws');
-    const api = getApiBase();
-    log(`API: ${api}`, 'info');
-    
-    fetch(`${api}/api/session?light=true&t=${Date.now()}`, {
-      credentials: 'include', 
-      cache: 'no-store'
-    })
-      .then(r => {
-        log(`Status: ${r.status} ${r.statusText}`, r.ok ? 'success' : 'error');
-        return r.json();
-      })
-      .then(j => {
-        const bal = j.user?.wallet_balance;
-        log(`Balance: ₦${bal !== undefined ? bal.toLocaleString() : 'N/A'}`, 'success');
-        log(`Seq: ${j.wallet_seq || 'N/A'}`, 'info');
-        return j;
-      })
-      .catch(e => log(e, 'error'));
-  };
-
-  window.checkWebSocket = () => {
-    log('🔍 Checking WebSocket...', 'ws');
-    const uid = safeGetUserId();
-    
-    if (!uid) {
-      log('❌ No user ID found', 'error');
-      return;
-    }
-
-    log(`User ID: ${uid}`, 'success');
-    log('Connecting...', 'ws');
-    
-    let ws;
-    try {
-      ws = new WebSocket('wss://api.flexgig.com.ng/ws/wallet');
-    } catch (e) {
-      log(e, 'error');
-      return;
-    }
-
-    ws.onopen = () => {
-      log('✅ WebSocket CONNECTED!', 'success');
-      const msg = JSON.stringify({type: 'subscribe', user_uid: uid});
-      ws.send(msg);
-      log(`📤 Sent: ${msg}`, 'ws');
-    };
-    
-    ws.onmessage = e => {
-      log(`📨 Message: ${e.data}`, 'ws');
-      try {
-        const data = JSON.parse(e.data);
-        log(data, 'success');
-      } catch {}
-    };
-    
-    ws.onerror = e => log(`❌ WS Error: ${e.type}`, 'error');
-    
-    ws.onclose = e => {
-      log(`🔌 WS Closed: code=${e.code}, clean=${e.wasClean}`, e.wasClean ? 'warn' : 'error');
-    };
-    
-    setTimeout(() => {
-      if (ws.readyState === WebSocket.OPEN) {
-        log('Closing test connection...', 'info');
-        ws.close();
-      }
-    }, 10000);
-  };
-
-  window.testBalance = async () => {
-    log('🧪 Testing balance fetch...', 'ws');
-    const api = getApiBase();
-    
-    try {
-      const r = await fetch(`${api}/api/session?light=true&t=${Date.now()}`, {
-        credentials: 'include',
-        cache: 'no-store'
-      });
-      
-      log(`Status: ${r.status}`, r.ok ? 'success' : 'error');
-      
-      if (!r.ok) {
-        const text = await r.text();
-        log(`Response: ${text.substring(0, 200)}`, 'error');
-        return;
-      }
-      
-      const j = await r.json();
-      const bal = j.user?.wallet_balance;
-      
-      log(`✅ Balance: ₦${bal !== undefined ? bal.toLocaleString() : 'N/A'}`, 'success');
-      log(`Seq: ${j.wallet_seq || 'N/A'}`, 'info');
-      log(`User: ${j.user?.username || 'N/A'}`, 'info');
-      
-      return j;
-    } catch (e) { 
-      log(e, 'error'); 
-    }
-  };
-
-  window.forceSync = async () => {
-    log('🔄 Force syncing...', 'ws');
-    const api = getApiBase();
-    
-    try {
-      const r = await fetch(`${api}/api/session?light=true&t=${Date.now()}`, {
-        credentials: 'include',
-        cache: 'no-store'
-      });
-      
-      if (!r.ok) {
-        log(`❌ Sync failed: ${r.status}`, 'error');
-        return;
-      }
-      
-      const j = await r.json();
-      const bal = j.user?.wallet_balance;
-      
-      log(`✅ Synced: ₦${bal !== undefined ? bal.toLocaleString() : 'N/A'}`, 'success');
-      
-      if (typeof handleNewBalance === 'function') {
-        handleNewBalance(bal, 'dev-console');
-        log('✅ Called handleNewBalance', 'success');
-      } else if (typeof window.handleNewBalance === 'function') {
-        window.handleNewBalance(bal, 'dev-console');
-        log('✅ Called window.handleNewBalance', 'success');
+      // Show toast
+      if (typeof window.notify === 'function') {
+        window.notify(`₦${amountAdded.toLocaleString()} received!`, 'success');
       } else {
-        log('⚠️ handleNewBalance not found', 'warn');
+        // Fallback beautiful toast
+        const t = document.createElement('div');
+        t.textContent = `✓ ₦${amountAdded.toLocaleString()} credited!`;
+        Object.assign(t.style, {
+          position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)',
+          background: '#10b981', color: 'white', padding: '16px 24px', borderRadius: '16px',
+          zIndex: 999999, fontWeight: 'bold', boxShadow: '0 10px 30px rgba(0,0,0,0.3)'
+        });
+        document.body.appendChild(t);
+        setTimeout(() => t.remove(), 4000);
       }
-      
-      return j;
-    } catch (e) { 
-      log(e, 'error'); 
-    }
-  };
 
-  window.getUserId = () => {
-    const uid = safeGetUserId();
-    log(`User ID: ${uid || 'NOT FOUND'}`, uid ? 'success' : 'error');
-    
-    if (!uid) {
-      log('Checking localStorage...', 'info');
+      // Allow next payment after 30s
+      setTimeout(() => { hasProcessedPayment = false; }, 30000);
+    }
+  }
+
+  window.handleNewBalance = window.handleNewBalance || handleNewBalance;
+
+  // AGGRESSIVE Polling fallback (mobile-first: checks every 3s)
+  async function startPolling() {
+    if (pollTimer) clearTimeout(pollTimer);
+
+    const poll = async () => {
       try {
-        const keys = [];
-        for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i);
-          if (key.includes('user') || key.includes('id')) {
-            keys.push(`${key}: ${localStorage.getItem(key).substring(0, 50)}`);
+        log('🔄 Polling balance...', 'info');
+        // REMOVED light=true — we need the full user object with wallet_balance
+        const res = await fetch(`${window.__SEC_API_BASE}/api/session?t=${Date.now()}`, {
+          credentials: 'include',
+          cache: 'no-store',
+          headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' }
+        });
+        if (res.ok) {
+          const json = await res.json();
+          log(`📦 Poll response: ${JSON.stringify(json).substring(0, 200)}...`, 'info');
+          const bal = json.user?.wallet_balance ?? json.wallet_balance ?? json.balance;
+          log(`✓ Poll success: ₦${bal?.toLocaleString() || 'N/A'} (from ${json.user?.wallet_balance !== undefined ? 'user.wallet_balance' : json.wallet_balance !== undefined ? 'wallet_balance' : json.balance !== undefined ? 'balance' : 'NONE'})`, 'success');
+          if (bal !== undefined && bal !== lastKnownBalance) {
+            handleNewBalance(bal, 'polling');
           }
+        } else {
+          log(`⚠️ Poll failed: ${res.status}`, 'warn');
         }
-        if (keys.length) log(keys, 'info');
-      } catch (e) {
-        log('Cannot access localStorage', 'warn');
+      } catch (e) { 
+        log(`❌ Poll error: ${e.message}`, 'error');
       }
-    }
-    
-    return uid;
-  };
 
-  window.checkModal = () => {
-    log('🔍 Checking modal...', 'info');
-    const m = document.getElementById('addMoneyModal');
-    
-    if (!m) {
-      log('❌ Modal element not found', 'error');
-      return;
-    }
-    
-    log('✅ Modal exists', 'success');
-    const style = getComputedStyle(m);
-    const result = {
-      exists: true,
-      visible: style.display !== 'none',
-      display: style.display,
-      transform: m.style.transform || 'none',
-      classes: m.className
+      // Termux-optimized: poll every 15s (gentle on device + still responsive)
+      pollTimer = setTimeout(poll, 15000);
     };
-    log(result, 'info');
-    return result;
-  };
+    poll();
+  }
 
-  window.testPayment = () => {
-    log('🧪 Simulating payment...', 'ws');
-    
-    const testData = {
-      type: 'balance_update', 
-      balance: 50000, 
-      amount: 5000, 
-      seq: Date.now()
-    };
-    
-    log(testData, 'info');
-    
-    if (window.__handleBalanceUpdate) {
-      log('Calling __handleBalanceUpdate...', 'info');
-      window.__handleBalanceUpdate(testData);
-      log('✅ Handler called', 'success');
-    } else {
-      log('⚠️ __handleBalanceUpdate not found', 'warn');
+  // WebSocket (best effort)
+  function connectWS() {
+    try {
+      if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
+        log('⚠️ WS already connecting/open', 'warn');
+        return; // Already connecting/open
+      }
+
+      log('🔌 WS: Connecting to wss://api.flexgig.com.ng/ws/wallet...', 'info');
+      ws = new WebSocket('wss://api.flexgig.com.ng/ws/wallet');
+
+      let heartbeatInterval = null;
+
+      // Update global reference every time we create a new WS
+      window.__current_ws = ws;
+      log('✓ WS instance exposed to window.__current_ws', 'success');
+
+      ws.onopen = () => {
+        log('✅ WS: Connected! Subscribing...', 'success');
+        ws.send(JSON.stringify({ type: 'subscribe', user_uid: uid }));
+        log(`📤 WS: Sent subscribe for user ${uid}`, 'info');
+
+        // AGGRESSIVE heartbeat: every 15s to fight mobile connection drops
+        clearInterval(heartbeatInterval);
+        heartbeatInterval = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'ping' }));
+            log('💓 WS: Heartbeat sent', 'info');
+          } else {
+            log('❌ WS: Connection dead, attempting reconnect...', 'error');
+            clearInterval(heartbeatInterval);
+            connectWS();
+          }
+        }, 15000);
+
+        if (pollTimer) clearTimeout(pollTimer);
+      };
+
+      ws.onmessage = (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          log(`📨 WS: Received message: ${JSON.stringify(data)}`, 'info');
+
+          if (data.type === 'balance_update' && data.balance !== undefined) {
+            log(`💰 WS: Balance update received: ₦${data.balance.toLocaleString()}`, 'success');
+            handleNewBalance(data.balance, 'websocket');
+          }
+
+          // Dispatch transaction if present
+          let txDetail = data.transaction || (data.type === 'transaction' ? data : null);
+          if (txDetail) {
+            log(`📝 WS: Transaction update dispatched`, 'info');
+            document.dispatchEvent(new CustomEvent('transaction_update', { detail: txDetail }));
+          }
+        } catch (err) {
+          log(`❌ WS: Parse error: ${err.message}`, 'error');
+        }
+      };
+
+      ws.onerror = (e) => {
+        log(`❌ WS: Error occurred`, 'error');
+      };
+
+      ws.onclose = (e) => {
+        log(`🔴 WS: Closed (code: ${e.code}, reason: ${e.reason}) — reconnecting in 1s`, 'warn');
+        clearInterval(heartbeatInterval);
+
+        // IMMEDIATE reconnect for mobile + ensure polling continues
+        setTimeout(() => {
+          connectWS();
+          startPolling(); // restart polling if it died
+        }, 1000);
+      };
+
+    } catch (err) {
+      log(`❌ WS: Failed to create: ${err.message}`, 'error');
+      setTimeout(connectWS, 3000);
     }
-    
-    log('Dispatching event...', 'info');
-    window.dispatchEvent(new CustomEvent('balance_update', { detail: testData }));
-    log('✅ Event dispatched', 'success');
-  };
+  }
 
-  window.showStatus = () => {
-    log('📊 System Status:', 'ws');
-    
-    const status = {
-      userId: safeGetUserId() || 'NOT FOUND',
-      apiBase: getApiBase(),
-      modal: !!document.getElementById('addMoneyModal'),
-      balanceHandler: typeof window.__handleBalanceUpdate === 'function',
-      notify: typeof window.notify === 'function',
-      updateBalances: typeof window.updateAllBalances === 'function',
-      playSound: typeof window.playSuccessSound === 'function',
-      modalManager: typeof window.ModalManager !== 'undefined'
-    };
-    
-    log(status, 'info');
-    return status;
-  };
+  // CRITICAL: Re-check balance when user returns to app (iOS/Android fix)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      log('👁️ Page visible → force balance check + WS reconnect', 'info');
+      
+      // Immediate balance check
+      fetch(`${window.__SEC_API_BASE}/api/session?t=${Date.now()}`, { 
+        credentials: 'include',
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache' }
+      })
+        .then(r => r.ok ? r.json() : null)
+        .then(j => {
+          if (j?.user?.wallet_balance !== undefined) {
+            log(`✓ Visibility check: ₦${j.user.wallet_balance.toLocaleString()}`, 'success');
+            handleNewBalance(j.user.wallet_balance, 'visibility');
+          }
+        })
+        .catch(e => log(`❌ Visibility check failed: ${e.message}`, 'error'));
 
-  // === INITIALIZATION ===
-  log('🚀 Mobile Dev Console Ready!', 'success');
-  log('Tap 🔧 to toggle console', 'info');
-  log(`Debug Mode: ${DEBUG_MODE ? 'ENABLED' : 'DISABLED'}`, 'info');
+      // Force WebSocket reconnect if dead
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        log('🔌 WS dead, reconnecting...', 'warn');
+        connectWS();
+      }
 
-  // Auto-show on errors
-  window.addEventListener('error', e => {
-    if (consoleEl.style.display === 'none') {
-      consoleEl.style.display = 'flex';
-      toggleBtn.textContent = '✖️';
+      // Restart polling
+      startPolling();
     }
-    log({
-      message: e.message,
-      filename: e.filename,
-      lineno: e.lineno,
-      colno: e.colno,
-      error: e.error
-    }, 'error');
   });
 
-  // Initial checks (delayed)
+  // Also on resume, focus, pageshow (covers all mobile scenarios)
+  ['resume', 'focus', 'pageshow'].forEach(event => {
+    window.addEventListener(event, () => {
+      log(`🔄 [${event}] Forcing balance check + WS reconnect`, 'info');
+      
+      // Triple guarantee: fetch + WS + polling
+      fetch(`${window.__SEC_API_BASE}/api/session?t=${Date.now()}`, { 
+        credentials: 'include',
+        cache: 'no-store' 
+      })
+        .then(r => r.ok ? r.json() : null)
+        .then(j => {
+          if (j?.user?.wallet_balance !== undefined) {
+            log(`✓ [${event}] Balance: ₦${j.user.wallet_balance.toLocaleString()}`, 'success');
+            handleNewBalance(j.user.wallet_balance, event);
+          }
+        })
+        .catch(e => log(`❌ [${event}] Check failed: ${e.message}`, 'error'));
+
+      connectWS();
+      startPolling();
+    });
+  });
+
+  // Start everything
   setTimeout(() => {
-    log('Running initial checks...', 'info');
-    getUserId();
-    checkModal();
-  }, 1500);
+    log('🚀 Starting balance monitoring system...', 'info');
+    connectWS();
+    startPolling(); // run polling always on mobile
+  }, 800);
+
+  // Initial load
+  getSession().then(s => {
+    if (s?.user?.wallet_balance !== undefined) {
+      log(`💰 Initial balance: ₦${s.user.wallet_balance.toLocaleString()}`, 'success');
+      handleNewBalance(s.user.wallet_balance, 'initial');
+    }
+  }).catch(e => log(`❌ Initial session failed: ${e.message}`, 'error'));
 
 })();
 
