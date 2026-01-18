@@ -382,13 +382,7 @@ window.clearReauthLock = clearReauthLock;
 
 let balanceRealtimeChannel = null;
 
-function subscribeToWalletBalance() {
-  // Prevent duplicate subscriptions
-  if (balanceRealtimeChannel) {
-    supabaseClient.removeChannel(balanceRealtimeChannel);
-    balanceRealtimeChannel = null;
-  }
-
+function subscribeToWalletBalance(force = false) {
   // Get user UID reliably (adjust sources as needed)
   const uid = 
     window.__USER_UID ||
@@ -399,6 +393,19 @@ function subscribeToWalletBalance() {
   if (!uid || !uid.includes('-')) {
     console.warn('[Wallet Realtime] Cannot subscribe — missing/invalid UID');
     return;
+  }
+
+  // Early exit if already subscribed and not forced
+  if (!force && balanceRealtimeChannel && balanceRealtimeChannel.state === 'SUBSCRIBED') {
+    console.log('[Wallet Realtime] Already subscribed & connected — skipping');
+    return;
+  }
+
+  // Clean up only if exists and NOT healthy (prevents removing good channels)
+  if (balanceRealtimeChannel && balanceRealtimeChannel.state !== 'SUBSCRIBED') {
+    console.log('[Wallet Realtime] Cleaning up unhealthy channel');
+    supabaseClient.removeChannel(balanceRealtimeChannel).catch(err => console.warn('Channel remove error', err));
+    balanceRealtimeChannel = null;
   }
 
   console.log('[Wallet Realtime] Subscribing → user_uid:', uid);
@@ -441,6 +448,7 @@ function subscribeToWalletBalance() {
     )
     .subscribe((status, err) => {
       console.log('[Wallet Realtime] Subscription status:', status);
+      
       if (err) {
         console.error('[Wallet Realtime] Subscription ERROR details:', err);
       }
@@ -449,40 +457,12 @@ function subscribeToWalletBalance() {
         console.log('[Wallet Realtime] Connected & listening!');
       } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
         console.warn('[Wallet Realtime] Disconnected/error → retrying soon', { error: err });
-        setTimeout(subscribeToWalletBalance, 6000);
+        setTimeout(() => subscribeToWalletBalance(true), 6000); // force retry
       }
     });
 
   // Optional: store globally for debugging / cleanup
   window.__balanceRealtimeChannel = balanceRealtimeChannel;
-}
-
-// ────────────────────────────────────────────────
-// When to call it
-// ────────────────────────────────────────────────
-
-// Best: after successful session load
-getSession().then(session => {
-  if (session?.user) {
-    subscribeToWalletBalance();
-  }
-}).catch(() => {});
-
-// Also re-subscribe when tab/app becomes visible again (mobile fix)
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') {
-    console.log('[Wallet Realtime] Tab visible → checking subscription');
-    subscribeToWalletBalance();
-  }
-}, { passive: true });
-
-// Optional: also call in onDashboardLoad if you have that hook
-if (typeof onDashboardLoad === 'function') {
-  const original = onDashboardLoad;
-  onDashboardLoad = async (...args) => {
-    await original(...args);
-    subscribeToWalletBalance();
-  };
 }
 
 
