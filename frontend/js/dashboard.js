@@ -376,57 +376,54 @@ window.clearReauthLock = clearReauthLock;
 
 
 // ────────────────────────────────────────────────
-// REAL-TIME BALANCE SUBSCRIPTION – Fixed version
+// REAL-TIME BALANCE SUBSCRIPTION – FINAL STABLE VERSION
 // ────────────────────────────────────────────────
 
-// Global guards to prevent overlapping calls and flapping
 let balanceRealtimeChannel = null;
 let isSubscribing = false;
-let lastSubscribeAttempt = 0;
-const MIN_SUBSCRIBE_GAP_MS = 4000;     // min 4 seconds between attempts
-const SUBSCRIPTION_RETRY_MS = 10000;   // 10s retry on disconnect/error
+let activeRetryTimer = null;           // Only one retry timer at a time
+let lastHealthyTs = 0;                 // When was the last successful SUBSCRIBED
+const SUBSCRIPTION_RETRY_MS = 15000;   // 15s — slower to avoid spam
+const HEALTHY_THRESHOLD_MS = 5000;     // Consider healthy if SUBSCRIBED within last 5s
 
 async function subscribeToWalletBalance(force = false) {
   const now = Date.now();
 
-  // 1. Prevent concurrent / spammy calls
+  // Guard 1: Already subscribing? Skip
   if (isSubscribing) {
-    console.debug('[Wallet Realtime] Already subscribing — skipping duplicate call');
+    console.debug('[Wallet Realtime] Subscription in progress — skipping');
     return;
   }
 
-  if (!force && now - lastSubscribeAttempt < MIN_SUBSCRIBE_GAP_MS) {
-    console.debug('[Wallet Realtime] Too soon after last attempt — skipping');
+  // Guard 2: Recently healthy? Skip unless forced
+  if (!force && now - lastHealthyTs < HEALTHY_THRESHOLD_MS) {
+    console.debug('[Wallet Realtime] Recently healthy — skipping redundant call');
     return;
   }
 
-  lastSubscribeAttempt = now;
   isSubscribing = true;
 
   try {
-    // 2. Strong "already good" check — skip if healthy
+    // Guard 3: Channel exists and looks healthy? Skip
     if (
       balanceRealtimeChannel &&
-      (balanceRealtimeChannel.state === 'SUBSCRIBED' ||
-       balanceRealtimeChannel.state === 'JOINED') &&
-      !force
+      (balanceRealtimeChannel.state === 'SUBSCRIBED' || balanceRealtimeChannel.state === 'JOINED')
     ) {
-      console.log('[Wallet Realtime] Channel already healthy & SUBSCRIBED — no action needed');
+      console.log('[Wallet Realtime] Channel already SUBSCRIBED — skipping');
+      lastHealthyTs = now;
       return;
     }
 
-    // 3. Cleanup only if channel exists AND is not healthy
+    // Cleanup only if needed
     if (balanceRealtimeChannel) {
-      console.log('[Wallet Realtime] Cleaning up previous unhealthy channel');
+      console.log('[Wallet Realtime] Cleaning up old channel');
       try {
         await supabaseClient.removeChannel(balanceRealtimeChannel);
-      } catch (cleanupErr) {
-        console.warn('[Wallet Realtime] Cleanup failed (harmless):', cleanupErr.message);
-      }
+      } catch {}
       balanceRealtimeChannel = null;
     }
 
-    // 4. Get UID (same logic, but cache result if possible)
+    // Get UID
     let uid =
       window.__USER_UID ||
       localStorage.getItem('userId') ||
@@ -435,13 +432,13 @@ async function subscribeToWalletBalance(force = false) {
       null;
 
     if (!uid || !uid.includes('-')) {
-      console.warn('[Wallet Realtime] Cannot subscribe — missing/invalid UID');
+      console.warn('[Wallet Realtime] Missing/invalid UID — cannot subscribe');
       return;
     }
 
     console.log('[Wallet Realtime] Subscribing for UID:', uid);
 
-    // 5. Fetch fresh Supabase JWT from your secure endpoint
+    // Fetch JWT
     let token;
     try {
       const res = await fetch('https://api.flexgig.com.ng/api/supabase/token', {
@@ -451,32 +448,29 @@ async function subscribeToWalletBalance(force = false) {
       });
 
       if (!res.ok) {
-        const errText = await res.text().catch(() => 'No response body');
-        throw new Error(`Token endpoint failed: ${res.status} — ${errText}`);
+        const errText = await res.text().catch(() => '');
+        throw new Error(`Token failed: ${res.status} — ${errText}`);
       }
 
       ({ token } = await res.json());
       console.log('[Wallet Realtime] Fresh JWT acquired');
     } catch (err) {
-      console.error('[Wallet Realtime] JWT fetch failed:', err.message || err);
-      setTimeout(() => subscribeToWalletBalance(true), SUBSCRIPTION_RETRY_MS);
+      console.error('[Wallet Realtime] JWT fetch error:', err.message || err);
+      scheduleRetry();
       return;
     }
 
-    // 6. Create isolated client with custom JWT (different storage key = no GoTrue warning)
+    // Create client with unique storage key
     const tempClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       auth: {
         autoRefreshToken: false,
         persistSession: false,
-        storageKey: 'flexgig_wallet_jwt'   // ← Unique key prevents "multiple instances" warning
+        storageKey: 'flexgig_wallet_private_jwt_v1'  // Unique per app instance
       },
-      global: {
-        headers: { Authorization: `Bearer ${token}` }
-      }
+      global: { headers: { Authorization: `Bearer ${token}` } }
     });
 
     const channelName = `wallet:${uid}`;
-
     balanceRealtimeChannel = tempClient.channel(channelName);
 
     balanceRealtimeChannel
@@ -489,29 +483,20 @@ async function subscribeToWalletBalance(force = false) {
           filter: `user_uid=eq.${uid}`
         },
         (payload) => {
-          console.log('[Wallet Realtime] 🔔 Change received:', payload.eventType);
-
+          console.log('[Wallet Realtime] 🔔 Change:', payload.eventType);
           if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
             const newBalance = Number(payload.new?.balance);
             if (!isNaN(newBalance)) {
-              console.log('[Wallet Realtime] Balance update:', {
-                new: newBalance,
-                old: payload.old?.balance,
-                user: payload.new.user_uid
-              });
-
+              console.log('[Wallet Realtime] Balance:', newBalance);
               window.handleNewBalance?.(newBalance, 'supabase-postgres');
-              window.dispatchEvent(
-                new CustomEvent('balance_update', {
-                  detail: {
-                    balance: newBalance,
-                    amount: newBalance - (window.currentDisplayedBalance || 0),
-                    source: 'postgres_changes',
-                    timestamp: Date.now()
-                  }
-                })
-              );
-
+              window.dispatchEvent(new CustomEvent('balance_update', {
+                detail: {
+                  balance: newBalance,
+                  amount: newBalance - (window.currentDisplayedBalance || 0),
+                  source: 'postgres_changes',
+                  timestamp: Date.now()
+                }
+              }));
               window.updateAllBalances(newBalance);
             }
           }
@@ -520,29 +505,47 @@ async function subscribeToWalletBalance(force = false) {
       .subscribe((status, err) => {
         console.log('[Wallet Realtime] Status:', status);
 
-        if (err) {
-          console.error('[Wallet Realtime] Channel error:', err);
-        }
+        if (err) console.error('[Wallet Realtime] Error:', err);
 
         if (status === 'SUBSCRIBED') {
-          console.log('[Wallet Realtime] ✅ Connected & listening for balance changes');
+          console.log('[Wallet Realtime] ✅ Connected & listening');
+          lastHealthyTs = Date.now();
+          // Clear any pending retry
+          if (activeRetryTimer) {
+            clearTimeout(activeRetryTimer);
+            activeRetryTimer = null;
+          }
         } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
-          console.warn('[Wallet Realtime] Disconnected — retrying in 10s');
-          setTimeout(() => subscribeToWalletBalance(true), SUBSCRIPTION_RETRY_MS);
+          console.warn('[Wallet Realtime] Disconnected — scheduling retry');
+          scheduleRetry();
         }
       });
 
     window.__balanceRealtimeChannel = balanceRealtimeChannel;
 
   } catch (err) {
-    console.error('[Wallet Realtime] Subscription setup crashed:', err);
+    console.error('[Wallet Realtime] Setup crashed:', err);
+    scheduleRetry();
   } finally {
     isSubscribing = false;
   }
 }
 
-  window.__balanceRealtimeChannel = balanceRealtimeChannel;
+// Centralized retry scheduler — only one at a time
+function scheduleRetry() {
+  if (activeRetryTimer) {
+    console.debug('[Wallet Realtime] Retry already scheduled — skipping duplicate');
+    return;
+  }
 
+  activeRetryTimer = setTimeout(() => {
+    activeRetryTimer = null;
+    console.log('[Wallet Realtime] Executing scheduled retry');
+    subscribeToWalletBalance(true);
+  }, SUBSCRIPTION_RETRY_MS);
+}
+
+// Updated onDashboardLoad wrapper — REMOVE the setTimeout retry
 if (typeof onDashboardLoad === 'function') {
   const original = onDashboardLoad;
   onDashboardLoad = async function (...args) {
@@ -550,21 +553,13 @@ if (typeof onDashboardLoad === 'function') {
 
     setupBroadcastRealtime();
     pollStatus(true);
-    subscribeToWalletBalance();          // ← ADD THIS LINE
-
-    // Optional: retry on failure
-    setTimeout(() => {
-      if (!balanceRealtimeChannel || balanceRealtimeChannel.state !== 'SUBSCRIBED') {
-        console.warn('[Wallet Realtime] Initial sub failed — retrying');
-        subscribeToWalletBalance(true);
-      }
-    }, 5000);
+    subscribeToWalletBalance();   // ← Only this call — function handles its own retries now
   };
 } else {
   console.warn('[BROADCAST] No onDashboardLoad – running standalone');
   setupBroadcastRealtime();
   pollStatus(true);
-  subscribeToWalletBalance();            // ← ADD HERE TOO
+  subscribeToWalletBalance();
 }
 
 
