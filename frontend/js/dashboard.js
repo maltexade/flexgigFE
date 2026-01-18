@@ -441,12 +441,15 @@ function subscribeToWalletBalance() {
     )
     .subscribe((status, err) => {
       console.log('[Wallet Realtime] Subscription status:', status);
+      if (err) {
+        console.error('[Wallet Realtime] Subscription ERROR details:', err);
+      }
       
       if (status === 'SUBSCRIBED') {
         console.log('[Wallet Realtime] Connected & listening!');
       } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
-        console.warn('[Wallet Realtime] Disconnected/error → retrying soon');
-        setTimeout(subscribeToWalletBalance, 6000); // retry after ~6s
+        console.warn('[Wallet Realtime] Disconnected/error → retrying soon', { error: err });
+        setTimeout(subscribeToWalletBalance, 6000);
       }
     });
 
