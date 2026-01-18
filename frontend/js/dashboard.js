@@ -3214,6 +3214,7 @@ async function onDashboardLoad() {
   }
   setupBroadcastSubscription();
   subscribeToWalletBalance();
+  
 
 
   // 🔥 ADD THESE TWO LINES (after the single getSession)
