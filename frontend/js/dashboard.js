@@ -482,39 +482,7 @@ if (typeof onDashboardLoad === 'function') {
   };
 }
 
-// Light fallback – runs infrequently and skips if realtime looks healthy  
-let fallbackPollTimer = null;  
 
-function startLightFallbackPolling() {  
-  if (fallbackPollTimer) clearInterval(fallbackPollTimer);  
-
-  fallbackPollTimer = setInterval(async () => {  
-    // Skip if realtime subscription appears active  
-    if (  
-      balanceRealtimeChannel &&  
-      ['SUBSCRIBED', 'JOINED'].includes(balanceRealtimeChannel.state || '')  
-    ) {  
-      return; // realtime is working → no need to poll  
-    }  
-
-    console.log('[Wallet Fallback] Realtime seems down → light check');  
-
-    try {  
-      const session = await getSession();  
-      const bal = session?.user?.wallet_balance; // adjust if it's session.wallet_balance  
-
-      if (bal !== undefined && bal !== window.currentDisplayedBalance) {  
-        console.log('[Wallet Fallback] Found update:', bal);  
-        window.handleNewBalance(bal, 'fallback-poll');  
-      }  
-    } catch (err) {  
-      console.warn('[Wallet Fallback] Check failed', err);  
-    }  
-  }, 60000); // every 60 seconds — very gentle on data  
-}  
-
-// Start it once (after realtime sub)  
-startLightFallbackPolling();  
 
 
     function saveCurrentAppState() {
