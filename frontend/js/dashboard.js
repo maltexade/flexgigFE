@@ -375,59 +375,34 @@ window.checkReauthLock = checkReauthLock;
 window.clearReauthLock = clearReauthLock;
 
 // ────────────────────────────────────────────────
-// REAL-TIME BALANCE SUBSCRIPTION – FINAL STABLE VERSION
+// REAL-TIME BALANCE SUBSCRIPTION – MAX DEBUG VERSION
 // ────────────────────────────────────────────────
 
 let balanceRealtimeChannel = null;
 let isSubscribing = false;
-let activeRetryTimer = null;           // Only one retry timer at a time
-let lastHealthyTs = 0;                 // When was the last successful SUBSCRIBED
-const SUBSCRIPTION_RETRY_MS = 15000;   // 15s — slower to avoid spam
-const HEALTHY_THRESHOLD_MS = 5000;     // Consider healthy if SUBSCRIBED within last 5s
+let activeRetryTimer = null;
+let lastHealthyTs = 0;
+const SUBSCRIPTION_RETRY_MS = 15000;
+const HEALTHY_THRESHOLD_MS = 5000;
 
 async function subscribeToWalletBalance(force = false) {
   const now = Date.now();
-  console.log(`[Wallet Realtime DEBUG] subscribeToWalletBalance called - force: ${force}, time: ${new Date().toISOString()}`);
+  console.log(`[Wallet Realtime MAX DEBUG] subscribeToWalletBalance called | force=${force} | ts=${now}`);
 
-  // Guard 1: Already subscribing? Skip
   if (isSubscribing) {
-    console.debug('[Wallet Realtime] Subscription in progress — skipping');
+    console.debug('[Wallet Realtime] Already subscribing — skip');
     return;
   }
 
-  // Guard 2: Recently healthy? Skip unless forced
   if (!force && now - lastHealthyTs < HEALTHY_THRESHOLD_MS) {
-    console.debug('[Wallet Realtime] Recently healthy — skipping redundant call');
+    console.debug('[Wallet Realtime] Recently healthy — skip');
     return;
   }
 
   isSubscribing = true;
 
   try {
-    // Guard 3: Channel exists and looks healthy? Skip
-    if (
-      balanceRealtimeChannel &&
-      (balanceRealtimeChannel.state === 'SUBSCRIBED' || balanceRealtimeChannel.state === 'JOINED')
-    ) {
-      console.log('[Wallet Realtime] Channel already SUBSCRIBED — skipping');
-      console.debug('[Wallet Realtime DEBUG] Current channel state:', balanceRealtimeChannel.state);
-      lastHealthyTs = now;
-      return;
-    }
-
-    // Cleanup only if needed
-    if (balanceRealtimeChannel) {
-      console.log('[Wallet Realtime] Cleaning up old channel');
-      try {
-        await supabaseClient.removeChannel(balanceRealtimeChannel);
-        console.debug('[Wallet Realtime DEBUG] Old channel removed successfully');
-      } catch (cleanupErr) {
-        console.error('[Wallet Realtime] Channel cleanup error:', cleanupErr.message || cleanupErr);
-      }
-      balanceRealtimeChannel = null;
-    }
-
-    // Get UID
+    // 1. Get UID - log all sources
     let uid =
       window.__USER_UID ||
       localStorage.getItem('userId') ||
@@ -435,82 +410,107 @@ async function subscribeToWalletBalance(force = false) {
       (await getSession())?.user?.uid ||
       null;
 
+    console.log('[Wallet Realtime DEBUG] UID sources:', {
+      __USER_UID: window.__USER_UID,
+      local_userId: localStorage.getItem('userId'),
+      local_userData: JSON.parse(localStorage.getItem('userData') || '{}')?.uid,
+      getSession: (await getSession())?.user?.uid,
+      final: uid
+    });
+
     if (!uid || !uid.includes('-')) {
-      console.warn('[Wallet Realtime] Missing/invalid UID — cannot subscribe');
-      console.debug('[Wallet Realtime DEBUG] Sources checked:', {
-        __USER_UID: !!window.__USER_UID,
-        local_userId: localStorage.getItem('userId'),
-        local_userData_uid: JSON.parse(localStorage.getItem('userData') || '{}')?.uid,
-        getSession_uid: (await getSession())?.user?.uid
-      });
+      console.error('[Wallet Realtime] INVALID UID — aborting', uid);
       return;
     }
 
-    console.log('[Wallet Realtime] Subscribing for UID:', uid);
+    console.log('[Wallet Realtime] Using UID:', uid);
 
-    // Fetch JWT
+    // 2. Fetch JWT
+    console.log('[Wallet Realtime] Fetching JWT...');
     let token;
     try {
-      console.log('[Wallet Realtime DEBUG] Fetching JWT from /api/supabase/token');
       const res = await fetch('https://api.flexgig.com.ng/api/supabase/token', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Accept': 'application/json' }
       });
 
-      console.debug('[Wallet Realtime DEBUG] JWT fetch response:', {
-        status: res.status,
-        ok: res.ok,
-        headers: Object.fromEntries(res.headers.entries())
-      });
+      console.log('[Wallet Realtime] JWT response status:', res.status, res.ok);
 
       if (!res.ok) {
-        const errText = await res.text().catch(() => '');
-        console.error('[Wallet Realtime] JWT fetch failed:', res.status, errText);
-        throw new Error(`Token failed: ${res.status} — ${errText}`);
+        const text = await res.text();
+        console.error('[Wallet Realtime] JWT fetch failed:', res.status, text);
+        throw new Error(`Token fetch failed: ${res.status}`);
       }
 
       ({ token } = await res.json());
-      console.log('[Wallet Realtime] Fresh JWT acquired - length:', token.length);
+      console.log('[Wallet Realtime] JWT acquired (length):', token?.length || 0);
     } catch (err) {
-      console.error('[Wallet Realtime] JWT fetch error:', err.message || err);
+      console.error('[Wallet Realtime] JWT fetch crashed:', err);
       scheduleRetry();
       return;
     }
 
-    // Decode and log JWT claims
+    // 3. Decode & log JWT fully
     try {
-      const header = JSON.parse(atob(token.split('.')[0]));
       const payload = JSON.parse(atob(token.split('.')[1]));
-      console.log('[Wallet Realtime DEBUG] JWT Header:', JSON.stringify(header, null, 2));
-      console.log('[Wallet Realtime DEBUG] JWT Payload:', JSON.stringify(payload, null, 2));
-      console.log('[Wallet Realtime DEBUG] Key Claims:', {
+      console.log('[Wallet Realtime JWT FULL PAYLOAD]:', JSON.stringify(payload, null, 2));
+      console.log('[Wallet Realtime JWT KEYS]:', {
         sub: payload.sub,
         role: payload.role,
         aud: payload.aud,
         iss: payload.iss,
-        iat: new Date(payload.iat * 1000).toISOString(),
-        exp: new Date(payload.exp * 1000).toISOString()
+        iat: payload.iat ? new Date(payload.iat * 1000).toISOString() : null,
+        exp: payload.exp ? new Date(payload.exp * 1000).toISOString() : null,
+        email: payload.email
       });
-    } catch (decodeErr) {
-      console.error('[Wallet Realtime] JWT decode failed:', decodeErr.message || decodeErr);
+
+      if (payload.sub !== uid) {
+        console.error('[Wallet Realtime CRITICAL] JWT sub mismatch!', {
+          expected: uid,
+          actual: payload.sub
+        });
+      }
+    } catch (e) {
+      console.error('[Wallet Realtime] JWT decode failed:', e);
     }
 
-    // Create client with unique storage key
+    // 4. Create temp client
     const tempClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-        storageKey: 'flexgig_wallet_private_jwt_v1'  // Unique per app instance
-      },
+      auth: { autoRefreshToken: false, persistSession: false, storageKey: 'flexgig_wallet_private_jwt_v1' },
       global: { headers: { Authorization: `Bearer ${token}` } }
     });
-    console.log('[Wallet Realtime DEBUG] Temp Supabase client created');
+    console.log('[Wallet Realtime] Temp client created');
 
+    // 5. Test RLS visibility with a direct query
+    console.log('[Wallet Realtime] Testing direct SELECT visibility...');
+    try {
+      const { data: testRow, error: testErr } = await tempClient
+        .from('user_wallets')
+        .select('balance, user_uid')
+        .eq('user_uid', uid)
+        .maybeSingle();
+
+      if (testErr) {
+        console.error('[Wallet Realtime] SELECT visibility TEST FAILED (RLS blocking?):', testErr.message || testErr);
+      } else if (testRow) {
+        console.log('[Wallet Realtime] SELECT visibility TEST OK — row exists', {
+          balance: testRow.balance,
+          user_uid: testRow.user_uid
+        });
+      } else {
+        console.warn('[Wallet Realtime] SELECT visibility TEST: No row found (expected if new user)');
+      }
+    } catch (testEx) {
+      console.error('[Wallet Realtime] SELECT test crashed:', testEx);
+    }
+
+    // 6. Create channel
     const channelName = `wallet:${uid}`;
     balanceRealtimeChannel = tempClient.channel(channelName);
-    console.log('[Wallet Realtime DEBUG] Channel created:', channelName);
+    console.log('[Wallet Realtime] Channel created:', channelName);
 
+    // 7. Subscribe with FULL logging
     balanceRealtimeChannel
       .on(
         'postgres_changes',
@@ -521,11 +521,15 @@ async function subscribeToWalletBalance(force = false) {
           filter: `user_uid=eq.${uid}`
         },
         (payload) => {
-          console.log('[Wallet Realtime] 🔔 Change received:', JSON.stringify(payload, null, 2));
+          console.log('[Wallet Realtime] 🔔 FULL PAYLOAD RECEIVED:', JSON.stringify(payload, null, 2));
+          console.log('[Wallet Realtime] Event type:', payload.eventType);
+          console.log('[Wallet Realtime] Old:', payload.old);
+          console.log('[Wallet Realtime] New:', payload.new);
+
           if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
             const newBalance = Number(payload.new?.balance);
             if (!isNaN(newBalance)) {
-              console.log('[Wallet Realtime] Balance update:', newBalance);
+              console.log('[Wallet Realtime] VALID BALANCE UPDATE:', newBalance);
               window.handleNewBalance?.(newBalance, 'supabase-postgres');
               window.dispatchEvent(new CustomEvent('balance_update', {
                 detail: {
@@ -537,49 +541,52 @@ async function subscribeToWalletBalance(force = false) {
               }));
               window.updateAllBalances(newBalance);
             } else {
-              console.warn('[Wallet Realtime] Invalid balance in payload:', payload.new?.balance);
+              console.warn('[Wallet Realtime] Invalid balance value in payload');
             }
           }
         }
       )
       .subscribe((status, err) => {
-        console.log('[Wallet Realtime] Subscription status:', status);
-        console.debug('[Wallet Realtime DEBUG] Full status details:', { status, err: err ? err.message : null });
-
+        console.log('[Wallet Realtime] SUBSCRIBE STATUS:', status);
         if (err) {
-          console.error('[Wallet Realtime] Subscription error:', err.message || err);
-          console.debug('[Wallet Realtime DEBUG] Error details:', JSON.stringify(err, null, 2));
+          console.error('[Wallet Realtime] SUBSCRIBE ERROR:', err.message || err);
+          console.debug('[Wallet Realtime DEBUG] Full error object:', JSON.stringify(err, null, 2));
         }
 
         if (status === 'SUBSCRIBED') {
-          console.log('[Wallet Realtime] ✅ Connected & listening');
+          console.log('[Wallet Realtime] ✅ SUBSCRIBED & LISTENING');
           lastHealthyTs = Date.now();
-          // Clear any pending retry
           if (activeRetryTimer) {
             clearTimeout(activeRetryTimer);
             activeRetryTimer = null;
           }
-        } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
-          console.warn('[Wallet Realtime] Disconnected — scheduling retry');
-          scheduleRetry();
-        } else if (status === 'TIMED_OUT') {
-          console.warn('[Wallet Realtime] Subscription timed out — retrying');
+
+          // Heartbeat: log every 30s to confirm channel alive
+          setInterval(() => {
+            if (balanceRealtimeChannel?.state === 'SUBSCRIBED') {
+              console.debug('[Wallet Realtime HEARTBEAT] Channel still alive');
+            }
+          }, 30000);
+        } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.warn('[Wallet Realtime] Channel state changed:', status);
           scheduleRetry();
         }
       });
 
     window.__balanceRealtimeChannel = balanceRealtimeChannel;
-    console.log('[Wallet Realtime DEBUG] Subscription setup complete');
+    console.log('[Wallet Realtime] Subscription setup complete');
 
   } catch (err) {
-    console.error('[Wallet Realtime] Setup crashed:', err.message || err);
+    console.error('[Wallet Realtime] CRASH:', err.message || err);
     console.debug('[Wallet Realtime DEBUG] Crash stack:', err.stack);
     scheduleRetry();
   } finally {
     isSubscribing = false;
-    console.log('[Wallet Realtime DEBUG] subscribeToWalletBalance ended');
+    console.log('[Wallet Realtime] Function ended');
   }
 }
+
+// ... rest of your code (scheduleRetry, onDashboardLoad wrapper) unchanged
 
 // Centralized retry scheduler — only one at a time
 function scheduleRetry() {
