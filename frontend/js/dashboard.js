@@ -375,18 +375,16 @@ window.checkReauthLock = checkReauthLock;
 window.clearReauthLock = clearReauthLock;
 
 
-// ────────────────────────────────────────────────
-// REAL-TIME BALANCE SUBSCRIPTION – user_wallets table
-// ────────────────────────────────────────────────
-
+// REAL-TIME BALANCE SUBSCRIPTION – Direct postgres_changes with custom JWT
 let balanceRealtimeChannel = null;
 
-function subscribeToWalletBalance(force = false) {
-  // Get user UID reliably (adjust sources as needed)
-  const uid = 
+async function subscribeToWalletBalance(force = false) {
+  // Get UID (robust sources)
+  let uid = 
     window.__USER_UID ||
     localStorage.getItem('userId') ||
     JSON.parse(localStorage.getItem('userData') || '{}')?.uid ||
+    (await getSession())?.user?.uid ||  // fallback to fresh session
     null;
 
   if (!uid || !uid.includes('-')) {
@@ -394,78 +392,93 @@ function subscribeToWalletBalance(force = false) {
     return;
   }
 
-  // Early exit if already subscribed and not forced
   if (!force && balanceRealtimeChannel && balanceRealtimeChannel.state === 'SUBSCRIBED') {
-    console.log('[Wallet Realtime] Already subscribed & connected — skipping');
+    console.log('[Wallet Realtime] Already healthy — skipping');
     return;
   }
 
-  // Clean up only if exists and NOT healthy (prevents removing good channels)
-  if (balanceRealtimeChannel && balanceRealtimeChannel.state !== 'SUBSCRIBED') {
-    console.log('[Wallet Realtime] Cleaning up unhealthy channel');
-    supabaseClient.removeChannel(balanceRealtimeChannel).catch(err => console.warn('Channel remove error', err));
+  // Cleanup old/unhealthy
+  if (balanceRealtimeChannel) {
+    console.log('[Wallet Realtime] Cleaning up old channel');
+    supabaseClient.removeChannel(balanceRealtimeChannel).catch(() => {});
     balanceRealtimeChannel = null;
   }
 
-  console.log('[Wallet Realtime] Subscribing → user_uid:', uid);
+  console.log('[Wallet Realtime] Subscribing for UID:', uid);
 
-  const channelName = `wallet:${uid}`; // unique per user
+  // Fetch fresh custom JWT (your secure endpoint)
+  let token;
+  try {
+    const res = await fetch('https://api.flexgig.com.ng/api/supabase/token', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Accept': 'application/json' }
+    });
+    if (!res.ok) throw new Error(`Token fetch failed: ${res.status}`);
+    ({ token } = await res.json());
+    console.log('[Wallet Realtime] Fresh JWT acquired');
+  } catch (err) {
+    console.error('[Wallet Realtime] JWT fetch failed:', err);
+    setTimeout(() => subscribeToWalletBalance(true), 10000); // retry
+    return;
+  }
 
-  balanceRealtimeChannel = supabaseClient.channel(channelName);
+  // Create client with custom token override (same as your test script)
+  const tempClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: { autoRefreshToken: false, persistSession: false },
+    global: { headers: { Authorization: `Bearer ${token}` } }
+  });
+
+  const channelName = `wallet:${uid}`;
+
+  balanceRealtimeChannel = tempClient.channel(channelName);
 
   balanceRealtimeChannel
-    .on(
-      'broadcast',                          // ← listen for custom broadcasts
-      { event: 'balance_updated' },         // matches what we sent in pg_notify payload
-      (payload) => {
-        // payload.payload is the JSON string we sent
-        let data;
-        try {
-          data = JSON.parse(payload.payload);
-        } catch (e) {
-          console.error('[Wallet Broadcast] Failed to parse payload:', payload.payload, e);
-          return;
-        }
+    .on('postgres_changes', {
+      event: '*',
+      schema: 'public',
+      table: 'user_wallets',
+      filter: `user_uid=eq.${uid}`  // only your rows!
+    }, (payload) => {
+      console.log('[Wallet Realtime] 🔔 Change received:', payload.eventType);
 
-        const newBalance = Number(data.new_balance);
-
+      if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
+        const newBalance = Number(payload.new?.balance);
         if (!isNaN(newBalance)) {
-          console.log('[Wallet Realtime] ← Balance broadcast received:', {
+          console.log('[Wallet Realtime] Balance update:', {
             new: newBalance,
-            old: data.old_balance,
-            user: data.user_uid
+            old: payload.old?.balance,
+            user: payload.new.user_uid
           });
 
-          window.handleNewBalance?.(newBalance, 'supabase-broadcast');
-
+          // Call your handler + dispatch event
+          window.handleNewBalance?.(newBalance, 'supabase-postgres');
           window.dispatchEvent(new CustomEvent('balance_update', {
             detail: {
               balance: newBalance,
               amount: newBalance - (window.currentDisplayedBalance || 0),
-              source: 'broadcast',
+              source: 'postgres_changes',
               timestamp: Date.now()
             }
           }));
+
+          // Update global display immediately
+          window.updateAllBalances(newBalance);
         }
       }
-    )
-
+    })
     .subscribe((status, err) => {
-      console.log('[Wallet Realtime] Subscription status:', status);
-      
-      if (err) {
-        console.error('[Wallet Realtime] Subscription ERROR details:', err);
-      }
-      
+      console.log('[Wallet Realtime] Status:', status);
+      if (err) console.error('[Wallet Realtime] Error:', err);
+
       if (status === 'SUBSCRIBED') {
-        console.log('[Wallet Realtime] Connected & listening!');
+        console.log('[Wallet Realtime] ✅ Connected & listening for balance changes');
       } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
-        console.warn('[Wallet Realtime] Disconnected/error → retrying soon', { error: err });
-        setTimeout(() => subscribeToWalletBalance(true), 6000); // force retry
+        console.warn('[Wallet Realtime] Disconnected — retrying in 6s');
+        setTimeout(() => subscribeToWalletBalance(true), 6000);
       }
     });
 
-  // Optional: store globally for debugging / cleanup
   window.__balanceRealtimeChannel = balanceRealtimeChannel;
 }
 
@@ -3200,6 +3213,7 @@ async function onDashboardLoad() {
     session = null;
   }
   setupBroadcastSubscription();
+  subscribeToWalletBalance();
 
 
   // 🔥 ADD THESE TWO LINES (after the single getSession)
