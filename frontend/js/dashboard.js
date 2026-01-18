@@ -482,6 +482,30 @@ async function subscribeToWalletBalance(force = false) {
   window.__balanceRealtimeChannel = balanceRealtimeChannel;
 }
 
+if (typeof onDashboardLoad === 'function') {
+  const original = onDashboardLoad;
+  onDashboardLoad = async function (...args) {
+    await original(...args);
+
+    setupBroadcastRealtime();
+    pollStatus(true);
+    subscribeToWalletBalance();          // ← ADD THIS LINE
+
+    // Optional: retry on failure
+    setTimeout(() => {
+      if (!balanceRealtimeChannel || balanceRealtimeChannel.state !== 'SUBSCRIBED') {
+        console.warn('[Wallet Realtime] Initial sub failed — retrying');
+        subscribeToWalletBalance(true);
+      }
+    }, 5000);
+  };
+} else {
+  console.warn('[BROADCAST] No onDashboardLoad – running standalone');
+  setupBroadcastRealtime();
+  pollStatus(true);
+  subscribeToWalletBalance();            // ← ADD HERE TOO
+}
+
 
 
 
@@ -3214,7 +3238,7 @@ async function onDashboardLoad() {
   }
   setupBroadcastSubscription();
   subscribeToWalletBalance();
-  
+
 
 
   // 🔥 ADD THESE TWO LINES (after the single getSession)
