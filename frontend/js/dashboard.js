@@ -374,17 +374,6 @@ window.requireReauthLock = requireReauthLock;
 window.checkReauthLock = checkReauthLock;
 window.clearReauthLock = clearReauthLock;
 
-// ────────────────────────────────────────────────
-// REAL-TIME BALANCE SUBSCRIPTION – MAX DEBUG VERSION
-// ────────────────────────────────────────────────
-
-let balanceRealtimeChannel = null;
-let isSubscribing = false;
-let activeRetryTimer = null;
-let lastHealthyTs = 0;
-const SUBSCRIPTION_RETRY_MS = 15000;
-const HEALTHY_THRESHOLD_MS = 5000;
-
 async function subscribeToWalletBalance(force = false) {
   const now = Date.now();
   console.log(`[Wallet Realtime MAX DEBUG] subscribeToWalletBalance called | force=${force} | ts=${now}`);
@@ -475,14 +464,40 @@ async function subscribeToWalletBalance(force = false) {
       console.error('[Wallet Realtime] JWT decode failed:', e);
     }
 
-    // 4. Create temp client
+    // 4. Create temp client WITHOUT Authorization header
     const tempClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      auth: { autoRefreshToken: false, persistSession: false, storageKey: 'flexgig_wallet_private_jwt_v1' },
-      global: { headers: { Authorization: `Bearer ${token}` } }
+      auth: { 
+        autoRefreshToken: false, 
+        persistSession: false, 
+        storageKey: 'flexgig_wallet_private_jwt_v1' 
+      }
+      // REMOVED: global: { headers: { Authorization: `Bearer ${token}` } }
     });
     console.log('[Wallet Realtime] Temp client created');
 
-    // 5. Test RLS visibility with a direct query
+    // 5. Set session with JWT (THIS IS THE KEY CHANGE!)
+    console.log('[Wallet Realtime] Setting session with JWT...');
+    try {
+      const { data: sessionData, error: sessionError } = await tempClient.auth.setSession({
+        access_token: token,
+        refresh_token: token
+      });
+
+      if (sessionError) {
+        console.error('[Wallet Realtime] setSession FAILED:', sessionError.message);
+        scheduleRetry();
+        return;
+      }
+
+      console.log('[Wallet Realtime] ✅ Session set successfully');
+      console.log('[Wallet Realtime] Session user ID:', sessionData.user?.id);
+    } catch (sessionErr) {
+      console.error('[Wallet Realtime] setSession crashed:', sessionErr);
+      scheduleRetry();
+      return;
+    }
+
+    // 6. Test RLS visibility with a direct query
     console.log('[Wallet Realtime] Testing direct SELECT visibility...');
     try {
       const { data: testRow, error: testErr } = await tempClient
@@ -505,12 +520,12 @@ async function subscribeToWalletBalance(force = false) {
       console.error('[Wallet Realtime] SELECT test crashed:', testEx);
     }
 
-    // 6. Create channel
+    // 7. Create channel
     const channelName = `wallet:${uid}`;
     balanceRealtimeChannel = tempClient.channel(channelName);
     console.log('[Wallet Realtime] Channel created:', channelName);
 
-    // 7. Subscribe with FULL logging
+    // 8. Subscribe with FULL logging
     balanceRealtimeChannel
       .on(
         'postgres_changes',
