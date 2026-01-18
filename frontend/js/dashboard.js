@@ -16,12 +16,11 @@
 
   console.log('[SCROLL FIX] Lightweight prevention active – no more middle/bottom reloads');
 })();
-import { getAllPlans, getPlans, fetchPlans } from './dataPlans.js';  // ADD THIS LINE
+import { getAllPlans, getPlans, fetchPlans } from './dataPlans.js';  
 
 
 window.__SEC_API_BASE = 'https://api.flexgig.com.ng'
 
-// Your project URL and anon key (get them from Supabase dashboard → Project Settings → API)
 const SUPABASE_URL = 'https://bwmappzvptcjxlukccux.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ3bWFwcHp2cHRjanhsdWtjY3V4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTU0OTMzMjcsImV4cCI6MjA3MTA2OTMyN30.Ra7k6Br6nl1huQQi5DpDuOQSDE-6N1qlhUIvIset0mc';
 
@@ -416,36 +415,27 @@ function subscribeToWalletBalance(force = false) {
 
   balanceRealtimeChannel
     .on(
-      'postgres_changes',
-      {
-        event: 'UPDATE',                      // only care about balance changes
-        schema: 'public',
-        table: 'user_wallets',
-        filter: `user_uid=eq.${uid}`          // ← this is critical!
-      },
+      'broadcast',                                    // ← change from 'postgres_changes'
+      { event: 'balance_updated' },                   // matches what trigger sends
       (payload) => {
-        const newBalance = payload.new?.balance;
+        const data = payload.payload;                 // the jsonb object we sent
+        const newBalance = Number(data?.balance);
 
-        if (newBalance !== undefined && typeof newBalance === 'number') {
-          console.log('[Wallet Realtime] ← Balance update:', newBalance);
-
-          // Use your existing handler
-          window.handleNewBalance?.(newBalance, 'supabase-realtime');
-
-          // Optional: also dispatch event for other listeners
+        if (!isNaN(newBalance)) {
+          console.log('[Wallet Realtime] ← Balance broadcast:', newBalance, data);
+          window.handleNewBalance?.(newBalance, 'supabase-broadcast');
           window.dispatchEvent(new CustomEvent('balance_update', {
             detail: {
               balance: newBalance,
               amount: newBalance - (window.currentDisplayedBalance || 0),
-              source: 'realtime',
+              source: 'broadcast',
               timestamp: Date.now()
             }
           }));
-        } else {
-          console.debug('[Wallet Realtime] Update had no balance field');
         }
       }
     )
+    // keep your .subscribe() callback the same
     .subscribe((status, err) => {
       console.log('[Wallet Realtime] Subscription status:', status);
       
