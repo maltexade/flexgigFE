@@ -374,6 +374,17 @@ window.requireReauthLock = requireReauthLock;
 window.checkReauthLock = checkReauthLock;
 window.clearReauthLock = clearReauthLock;
 
+// ────────────────────────────────────────────────
+// REAL-TIME BALANCE SUBSCRIPTION – MAX DEBUG VERSION
+// ────────────────────────────────────────────────
+
+let balanceRealtimeChannel = null;
+let isSubscribing = false;
+let activeRetryTimer = null;
+let lastHealthyTs = 0;
+const SUBSCRIPTION_RETRY_MS = 15000;
+const HEALTHY_THRESHOLD_MS = 5000;
+
 async function subscribeToWalletBalance(force = false) {
   const now = Date.now();
   console.log(`[Wallet Realtime MAX DEBUG] subscribeToWalletBalance called | force=${force} | ts=${now}`);
@@ -600,9 +611,6 @@ async function subscribeToWalletBalance(force = false) {
     console.log('[Wallet Realtime] Function ended');
   }
 }
-
-// ... rest of your code (scheduleRetry, onDashboardLoad wrapper) unchanged
-
 // Centralized retry scheduler — only one at a time
 function scheduleRetry() {
   if (activeRetryTimer) {
