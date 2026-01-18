@@ -415,15 +415,29 @@ function subscribeToWalletBalance(force = false) {
 
   balanceRealtimeChannel
     .on(
-      'broadcast',                                    // ← change from 'postgres_changes'
-      { event: 'balance_updated' },                   // matches what trigger sends
+      'broadcast',                          // ← listen for custom broadcasts
+      { event: 'balance_updated' },         // matches what we sent in pg_notify payload
       (payload) => {
-        const data = payload.payload;                 // the jsonb object we sent
-        const newBalance = Number(data?.balance);
+        // payload.payload is the JSON string we sent
+        let data;
+        try {
+          data = JSON.parse(payload.payload);
+        } catch (e) {
+          console.error('[Wallet Broadcast] Failed to parse payload:', payload.payload, e);
+          return;
+        }
+
+        const newBalance = Number(data.new_balance);
 
         if (!isNaN(newBalance)) {
-          console.log('[Wallet Realtime] ← Balance broadcast:', newBalance, data);
+          console.log('[Wallet Realtime] ← Balance broadcast received:', {
+            new: newBalance,
+            old: data.old_balance,
+            user: data.user_uid
+          });
+
           window.handleNewBalance?.(newBalance, 'supabase-broadcast');
+
           window.dispatchEvent(new CustomEvent('balance_update', {
             detail: {
               balance: newBalance,
@@ -435,7 +449,7 @@ function subscribeToWalletBalance(force = false) {
         }
       }
     )
-    // keep your .subscribe() callback the same
+
     .subscribe((status, err) => {
       console.log('[Wallet Realtime] Subscription status:', status);
       
