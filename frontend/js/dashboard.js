@@ -582,6 +582,7 @@ async function subscribeToWalletBalance(force = false) {
     console.log('[Wallet Realtime] Channel created:', channelName);
 
     // 8. Subscribe with FULL logging
+    // 7. Subscribe with FULL logging
 balanceRealtimeChannel
   .on(
     'postgres_changes',
@@ -603,52 +604,65 @@ balanceRealtimeChannel
         
         if (!isNaN(newBalance)) {
           console.log('[Wallet Realtime] VALID BALANCE UPDATE:', newBalance);
+          console.log('[Wallet Realtime] Old balance:', oldBalance);
+          console.log('[Wallet Realtime] New balance:', newBalance);
           
           // Calculate the amount that was added/removed
           const amount = newBalance - oldBalance;
+          console.log('[Wallet Realtime] Calculated amount change:', amount);
           
           // 🔥 ONLY trigger success flow if balance INCREASED
           if (amount > 0) {
             console.log('[Wallet Realtime] ✅ BALANCE INCREASED by', amount);
+            console.log('[Wallet Realtime] Checking for __handleBalanceUpdate...');
+            console.log('[Wallet Realtime] __handleBalanceUpdate exists?', typeof window.__handleBalanceUpdate);
             
-            // Call handleBalanceUpdate (closes modal, shows toast, plays sound)
-            if (typeof window.__handleBalanceUpdate === 'function') {
-              window.__handleBalanceUpdate({
-                type: 'balance_update',
-                balance: newBalance,
-                amount: amount,
-                source: 'postgres_changes',
-                timestamp: Date.now()
-              });
-              console.log('[Wallet Realtime] ✅ Called __handleBalanceUpdate');
-            } else {
-              console.warn('[Wallet Realtime] __handleBalanceUpdate not found');
-            }
-          } else if (amount < 0) {
-            console.log('[Wallet Realtime] ℹ️  BALANCE DECREASED by', Math.abs(amount), '- skipping success flow');
-          } else {
-            console.log('[Wallet Realtime] ℹ️  Balance unchanged - skipping');
-          }
-          
-          // Always dispatch the custom event (for other listeners that might need it)
-          window.dispatchEvent(new CustomEvent('balance_update', {
-            detail: {
+            const updateData = {
               type: 'balance_update',
               balance: newBalance,
               amount: amount,
               source: 'postgres_changes',
               timestamp: Date.now()
+            };
+            
+            console.log('[Wallet Realtime] Calling __handleBalanceUpdate with:', updateData);
+            
+            // Call handleBalanceUpdate (closes modal, shows toast, plays sound)
+            if (typeof window.__handleBalanceUpdate === 'function') {
+              try {
+                window.__handleBalanceUpdate(updateData);
+                console.log('[Wallet Realtime] ✅ Successfully called __handleBalanceUpdate');
+              } catch (err) {
+                console.error('[Wallet Realtime] ❌ Error calling __handleBalanceUpdate:', err);
+              }
+            } else {
+              console.warn('[Wallet Realtime] ⚠️ __handleBalanceUpdate not found on window');
+              console.log('[Wallet Realtime] Available window properties:', Object.keys(window).filter(k => k.includes('handle')));
             }
-          }));
+            
+            // Also try the event-based approach
+            console.log('[Wallet Realtime] Dispatching balance_update event...');
+            window.dispatchEvent(new CustomEvent('balance_update', {
+              detail: updateData
+            }));
+            console.log('[Wallet Realtime] ✅ Event dispatched');
+            
+          } else if (amount < 0) {
+            console.log('[Wallet Realtime] ℹ️ BALANCE DECREASED by', Math.abs(amount), '- skipping success flow');
+          } else {
+            console.log('[Wallet Realtime] ℹ️ Balance unchanged (amount = 0) - skipping');
+          }
           
           // Always update all balance displays (regardless of increase/decrease)
           if (typeof window.updateAllBalances === 'function') {
             window.updateAllBalances(newBalance);
+            console.log('[Wallet Realtime] Called updateAllBalances');
           }
           
           // Legacy handler (if it exists)
           if (typeof window.handleNewBalance === 'function') {
             window.handleNewBalance(newBalance, 'supabase-postgres');
+            console.log('[Wallet Realtime] Called handleNewBalance');
           }
         } else {
           console.warn('[Wallet Realtime] Invalid balance value in payload');
