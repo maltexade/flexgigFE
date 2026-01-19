@@ -218,41 +218,86 @@ window.forceBroadcastCheck = () => pollStatus(true);
 
 // ────────────────────────────────────────────────
 // DIRECT SUPABASE REAUTH LOCK HELPERS
-// No more /reauth/require, /reauth/status, /reauth/complete
+// Secure client-side with RLS - no backend needed
 // ────────────────────────────────────────────────
 
 const REAUTH_TTL_MINUTES = 60;
+
+// Shared authenticated client - reused across reauth operations
+let _reauthClient = null;
+let _reauthClientExpiry = 0;
+
+// Get or create authenticated client (cached for 50 min)
+async function getReauthClient() {
+  const now = Date.now();
+  
+  // Reuse existing client if still valid (50 min cache to be safe before 60 min expiry)
+  if (_reauthClient && now < _reauthClientExpiry) {
+    return _reauthClient;
+  }
+
+  console.log('[REAUTH] Creating new authenticated client...');
+  
+  try {
+    const res = await fetch(window.__SEC_API_BASE + '/api/supabase/token', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Accept': 'application/json' }
+    });
+
+    if (!res.ok) {
+      console.error('[REAUTH] JWT fetch failed:', res.status);
+      return null;
+    }
+
+    const { token } = await res.json();
+    
+    _reauthClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: { 
+        autoRefreshToken: false, 
+        persistSession: false, 
+        storageKey: 'flexgig_reauth_jwt_v1' 
+      }
+    });
+
+    await _reauthClient.auth.setSession({
+      access_token: token,
+      refresh_token: token
+    });
+
+    _reauthClientExpiry = now + (50 * 60 * 1000); // Cache for 50 minutes
+    console.log('[REAUTH] Authenticated client created and cached');
+    
+    return _reauthClient;
+  } catch (err) {
+    console.error('[REAUTH] Failed to create authenticated client:', err);
+    return null;
+  }
+}
 
 async function requireReauthLock(reason = 'soft_idle_timeout') {
   console.log('[REAUTH] requireReauthLock called → reason:', reason);
 
   try {
-    const res = await fetch(window.__SEC_API_BASE + '/api/session', {
-      method: 'GET',
-      credentials: 'include',
-      headers: { 'Cache-Control': 'no-cache' }
-    });
+    // We already have the session from our app, just need UID
+    const uid = window.__USER_UID || 
+                localStorage.getItem('userId') || 
+                JSON.parse(localStorage.getItem('userData') || '{}')?.uid;
 
-    if (!res.ok) {
-      console.error('[REAUTH] /api/session failed:', res.status, await res.text());
+    if (!uid || !uid.includes('-')) {
+      console.error('[REAUTH] Invalid UID:', uid);
       return false;
     }
 
-    const sessionData = await res.json();
-    
-    // FIXED: uid is inside sessionData.user.uid
-    const uid = sessionData?.user?.uid;
-
-    if (!uid || typeof uid !== 'string' || !uid.includes('-')) {
-      console.error('[REAUTH] Invalid or missing uid from /api/session:', sessionData);
+    const authClient = await getReauthClient();
+    if (!authClient) {
+      console.error('[REAUTH] Could not get authenticated client');
       return false;
     }
-
-    console.log('[REAUTH] Successfully got uid from backend:', uid);
 
     const expiresAt = new Date(Date.now() + REAUTH_TTL_MINUTES * 60 * 1000).toISOString();
 
-    const { data, error } = await supabaseClient
+    const { data, error } = await authClient
       .from('reauth_locks')
       .upsert({
         user_uid: uid,
@@ -291,19 +336,18 @@ async function checkReauthLock() {
   console.log('[REAUTH] checkReauthLock called');
 
   try {
-    const res = await fetch(window.__SEC_API_BASE + '/api/session', {
-      credentials: 'include',
-      headers: { 'Cache-Control': 'no-cache' }
-    });
-
-    if (!res.ok) return { required: false };
-
-    const sessionData = await res.json();
-    const uid = sessionData?.user?.uid;
+    const uid = window.__USER_UID || 
+                localStorage.getItem('userId') || 
+                JSON.parse(localStorage.getItem('userData') || '{}')?.uid;
 
     if (!uid) return { required: false };
 
-    const { data, error } = await supabaseClient
+    const authClient = await getReauthClient();
+    if (!authClient) {
+      return { required: false };
+    }
+
+    const { data, error } = await authClient
       .from('reauth_locks')
       .select('reason, expires_at')
       .eq('user_uid', uid)
@@ -318,7 +362,7 @@ async function checkReauthLock() {
     const expires = new Date(data.expires_at);
 
     if (now > expires) {
-      await supabaseClient.from('reauth_locks').delete().eq('user_uid', uid);
+      await authClient.from('reauth_locks').delete().eq('user_uid', uid);
       localStorage.removeItem('fg_reauth_required_v1');
       return { required: false };
     }
@@ -340,18 +384,18 @@ async function clearReauthLock() {
   console.log('[REAUTH] clearReauthLock called');
 
   try {
-    const res = await fetch(window.__SEC_API_BASE + '/api/session', {
-      credentials: 'include'
-    });
-
-    if (!res.ok) return false;
-
-    const sessionData = await res.json();
-    const uid = sessionData?.user?.uid;
+    const uid = window.__USER_UID || 
+                localStorage.getItem('userId') || 
+                JSON.parse(localStorage.getItem('userData') || '{}')?.uid;
 
     if (!uid) return false;
 
-    const { error } = await supabaseClient
+    const authClient = await getReauthClient();
+    if (!authClient) {
+      return false;
+    }
+
+    const { error } = await authClient
       .from('reauth_locks')
       .delete()
       .eq('user_uid', uid);
@@ -369,6 +413,7 @@ async function clearReauthLock() {
     return false;
   }
 }
+
 
 window.requireReauthLock = requireReauthLock;
 window.checkReauthLock = checkReauthLock;
