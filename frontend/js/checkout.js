@@ -1029,7 +1029,7 @@ function showProcessingReceipt(data) {
   icon.innerHTML = '<div class="spinner"></div>';
 
   document.getElementById('receipt-status').textContent = 'Processing Transaction';
-  document.getElementById('receipt-message').textContent = '';
+  document.getElementById('receipt-message').textContent = 'Please hold on while we deliver your data...';
   document.getElementById('receipt-details').style.display = 'none';
   document.getElementById('receipt-actions').style.display = 'none';
 
@@ -1048,6 +1048,8 @@ async function updateReceiptToSuccess(result) {
   `;
 
   document.getElementById('receipt-status').textContent = 'Transaction Successful';
+  document.getElementById('receipt-message').textContent = 'Your data has been delivered successfully!';
+
 
   const data = window._currentCheckoutData;
   let transactionRef = 'Loading...';
