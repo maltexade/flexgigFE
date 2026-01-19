@@ -582,41 +582,72 @@ async function subscribeToWalletBalance(force = false) {
     console.log('[Wallet Realtime] Channel created:', channelName);
 
     // 8. Subscribe with FULL logging
-    balanceRealtimeChannel
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'user_wallets',
-          filter: `user_uid=eq.${uid}`
-        },
-        (payload) => {
-          console.log('[Wallet Realtime] 🔔 FULL PAYLOAD RECEIVED:', JSON.stringify(payload, null, 2));
-          console.log('[Wallet Realtime] Event type:', payload.eventType);
-          console.log('[Wallet Realtime] Old:', payload.old);
-          console.log('[Wallet Realtime] New:', payload.new);
+balanceRealtimeChannel
+  .on(
+    'postgres_changes',
+    {
+      event: '*',
+      schema: 'public',
+      table: 'user_wallets',
+      filter: `user_uid=eq.${uid}`
+    },
+    (payload) => {
+      console.log('[Wallet Realtime] 🔔 FULL PAYLOAD RECEIVED:', JSON.stringify(payload, null, 2));
+      console.log('[Wallet Realtime] Event type:', payload.eventType);
+      console.log('[Wallet Realtime] Old:', payload.old);
+      console.log('[Wallet Realtime] New:', payload.new);
 
-          if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
-            const newBalance = Number(payload.new?.balance);
-            if (!isNaN(newBalance)) {
-              console.log('[Wallet Realtime] VALID BALANCE UPDATE:', newBalance);
-              window.handleNewBalance?.(newBalance, 'supabase-postgres');
-              window.dispatchEvent(new CustomEvent('balance_update', {
-                detail: {
-                  balance: newBalance,
-                  amount: newBalance - (window.currentDisplayedBalance || 0),
-                  source: 'postgres_changes',
-                  timestamp: Date.now()
-                }
-              }));
-              window.updateAllBalances(newBalance);
-            } else {
-              console.warn('[Wallet Realtime] Invalid balance value in payload');
-            }
+      if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
+        const newBalance = Number(payload.new?.balance);
+        const oldBalance = Number(payload.old?.balance) || window.currentDisplayedBalance || 0;
+        
+        if (!isNaN(newBalance)) {
+          console.log('[Wallet Realtime] VALID BALANCE UPDATE:', newBalance);
+          
+          // Calculate the amount that was added/removed
+          const amount = newBalance - oldBalance;
+          
+          // 🔥 CALL handleBalanceUpdate (from your addmoney.js)
+          if (typeof window.__handleBalanceUpdate === 'function') {
+            window.__handleBalanceUpdate({
+              type: 'balance_update',
+              balance: newBalance,
+              amount: amount,
+              source: 'postgres_changes',
+              timestamp: Date.now()
+            });
+            console.log('[Wallet Realtime] ✅ Called __handleBalanceUpdate');
+          } else {
+            console.warn('[Wallet Realtime] __handleBalanceUpdate not found');
           }
+          
+          // Also dispatch the custom event (for other listeners)
+          window.dispatchEvent(new CustomEvent('balance_update', {
+            detail: {
+              type: 'balance_update',
+              balance: newBalance,
+              amount: amount,
+              source: 'postgres_changes',
+              timestamp: Date.now()
+            }
+          }));
+          
+          // Update all balance displays
+          if (typeof window.updateAllBalances === 'function') {
+            window.updateAllBalances(newBalance);
+          }
+          
+          // Legacy handler (if it exists)
+          if (typeof window.handleNewBalance === 'function') {
+            window.handleNewBalance(newBalance, 'supabase-postgres');
+          }
+        } else {
+          console.warn('[Wallet Realtime] Invalid balance value in payload');
         }
-      )
+      }
+    }
+  )
+
       .subscribe((status, err) => {
         console.log('[Wallet Realtime] SUBSCRIBE STATUS:', status);
         if (err) {
