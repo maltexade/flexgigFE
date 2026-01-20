@@ -18617,12 +18617,14 @@ updateContinueState();
 
 
 // ================================
-// REALTIME UI UPDATE HANDLER
+// REALTIME UI UPDATE MODULE
 // ================================
 
-// Show a subtle notification when plans update
+// --------------------
+// Notification System
+// --------------------
 function showRealtimeUpdateNotification() {
-  // Avoid adding duplicate notifications
+  // Avoid duplicates
   if (document.querySelector('.realtime-update-notification')) return;
 
   const notification = document.createElement('div');
@@ -18669,50 +18671,81 @@ function showRealtimeUpdateNotification() {
 
   document.body.appendChild(notification);
 
-  // Remove after 3 seconds
+  // Auto-remove after 3s
   setTimeout(() => {
     notification.firstElementChild.style.animation = 'slideOutRight 0.3s ease-in';
     setTimeout(() => notification.remove(), 300);
   }, 3000);
 }
 
-// Expose notification function
+// Expose notification
 window.showRealtimeUpdateNotification = window.showRealtimeUpdateNotification || showRealtimeUpdateNotification;
 
-// Setup realtime UI updates
+// --------------------
+// Realtime UI Update Listener
+// --------------------
 function setupRealtimeUIUpdates() {
-  console.log('🔄 Setting up realtime UI update handler...');
+  console.log('%c🔄 Setting up realtime UI update handler...', 'color:cyan; font-weight:bold');
 
-  // Listen for the plansUpdated event
-  window.addEventListener('plansUpdated', () => {
+  const uiUpdateListener = () => {
     console.log('%c[REALTIME] Plans updated - refreshing UI...', 'color:lime; font-weight:bold');
 
-    // Get currently active provider
+    // Find active provider or fallback
     const activeProvider = ['mtn', 'airtel', 'glo', 'ninemobile'].find(p =>
       document.querySelector(`.provider-box.${p}.active`)
-    );
+    ) || 'mtn';
 
-    if (activeProvider) {
-      console.log(`[REALTIME] Refreshing plans for ${activeProvider.toUpperCase()}`);
+    console.log(`[REALTIME] Active provider: ${activeProvider.toUpperCase()}`);
 
-      if (typeof renderDashboardPlans === 'function') renderDashboardPlans(activeProvider);
-      if (typeof renderModalPlans === 'function') renderModalPlans(activeProvider);
-      if (typeof attachPlanListeners === 'function') attachPlanListeners();
-
-      showRealtimeUpdateNotification();
+    // Call render functions safely
+    if (typeof window.renderDashboardPlans === 'function') {
+      window.renderDashboardPlans(activeProvider);
+      console.log('✅ renderDashboardPlans() called');
     } else {
-      console.log('[REALTIME] No active provider - update will apply when user selects one');
+      console.warn('❌ renderDashboardPlans() not found');
     }
-  });
 
-  console.log('✅ Realtime UI update handler active');
+    if (typeof window.renderModalPlans === 'function') {
+      window.renderModalPlans(activeProvider);
+      console.log('✅ renderModalPlans() called');
+    } else {
+      console.warn('❌ renderModalPlans() not found');
+    }
+
+    if (typeof window.attachPlanListeners === 'function') {
+      window.attachPlanListeners();
+      console.log('✅ attachPlanListeners() called');
+    } else {
+      console.warn('❌ attachPlanListeners() not found');
+    }
+
+    // Show notification
+    window.showRealtimeUpdateNotification?.();
+    console.log('%c✨ UI REFRESH COMPLETE!', 'color:lime; font-weight:bold');
+  };
+
+  // Remove previous listener if any and add the new one
+  if (window.uiUpdateListener) {
+    window.removeEventListener('plansUpdated', window.uiUpdateListener);
+  }
+  window.addEventListener('plansUpdated', uiUpdateListener);
+
+  // Expose globally for removal if needed
+  window.uiUpdateListener = uiUpdateListener;
+
+  console.log('%c✅ Real UI update listener installed!', 'color:lime; font-weight:bold');
+
+  // Optional: fire an initial test update immediately
+  // window.dispatchEvent(new Event('plansUpdated'));
 }
 
 // Expose setup function
 window.setupRealtimeUIUpdates = window.setupRealtimeUIUpdates || setupRealtimeUIUpdates;
 
-// Immediately activate handler
-setupRealtimeUIUpdates();
+// --------------------
+// Activate listener immediately
+// --------------------
+window.setupRealtimeUIUpdates();
 
 
 
