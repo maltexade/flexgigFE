@@ -1928,64 +1928,79 @@ window.notifyReauthComplete = notifyReauthComplete;
 
 
 // --- START: Server-reconcile on boot to handle cleared localStorage / cache ---
+// --- START: Server-reconcile on boot to handle cleared localStorage / cache ---
 (async function reconcileServerReauthOnBoot() {
   const LOCAL_KEY = 'fg_reauth_required_v1';
 
-  // small guard: only run once and early
   try {
     // If we already have local canonical flag, nothing to do
-    const local = (function readLocal() { try { return JSON.parse(localStorage.getItem(LOCAL_KEY) || 'null'); } catch(e){ return null; } })();
-    if (local) return;
+    const local = (function readLocal() { 
+      try { return JSON.parse(localStorage.getItem(LOCAL_KEY) || 'null'); } 
+      catch(e){ return null; } 
+    })();
+    
+    if (local) {
+      console.debug('[REAUTH-BOOT] Local flag exists, skipping reconcile');
+      return;
+    }
 
-    // Try to call server to see if a reauth_locks row exists for this user
-    // `checkReauthLock()` exists in this file and returns { required: true/false, reason, expiresAt }
+    console.debug('[REAUTH-BOOT] No local canonical flag found — querying backend for authoritative reauth state');
+
     if (typeof checkReauthLock !== 'function') {
       console.debug('[REAUTH-BOOT] checkReauthLock not available yet — skipping server reconcile');
       return;
     }
 
-    console.debug('[REAUTH-BOOT] No local canonical flag found — querying Supabase for authoritative reauth state');
-
-    // If the session or cookies were cleared, this may fail — handle gracefully
+    // 🔥 THIS IS THE CRITICAL CALL
     let srv;
     try {
       srv = await checkReauthLock();
     } catch (err) {
-      console.warn('[REAUTH-BOOT] Server check failed (network/auth):', err);
+      console.warn('[REAUTH-BOOT] Server check failed:', err);
       return;
     }
 
     if (srv && srv.required) {
-      // Build an object compatible with your cross-tab helper
-      const obj = {
-        token: (crypto && crypto.randomUUID) ? crypto.randomUUID() : ('t_' + Date.now()),
-        ts: Date.now(),
-        reason: srv.reason || 'server_reconciled',
-        expiresAt: srv.expiresAt || null
-      };
-
-      // write canonical local flag the same way other code expects
-      try { localStorage.setItem(LOCAL_KEY, JSON.stringify(obj)); } catch (e) { console.warn('[REAUTH-BOOT] Failed to write local canonical flag', e); }
-
-      // Prefer local show helper if present (matches existing code)
+      console.warn('[REAUTH-BOOT] Lock detected, showing modal immediately');
+      
+      // 🔥 FIX: Show modal IMMEDIATELY, don't rely on other code to pick it up
       try {
-        if (typeof showReauthModalLocal === 'function') {
-          showReauthModalLocal({ fromStorageObj: obj });
-        } else if (window.__reauth && typeof window.__reauth.initReauthModal === 'function') {
+        // Try the direct method first
+        if (window.__reauth && typeof window.__reauth.initReauthModal === 'function') {
           await window.__reauth.initReauthModal({ show: true, context: 'reauth' });
-        } else {
-          // fallback: dispatch storage event to trigger cross-tab handlers
-          window.dispatchEvent(new StorageEvent('storage', { key: LOCAL_KEY, newValue: JSON.stringify(obj) }));
+          console.info('[REAUTH-BOOT] Modal shown via __reauth.initReauthModal');
+        } 
+        // Fallback to showReauthModalLocal if it exists
+        else if (typeof showReauthModalLocal === 'function') {
+          showReauthModalLocal({ 
+            fromStorageObj: { 
+              reason: srv.reason || 'backend_423',
+              ts: Date.now() 
+            } 
+          });
+          console.info('[REAUTH-BOOT] Modal shown via showReauthModalLocal');
         }
-        console.info('[REAUTH-BOOT] Reauth required (server) — modal shown / flagged locally');
+        // Last resort: dispatch storage event
+        else {
+          const obj = {
+            token: (crypto && crypto.randomUUID) ? crypto.randomUUID() : ('t_' + Date.now()),
+            ts: Date.now(),
+            reason: srv.reason || 'backend_423'
+          };
+          window.dispatchEvent(new StorageEvent('storage', { 
+            key: LOCAL_KEY, 
+            newValue: JSON.stringify(obj) 
+          }));
+          console.info('[REAUTH-BOOT] Storage event dispatched');
+        }
       } catch (e) {
-        console.error('[REAUTH-BOOT] Failed to show reauth modal after server reconcile', e);
+        console.error('[REAUTH-BOOT] Failed to show reauth modal:', e);
       }
     } else {
-      console.debug('[REAUTH-BOOT] Server says no reauth required');
+      console.debug('[REAUTH-BOOT] No reauth required');
     }
   } catch (e) {
-    console.warn('[REAUTH-BOOT] Unexpected error', e);
+    console.warn('[REAUTH-BOOT] Unexpected error in reconcile:', e);
   }
 })();
 // --- END: Server-reconcile on boot ---
@@ -5529,133 +5544,112 @@ async function loadAllPlansOnce() {
 // ==========================================
 // REWRITTEN: renderDashboardPlans (FIXED - adds data-provider)
 // ==========================================
-// ==========================================
-// DEBOUNCE GUARD FOR DASHBOARD RENDERING
-// ==========================================
-let __renderingDashboard = false;
-
 async function renderDashboardPlans(provider) {
-  // 🔥 FIX: Prevent duplicate renders
-  if (__renderingDashboard) {
-    console.log('[RENDER] Already rendering, skipping duplicate call for:', provider);
+  console.log('%c[RENDER] Starting renderDashboardPlans for:', 'color:cyan;font-weight:bold', provider);
+
+  const plansRow = document.querySelector('.plans-row');
+  if (!plansRow) {
+    console.error('[ERROR] .plans-row not found');
     return;
   }
 
-  __renderingDashboard = true;
+  // Clear old plans
+  plansRow.querySelectorAll('.plan-box').forEach(p => p.remove());
+  console.log('[RENDER] Cleared old plans');
 
-  try {
-    console.log('%c[RENDER] Starting renderDashboardPlans for:', 'color:cyan;font-weight:bold', provider);
+  const plans = await loadAllPlansOnce();
+  console.log('[RENDER] Total loaded plans:', plans.length);
 
-    const plansRow = document.querySelector('.plans-row');
-    if (!plansRow) {
-      console.error('[ERROR] .plans-row not found');
-      return;
-    }
+  const providerPlans = plans.filter(p => 
+    p.provider?.toLowerCase() === (provider === 'ninemobile' ? '9mobile' : provider.toLowerCase()) &&
+    p.active === true
+  );
+  console.log(`[RENDER] Found ${providerPlans.length} plans for ${provider}`);
 
-    // Clear old plans
-    plansRow.querySelectorAll('.plan-box').forEach(p => p.remove());
-    console.log('[RENDER] Cleared old plans');
+  let plansToShow = [];
 
-    const plans = await loadAllPlansOnce();
-    console.log('[RENDER] Total loaded plans:', plans.length);
+  if (provider === 'ninemobile') {
+    plansToShow = providerPlans.slice(0, 2);
+    console.log('[RENDER] 9mobile → showing first 2 plans');
+  } else {
+    const awoof = providerPlans.find(p => p.category === 'AWOOF');
+    const cg = providerPlans.find(p => p.category === 'CG');
+    const gifting = providerPlans.find(p => p.category === 'GIFTING');
 
-    const providerPlans = plans.filter(p => 
-      p.provider?.toLowerCase() === (provider === 'ninemobile' ? '9mobile' : provider.toLowerCase()) &&
-      p.active === true
-    );
-    console.log(`[RENDER] Found ${providerPlans.length} plans for ${provider}`);
+    console.log('[RENDER] Categories found →', { awoof: !!awoof, cg: !!cg, gifting: !!gifting });
 
-    let plansToShow = [];
-
-    if (provider === 'ninemobile') {
-      plansToShow = providerPlans.slice(0, 2);
-      console.log('[RENDER] 9mobile → showing first 2 plans');
-    } else {
-      const awoof = providerPlans.find(p => p.category === 'AWOOF');
-      const cg = providerPlans.find(p => p.category === 'CG');
-      const gifting = providerPlans.find(p => p.category === 'GIFTING');
-
-      console.log('[RENDER] Categories found →', { awoof: !!awoof, cg: !!cg, gifting: !!gifting });
-
-      // AIRTEL: Show AWOOF + CG
-      if (provider === 'airtel') {
-        if (awoof) {
-          plansToShow.push(awoof);
-          console.log('[RENDER] Added AWOOF plan');
-        }
-        if (cg) {
-          plansToShow.push(cg);
-          console.log('[RENDER] Added CG plan');
-        }
+    // AIRTEL: Show AWOOF + CG
+    if (provider === 'airtel') {
+      if (awoof) {
+        plansToShow.push(awoof);
+        console.log('[RENDER] Added AWOOF plan');
       }
-      // GLO: CG first, then GIFTING
-      else if (provider === 'glo') {
-        if (cg) {
-          plansToShow.push(cg);
-          console.log('[RENDER] Added CG plan');
-        } else if (awoof) {
-          plansToShow.push(awoof);
-          console.log('[RENDER] Added AWOOF plan (fallback)');
-        }
-        if (gifting) {
-          plansToShow.push(gifting);
-          console.log('[RENDER] Added GIFTING plan');
-        }
-      }
-      // MTN: AWOOF + GIFTING
-      else if (provider === 'mtn') {
-        if (awoof) {
-          plansToShow.push(awoof);
-          console.log('[RENDER] Added AWOOF plan');
-        }
-        if (gifting) {
-          plansToShow.push(gifting);
-          console.log('[RENDER] Added GIFTING plan');
-        }
+      if (cg) {
+        plansToShow.push(cg);
+        console.log('[RENDER] Added CG plan');
       }
     }
-
-    const seeAllBtn = plansRow.querySelector('.see-all-plans');
-    if (!seeAllBtn) {
-      console.error('[ERROR] .see-all-plans button not found');
-      return;
+    // GLO: CG first, then GIFTING
+    else if (provider === 'glo') {
+      if (cg) {
+        plansToShow.push(cg);
+        console.log('[RENDER] Added CG plan');
+      } else if (awoof) {
+        plansToShow.push(awoof);
+        console.log('[RENDER] Added AWOOF plan (fallback)');
+      }
+      if (gifting) {
+        plansToShow.push(gifting);
+        console.log('[RENDER] Added GIFTING plan');
+      }
     }
-
-    console.log(`[RENDER] Final plans to show: ${plansToShow.length}`);
-
-    plansToShow.forEach((plan, i) => {
-      const box = document.createElement('div');
-      box.className = `plan-box ${provider}`;
-      box.dataset.id = plan.plan_id;
-      
-      // 🔥 FIX #1: ADD data-provider attribute
-      box.dataset.provider = provider;
-
-      const tag = (plan.category && !['STANDARD', 'NORMAL'].includes(plan.category))
-        ? `<span class="plan-type-tag">${plan.category}</span>`
-        : '';
-
-      box.innerHTML = `
-        <div class="plan-price plan-amount">₦${plan.price}</div>
-        <div class="plan-data plan-gb">${plan.data || plan.data_amount}</div>
-        <div class="plan-duration">${plan.validity || plan.duration}</div>
-        ${tag}
-      `;
-
-      plansRow.insertBefore(box, seeAllBtn);
-      console.log(`[RENDER] Added plan ${i + 1}: ${plan.category || 'Standard'} ₦${plan.price} [data-provider="${provider}"]`);
-    });
-
-    // Force re-attach listeners
-    attachPlanListeners();
-    console.log('%c[RENDER] Dashboard render complete - data-provider set on all plans', 'color:lime;font-weight:bold');
-  } finally {
-    // 🔥 FIX: Reset the lock after a short delay to prevent race conditions
-    setTimeout(() => {
-      __renderingDashboard = false;
-      console.log('[RENDER] Debounce lock released');
-    }, 150);
+    // MTN: AWOOF + GIFTING
+    else if (provider === 'mtn') {
+      if (awoof) {
+        plansToShow.push(awoof);
+        console.log('[RENDER] Added AWOOF plan');
+      }
+      if (gifting) {
+        plansToShow.push(gifting);
+        console.log('[RENDER] Added GIFTING plan');
+      }
+    }
   }
+
+  const seeAllBtn = plansRow.querySelector('.see-all-plans');
+  if (!seeAllBtn) {
+    console.error('[ERROR] .see-all-plans button not found');
+    return;
+  }
+
+  console.log(`[RENDER] Final plans to show: ${plansToShow.length}`);
+
+  plansToShow.forEach((plan, i) => {
+    const box = document.createElement('div');
+    box.className = `plan-box ${provider}`;
+    box.dataset.id = plan.plan_id;
+    
+    // 🔥 FIX #1: ADD data-provider attribute
+    box.dataset.provider = provider;
+
+    const tag = (plan.category && !['STANDARD', 'NORMAL'].includes(plan.category))
+      ? `<span class="plan-type-tag">${plan.category}</span>`
+      : '';
+
+    box.innerHTML = `
+      <div class="plan-price plan-amount">₦${plan.price}</div>
+      <div class="plan-data plan-gb">${plan.data || plan.data_amount}</div>
+      <div class="plan-duration">${plan.validity || plan.duration}</div>
+      ${tag}
+    `;
+
+    plansRow.insertBefore(box, seeAllBtn);
+    console.log(`[RENDER] Added plan ${i + 1}: ${plan.category || 'Standard'} ₦${plan.price} [data-provider="${provider}"]`);
+  });
+
+  // Force re-attach listeners
+  attachPlanListeners();
+  console.log('%c[RENDER] Dashboard render complete - data-provider set on all plans', 'color:lime;font-weight:bold');
 }
 
 // ==========================================
