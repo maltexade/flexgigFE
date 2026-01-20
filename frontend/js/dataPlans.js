@@ -219,9 +219,23 @@ export const getPlans = async (provider, category = null) => {
   return result.sort((a, b) => Number(a.price) - Number(b.price));
 };
 
+// Add this improved version to your dataPlans.js
+// Replace the existing dispatchPlansUpdateEvent function
+
 // Dispatch a custom event so your UI components can react instantly
 const dispatchPlansUpdateEvent = () => {
-  window.dispatchEvent(new Event('plansUpdated'));
+  console.log('%c[EVENT] Dispatching plansUpdated event...', 'color:yellow;font-weight:bold');
+  
+  const event = new CustomEvent('plansUpdated', { 
+    detail: { 
+      timestamp: new Date().toISOString(),
+      cacheSize: plansCache.length,
+      updatedAt: cacheUpdatedAt
+    } 
+  });
+  
+  window.dispatchEvent(event);
+  console.log('%c[EVENT] plansUpdated event dispatched!', 'color:lime;font-weight:bold', event.detail);
 };
 
 // Initialize on load
