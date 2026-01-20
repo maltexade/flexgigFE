@@ -18616,50 +18616,13 @@ try { if (!window.disableBiometrics) window.disableBiometrics = disableBiometric
 updateContinueState();
 
 
-// Add this to your dashboard.js - AFTER all your existing code
+// ================================
+// REALTIME UI UPDATE HANDLER
+// ================================
 
-// === REALTIME UI UPDATE HANDLER ===
-(function setupRealtimeUIUpdates() {
-  console.log('🔄 Setting up realtime UI update handler...');
-
-  // Listen for the plansUpdated event from dataPlans.js
-  window.addEventListener('plansUpdated', () => {
-    console.log('%c[REALTIME] Plans updated - refreshing UI...', 'color:lime; font-weight:bold');
-
-    // Get the currently active provider
-    const activeProvider = ['mtn', 'airtel', 'glo', 'ninemobile'].find(p => 
-      document.querySelector(`.provider-box.${p}.active`)
-    );
-
-    if (activeProvider) {
-      console.log(`[REALTIME] Refreshing plans for ${activeProvider.toUpperCase()}`);
-      
-      // Refresh both dashboard and modal plans
-      if (typeof renderDashboardPlans === 'function') {
-        renderDashboardPlans(activeProvider);
-      }
-      
-      if (typeof renderModalPlans === 'function') {
-        renderModalPlans(activeProvider);
-      }
-      
-      if (typeof attachPlanListeners === 'function') {
-        attachPlanListeners();
-      }
-
-      // Optional: Show a subtle notification
-      showRealtimeUpdateNotification();
-    } else {
-      console.log('[REALTIME] No active provider - update will apply when user selects one');
-    }
-  });
-
-  console.log('✅ Realtime UI update handler active');
-})();
-
-// Optional: Show a subtle notification when plans update
+// Show a subtle notification when plans update
 function showRealtimeUpdateNotification() {
-  // Check if notification already exists
+  // Avoid adding duplicate notifications
   if (document.querySelector('.realtime-update-notification')) return;
 
   const notification = document.createElement('div');
@@ -18687,45 +18650,70 @@ function showRealtimeUpdateNotification() {
     </div>
   `;
 
-  // Add animation
-  const style = document.createElement('style');
-  style.textContent = `
-    @keyframes slideInRight {
-      from {
-        transform: translateX(400px);
-        opacity: 0;
+  // Add keyframes only once
+  if (!document.getElementById('realtime-notification-styles')) {
+    const style = document.createElement('style');
+    style.id = 'realtime-notification-styles';
+    style.textContent = `
+      @keyframes slideInRight {
+        from { transform: translateX(400px); opacity: 0; }
+        to { transform: translateX(0); opacity: 1; }
       }
-      to {
-        transform: translateX(0);
-        opacity: 1;
+      @keyframes slideOutRight {
+        from { transform: translateX(0); opacity: 1; }
+        to { transform: translateX(400px); opacity: 0; }
       }
-    }
-    @keyframes slideOutRight {
-      from {
-        transform: translateX(0);
-        opacity: 1;
-      }
-      to {
-        transform: translateX(400px);
-        opacity: 0;
-      }
-    }
-  `;
-  document.head.appendChild(style);
+    `;
+    document.head.appendChild(style);
+  }
 
   document.body.appendChild(notification);
 
   // Remove after 3 seconds
   setTimeout(() => {
     notification.firstElementChild.style.animation = 'slideOutRight 0.3s ease-in';
-    setTimeout(() => {
-      notification.remove();
-    }, 300);
+    setTimeout(() => notification.remove(), 300);
   }, 3000);
 }
 
+// Expose notification function
 window.showRealtimeUpdateNotification = window.showRealtimeUpdateNotification || showRealtimeUpdateNotification;
+
+// Setup realtime UI updates
+function setupRealtimeUIUpdates() {
+  console.log('🔄 Setting up realtime UI update handler...');
+
+  // Listen for the plansUpdated event
+  window.addEventListener('plansUpdated', () => {
+    console.log('%c[REALTIME] Plans updated - refreshing UI...', 'color:lime; font-weight:bold');
+
+    // Get currently active provider
+    const activeProvider = ['mtn', 'airtel', 'glo', 'ninemobile'].find(p =>
+      document.querySelector(`.provider-box.${p}.active`)
+    );
+
+    if (activeProvider) {
+      console.log(`[REALTIME] Refreshing plans for ${activeProvider.toUpperCase()}`);
+
+      if (typeof renderDashboardPlans === 'function') renderDashboardPlans(activeProvider);
+      if (typeof renderModalPlans === 'function') renderModalPlans(activeProvider);
+      if (typeof attachPlanListeners === 'function') attachPlanListeners();
+
+      showRealtimeUpdateNotification();
+    } else {
+      console.log('[REALTIME] No active provider - update will apply when user selects one');
+    }
+  });
+
+  console.log('✅ Realtime UI update handler active');
+}
+
+// Expose setup function
 window.setupRealtimeUIUpdates = window.setupRealtimeUIUpdates || setupRealtimeUIUpdates;
+
+// Immediately activate handler
+setupRealtimeUIUpdates();
+
 
 
 
