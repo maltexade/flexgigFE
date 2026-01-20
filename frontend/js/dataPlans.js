@@ -67,7 +67,7 @@ export const fetchPlans = async () => {
 
   try {
     const { data, error } = await supabase
-      .from('dataplans')
+      .from('data_plans')
       .select('*')
       .order('updated_at', { ascending: false });
 
