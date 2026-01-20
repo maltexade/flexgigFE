@@ -22,6 +22,9 @@ export const loadCachedPlans = () => {
 // Fetch latest from your Supabase backend
 // dataPlans.js – Updated fetchPlans (permanent fix)
 export const fetchPlans = async () => {
+  if (window.__REAUTH_LOCKED__ === true) {
+    return plansCache; // serve cache silently
+  }
   try {
     const base = (window.__SEC_API_BASE || 'https://api.flexgig.com.ng').replace(/\/+$/, '');
     const url = `${base}/api/dataPlans`;

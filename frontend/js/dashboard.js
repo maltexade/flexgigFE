@@ -5491,37 +5491,40 @@ let __plansLoaded = false;
 async function loadAllPlansOnce() {
   const CACHE_KEY = 'cached_data_plans_v12';
 
-  // 1. ALWAYS check localStorage first — this is the source of truth now
+  // 1️⃣ Always hydrate from localStorage (fast UI)
   try {
     const saved = localStorage.getItem(CACHE_KEY);
     if (saved) {
       const parsed = JSON.parse(saved);
-      if (parsed.plans && Array.isArray(parsed.plans)) {
+      if (Array.isArray(parsed.plans)) {
         __allPlansCache = parsed.plans;
-        __plansLoaded = true;
-        console.log('[PLANS] Using FRESH plans from localStorage:', __allPlansCache.length);
-        return __allPlansCache;
       }
     }
-  } catch (e) {
-    console.warn('[PLANS] localStorage cache invalid', e);
+  } catch {}
+
+  // 2️⃣ If reauth locked → NEVER fetch
+  if (window.__REAUTH_LOCKED__ === true) {
+    return __allPlansCache;
   }
 
-  // 2. Only if no localStorage cache → fall back to server
-  if (__allPlansCache.length === 0) {
+  // 3️⃣ Fetch ONLY if not already loaded
+  if (!__plansLoaded) {
     try {
-      console.log('[PLANS] No local cache — fetching from server');
-      const fresh = await fetchPlans(); // This updates localStorage too
-      __allPlansCache = fresh;
-      __plansLoaded = true;
-    } catch (err) {
-      console.warn('[PLANS] Server fetch failed', err);
+      const res = await fetchPlans();
+
+      // ✅ Only mark loaded if server truly responded
+      if (Array.isArray(res) && res.length > 0) {
+        __allPlansCache = res;
+        __plansLoaded = true;
+      }
+    } catch {
+      // ❌ Do nothing — do NOT mark loaded
     }
   }
 
-  console.log('[PLANS] Final plans used:', __allPlansCache.length);
   return __allPlansCache;
 }
+
 
 // ==========================================
 // REWRITTEN: renderDashboardPlans (FIXED - adds data-provider)
@@ -18366,6 +18369,36 @@ async function onSuccessfulReauth() {
       const appRoot = document.querySelector('main') || document.body;
       if (appRoot && typeof appRoot.focus === 'function') appRoot.focus();
     } catch (e) {}
+    // ================================
+    // 🔁 POST-REAUTH DATA REHYDRATION
+    // ================================
+    try {
+      // mark system unlocked
+      window.__REAUTH_LOCKED__ = false;
+
+      // 🔥 reset poisoned plan loader state
+      if (typeof window.__resetPlansState === 'function') {
+        window.__resetPlansState();
+      } else {
+        // fallback if function not exposed
+        if (typeof __plansLoaded !== 'undefined') __plansLoaded = false;
+      }
+
+      // 🔁 force fresh server fetch
+      if (typeof fetchPlans === 'function') {
+        await fetchPlans();
+      }
+
+      // 🔔 notify UI listeners
+      if (typeof dispatchPlansUpdateEvent === 'function') {
+        dispatchPlansUpdateEvent();
+      }
+
+      console.log('[reauth] plans rehydrated after unlock');
+    } catch (e) {
+      console.warn('[reauth] post-reauth plans refresh failed', e);
+    }
+
 
     return true;
   } catch (err) {
@@ -18377,6 +18410,12 @@ async function onSuccessfulReauth() {
   }
 }
 
+window.__resetPlansState = function () {
+  try {
+    __plansLoaded = false;
+    __allPlansCache = [];
+  } catch (e) {}
+};
 
 
   /* -----------------------
