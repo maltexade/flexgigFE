@@ -5654,6 +5654,7 @@ async function renderDashboardPlans(provider) {
 
 // ==========================================
 // FIX 2: GLO GIFTING section fix - renderModalPlans
+// WITH PRICE SORTING (smallest to biggest)
 // ==========================================
 async function renderModalPlans(provider) {
   console.log('%c[RENDER MODAL] Starting for:', 'color:purple;font-weight:bold', provider);
@@ -5670,10 +5671,20 @@ async function renderModalPlans(provider) {
     p.active === true
   );
 
+  // Helper function to sort plans by price (smallest to biggest)
+  const sortByPrice = (planArray) => {
+    return planArray.sort((a, b) => {
+      const priceA = parseFloat(a.price) || 0;
+      const priceB = parseFloat(b.price) || 0;
+      return priceA - priceB;
+    });
+  };
+
   // 9MOBILE - Show all plans in first section
   if (provider === 'ninemobile') {
     if (awoofSection) {
-      fillPlanSection(awoofSection, provider, 'standard', providerPlans,
+      const sortedPlans = sortByPrice([...providerPlans]);
+      fillPlanSection(awoofSection, provider, 'standard', sortedPlans,
         '9MOBILE PLANS', svgShapes.ninemobile
       );
       awoofSection.style.display = 'block';
@@ -5686,9 +5697,9 @@ async function renderModalPlans(provider) {
   }
 
   // Filter plans by category
-  const awoofPlans = providerPlans.filter(p => p.category === 'AWOOF');
-  const cgPlans = providerPlans.filter(p => p.category === 'CG');
-  const giftingPlans = providerPlans.filter(p => p.category === 'GIFTING');
+  const awoofPlans = sortByPrice(providerPlans.filter(p => p.category === 'AWOOF'));
+  const cgPlans = sortByPrice(providerPlans.filter(p => p.category === 'CG'));
+  const giftingPlans = sortByPrice(providerPlans.filter(p => p.category === 'GIFTING'));
 
   console.log(`[RENDER MODAL] ${provider.toUpperCase()} categories:`, {
     awoof: awoofPlans.length,
@@ -18603,6 +18614,115 @@ try { if (!window.disableBiometrics) window.disableBiometrics = disableBiometric
 
 
 updateContinueState();
+
+
+// Add this to your dashboard.js - AFTER all your existing code
+
+// === REALTIME UI UPDATE HANDLER ===
+(function setupRealtimeUIUpdates() {
+  console.log('🔄 Setting up realtime UI update handler...');
+
+  // Listen for the plansUpdated event from dataPlans.js
+  window.addEventListener('plansUpdated', () => {
+    console.log('%c[REALTIME] Plans updated - refreshing UI...', 'color:lime; font-weight:bold');
+
+    // Get the currently active provider
+    const activeProvider = ['mtn', 'airtel', 'glo', 'ninemobile'].find(p => 
+      document.querySelector(`.provider-box.${p}.active`)
+    );
+
+    if (activeProvider) {
+      console.log(`[REALTIME] Refreshing plans for ${activeProvider.toUpperCase()}`);
+      
+      // Refresh both dashboard and modal plans
+      if (typeof renderDashboardPlans === 'function') {
+        renderDashboardPlans(activeProvider);
+      }
+      
+      if (typeof renderModalPlans === 'function') {
+        renderModalPlans(activeProvider);
+      }
+      
+      if (typeof attachPlanListeners === 'function') {
+        attachPlanListeners();
+      }
+
+      // Optional: Show a subtle notification
+      showRealtimeUpdateNotification();
+    } else {
+      console.log('[REALTIME] No active provider - update will apply when user selects one');
+    }
+  });
+
+  console.log('✅ Realtime UI update handler active');
+})();
+
+// Optional: Show a subtle notification when plans update
+function showRealtimeUpdateNotification() {
+  // Check if notification already exists
+  if (document.querySelector('.realtime-update-notification')) return;
+
+  const notification = document.createElement('div');
+  notification.className = 'realtime-update-notification';
+  notification.innerHTML = `
+    <div style="
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 12px 20px;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      font-size: 14px;
+      font-weight: 500;
+      z-index: 10000;
+      animation: slideInRight 0.3s ease-out;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    ">
+      <span style="font-size: 18px;">🔄</span>
+      <span>Plans updated</span>
+    </div>
+  `;
+
+  // Add animation
+  const style = document.createElement('style');
+  style.textContent = `
+    @keyframes slideInRight {
+      from {
+        transform: translateX(400px);
+        opacity: 0;
+      }
+      to {
+        transform: translateX(0);
+        opacity: 1;
+      }
+    }
+    @keyframes slideOutRight {
+      from {
+        transform: translateX(0);
+        opacity: 1;
+      }
+      to {
+        transform: translateX(400px);
+        opacity: 0;
+      }
+    }
+  `;
+  document.head.appendChild(style);
+
+  document.body.appendChild(notification);
+
+  // Remove after 3 seconds
+  setTimeout(() => {
+    notification.firstElementChild.style.animation = 'slideOutRight 0.3s ease-in';
+    setTimeout(() => {
+      notification.remove();
+    }, 300);
+  }, 3000);
+}
 
 
 
