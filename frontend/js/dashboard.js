@@ -5530,7 +5530,7 @@ async function loadAllPlansOnce() {
 // REWRITTEN: renderDashboardPlans (FIXED - adds data-provider)
 // ==========================================
 // ==========================================
-// REWRITTEN: renderDashboardPlans (FIXED - adds debounce guard)
+// DEBOUNCE GUARD FOR DASHBOARD RENDERING
 // ==========================================
 let __renderingDashboard = false;
 
@@ -5552,9 +5552,9 @@ async function renderDashboardPlans(provider) {
       return;
     }
 
-    // Clear old plans (only those matching current provider)
-    plansRow.querySelectorAll(`.plan-box[data-provider="${provider}"]`).forEach(p => p.remove());
-    console.log('[RENDER] Cleared old plans for:', provider);
+    // Clear old plans
+    plansRow.querySelectorAll('.plan-box').forEach(p => p.remove());
+    console.log('[RENDER] Cleared old plans');
 
     const plans = await loadAllPlansOnce();
     console.log('[RENDER] Total loaded plans:', plans.length);
@@ -5627,6 +5627,8 @@ async function renderDashboardPlans(provider) {
       const box = document.createElement('div');
       box.className = `plan-box ${provider}`;
       box.dataset.id = plan.plan_id;
+      
+      // 🔥 FIX #1: ADD data-provider attribute
       box.dataset.provider = provider;
 
       const tag = (plan.category && !['STANDARD', 'NORMAL'].includes(plan.category))
@@ -5648,10 +5650,11 @@ async function renderDashboardPlans(provider) {
     attachPlanListeners();
     console.log('%c[RENDER] Dashboard render complete - data-provider set on all plans', 'color:lime;font-weight:bold');
   } finally {
-    // 🔥 FIX: Reset the lock after a short delay
+    // 🔥 FIX: Reset the lock after a short delay to prevent race conditions
     setTimeout(() => {
       __renderingDashboard = false;
-    }, 100);
+      console.log('[RENDER] Debounce lock released');
+    }, 150);
   }
 }
 
