@@ -1,8 +1,16 @@
-//dataPlans.js
+// dataPlans.js with Supabase Realtime
+
+import { createClient } from '@supabase/supabase-js';
+
+// Initialize Supabase client
+const supabaseUrl = 'YOUR_SUPABASE_URL'; // Replace with your Supabase URL
+const supabaseKey = 'YOUR_SUPABASE_ANON_KEY'; // Replace with your anon/public key
+const supabase = createClient(supabaseUrl, supabaseKey);
 
 let plansCache = [];
 let cacheUpdatedAt = null;
-const CACHE_KEY = 'cached_data_plans_v12';  
+const CACHE_KEY = 'cached_data_plans_v12';
+let realtimeSubscription = null;
 
 // Load cached plans instantly (offline-first)
 export const loadCachedPlans = () => {
@@ -19,68 +27,105 @@ export const loadCachedPlans = () => {
   return plansCache;
 };
 
-// Fetch latest from your Supabase backend
-// dataPlans.js – Updated fetchPlans (permanent fix)
+// Update cache and dispatch event
+const updateCache = (plans) => {
+  const latestUpdate = plans.reduce((maxDate, p) => {
+    if (!p.updated_at) return maxDate;
+    const current = new Date(p.updated_at);
+    return maxDate === null || current > maxDate ? current : maxDate;
+  }, null);
+
+  const latestUpdateStr = latestUpdate ? latestUpdate.toISOString() : new Date().toISOString();
+
+  plansCache = plans;
+  cacheUpdatedAt = latestUpdateStr;
+
+  // Save to localStorage
+  localStorage.setItem(CACHE_KEY, JSON.stringify({
+    plans: plans,
+    updatedAt: latestUpdateStr
+  }));
+
+  console.log('✅ Data plans cache updated');
+  dispatchPlansUpdateEvent();
+};
+
+// Fetch latest from Supabase directly
 export const fetchPlans = async () => {
   if (window.__REAUTH_LOCKED__ === true) {
-    return plansCache; // serve cache silently
+    return plansCache;
   }
-  try {
-    const base = (window.__SEC_API_BASE || 'https://api.flexgig.com.ng').replace(/\/+$/, '');
-    const url = `${base}/api/dataPlans`;
 
-    const res = await fetch(url, {
-      method: 'GET',
-      credentials: 'include',
-      headers: {
-        'Accept': 'application/json',
+  try {
+    const { data, error } = await supabase
+      .from('dataplans')
+      .select('*')
+      .order('updated_at', { ascending: false });
+
+    if (error) throw error;
+
+    updateCache(data);
+    return data;
+  } catch (err) {
+    console.warn('Failed to fetch plans from Supabase, using cache', err);
+    return plansCache;
+  }
+};
+
+// Set up realtime subscription
+export const subscribeToPlans = () => {
+  // Unsubscribe if already subscribed
+  if (realtimeSubscription) {
+    realtimeSubscription.unsubscribe();
+  }
+
+  console.log('🔴 Subscribing to dataplans realtime updates...');
+
+  realtimeSubscription = supabase
+    .channel('dataplans-changes')
+    .on(
+      'postgres_changes',
+      {
+        event: '*', // Listen to all events (INSERT, UPDATE, DELETE)
+        schema: 'public',
+        table: 'dataplans'
       },
-      cache: 'no-store'  // Prevent browser-level caching
+      (payload) => {
+        console.log('🔴 Realtime change detected:', payload);
+
+        if (payload.eventType === 'INSERT') {
+          // Add new plan to cache
+          plansCache.push(payload.new);
+          updateCache(plansCache);
+        } else if (payload.eventType === 'UPDATE') {
+          // Update existing plan in cache
+          const index = plansCache.findIndex(p => p.id === payload.new.id);
+          if (index !== -1) {
+            plansCache[index] = payload.new;
+            updateCache(plansCache);
+          }
+        } else if (payload.eventType === 'DELETE') {
+          // Remove plan from cache
+          plansCache = plansCache.filter(p => p.id !== payload.old.id);
+          updateCache(plansCache);
+        }
+      }
+    )
+    .subscribe((status) => {
+      console.log('Realtime subscription status:', status);
     });
 
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-    const fresh = await res.json();
-
-    // Properly calculate the latest updated_at using Date objects
-    const latestUpdate = fresh.reduce((maxDate, p) => {
-      if (!p.updated_at) return maxDate;
-      const current = new Date(p.updated_at);
-      return maxDate === null || current > maxDate ? current : maxDate;
-    }, null);
-
-    const latestUpdateStr = latestUpdate ? latestUpdate.toISOString() : null;
-
-    // Compare properly
-    const cachedDate = cacheUpdatedAt ? new Date(cacheUpdatedAt) : null;
-    const hasNewerData = latestUpdate && (!cachedDate || latestUpdate > cachedDate);
-
-    if (hasNewerData) {
-      plansCache = fresh;
-      cacheUpdatedAt = latestUpdateStr;
-
-      // Save to localStorage
-      localStorage.setItem(CACHE_KEY, JSON.stringify({
-        plans: fresh,
-        updatedAt: latestUpdateStr
-      }));
-
-      console.log('✅ Data plans updated from server (newer data detected)');
-      
-      // Trigger UI update without reload (more on this below)
-      dispatchPlansUpdateEvent();
-
-      return fresh;
-    } else {
-      console.log('No new data – using existing cache');
-    }
-  } catch (err) {
-    console.warn('Failed to fetch plans, using cache', err);
-  }
-
-  return plansCache;
+  return realtimeSubscription;
 };
-window.fetchPlans = window.fetchPlans || fetchPlans;
+
+// Unsubscribe from realtime (call this on cleanup)
+export const unsubscribeFromPlans = () => {
+  if (realtimeSubscription) {
+    realtimeSubscription.unsubscribe();
+    realtimeSubscription = null;
+    console.log('Unsubscribed from dataplans realtime');
+  }
+};
 
 // Get all active plans
 export const getAllPlans = async () => {
@@ -94,7 +139,6 @@ export const getPlansByProvider = async (provider) => {
   const all = await getAllPlans();
   return all.filter(p => p.provider.toLowerCase() === provider.toLowerCase());
 };
-window.getPlansByProvider = window.getPlansByProvider || getPlansByProvider;
 
 // Get specific category (AWOOF, CG, GIFTING, etc.)
 export const getPlans = async (provider, category = null) => {
@@ -105,14 +149,20 @@ export const getPlans = async (provider, category = null) => {
   }
   return result.sort((a, b) => Number(a.price) - Number(b.price));
 };
-window.getPlans = window.getPlans || getPlans;
-
-// Load cache immediately when app starts
-loadCachedPlans();
-
-window.getAllPlans = getAllPlans;
 
 // Dispatch a custom event so your UI components can react instantly
 const dispatchPlansUpdateEvent = () => {
   window.dispatchEvent(new Event('plansUpdated'));
 };
+
+// Initialize on load
+loadCachedPlans();
+subscribeToPlans(); // Start listening to realtime changes immediately
+
+// Export for global access
+window.getAllPlans = getAllPlans;
+window.getPlans = getPlans;
+window.getPlansByProvider = getPlansByProvider;
+window.fetchPlans = fetchPlans;
+window.subscribeToPlans = subscribeToPlans;
+window.unsubscribeFromPlans = unsubscribeFromPlans;
