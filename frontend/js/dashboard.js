@@ -1901,6 +1901,72 @@ window.notifyReauthComplete = notifyReauthComplete;
   }
 })();
 
+
+// --- START: Server-reconcile on boot to handle cleared localStorage / cache ---
+(async function reconcileServerReauthOnBoot() {
+  const LOCAL_KEY = 'fg_reauth_required_v1';
+
+  // small guard: only run once and early
+  try {
+    // If we already have local canonical flag, nothing to do
+    const local = (function readLocal() { try { return JSON.parse(localStorage.getItem(LOCAL_KEY) || 'null'); } catch(e){ return null; } })();
+    if (local) return;
+
+    // Try to call server to see if a reauth_locks row exists for this user
+    // `checkReauthLock()` exists in this file and returns { required: true/false, reason, expiresAt }
+    if (typeof checkReauthLock !== 'function') {
+      console.debug('[REAUTH-BOOT] checkReauthLock not available yet — skipping server reconcile');
+      return;
+    }
+
+    console.debug('[REAUTH-BOOT] No local canonical flag found — querying Supabase for authoritative reauth state');
+
+    // If the session or cookies were cleared, this may fail — handle gracefully
+    let srv;
+    try {
+      srv = await checkReauthLock();
+    } catch (err) {
+      console.warn('[REAUTH-BOOT] Server check failed (network/auth):', err);
+      return;
+    }
+
+    if (srv && srv.required) {
+      // Build an object compatible with your cross-tab helper
+      const obj = {
+        token: (crypto && crypto.randomUUID) ? crypto.randomUUID() : ('t_' + Date.now()),
+        ts: Date.now(),
+        reason: srv.reason || 'server_reconciled',
+        expiresAt: srv.expiresAt || null
+      };
+
+      // write canonical local flag the same way other code expects
+      try { localStorage.setItem(LOCAL_KEY, JSON.stringify(obj)); } catch (e) { console.warn('[REAUTH-BOOT] Failed to write local canonical flag', e); }
+
+      // Prefer local show helper if present (matches existing code)
+      try {
+        if (typeof showReauthModalLocal === 'function') {
+          showReauthModalLocal({ fromStorageObj: obj });
+        } else if (window.__reauth && typeof window.__reauth.initReauthModal === 'function') {
+          await window.__reauth.initReauthModal({ show: true, context: 'reauth' });
+        } else {
+          // fallback: dispatch storage event to trigger cross-tab handlers
+          window.dispatchEvent(new StorageEvent('storage', { key: LOCAL_KEY, newValue: JSON.stringify(obj) }));
+        }
+        console.info('[REAUTH-BOOT] Reauth required (server) — modal shown / flagged locally');
+      } catch (e) {
+        console.error('[REAUTH-BOOT] Failed to show reauth modal after server reconcile', e);
+      }
+    } else {
+      console.debug('[REAUTH-BOOT] Server says no reauth required');
+    }
+  } catch (e) {
+    console.warn('[REAUTH-BOOT] Unexpected error', e);
+  }
+})();
+// --- END: Server-reconcile on boot ---
+
+
+
 // ---------- Helpers (paste near other helper functions) ----------
 function isCanonicalReauthPending() {
   console.log('❄️❄️❄️ isCanonicalReauthPending check');
