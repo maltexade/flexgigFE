@@ -401,9 +401,7 @@ window.refreshActiveProviderUI = window.refreshActiveProviderUI || function () {
       console.log('✅ attachPlanListeners() called');
     } else console.warn('❌ attachPlanListeners() not found');
 
-    if (typeof showRealtimeUpdateNotification === 'function') {
-      showRealtimeUpdateNotification();
-    }
+
 
     console.log('%c✨ UI REFRESH COMPLETE!', 'color:lime;font-size:14px;font-weight:bold');
   } else {
