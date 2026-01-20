@@ -5191,20 +5191,20 @@ p:has(.balance-real, .balance-masked) {
 }
 /* Receipt Header */
 .receipt-header {
-  padding: 40px 28px 25px;
+  padding: 45px 28px 28px;
   text-align: center;
 }
 
 /* Receipt Icon */
 .receipt-icon {
-  width: 90px;
-  height: 90px;
+  width: 100px;
+  height: 100px;
   border-radius: 50%;
-  margin: 0 auto 20px;
+  margin: 0 auto 22px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 50px;
+  font-size: 55px;
   color: white;
   transition: all 0.4s ease;
 }
@@ -5216,8 +5216,8 @@ p:has(.balance-real, .balance-masked) {
 
 /* Spinner */
 .spinner {
-  width: 50px;
-  height: 50px;
+  width: 55px;
+  height: 55px;
   border: 5px solid rgba(255,255,255,0.3);
   border-top: 5px solid white;
   border-radius: 50%;
@@ -5226,31 +5226,31 @@ p:has(.balance-real, .balance-masked) {
 
 /* Receipt Status & Message */
 .receipt-status {
-  font-size: 22px;
+  font-size: 24px;
   font-weight: bold;
-  margin: 12px 0 8px;
+  margin: 14px 0 10px;
 }
 
 .receipt-message {
-  font-size: 14px;
+  font-size: 15px;
   color: #666;
-  margin: 0 0 18px;
+  margin: 0 0 20px;
   line-height: 1.5;
-  padding: 0 12px;
+  padding: 0 14px;
 }
 
 /* Receipt Details */
 .receipt-details {
   background: #151515;
-  padding: 18px 22px;
+  padding: 20px 24px;
   font-size: 15px;
 }
 
 .receipt-row {
   display: flex;
   justify-content: space-between;
-  margin-bottom: 16px;
-  padding-bottom: 13px;
+  margin-bottom: 17px;
+  padding-bottom: 14px;
 }
 
 .receipt-row:last-child { 
@@ -5261,14 +5261,14 @@ p:has(.balance-real, .balance-masked) {
 
 .receipt-label { 
   color: #666; 
-  font-size: 14px;
+  font-size: 15px;
 }
 
 .receipt-value { 
   font-weight: 600; 
   text-align: right; 
   color: #fff;
-  font-size: 15px;
+  font-size: 16px;
 }
 
 /* Provider Logo */
@@ -5276,24 +5276,24 @@ p:has(.balance-real, .balance-masked) {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 17px;
+  font-size: 18px;
   font-weight: bold;
-  margin-bottom: 16px;
+  margin-bottom: 17px;
 }
 
 /* Receipt Actions */
 .receipt-actions {
-  padding: 22px 22px 30px;
+  padding: 24px 24px 32px;
   display: flex;
   gap: 12px;
 }
 
 .receipt-btn {
   flex: 1;
-  padding: 14px;
+  padding: 15px;
   border: none;
   border-radius: 13px;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
@@ -5316,8 +5316,8 @@ p:has(.balance-real, .balance-masked) {
 
 /* Animated Checkmark SVG */
 .checkmark {
-  width: 52px;
-  height: 52px;
+  width: 54px;
+  height: 54px;
   border-radius: 50%;
   display: block;
   stroke-width: 3;
@@ -5345,8 +5345,8 @@ p:has(.balance-real, .balance-masked) {
 
 /* Animated X SVG */
 .cross {
-  width: 52px;
-  height: 52px;
+  width: 54px;
+  height: 54px;
   border-radius: 50%;
   display: block;
   stroke-width: 3;
@@ -5375,70 +5375,70 @@ p:has(.balance-real, .balance-masked) {
 /* Mobile Optimization - Small Phones (< 375px) */
 @media (max-width: 374px) {
   .receipt-header {
-    padding: 32px 22px 20px;
+    padding: 36px 24px 22px;
   }
   
   .receipt-icon {
-    width: 75px;
-    height: 75px;
-    margin: 0 auto 16px;
-    font-size: 42px;
+    width: 82px;
+    height: 82px;
+    margin: 0 auto 18px;
+    font-size: 45px;
   }
   
   .spinner {
-    width: 42px;
-    height: 42px;
+    width: 45px;
+    height: 45px;
     border-width: 4px;
   }
   
   .receipt-status {
-    font-size: 19px;
-    margin: 10px 0 6px;
+    font-size: 20px;
+    margin: 12px 0 8px;
   }
   
   .receipt-message {
-    font-size: 13px;
-    margin: 0 0 14px;
+    font-size: 14px;
+    margin: 0 0 16px;
   }
   
   .receipt-details {
-    padding: 14px 18px;
+    padding: 16px 20px;
     font-size: 14px;
   }
   
   .receipt-row {
-    margin-bottom: 14px;
-    padding-bottom: 11px;
+    margin-bottom: 15px;
+    padding-bottom: 12px;
   }
   
   .receipt-label {
-    font-size: 13px;
-  }
-  
-  .receipt-value {
     font-size: 14px;
   }
   
-  .provider-logo {
+  .receipt-value {
     font-size: 15px;
+  }
+  
+  .provider-logo {
+    font-size: 16px;
     gap: 8px;
-    margin-bottom: 14px;
+    margin-bottom: 15px;
   }
   
   .receipt-actions {
-    padding: 18px 18px 26px;
+    padding: 20px 20px 28px;
     gap: 10px;
   }
   
   .receipt-btn {
-    padding: 12px;
-    font-size: 14px;
+    padding: 13px;
+    font-size: 15px;
   }
   
   .checkmark,
   .cross {
-    width: 45px;
-    height: 45px;
+    width: 47px;
+    height: 47px;
   }
 }
 
