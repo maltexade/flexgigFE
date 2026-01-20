@@ -1464,61 +1464,118 @@ function inGraceWindow() {
   return ts && (Date.now() - ts) < REAUTH_GRACE_SECONDS * 1000;
 }
 
-// === FRESH PLAN FETCH ON LOAD (PLACE ABOVE onDashboardLoad) ===
+// === FRESH PLAN FETCH ON LOAD - SUPABASE FIRST, API FALLBACK ===
 (function ensureFreshPlansOnLoad() {
   const CACHE_KEY = 'cached_data_plans_v12'; // Match your current version
 
   async function fetchAndCacheFreshPlans() {
+    let freshPlans = null;
+    let source = 'unknown';
+
     try {
       console.log('%c[PLANS] Fetching fresh plans on load...', 'color:cyan');
 
-      const response = await fetch('https://api.flexgig.com.ng/api/dataPlans', {
-        method: 'GET',
-        credentials: 'include',
-        headers: {
-          'Cache-Control': 'no-cache',
-        },
-        cache: 'no-store'
-      });
+      // TRY SUPABASE FIRST
+      const supabase = window.supabaseClient;
+      
+      if (supabase) {
+        console.log('%c[PLANS] Attempting Supabase fetch...', 'color:cyan');
+        
+        try {
+          const { data, error } = await supabase
+            .from('data_plans')
+            .select('*')
+            .eq('active', true)
+            .order('price', { ascending: true });
 
-      if (!response.ok) {
-        console.warn('[PLANS] Failed to fetch fresh plans:', response.status);
-        return;
+          if (error) {
+            console.warn('[PLANS] Supabase fetch error:', error.message);
+            throw error;
+          }
+
+          if (data && data.length > 0) {
+            freshPlans = data;
+            source = 'Supabase';
+            console.log(`%c[PLANS] ✅ Fetched ${freshPlans.length} plans from Supabase`, 'color:lime;font-weight:bold');
+          } else {
+            console.warn('[PLANS] Supabase returned empty data, trying API...');
+            throw new Error('Empty Supabase response');
+          }
+        } catch (supabaseErr) {
+          console.warn('[PLANS] Supabase failed, falling back to API:', supabaseErr.message);
+          // Fall through to API fallback
+        }
+      } else {
+        console.warn('[PLANS] Supabase client not available, using API');
       }
 
-      const freshPlans = await response.json();
-      console.log(`[PLANS] Fetched ${freshPlans.length} fresh plans`);
+      // FALLBACK TO API IF SUPABASE FAILED
+      if (!freshPlans) {
+        console.log('%c[PLANS] Attempting API fetch...', 'color:orange');
+        
+        const response = await fetch('https://api.flexgig.com.ng/api/dataPlans', {
+          method: 'GET',
+          credentials: 'include',
+          headers: {
+            'Cache-Control': 'no-cache',
+          },
+          cache: 'no-store'
+        });
 
-      // Update cache with proper structure
-      const latestUpdate = freshPlans.reduce((max, p) => 
-        p.updated_at && p.updated_at > max ? p.updated_at : max, ''
-      );
+        if (!response.ok) {
+          throw new Error(`API HTTP ${response.status}`);
+        }
 
-      localStorage.setItem(CACHE_KEY, JSON.stringify({
-        plans: freshPlans,
-        updatedAt: latestUpdate
-      }));
+        freshPlans = await response.json();
+        source = 'API';
+        console.log(`%c[PLANS] ✅ Fetched ${freshPlans.length} plans from API`, 'color:lime;font-weight:bold');
+      }
 
-      // Update in-memory cache if variables exist
-      if (typeof plansCache !== 'undefined') plansCache = freshPlans;
-      if (typeof cacheUpdatedAt !== 'undefined') cacheUpdatedAt = latestUpdate;
+      // UPDATE CACHE WITH FRESH DATA
+      if (freshPlans && freshPlans.length > 0) {
+        const latestUpdate = freshPlans.reduce((max, p) => 
+          p.updated_at && p.updated_at > max ? p.updated_at : max, ''
+        );
 
-      console.log('[PLANS] Cache updated with fresh data');
+        localStorage.setItem(CACHE_KEY, JSON.stringify({
+          plans: freshPlans,
+          updatedAt: latestUpdate,
+          source: source,
+          fetchedAt: new Date().toISOString()
+        }));
 
-      // Refresh UI if provider is already active
-      const activeProvider = ['mtn', 'airtel', 'glo', 'ninemobile'].find(p => 
-        document.querySelector(`.provider-box.${p}.active`)
-      );
+        // Update in-memory cache if variables exist
+        if (typeof plansCache !== 'undefined') plansCache = freshPlans;
+        if (typeof cacheUpdatedAt !== 'undefined') cacheUpdatedAt = latestUpdate;
 
-      if (activeProvider && typeof renderDashboardPlans === 'function') {
-        renderDashboardPlans(activeProvider);
-        renderModalPlans(activeProvider);
-        attachPlanListeners();
-        console.log(`[PLANS] UI refreshed for ${activeProvider.toUpperCase()}`);
+        console.log(`%c[PLANS] Cache updated with fresh data from ${source}`, 'color:lime');
+
+        // Refresh UI if provider is already active
+        const activeProvider = ['mtn', 'airtel', 'glo', 'ninemobile'].find(p => 
+          document.querySelector(`.provider-box.${p}.active`)
+        );
+
+        if (activeProvider && typeof renderDashboardPlans === 'function') {
+          renderDashboardPlans(activeProvider);
+          renderModalPlans(activeProvider);
+          attachPlanListeners();
+          console.log(`%c[PLANS] UI refreshed for ${activeProvider.toUpperCase()}`, 'color:lime');
+        }
       }
 
     } catch (err) {
-      console.warn('[PLANS] Fresh fetch failed (will use cache):', err);
+      console.error('[PLANS] All fetch methods failed, using cache:', err);
+      
+      // Load from cache as last resort
+      try {
+        const cached = localStorage.getItem(CACHE_KEY);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          console.log(`%c[PLANS] Using cached data (${parsed.plans?.length || 0} plans)`, 'color:yellow');
+        }
+      } catch (cacheErr) {
+        console.error('[PLANS] Failed to load cache:', cacheErr);
+      }
     }
   }
 
@@ -1537,7 +1594,7 @@ function inGraceWindow() {
     }
   });
 
-  console.log('🚀 Fresh plan fetch system active (on load + visibility)');
+  console.log('🚀 Fresh plan fetch system active (Supabase → API → Cache)');
 })();
 
 
