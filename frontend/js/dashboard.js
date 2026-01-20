@@ -230,14 +230,13 @@ let _reauthClientExpiry = 0;
 // Get or create authenticated client (cached for 50 min)
 async function getReauthClient() {
   const now = Date.now();
-  
-  // Reuse existing client if still valid (50 min cache to be safe before 60 min expiry)
+
   if (_reauthClient && now < _reauthClientExpiry) {
     return _reauthClient;
   }
 
   console.log('[REAUTH] Creating new authenticated client...');
-  
+
   try {
     const res = await fetch(window.__SEC_API_BASE + '/api/supabase/token', {
       method: 'POST',
@@ -245,18 +244,24 @@ async function getReauthClient() {
       headers: { 'Accept': 'application/json' }
     });
 
+    // 🔥 LOCK SIGNAL — NOT AN ERROR
+    if (res.status === 423) {
+      console.warn('[REAUTH] Backend reports active reauth lock (423)');
+      return { __locked: true };
+    }
+
     if (!res.ok) {
       console.error('[REAUTH] JWT fetch failed:', res.status);
       return null;
     }
 
     const { token } = await res.json();
-    
+
     _reauthClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      auth: { 
-        autoRefreshToken: false, 
-        persistSession: false, 
-        storageKey: 'flexgig_reauth_jwt_v1' 
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+        storageKey: 'flexgig_reauth_jwt_v1'
       }
     });
 
@@ -265,9 +270,9 @@ async function getReauthClient() {
       refresh_token: token
     });
 
-    _reauthClientExpiry = now + (50 * 60 * 1000); // Cache for 50 minutes
+    _reauthClientExpiry = now + (50 * 60 * 1000);
     console.log('[REAUTH] Authenticated client created and cached');
-    
+
     return _reauthClient;
   } catch (err) {
     console.error('[REAUTH] Failed to create authenticated client:', err);
@@ -275,110 +280,120 @@ async function getReauthClient() {
   }
 }
 
+
 async function requireReauthLock(reason = 'soft_idle_timeout') {
-  console.log('[REAUTH] requireReauthLock called → reason:', reason);
+  console.log('[REAUTH] requireReauthLock →', reason);
 
-  try {
-    // We already have the session from our app, just need UID
-    const uid = window.__USER_UID || 
-                localStorage.getItem('userId') || 
-                JSON.parse(localStorage.getItem('userData') || '{}')?.uid;
+  const uid =
+    window.__USER_UID ||
+    localStorage.getItem('userId') ||
+    JSON.parse(localStorage.getItem('userData') || '{}')?.uid;
 
-    if (!uid || !uid.includes('-')) {
-      console.error('[REAUTH] Invalid UID:', uid);
-      return false;
-    }
-
-    const authClient = await getReauthClient();
-    if (!authClient) {
-      console.error('[REAUTH] Could not get authenticated client');
-      return false;
-    }
-
-    const expiresAt = new Date(Date.now() + REAUTH_TTL_MINUTES * 60 * 1000).toISOString();
-
-    const { data, error } = await authClient
-      .from('reauth_locks')
-      .upsert({
-        user_uid: uid,
-        reason,
-        expires_at: expiresAt,
-        created_at: new Date().toISOString(),
-        metadata: { triggered_by: 'client_idle', at: new Date().toISOString() }
-      }, { onConflict: 'user_uid' });
-
-    if (error) {
-      console.error('[REAUTH] Supabase upsert ERROR:', {
-        message: error.message,
-        details: error.details,
-        hint: error.hint,
-        code: error.code
-      });
-      return false;
-    }
-
-    console.log('[REAUTH] Lock row created/updated successfully for uid:', uid);
-    
-    localStorage.setItem('fg_reauth_required_v1', JSON.stringify({
-      reason,
-      expiresAt,
-      ts: Date.now()
-    }));
-
-    return true;
-  } catch (err) {
-    console.error('[REAUTH] requireReauthLock crashed:', err.message || err);
+  if (!uid || !uid.includes('-')) {
+    console.error('[REAUTH] Invalid UID:', uid);
     return false;
   }
+
+  const authClient = await getReauthClient();
+
+  // If already locked, no need to write again
+  if (authClient?.__locked) {
+    console.warn('[REAUTH] Lock already active (backend)');
+    return true;
+  }
+
+  if (!authClient) return false;
+
+  const expiresAt = new Date(
+    Date.now() + REAUTH_TTL_MINUTES * 60 * 1000
+  ).toISOString();
+
+  const { error } = await authClient
+    .from('reauth_locks')
+    .upsert({
+      user_uid: uid,
+      reason,
+      expires_at: expiresAt,
+      created_at: new Date().toISOString(),
+      metadata: { triggered_by: 'client_idle' }
+    }, { onConflict: 'user_uid' });
+
+  if (error) {
+    console.error('[REAUTH] Supabase upsert failed:', error);
+    return false;
+  }
+
+  localStorage.setItem('fg_reauth_required_v1', JSON.stringify({
+    reason,
+    expiresAt,
+    ts: Date.now()
+  }));
+
+  return true;
 }
+
 
 async function checkReauthLock() {
   console.log('[REAUTH] checkReauthLock called');
 
-  try {
-    const uid = window.__USER_UID || 
-                localStorage.getItem('userId') || 
-                JSON.parse(localStorage.getItem('userData') || '{}')?.uid;
+  const uid =
+    window.__USER_UID ||
+    localStorage.getItem('userId') ||
+    JSON.parse(localStorage.getItem('userData') || '{}')?.uid;
 
-    if (!uid) return { required: false };
+  if (!uid) return { required: false };
 
-    const authClient = await getReauthClient();
-    if (!authClient) {
-      return { required: false };
-    }
+  const authClient = await getReauthClient();
 
-    const { data, error } = await authClient
-      .from('reauth_locks')
-      .select('reason, expires_at')
-      .eq('user_uid', uid)
-      .maybeSingle();
-
-    if (error || !data) {
-      localStorage.removeItem('fg_reauth_required_v1');
-      return { required: false };
-    }
-
-    const now = new Date();
-    const expires = new Date(data.expires_at);
-
-    if (now > expires) {
-      await authClient.from('reauth_locks').delete().eq('user_uid', uid);
-      localStorage.removeItem('fg_reauth_required_v1');
-      return { required: false };
-    }
-
-    localStorage.setItem('fg_reauth_required_v1', JSON.stringify({
-      reason: data.reason,
-      expiresAt: data.expires_at,
+  // 🔥 AUTHORITATIVE: BACKEND LOCK
+  if (authClient?.__locked) {
+    const payload = {
+      reason: 'backend_423',
       ts: Date.now()
-    }));
+    };
 
-    return { required: true, reason: data.reason, expiresAt: data.expires_at };
-  } catch (err) {
-    console.error('[REAUTH] check failed:', err);
+    localStorage.setItem('fg_reauth_required_v1', JSON.stringify(payload));
+
+    console.warn('[REAUTH] Lock ACTIVE via backend (423)');
+    return { required: true, reason: payload.reason };
+  }
+
+  if (!authClient) {
     return { required: false };
   }
+
+  // Secondary check (Supabase audit / persistence)
+  const { data, error } = await authClient
+    .from('reauth_locks')
+    .select('reason, expires_at')
+    .eq('user_uid', uid)
+    .maybeSingle();
+
+  if (error || !data) {
+    localStorage.removeItem('fg_reauth_required_v1');
+    return { required: false };
+  }
+
+  const expires = new Date(data.expires_at);
+  if (Date.now() > expires.getTime()) {
+    await authClient.from('reauth_locks').delete().eq('user_uid', uid);
+    localStorage.removeItem('fg_reauth_required_v1');
+    return { required: false };
+  }
+
+  localStorage.setItem('fg_reauth_required_v1', JSON.stringify({
+    reason: data.reason,
+    expiresAt: data.expires_at,
+    ts: Date.now()
+  }));
+
+  return {
+    required: true,
+    reason: data.reason,
+    expiresAt: data.expires_at
+  };
 }
+
 
 async function clearReauthLock() {
   console.log('[REAUTH] clearReauthLock called');
