@@ -129,8 +129,6 @@ const fetchPlansViaAPI = async () => {
 
 // Replace the realtime subscription section in your dataPlans.js
 
-// Replace the realtime subscription section in your dataPlans.js
-
 // Set up realtime subscription
 export const subscribeToPlans = () => {
   const supabase = getSupabaseClient();
@@ -143,77 +141,59 @@ export const subscribeToPlans = () => {
 
   // Unsubscribe if already subscribed
   if (realtimeSubscription) {
-    console.log('Unsubscribing from old channel...');
     realtimeSubscription.unsubscribe();
   }
 
-  console.log('🔴 Subscribing to dataplans realtime updates (ALL events, NO filters)...');
+  console.log('🔴 Subscribing to dataplans realtime updates...');
 
   realtimeSubscription = supabase
-    .channel('dataplans-all-changes')
+    .channel('dataplans-changes')
     .on(
       'postgres_changes',
       {
-        event: '*', // Listen to ALL events (INSERT, UPDATE, DELETE)
+        event: '*', // Listen to all events (INSERT, UPDATE, DELETE)
         schema: 'public',
         table: 'data_plans'
-        // NO FILTERS - This ensures we catch active:true AND active:false changes
       },
       (payload) => {
-        console.log('%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'color:cyan');
-        console.log('%c🔴 Realtime change detected:', 'color:lime;font-weight:bold', payload.eventType);
-        
-        // Log the active status for debugging
-        if (payload.new) {
-          console.log(`Plan: ${payload.new.name || 'Unknown'} | Active: ${payload.new.active} | Price: ₦${payload.new.price}`);
-        }
+        console.log('🔴 Realtime change detected:', payload);
 
         if (payload.eventType === 'INSERT') {
           // Only add if active is true
           if (payload.new.active === true) {
             plansCache.push(payload.new);
             updateCache(plansCache);
-            console.log('%c✅ New active plan added to cache', 'color:lime;font-weight:bold');
+            console.log('✅ New active plan added to cache');
           } else {
-            console.log('%cℹ️ Inactive plan inserted - not adding to cache', 'color:gray');
+            console.log('ℹ️ Inactive plan inserted - not adding to cache');
           }
         } 
         else if (payload.eventType === 'UPDATE') {
           const index = plansCache.findIndex(p => p.id === payload.new.id);
-          const wasInCache = index !== -1;
           
-          console.log(`Cache check: ${wasInCache ? 'Found in cache at index ' + index : 'NOT in cache'}`);
-          
-          // CRITICAL: Check if the plan was set to inactive
+          // Check if the plan was set to inactive
           if (payload.new.active === false) {
-            console.log('%c🔴 Plan set to INACTIVE (active: false)', 'color:red;font-weight:bold');
-            
-            if (wasInCache) {
+            if (index !== -1) {
               // Remove from cache since it's now inactive
               plansCache.splice(index, 1);
-              console.log(`%c🗑️ REMOVED from cache (was at index ${index})`, 'color:red;font-weight:bold');
-              console.log(`Cache size: ${plansCache.length + 1} → ${plansCache.length}`);
-              
-              // Force update to trigger UI refresh
               updateCache(plansCache);
+              console.log('🗑️ Plan set to inactive - removed from cache');
             } else {
-              console.log('%cℹ️ Plan was not in cache (already removed or never added)', 'color:gray');
+              console.log('ℹ️ Inactive plan update - not in cache');
             }
           } 
-          // Plan is active
+          // Plan is still active, update it
           else if (payload.new.active === true) {
-            console.log('%c✅ Plan is ACTIVE (active: true)', 'color:lime;font-weight:bold');
-            
-            if (wasInCache) {
+            if (index !== -1) {
               // Update existing plan
               plansCache[index] = payload.new;
-              console.log(`%c✅ Updated in cache at index ${index}`, 'color:lime');
               updateCache(plansCache);
+              console.log('✅ Active plan updated in cache');
             } else {
               // Not in cache but is active - add it
               plansCache.push(payload.new);
-              console.log(`%c✅ Added to cache (new index: ${plansCache.length - 1})`, 'color:lime');
               updateCache(plansCache);
+              console.log('✅ Active plan added to cache');
             }
           }
         } 
@@ -223,25 +203,19 @@ export const subscribeToPlans = () => {
           plansCache = plansCache.filter(p => p.id !== payload.old.id);
           
           if (plansCache.length < initialLength) {
-            console.log(`%c🗑️ Plan deleted - removed from cache (${initialLength} → ${plansCache.length})`, 'color:red;font-weight:bold');
             updateCache(plansCache);
+            console.log('🗑️ Plan deleted - removed from cache');
           } else {
-            console.log('%cℹ️ Plan deleted - was not in cache', 'color:gray');
+            console.log('ℹ️ Plan deleted - was not in cache');
           }
         }
-        
-        console.log('%c━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'color:cyan');
       }
     )
     .subscribe((status) => {
       if (status === 'SUBSCRIBED') {
-        console.log('%c✅ Realtime subscription active! Listening for ALL changes (including active:false)', 'color:lime;font-size:14px;font-weight:bold');
+        console.log('✅ Realtime subscription active!');
       } else if (status === 'CHANNEL_ERROR') {
-        console.error('%c❌ Realtime subscription error!', 'color:red;font-weight:bold');
-        console.log('%cTroubleshooting:', 'color:orange');
-        console.log('1. Check Database → Replication in Supabase');
-        console.log('2. Ensure Realtime is enabled for data_plans');
-        console.log('3. Check RLS policies allow SELECT');
+        console.error('❌ Realtime subscription error');
       } else {
         console.log('Realtime subscription status:', status);
       }
