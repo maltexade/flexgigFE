@@ -1464,15 +1464,6 @@ function inGraceWindow() {
   return ts && (Date.now() - ts) < REAUTH_GRACE_SECONDS * 1000;
 }
 
-// Before overwriting UI
-function mergeWithSelections(freshPlans, currentSelections) {
-  return freshPlans.map(plan => {
-    const selected = currentSelections?.includes(plan.id) || false;
-    return { ...plan, selected };
-  });
-}
-
-
 // === FRESH PLAN FETCH ON LOAD - SUPABASE FIRST, API FALLBACK ===
 (function ensureFreshPlansOnLoad() {
   const CACHE_KEY = 'cached_data_plans_v12'; // Match your current version
@@ -1480,15 +1471,6 @@ function mergeWithSelections(freshPlans, currentSelections) {
   async function fetchAndCacheFreshPlans() {
     let freshPlans = null;
     let source = 'unknown';
-
-    // Determine current selections
-    let currentSelections = [];
-    document.querySelectorAll('.plan-box.selected').forEach(el => {
-      currentSelections.push(el.dataset.planId); // assuming plan-box has data-plan-id
-    });
-
-    // Merge fresh plans with current selections
-    const mergedPlans = mergeWithSelections(freshPlans, currentSelections);
 
     try {
       console.log('%c[PLANS] Fetching fresh plans on load...', 'color:cyan');
@@ -1568,14 +1550,33 @@ function mergeWithSelections(freshPlans, currentSelections) {
 
         console.log(`%c[PLANS] Cache updated with fresh data from ${source}`, 'color:lime');
 
+        // Before overwriting UI
+        function mergeWithSelections(freshPlans, currentSelections) {
+          return freshPlans.map(plan => {
+            const selected = currentSelections?.includes(plan.id) || false;
+            return { ...plan, selected };
+          });
+        }
+
+
         // Refresh UI if provider is already active
         const activeProvider = ['mtn', 'airtel', 'glo', 'ninemobile'].find(p => 
           document.querySelector(`.provider-box.${p}.active`)
         );
 
+        // Determine current selections
+        let currentSelections = [];
+        document.querySelectorAll('.plan-box.selected').forEach(el => {
+          currentSelections.push(el.dataset.planId); // assuming plan-box has data-plan-id
+        });
+
+        // Merge fresh plans with current selections
+        const mergedPlans = mergeWithSelections(freshPlans, currentSelections);
+
+
         if (activeProvider && typeof renderDashboardPlans === 'function') {
-          renderDashboardPlans(activeProvider);
-          renderModalPlans(activeProvider);
+          renderDashboardPlans(activeProvider, mergedPlans);
+          renderModalPlans(activeProvider, mergedPlans);
           attachPlanListeners();
           console.log(`%c[PLANS] UI refreshed for ${activeProvider.toUpperCase()}`, 'color:lime');
         }
