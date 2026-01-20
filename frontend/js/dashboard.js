@@ -18675,7 +18675,7 @@ updateContinueState();
 
 // === REALTIME UI UPDATE HANDLER ===
 // Add this to the bottom of your dashboard.js
-(function setupRealtimeUIUpdates() {
+window.setupRealtimeUIUpdates = window.setupRealtimeUIUpdates || (function setupRealtimeUIUpdates() {
   console.log('%c🔄 Setting up realtime UI update handler...', 'color:cyan;font-weight:bold');
 
   // Function to refresh the active provider's UI
@@ -18800,6 +18800,8 @@ function showRealtimeUpdateNotification() {
     }, 300);
   }, 3000);
 }
+
+window.showRealtimeUpdateNotification = window.showRealtimeUpdateNotification || showRealtimeUpdateNotification;
 
 
 
