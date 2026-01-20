@@ -18722,7 +18722,7 @@ setTimeout(() => {
 
   console.log('%c✅ Realtime UI update handler active!', 'color:lime;font-weight:bold');
   console.log('%cℹ️ To manually test: window.refreshActiveProviderUI()', 'color:cyan');
-}, 1000);
+}, 10000);
 
 
 // Show a subtle notification when plans update
