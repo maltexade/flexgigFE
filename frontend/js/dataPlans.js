@@ -147,7 +147,7 @@ export const subscribeToPlans = () => {
       {
         event: '*', // Listen to all events (INSERT, UPDATE, DELETE)
         schema: 'public',
-        table: 'dataplans'
+        table: 'data_plans'
       },
       (payload) => {
         console.log('🔴 Realtime change detected:', payload);
