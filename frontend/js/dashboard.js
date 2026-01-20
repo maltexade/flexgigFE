@@ -18673,6 +18673,38 @@ try { if (!window.disableBiometrics) window.disableBiometrics = disableBiometric
 updateContinueState();
 
 
+// --- Ensure global exposure immediately ---
+window.refreshActiveProviderUI = window.refreshActiveProviderUI || function () {
+  console.warn('refreshActiveProviderUI() called before dashboard functions are ready');
+};
+
+// --- Now define the real function later ---
+setTimeout(() => {
+  const realHandler = () => {
+    const activeProvider = ['mtn','airtel','glo','ninemobile'].find(p =>
+      document.querySelector(`.provider-box.${p}.active`)
+    ) || 'mtn';
+
+    if (activeProvider) {
+      if (typeof renderDashboardPlans === 'function') renderDashboardPlans(activeProvider);
+      if (typeof renderModalPlans === 'function') renderModalPlans(activeProvider);
+      if (typeof attachPlanListeners === 'function') attachPlanListeners();
+      if (typeof window.showRealtimeUpdateNotification === 'function') window.showRealtimeUpdateNotification();
+      console.log('✨ UI REFRESH COMPLETE!');
+    } else {
+      console.log('⚠️ No active provider selected');
+    }
+  };
+
+  // Replace the temporary global with the real one
+  window.refreshActiveProviderUI = realHandler;
+
+  // Attach listener
+  window.addEventListener('plansUpdated', window.refreshActiveProviderUI);
+  console.log('✅ Realtime UI handler fully ready!');
+}, 500); // small delay to ensure render functions exist
+
+
 // ===============================
 // REALTIME UI UPDATE HANDLER
 // ===============================
