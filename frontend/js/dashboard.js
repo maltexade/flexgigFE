@@ -18674,37 +18674,35 @@ updateContinueState();
 
 
 // === REALTIME UI UPDATE HANDLER ===
-// Add this to the bottom of your dashboard.js
-window.setupRealtimeUIUpdates = window.setupRealtimeUIUpdates || (function setupRealtimeUIUpdates() {
+// === REALTIME UI UPDATE HANDLER ===
+// Attach after load with a small delay to ensure render functions exist
+setTimeout(() => {
   console.log('%c🔄 Setting up realtime UI update handler...', 'color:cyan;font-weight:bold');
 
-  // Function to refresh the active provider's UI
   const refreshActiveProviderUI = () => {
     console.log('%c[REALTIME] Plans updated - refreshing UI...', 'color:lime;font-weight:bold');
 
-    // Get the currently active provider
     const activeProvider = ['mtn', 'airtel', 'glo', 'ninemobile'].find(p => 
       document.querySelector(`.provider-box.${p}.active`)
-    );
+    ) || 'mtn'; // fallback to MTN
 
     if (activeProvider) {
-      console.log(`%c[REALTIME] Refreshing plans for ${activeProvider.toUpperCase()}`, 'color:orange;font-weight:bold');
-      
-      // Refresh both dashboard and modal plans
+      console.log(`[REALTIME] Refreshing plans for ${activeProvider.toUpperCase()}`);
+
       if (typeof renderDashboardPlans === 'function') {
         renderDashboardPlans(activeProvider);
         console.log('✅ renderDashboardPlans() called');
       } else {
         console.warn('❌ renderDashboardPlans() not found');
       }
-      
+
       if (typeof renderModalPlans === 'function') {
         renderModalPlans(activeProvider);
         console.log('✅ renderModalPlans() called');
       } else {
         console.warn('❌ renderModalPlans() not found');
       }
-      
+
       if (typeof attachPlanListeners === 'function') {
         attachPlanListeners();
         console.log('✅ attachPlanListeners() called');
@@ -18712,24 +18710,20 @@ window.setupRealtimeUIUpdates = window.setupRealtimeUIUpdates || (function setup
         console.warn('❌ attachPlanListeners() not found');
       }
 
-      // Show notification
       showRealtimeUpdateNotification();
-
       console.log('%c✨ UI REFRESH COMPLETE!', 'color:lime;font-size:14px;font-weight:bold');
     } else {
       console.log('%c⚠️ No active provider selected - update cached, will apply when provider selected', 'color:yellow');
     }
   };
 
-  // Listen for the plansUpdated event from dataPlans.js
   window.addEventListener('plansUpdated', refreshActiveProviderUI);
-
-  // Make it globally accessible for debugging
   window.refreshActiveProviderUI = refreshActiveProviderUI;
 
   console.log('%c✅ Realtime UI update handler active!', 'color:lime;font-weight:bold');
   console.log('%cℹ️ To manually test: window.refreshActiveProviderUI()', 'color:cyan');
-})();
+}, 1000);
+
 
 // Show a subtle notification when plans update
 function showRealtimeUpdateNotification() {
@@ -18800,10 +18794,6 @@ function showRealtimeUpdateNotification() {
     }, 300);
   }, 3000);
 }
-
-window.showRealtimeUpdateNotification = window.showRealtimeUpdateNotification || showRealtimeUpdateNotification;
-
-
 
 
 
