@@ -264,7 +264,6 @@ setTimeout(() => {
       if (typeof renderDashboardPlans === 'function') renderDashboardPlans(activeProvider);
       if (typeof renderModalPlans === 'function') renderModalPlans(activeProvider);
       if (typeof attachPlanListeners === 'function') attachPlanListeners();
-      if (typeof window.showRealtimeUpdateNotification === 'function') window.showRealtimeUpdateNotification();
       console.log('✨ UI REFRESH COMPLETE!');
     } else {
       console.log('⚠️ No active provider selected');
@@ -280,56 +279,7 @@ setTimeout(() => {
 }, 500); // small delay to ensure render functions exist
 
 
-// ===============================
-// REALTIME UI UPDATE HANDLER
-// ===============================
 
-// --- Notification function ---
-window.showRealtimeUpdateNotification = window.showRealtimeUpdateNotification || function () {
-  if (document.querySelector('.realtime-update-notification')) return;
-
-  const notification = document.createElement('div');
-  notification.className = 'realtime-update-notification';
-  notification.innerHTML = `
-    <div style="
-      position: fixed;
-      top: 80px;
-      right: 20px;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
-      padding: 12px 20px;
-      border-radius: 8px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-      font-size: 14px;
-      font-weight: 500;
-      z-index: 10000;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      animation: slideInRight 0.3s ease-out;
-    ">
-      <span style="font-size: 18px;">🔄</span>
-      <span>Plans updated in real-time</span>
-    </div>
-  `;
-
-  if (!document.querySelector('#realtime-notification-styles')) {
-    const style = document.createElement('style');
-    style.id = 'realtime-notification-styles';
-    style.textContent = `
-      @keyframes slideInRight { from { transform: translateX(400px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
-      @keyframes slideOutRight { from { transform: translateX(0); opacity: 1; } to { transform: translateX(400px); opacity: 0; } }
-    `;
-    document.head.appendChild(style);
-  }
-
-  document.body.appendChild(notification);
-
-  setTimeout(() => {
-    notification.firstElementChild.style.animation = 'slideOutRight 0.3s ease-in';
-    setTimeout(() => notification.remove(), 300);
-  }, 3000);
-};
 
 // --- Global UI refresh handler ---
 window.refreshActiveProviderUI = window.refreshActiveProviderUI || function () {
@@ -356,10 +306,6 @@ window.refreshActiveProviderUI = window.refreshActiveProviderUI || function () {
       attachPlanListeners();
       console.log('✅ attachPlanListeners() called');
     } else console.warn('❌ attachPlanListeners() not found');
-
-    if (typeof showRealtimeUpdateNotification === 'function') {
-      showRealtimeUpdateNotification();
-    }
 
     console.log('%c✨ UI REFRESH COMPLETE!', 'color:lime;font-size:14px;font-weight:bold');
   } else {
