@@ -1567,7 +1567,7 @@ function inGraceWindow() {
         // Determine current selections
         let currentSelections = [];
         document.querySelectorAll('.plan-box.selected').forEach(el => {
-          currentSelections.push(el.dataset.planId); // assuming plan-box has data-plan-id
+          currentSelections.push(el.dataset.selectedPlanId); // assuming plan-box has data-plan-id
         });
 
         // Merge fresh plans with current selections
