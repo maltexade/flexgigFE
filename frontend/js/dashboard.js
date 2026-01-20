@@ -18724,6 +18724,9 @@ function showRealtimeUpdateNotification() {
   }, 3000);
 }
 
+window.showRealtimeUpdateNotification = window.showRealtimeUpdateNotification || showRealtimeUpdateNotification;
+window.setupRealtimeUIUpdates = window.setupRealtimeUIUpdates || setupRealtimeUIUpdates;
+
 
 
 
