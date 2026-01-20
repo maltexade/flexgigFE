@@ -341,35 +341,44 @@ async function checkReauthLock() {
     localStorage.getItem('userId') ||
     JSON.parse(localStorage.getItem('userData') || '{}')?.uid;
 
-  if (!uid) return { required: false };
-
-  const authClient = await getReauthClient();
-
-  // 🔥 AUTHORITATIVE: BACKEND LOCK
-  if (authClient?.__locked) {
-    const payload = {
-      reason: 'backend_423',
-      ts: Date.now()
-    };
-
-    localStorage.setItem('fg_reauth_required_v1', JSON.stringify(payload));
-
-    console.warn('[REAUTH] Lock ACTIVE via backend (423)');
-    return { required: true, reason: payload.reason };
-  }
-
-  if (!authClient) {
+  if (!uid) {
     return { required: false };
   }
 
-  // Secondary check (Supabase audit / persistence)
+  let authClient;
+  try {
+    authClient = await getReauthClient();
+  } catch (e) {
+    console.warn('[REAUTH] getReauthClient threw:', e);
+  }
+
+  // 🔥 THIS IS THE CRITICAL PART
+  // If JWT fetch was blocked → account IS locked
+  if (authClient && authClient.__locked) {
+    console.warn('[REAUTH] Active lock detected via backend (423)');
+
+    localStorage.setItem('fg_reauth_required_v1', JSON.stringify({
+      reason: 'backend_423',
+      ts: Date.now()
+    }));
+
+    return { required: true, reason: 'backend_423' };
+  }
+
+  // If we couldn't even get a client, DO NOT assume unlocked
+  if (!authClient) {
+    console.warn('[REAUTH] No auth client — treating as locked (fail-safe)');
+    return { required: true, reason: 'unknown_auth_state' };
+  }
+
+  // Only now is it safe to query Supabase
   const { data, error } = await authClient
     .from('reauth_locks')
     .select('reason, expires_at')
     .eq('user_uid', uid)
     .maybeSingle();
 
-  if (error || !data) {
+  if (!data || error) {
     localStorage.removeItem('fg_reauth_required_v1');
     return { required: false };
   }
@@ -393,6 +402,7 @@ async function checkReauthLock() {
     expiresAt: data.expires_at
   };
 }
+
 
 
 async function clearReauthLock() {
