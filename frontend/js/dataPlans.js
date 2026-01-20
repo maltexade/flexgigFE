@@ -1,16 +1,18 @@
 // dataPlans.js with Supabase Realtime
 
-import { createClient } from '@supabase/supabase-js';
-
-// Initialize Supabase client
-const supabaseUrl = 'YOUR_SUPABASE_URL'; // Replace with your Supabase URL
-const supabaseKey = 'YOUR_SUPABASE_ANON_KEY'; // Replace with your anon/public key
-const supabase = createClient(supabaseUrl, supabaseKey);
-
 let plansCache = [];
 let cacheUpdatedAt = null;
 const CACHE_KEY = 'cached_data_plans_v12';
 let realtimeSubscription = null;
+
+// Get Supabase client from window (initialized in dashboard.js)
+const getSupabaseClient = () => {
+  if (!window.supabaseClient) {
+    console.warn('Supabase client not initialized yet');
+    return null;
+  }
+  return window.supabaseClient;
+};
 
 // Load cached plans instantly (offline-first)
 export const loadCachedPlans = () => {
@@ -56,6 +58,13 @@ export const fetchPlans = async () => {
     return plansCache;
   }
 
+  const supabase = getSupabaseClient();
+  
+  // If Supabase isn't ready, fall back to HTTP API
+  if (!supabase) {
+    return fetchPlansViaAPI();
+  }
+
   try {
     const { data, error } = await supabase
       .from('dataplans')
@@ -67,13 +76,63 @@ export const fetchPlans = async () => {
     updateCache(data);
     return data;
   } catch (err) {
-    console.warn('Failed to fetch plans from Supabase, using cache', err);
-    return plansCache;
+    console.warn('Failed to fetch plans from Supabase, trying API fallback', err);
+    return fetchPlansViaAPI();
   }
+};
+
+// Fallback to your existing API endpoint
+const fetchPlansViaAPI = async () => {
+  try {
+    const base = (window.__SEC_API_BASE || 'https://api.flexgig.com.ng').replace(/\/+$/, '');
+    const url = `${base}/api/dataPlans`;
+
+    const res = await fetch(url, {
+      method: 'GET',
+      credentials: 'include',
+      headers: {
+        'Accept': 'application/json',
+      },
+      cache: 'no-store'
+    });
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const fresh = await res.json();
+
+    const latestUpdate = fresh.reduce((maxDate, p) => {
+      if (!p.updated_at) return maxDate;
+      const current = new Date(p.updated_at);
+      return maxDate === null || current > maxDate ? current : maxDate;
+    }, null);
+
+    const latestUpdateStr = latestUpdate ? latestUpdate.toISOString() : null;
+    const cachedDate = cacheUpdatedAt ? new Date(cacheUpdatedAt) : null;
+    const hasNewerData = latestUpdate && (!cachedDate || latestUpdate > cachedDate);
+
+    if (hasNewerData) {
+      updateCache(fresh);
+      return fresh;
+    } else {
+      console.log('No new data – using existing cache');
+    }
+  } catch (err) {
+    console.warn('Failed to fetch plans via API, using cache', err);
+  }
+
+  return plansCache;
 };
 
 // Set up realtime subscription
 export const subscribeToPlans = () => {
+  const supabase = getSupabaseClient();
+  
+  if (!supabase) {
+    console.warn('Cannot subscribe: Supabase client not ready. Will retry in 2s...');
+    setTimeout(subscribeToPlans, 2000);
+    return null;
+  }
+
   // Unsubscribe if already subscribed
   if (realtimeSubscription) {
     realtimeSubscription.unsubscribe();
@@ -103,6 +162,10 @@ export const subscribeToPlans = () => {
           if (index !== -1) {
             plansCache[index] = payload.new;
             updateCache(plansCache);
+          } else {
+            // If not found in cache, add it
+            plansCache.push(payload.new);
+            updateCache(plansCache);
           }
         } else if (payload.eventType === 'DELETE') {
           // Remove plan from cache
@@ -112,7 +175,13 @@ export const subscribeToPlans = () => {
       }
     )
     .subscribe((status) => {
-      console.log('Realtime subscription status:', status);
+      if (status === 'SUBSCRIBED') {
+        console.log('✅ Realtime subscription active!');
+      } else if (status === 'CHANNEL_ERROR') {
+        console.error('❌ Realtime subscription error');
+      } else {
+        console.log('Realtime subscription status:', status);
+      }
     });
 
   return realtimeSubscription;
@@ -157,7 +226,13 @@ const dispatchPlansUpdateEvent = () => {
 
 // Initialize on load
 loadCachedPlans();
-subscribeToPlans(); // Start listening to realtime changes immediately
+
+// Start realtime subscription when ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', subscribeToPlans);
+} else {
+  subscribeToPlans();
+}
 
 // Export for global access
 window.getAllPlans = getAllPlans;
