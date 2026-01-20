@@ -1467,129 +1467,187 @@ function inGraceWindow() {
 // === FRESH PLAN FETCH ON LOAD - SUPABASE FIRST, API FALLBACK ===
 (function ensureFreshPlansOnLoad() {
   const CACHE_KEY = 'cached_data_plans_v12'; // Match your current version
+  const SELECTION_KEY = 'cached_selected_plan_ids_v1';
+  const FRESHNESS_MS = 2 * 60 * 1000; // don't re-fetch if we fetched within 2 minutes
 
-  async function fetchAndCacheFreshPlans() {
-    let freshPlans = null;
-    let source = 'unknown';
+  // helper: read saved selection (DOM → memory → localStorage)
+  function getCurrentSelections() {
+    // 1) Prefer in-memory global if you maintain it
+    if (Array.isArray(window.selectedPlanIds) && window.selectedPlanIds.length) {
+      return window.selectedPlanIds.map(String);
+    }
 
+    // 2) Fall back to DOM
+    const domSelections = [];
+    document.querySelectorAll('.plan-box.selected').forEach(el => {
+      // common attribute names we accept: data-plan-id, data-selected-plan-id, data-id
+      const id = el.dataset.planId || el.dataset.selectedPlanId || el.dataset.id;
+      if (id != null) domSelections.push(String(id));
+    });
+    if (domSelections.length) return domSelections;
+
+    // 3) Fall back to localStorage
     try {
-      console.log('%c[PLANS] Fetching fresh plans on load...', 'color:cyan');
+      const stored = localStorage.getItem(SELECTION_KEY);
+      if (stored) return JSON.parse(stored).map(String);
+    } catch (e) {
+      console.warn('[PLANS] failed to parse stored selections', e);
+    }
+
+    return [];
+  }
+
+  function persistSelections(arr) {
+    window.selectedPlanIds = arr.map(String);
+    try {
+      localStorage.setItem(SELECTION_KEY, JSON.stringify(window.selectedPlanIds));
+    } catch (e) {
+      console.warn('[PLANS] could not persist selections', e);
+    }
+  }
+
+  function mergeWithSelections(freshPlans, currentSelections) {
+    const set = new Set((currentSelections || []).map(String));
+    return freshPlans.map(plan => {
+      return { ...plan, selected: set.has(String(plan.id)) };
+    });
+  }
+
+  async function fetchAndCacheFreshPlans(force = false) {
+    try {
+      // freshness guard
+      const cachedRaw = localStorage.getItem(CACHE_KEY);
+      if (!force && cachedRaw) {
+        try {
+          const parsed = JSON.parse(cachedRaw);
+          if (parsed.fetchedAt) {
+            const age = Date.now() - new Date(parsed.fetchedAt).getTime();
+            if (age < FRESHNESS_MS) {
+              console.log('%c[PLANS] Using fresh cache (skip fetch).', 'color:gray');
+              // still merge/render to ensure UI matches stored selections
+              const currentSelections = getCurrentSelections();
+              const merged = mergeWithSelections(parsed.plans || [], currentSelections);
+              // update in-memory cache and render
+              window.plansCache = merged;
+              persistSelections(currentSelections);
+              const activeProvider = ['mtn','airtel','glo','ninemobile'].find(p => document.querySelector(`.provider-box.${p}.active`));
+              if (activeProvider && typeof renderDashboardPlans === 'function') {
+                renderDashboardPlans(activeProvider);
+                renderModalPlans && renderModalPlans(activeProvider);
+                attachPlanListeners && attachPlanListeners();
+              }
+              return;
+            }
+          }
+        } catch (e) {
+          console.warn('[PLANS] failed to parse cached metadata', e);
+        }
+      }
+
+      console.log('%c[PLANS] Fetching fresh plans...', 'color:cyan');
+      let freshPlans = null;
+      let source = 'unknown';
 
       // TRY SUPABASE FIRST
       const supabase = window.supabaseClient;
-      
       if (supabase) {
-        console.log('%c[PLANS] Attempting Supabase fetch...', 'color:cyan');
-        
         try {
+          console.log('%c[PLANS] Attempting Supabase fetch...', 'color:cyan');
           const { data, error } = await supabase
             .from('data_plans')
             .select('*')
             .eq('active', true)
             .order('price', { ascending: true });
 
-          if (error) {
-            console.warn('[PLANS] Supabase fetch error:', error.message);
-            throw error;
-          }
-
-          if (data && data.length > 0) {
+          if (error) throw error;
+          if (Array.isArray(data) && data.length > 0) {
             freshPlans = data;
             source = 'Supabase';
             console.log(`%c[PLANS] ✅ Fetched ${freshPlans.length} plans from Supabase`, 'color:lime;font-weight:bold');
           } else {
-            console.warn('[PLANS] Supabase returned empty data, trying API...');
             throw new Error('Empty Supabase response');
           }
-        } catch (supabaseErr) {
-          console.warn('[PLANS] Supabase failed, falling back to API:', supabaseErr.message);
-          // Fall through to API fallback
+        } catch (err) {
+          console.warn('[PLANS] Supabase failed — falling back to API:', err.message || err);
         }
       } else {
-        console.warn('[PLANS] Supabase client not available, using API');
+        console.warn('[PLANS] supabase client not available, using API');
       }
 
-      // FALLBACK TO API IF SUPABASE FAILED
+      // FALLBACK TO API
       if (!freshPlans) {
         console.log('%c[PLANS] Attempting API fetch...', 'color:orange');
-        
         const response = await fetch('https://api.flexgig.com.ng/api/dataPlans', {
           method: 'GET',
           credentials: 'include',
-          headers: {
-            'Cache-Control': 'no-cache',
-          },
+          headers: { 'Cache-Control': 'no-cache' },
           cache: 'no-store'
         });
 
-        if (!response.ok) {
-          throw new Error(`API HTTP ${response.status}`);
-        }
-
+        if (!response.ok) throw new Error(`API HTTP ${response.status}`);
         freshPlans = await response.json();
         source = 'API';
         console.log(`%c[PLANS] ✅ Fetched ${freshPlans.length} plans from API`, 'color:lime;font-weight:bold');
       }
 
-      // UPDATE CACHE WITH FRESH DATA
-      if (freshPlans && freshPlans.length > 0) {
-        const latestUpdate = freshPlans.reduce((max, p) => 
+      // if we have fresh plans, merge selections & update cache + UI
+      if (Array.isArray(freshPlans) && freshPlans.length > 0) {
+        const latestUpdate = freshPlans.reduce((max, p) =>
           p.updated_at && p.updated_at > max ? p.updated_at : max, ''
         );
 
-        localStorage.setItem(CACHE_KEY, JSON.stringify({
-          plans: freshPlans,
-          updatedAt: latestUpdate,
-          source: source,
-          fetchedAt: new Date().toISOString()
-        }));
+        // read current selections (DOM or memory or persisted)
+        const currentSelections = getCurrentSelections();
 
-        // Update in-memory cache if variables exist
-        if (typeof plansCache !== 'undefined') plansCache = freshPlans;
-        if (typeof cacheUpdatedAt !== 'undefined') cacheUpdatedAt = latestUpdate;
+        // merge and store merged plans to in-memory cache (so render functions that read plansCache work)
+        const mergedPlans = mergeWithSelections(freshPlans, currentSelections);
+        window.plansCache = mergedPlans;
+        window.cacheUpdatedAt = latestUpdate;
+        persistSelections(currentSelections);
 
-        console.log(`%c[PLANS] Cache updated with fresh data from ${source}`, 'color:lime');
-
-        // Before overwriting UI
-        function mergeWithSelections(freshPlans, currentSelections) {
-          return freshPlans.map(plan => {
-            const selected = currentSelections?.includes(plan.id) || false;
-            return { ...plan, selected };
-          });
+        // store to localStorage (store mergedPlans so cache reflects user's picks)
+        try {
+          localStorage.setItem(CACHE_KEY, JSON.stringify({
+            plans: mergedPlans,
+            updatedAt: latestUpdate,
+            source,
+            fetchedAt: new Date().toISOString()
+          }));
+        } catch (e) {
+          console.warn('[PLANS] failed to write cache', e);
         }
 
-
-        // Refresh UI if provider is already active
-        const activeProvider = ['mtn', 'airtel', 'glo', 'ninemobile'].find(p => 
+        // render UI (safe to pass mergedPlans as extra arg; also update global cache so renderDashboardPlans can read it)
+        const activeProvider = ['mtn', 'airtel', 'glo', 'ninemobile'].find(p =>
           document.querySelector(`.provider-box.${p}.active`)
         );
 
-        // Determine current selections
-        let currentSelections = [];
-        document.querySelectorAll('.plan-box.selected').forEach(el => {
-          currentSelections.push(el.dataset.selectedPlanId); // assuming plan-box has data-plan-id
-        });
-
-        // Merge fresh plans with current selections
-        const mergedPlans = mergeWithSelections(freshPlans, currentSelections);
-
-
         if (activeProvider && typeof renderDashboardPlans === 'function') {
-          renderDashboardPlans(activeProvider, mergedPlans);
-          renderModalPlans(activeProvider, mergedPlans);
-          attachPlanListeners();
-          console.log(`%c[PLANS] UI refreshed for ${activeProvider.toUpperCase()}`, 'color:lime');
+          // prefer letting render read `window.plansCache`, but pass mergedPlans anyway (won't break)
+          try {
+            renderDashboardPlans(activeProvider, mergedPlans);
+            renderModalPlans && renderModalPlans(activeProvider, mergedPlans);
+            attachPlanListeners && attachPlanListeners();
+            console.log(`%c[PLANS] UI refreshed for ${activeProvider.toUpperCase()}`, 'color:lime');
+          } catch (renderErr) {
+            console.error('[PLANS] render failed', renderErr);
+          }
         }
       }
-
     } catch (err) {
-      console.error('[PLANS] All fetch methods failed, using cache:', err);
-      
-      // Load from cache as last resort
+      console.error('[PLANS] All fetch methods failed:', err);
+      // try to fall back to cache
       try {
         const cached = localStorage.getItem(CACHE_KEY);
         if (cached) {
           const parsed = JSON.parse(cached);
+          window.plansCache = parsed.plans || [];
+          const activeProvider = ['mtn','airtel','glo','ninemobile'].find(p => document.querySelector(`.provider-box.${p}.active`));
+          if (activeProvider && typeof renderDashboardPlans === 'function') {
+            renderDashboardPlans(activeProvider);
+            renderModalPlans && renderModalPlans(activeProvider);
+            attachPlanListeners && attachPlanListeners();
+          }
           console.log(`%c[PLANS] Using cached data (${parsed.plans?.length || 0} plans)`, 'color:yellow');
         }
       } catch (cacheErr) {
@@ -1600,12 +1658,12 @@ function inGraceWindow() {
 
   // Run on load
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', fetchAndCacheFreshPlans);
+    document.addEventListener('DOMContentLoaded', () => fetchAndCacheFreshPlans());
   } else {
     fetchAndCacheFreshPlans();
   }
 
-  // Also run when tab becomes visible (user returns)
+  // Also run when tab becomes visible (user returns) but respect freshness guard
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) {
       console.log('[PLANS] Tab visible — checking for updates');
@@ -1615,6 +1673,7 @@ function inGraceWindow() {
 
   console.log('🚀 Fresh plan fetch system active (Supabase → API → Cache)');
 })();
+
 
 
 // Call this as early as practical (before container paints) - e.g., in onDashboardLoad() before manageDashboardCards() if possible.
