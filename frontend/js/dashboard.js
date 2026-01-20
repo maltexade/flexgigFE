@@ -5960,7 +5960,7 @@ function selectPlanById(id) {
   window.attachPlanListeners = window.attachPlanListeners || attachPlanListeners;
 
   // --- PLAN CLICK HANDLER ---
-  function handlePlanClick(e) {
+function handlePlanClick(e) {
   const plan =
     e.currentTarget?.classList?.contains('plan-box')
       ? e.currentTarget
@@ -5976,7 +5976,7 @@ function selectPlanById(id) {
 
   const isModalClick = !!plan.closest('.plan-modal-content');
 
-  // 🔥 PROVIDER-AWARE dashboard lookup (THIS IS THE FIX)
+  // 🔥 PROVIDER-AWARE dashboard lookup
   const dashPlan = Array.from(
     plansRow.querySelectorAll('.plan-box')
   ).find(p =>
@@ -5997,6 +5997,7 @@ function selectPlanById(id) {
 
   /* ------------------ Modal click ------------------ */
   if (isModalClick) {
+    e.stopPropagation(); // 🔥 Prevent event bubbling
     selectPlanById(id);
 
     const dashPlans = Array.from(
@@ -6055,22 +6056,15 @@ function selectPlanById(id) {
   }
 
   /* ------------------ Dashboard click ------------------ */
+  e.stopPropagation(); // 🔥 Prevent event bubbling
   selectPlanById(id);
+  return; // 🔥 CRITICAL FIX: Stop further execution
 }
 
-
 window.handlePlanClick = window.handlePlanClick || handlePlanClick;
-document.addEventListener(
-  'click',
-  e => {
-    const plan = e.target.closest('.plan-box');
-    if (!plan) return;
-    handlePlanClick(e);
-    e.stopImmediatePropagation();
-  },
-  true
-);
 
+// 🔥 REMOVED GLOBAL LISTENER - This was causing duplicate clicks
+// The individual plan listeners (attached via attachPlanListeners) are sufficient
 
 
 /* ---------- RE-ATTACH LISTENERS AFTER RENDERS ---------- */
