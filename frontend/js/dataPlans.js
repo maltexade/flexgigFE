@@ -69,7 +69,6 @@ export const fetchPlans = async () => {
     const { data, error } = await supabase
       .from('data_plans')
       .select('*')
-      .eq('active', true)  // ONLY fetch active plans
       .order('updated_at', { ascending: false });
 
     if (error) throw error;
@@ -100,11 +99,8 @@ const fetchPlansViaAPI = async () => {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
     const fresh = await res.json();
-    
-    // Filter to only active plans
-    const activePlans = fresh.filter(p => p.active === true);
 
-    const latestUpdate = activePlans.reduce((maxDate, p) => {
+    const latestUpdate = fresh.reduce((maxDate, p) => {
       if (!p.updated_at) return maxDate;
       const current = new Date(p.updated_at);
       return maxDate === null || current > maxDate ? current : maxDate;
@@ -115,8 +111,8 @@ const fetchPlansViaAPI = async () => {
     const hasNewerData = latestUpdate && (!cachedDate || latestUpdate > cachedDate);
 
     if (hasNewerData) {
-      updateCache(activePlans);
-      return activePlans;
+      updateCache(fresh);
+      return fresh;
     } else {
       console.log('No new data – using existing cache');
     }
@@ -126,8 +122,6 @@ const fetchPlansViaAPI = async () => {
 
   return plansCache;
 };
-
-// Replace the realtime subscription section in your dataPlans.js
 
 // Set up realtime subscription
 export const subscribeToPlans = () => {
@@ -159,55 +153,24 @@ export const subscribeToPlans = () => {
         console.log('🔴 Realtime change detected:', payload);
 
         if (payload.eventType === 'INSERT') {
-          // Only add if active is true
-          if (payload.new.active === true) {
+          // Add new plan to cache
+          plansCache.push(payload.new);
+          updateCache(plansCache);
+        } else if (payload.eventType === 'UPDATE') {
+          // Update existing plan in cache
+          const index = plansCache.findIndex(p => p.id === payload.new.id);
+          if (index !== -1) {
+            plansCache[index] = payload.new;
+            updateCache(plansCache);
+          } else {
+            // If not found in cache, add it
             plansCache.push(payload.new);
             updateCache(plansCache);
-            console.log('✅ New active plan added to cache');
-          } else {
-            console.log('ℹ️ Inactive plan inserted - not adding to cache');
           }
-        } 
-        else if (payload.eventType === 'UPDATE') {
-          const index = plansCache.findIndex(p => p.id === payload.new.id);
-          
-          // Check if the plan was set to inactive
-          if (payload.new.active === false) {
-            if (index !== -1) {
-              // Remove from cache since it's now inactive
-              plansCache.splice(index, 1);
-              updateCache(plansCache);
-              console.log('🗑️ Plan set to inactive - removed from cache');
-            } else {
-              console.log('ℹ️ Inactive plan update - not in cache');
-            }
-          } 
-          // Plan is still active, update it
-          else if (payload.new.active === true) {
-            if (index !== -1) {
-              // Update existing plan
-              plansCache[index] = payload.new;
-              updateCache(plansCache);
-              console.log('✅ Active plan updated in cache');
-            } else {
-              // Not in cache but is active - add it
-              plansCache.push(payload.new);
-              updateCache(plansCache);
-              console.log('✅ Active plan added to cache');
-            }
-          }
-        } 
-        else if (payload.eventType === 'DELETE') {
+        } else if (payload.eventType === 'DELETE') {
           // Remove plan from cache
-          const initialLength = plansCache.length;
           plansCache = plansCache.filter(p => p.id !== payload.old.id);
-          
-          if (plansCache.length < initialLength) {
-            updateCache(plansCache);
-            console.log('🗑️ Plan deleted - removed from cache');
-          } else {
-            console.log('ℹ️ Plan deleted - was not in cache');
-          }
+          updateCache(plansCache);
         }
       }
     )
@@ -237,26 +200,19 @@ export const unsubscribeFromPlans = () => {
 export const getAllPlans = async () => {
   if (plansCache.length === 0) loadCachedPlans();
   await fetchPlans(); // background refresh
-  // Filter cache to ensure only active plans
-  return plansCache.filter(p => p.active === true);
+  return plansCache;
 };
 
 // Get plans for one network
 export const getPlansByProvider = async (provider) => {
   const all = await getAllPlans();
-  return all.filter(p => 
-    p.provider.toLowerCase() === provider.toLowerCase() && 
-    p.active === true  // Extra safety check
-  );
+  return all.filter(p => p.provider.toLowerCase() === provider.toLowerCase());
 };
 
 // Get specific category (AWOOF, CG, GIFTING, etc.)
 export const getPlans = async (provider, category = null) => {
   const all = await getAllPlans();
-  let result = all.filter(p => 
-    p.provider.toLowerCase() === provider.toLowerCase() &&
-    p.active === true  // Extra safety check
-  );
+  let result = all.filter(p => p.provider.toLowerCase() === provider.toLowerCase());
   if (category) {
     result = result.filter(p => p.category === category.toUpperCase());
   }
@@ -401,7 +357,9 @@ window.refreshActiveProviderUI = window.refreshActiveProviderUI || function () {
       console.log('✅ attachPlanListeners() called');
     } else console.warn('❌ attachPlanListeners() not found');
 
-
+    if (typeof showRealtimeUpdateNotification === 'function') {
+      showRealtimeUpdateNotification();
+    }
 
     console.log('%c✨ UI REFRESH COMPLETE!', 'color:lime;font-size:14px;font-weight:bold');
   } else {
