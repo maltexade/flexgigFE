@@ -1008,32 +1008,34 @@ function renderChunked(groupedMonths) {
 /* -------------------------- FALLBACK: LOAD FROM API ONLY IF REALTIME FAILS -------------------------- */
 async function loadLatestHistoryAsFallback() {
   if (state.fullHistoryLoaded) {
-    console.log('[Tx Fallback] Already fully loaded — skipping');
+    console.log('[Tx Fallback] Already fully loaded — skipping API call');
     return;
   }
 
-  console.log('[Tx Fallback] Realtime failed → loading from API (page 1, limit 200)');
+  console.log('[Tx Fallback] Realtime not working → loading latest from API');
 
   show(loadingEl);
   hide(emptyEl);
 
-  let allTx = state.items.slice();
+  let allTx = state.items.slice(); // Start with whatever realtime gave us
 
   try {
+    // Fetch only the most recent page
     const data = await safeFetch(`${CONFIG.apiEndpoint}?limit=200&page=1`);
-    const apiItems = data.items || [];
+    const newItems = data.items || [];
 
-    if (apiItems.length === 0) {
-      console.log('[Tx Fallback] API returned no items');
-    } else {
-      // Merge: update existing + add truly new
-      const existingById = new Map(allTx.map(tx => [tx.id, tx]));
+    console.log('[Tx Fallback] API returned', newItems.length, 'items');
 
-      apiItems.forEach(raw => {
+    if (newItems.length > 0) {
+      // Track existing IDs to prevent exact duplicates
+      const existingIds = new Set(allTx.map(tx => tx.id));
+
+      newItems.forEach(raw => {
         const id = raw.id || raw.reference;
         if (!id) return;
 
-        const normalized = {
+        // Normalize
+        let normalized = {
           id,
           reference: raw.reference || raw.id,
           type: raw.type || (Number(raw.amount) > 0 ? 'credit' : 'debit'),
@@ -1047,38 +1049,29 @@ async function loadLatestHistoryAsFallback() {
           phone: raw.phone
         };
 
-        // Special refund fix: force credit type + refund icon trigger
-        if (normalized.status.toLowerCase().includes('refund') || 
-            normalized.status.toLowerCase() === 'refunded') {
-          normalized.type = 'credit';
-          normalized.description = 'Refund for Failed Data'; // optional fixed text
-          console.log('[Tx Fallback] Forced refund → credit type + fixed desc');
+        // Special handling for REFUND rows — always separate
+        const statusLower = normalized.status.toLowerCase();
+        if (statusLower.includes('refund') || statusLower === 'refunded') {
+          normalized.type = 'credit';                        // Green incoming
+          normalized.description = 'Refund for Failed Data'; // Fixed client-side
+          console.log('[Tx Fallback] Added SEPARATE refund tx:', id, normalized.reference);
+        } else if (statusLower.includes('fail') || statusLower === 'failed') {
+          console.log('[Tx Fallback] Added failed tx:', id, normalized.reference);
         }
 
-        if (existingById.has(id)) {
-          // UPDATE existing row (e.g. status change to refund/failed/success)
-          console.log('[Tx Fallback] Updating existing tx:', id, 'new status:', normalized.status);
-          existingById.set(id, {
-            ...existingById.get(id),       // keep original
-            status: normalized.status,     // update status
-            type: normalized.type,         // allow credit override for refund
-            description: normalized.description.includes('Refund') 
-              ? normalized.description      // allow refund desc
-              : existingById.get(id).description  // protect original for others
-          });
-        } else {
-          // ADD new row
-          console.log('[Tx Fallback] Adding new tx:', id);
+        // Only add if this exact ID doesn't exist yet
+        if (!existingIds.has(id)) {
           allTx.unshift(normalized);
-          existingById.set(id, normalized);
+          existingIds.add(id);
+          console.log('[Tx Fallback] Added new tx:', id);
+        } else {
+          console.log('[Tx Fallback] Skipped duplicate ID:', id);
         }
       });
-
-      // Rebuild array from map to preserve order
-      allTx = Array.from(existingById.values()).sort((a, b) => 
-        new Date(b.time) - new Date(a.time)
-      );
     }
+
+    // Final sort: newest first
+    allTx.sort((a, b) => new Date(b.time) - new Date(a.time));
 
     state.items = allTx;
     state.fullHistoryLoaded = true;
@@ -1088,6 +1081,7 @@ async function loadLatestHistoryAsFallback() {
     console.log('[Tx Fallback] Success — total items now:', state.items.length);
   } catch (err) {
     console.error('[Tx Fallback] API fetch failed:', err);
+    // Optionally show error UI
   } finally {
     hide(loadingEl);
   }
