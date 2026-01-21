@@ -147,33 +147,33 @@ function generateFakeTransactions() {
   }
 
 function getTxIcon(tx) {
-  // Combine description + narration + any possible provider field for broader matching
+  const statusRaw = (tx.status || '').toLowerCase().trim();
+
+  // Highest priority: Refund status always gets refund icon (regardless of description)
+  if (statusRaw.includes('refund') || statusRaw === 'refunded') {
+    return { 
+      cls: 'refund incoming', 
+      img: '/frontend/svg/refund.svg', 
+      alt: 'Refund' 
+    };
+  }
+
+  // Then check description/provider (only if not refund)
   let text = '';
   if (tx.description) text += tx.description.toLowerCase() + ' ';
   if (tx.narration) text += tx.narration.toLowerCase() + ' ';
   if (tx.provider) text += tx.provider.toLowerCase() + ' ';
-  if (tx.service) text += tx.service.toLowerCase() + ' '; // some APIs use 'service'
+  if (tx.service) text += tx.service.toLowerCase() + ' ';
 
-  if (text.includes('opay')) {
-    return { cls: 'incoming', img: '/frontend/svg/bank.svg', alt: 'Opay' };
-  }
-  if (text.includes('mtn')) {
-    return { cls: 'mtn targets', img: '/frontend/img/mtn.svg', alt: 'MTN' };
-  }
-  if (text.includes('airtel')) {
-    return { cls: 'airtel targets', img: '/frontend/svg/airtel-icon.svg', alt: 'Airtel' };
-  }
-  if (text.includes('glo')) {
-    return { cls: 'glo targets', img: '/frontend/svg/GLO-icon.svg', alt: 'GLO' };
-  }
-  if (text.includes('9mobile') || text.includes('etisalat') || text.includes('nine mobile') || text.includes('nine-mobile')) {
+  if (text.includes('opay'))      return { cls: 'incoming',       img: '/frontend/svg/bank.svg',      alt: 'Opay' };
+  if (text.includes('mtn'))       return { cls: 'mtn targets',    img: '/frontend/img/mtn.svg',       alt: 'MTN' };
+  if (text.includes('airtel'))    return { cls: 'airtel targets', img: '/frontend/svg/airtel-icon.svg', alt: 'Airtel' };
+  if (text.includes('glo'))       return { cls: 'glo targets',    img: '/frontend/svg/GLO-icon.svg',  alt: 'GLO' };
+  if (text.includes('9mobile') || text.includes('etisalat') || text.includes('nine')) {
     return { cls: 'nine-mobile targets', img: '/frontend/svg/9mobile-icon.svg', alt: '9Mobile' };
   }
-  if (text.includes('refund')) {
-    return { cls: 'refund incoming', img: '/frontend/svg/refund.svg', alt: 'Refund' };
-  }
 
-  // Fallback to credit/debit arrow if no specific icon found
+  // Fallback
   return { cls: tx.type === 'credit' ? 'incoming' : 'outgoing', img: '', alt: '' };
 }
 
@@ -1591,7 +1591,7 @@ async function subscribeToTransactions(force = false) {
 
   const raw = payload.new;
 
-  const normalized = {
+  let normalized = {
     id: raw.id || raw.reference || `rt-${Date.now()}`,
     reference: raw.reference || raw.id,
     type: raw.type || (Number(raw.amount || 0) > 0 ? 'credit' : 'debit'),
@@ -1605,44 +1605,36 @@ async function subscribeToTransactions(force = false) {
 
   const txId = normalized.id;
 
+  // Special handling for REFUND
+  if (normalized.status.toLowerCase().includes('refund') || normalized.status.toLowerCase() === 'refunded') {
+    normalized.type = 'credit';                              // Force credit (incoming + green)
+    normalized.description = `Refund for Failed Data`;       // Fixed client-side description
+    console.log('[Tx Realtime] Refund detected → forced credit type + fixed description');
+  }
+
   const existingIndex = state.items.findIndex(t => t.id === txId);
 
   if (existingIndex !== -1) {
-    // UPDATE: smart merge — allow description update only if it's meaningful
+    // UPDATE: only update status + type if refund + keep original description unless refund
     const existingTx = state.items[existingIndex];
 
-    console.log('[Tx Realtime] Updating existing tx:', txId);
-
-    // Decide whether to take the new description
-    let finalDescription = existingTx.description;
-
-    // If new description is better/more final (customize this logic)
-    if (normalized.description && 
-        normalized.description !== existingTx.description && 
-        !existingTx.description.toLowerCase().includes('pending')) {
-      // Example: only update if old one was "pending" related
-      if (existingTx.description.toLowerCase().includes('pending') || 
-          existingTx.description.toLowerCase().includes('processing')) {
-        finalDescription = normalized.description;  // e.g. "Data purchase"
-        console.log('[Tx Realtime] Description upgraded:', finalDescription);
-      }
-    }
+    console.log('[Tx Realtime] Updating existing tx:', txId, 'new status:', normalized.status);
 
     state.items[existingIndex] = {
-      ...existingTx,                      // keep original fields
-      status: normalized.status,          // always update status
-      description: finalDescription,      // controlled update
-      // Add other fields if needed:
-      // provider: normalized.provider,
-      // phone: normalized.phone,
-      // but never blindly overwrite everything
+      ...existingTx,                        // Keep original description, time, etc.
+      status: normalized.status,            // Always update status
+      type: normalized.type,                // Allow type change (e.g. debit → credit for refund)
+      // Do NOT overwrite description unless it's a refund
+      description: normalized.status.toLowerCase().includes('refund') 
+        ? normalized.description 
+        : existingTx.description
     };
 
     if (state.open) {
       applyTransformsAndRender();
     }
   } else if (payload.eventType === 'INSERT') {
-    // New transaction — add full object
+    // New tx — add as is (description from provider)
     console.log('[Tx Realtime] Adding new tx:', normalized.reference);
     state.items.unshift(normalized);
 
@@ -1652,7 +1644,6 @@ async function subscribeToTransactions(force = false) {
     }
   }
 
-  // Keep dispatching event
   window.dispatchEvent(new CustomEvent('transaction_update', { detail: normalized }));
 }
       )
