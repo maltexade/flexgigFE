@@ -1893,15 +1893,3 @@ window.addEventListener('transactionHistoryUpdated', renderDashboardRecent); // 
 
 
 })();
-
-document.addEventListener('DOMContentLoaded', () => {
-  const viewAllBtn = document.getElementById('dashViewAllTxBtn');
-
-  if (!viewAllBtn) return;
-
-  viewAllBtn.addEventListener('click', (e) => {
-    e.preventDefault();
-    console.log('[Tx UI] View All button clicked');
-  });
-});
-
