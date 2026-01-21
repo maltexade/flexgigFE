@@ -1006,35 +1006,38 @@ function renderChunked(groupedMonths) {
   }
 
 /* -------------------------- FALLBACK: LOAD FROM API ONLY IF REALTIME FAILS -------------------------- */
+/* -------------------------- FALLBACK: LOAD FROM API ONLY IF REALTIME FAILS -------------------------- */
 async function loadLatestHistoryAsFallback() {
   if (state.fullHistoryLoaded) {
     console.log('[Tx Fallback] Already fully loaded — skipping API call');
     return;
   }
 
-  console.log('[Tx Fallback] Realtime not working → loading latest from API');
+  console.log('[Tx Fallback] Realtime not working → loading latest from API (limit 200, page 1)');
 
   show(loadingEl);
   hide(emptyEl);
 
-  let allTx = state.items.slice(); // Start with whatever realtime gave us
+  let allTx = state.items.slice(); // Start with whatever realtime already gave us
 
   try {
-    // Fetch only the most recent page
     const data = await safeFetch(`${CONFIG.apiEndpoint}?limit=200&page=1`);
-    const newItems = data.items || [];
+    const apiItems = data.items || [];
 
-    console.log('[Tx Fallback] API returned', newItems.length, 'items');
+    console.log('[Tx Fallback] API returned', apiItems.length, 'items');
 
-    if (newItems.length > 0) {
+    if (apiItems.length > 0) {
       // Track existing IDs to prevent exact duplicates
       const existingIds = new Set(allTx.map(tx => tx.id));
 
-      newItems.forEach(raw => {
+      apiItems.forEach(raw => {
         const id = raw.id || raw.reference;
-        if (!id) return;
+        if (!id) {
+          console.warn('[Tx Fallback] Skipping row with no ID/reference:', raw);
+          return;
+        }
 
-        // Normalize
+        // Normalize the row
         let normalized = {
           id,
           reference: raw.reference || raw.id,
@@ -1049,25 +1052,40 @@ async function loadLatestHistoryAsFallback() {
           phone: raw.phone
         };
 
-        // Special handling for REFUND rows — always separate
         const statusLower = normalized.status.toLowerCase();
+
+        // Special handling for REFUND rows — always separate
         if (statusLower.includes('refund') || statusLower === 'refunded') {
           normalized.type = 'credit';                        // Green incoming
-          normalized.description = 'Refund for Failed Data'; // Fixed client-side
-          console.log('[Tx Fallback] Added SEPARATE refund tx:', id, normalized.reference);
-        } else if (statusLower.includes('fail') || statusLower === 'failed') {
-          console.log('[Tx Fallback] Added failed tx:', id, normalized.reference);
+          normalized.description = 'Refund for Failed Data'; // Fixed client-side text
+          console.log('[Tx Fallback] Added SEPARATE refund tx:', {
+            id,
+            ref: normalized.reference,
+            status: normalized.status,
+            amount: normalized.amount
+          });
+        } 
+        // Log failed rows for visibility
+        else if (statusLower.includes('fail') || statusLower === 'failed') {
+          console.log('[Tx Fallback] Added failed tx:', {
+            id,
+            ref: normalized.reference,
+            status: normalized.status,
+            description: normalized.description
+          });
         }
 
         // Only add if this exact ID doesn't exist yet
         if (!existingIds.has(id)) {
           allTx.unshift(normalized);
           existingIds.add(id);
-          console.log('[Tx Fallback] Added new tx:', id);
+          console.log('[Tx Fallback] Successfully added tx:', id);
         } else {
           console.log('[Tx Fallback] Skipped duplicate ID:', id);
         }
       });
+    } else {
+      console.log('[Tx Fallback] API returned no items');
     }
 
     // Final sort: newest first
@@ -1080,12 +1098,12 @@ async function loadLatestHistoryAsFallback() {
     applyTransformsAndRender();
     console.log('[Tx Fallback] Success — total items now:', state.items.length);
   } catch (err) {
-    console.error('[Tx Fallback] API fetch failed:', err);
-    // Optionally show error UI
+    console.error('[Tx Fallback] API fetch failed:', err.message || err);
   } finally {
     hide(loadingEl);
   }
 }
+
 window.loadLatestHistoryAsFallback = loadLatestHistoryAsFallback;
 
   /* -------------------------- MONTH FILTER FUNCTIONS -------------------------- */
