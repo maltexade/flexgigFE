@@ -2942,6 +2942,12 @@ async function getSession() {
       updateLocalStorageFromUser(user);
 
       console.log('[DEBUG] getSession: Complete (loadId=' + loadId + ')');
+      
+  // ← Add this:
+if (window.subscribeToTransactions) {
+  console.log('[Auth] Session ready → triggering transaction realtime subscription');
+  window.subscribeToTransactions(true);  // force = true to bypass healthy check
+}
       return { user };
 
     } catch (err) {
@@ -3638,11 +3644,6 @@ async function onDashboardLoad() {
   setupBroadcastSubscription();
   subscribeToWalletBalance();
 
-  // ← Add this:
-if (window.subscribeToTransactions) {
-  console.log('[Auth] Session ready → triggering transaction realtime subscription');
-  window.subscribeToTransactions(true);  // force = true to bypass healthy check
-}
 
 
 

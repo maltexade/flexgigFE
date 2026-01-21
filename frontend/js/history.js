@@ -1577,6 +1577,7 @@ handleModalOpened = async function() {
   await originalHandleModalOpened.apply(this, arguments);
   subscribeToTransactions(true);   // force retry on open
 };
+window.subscribeToTransactions = window.subscribeToTransactions || subscribeToTransactions;
 
   showStateUI();
   updateMonthDisplay();
