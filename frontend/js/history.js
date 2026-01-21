@@ -1585,37 +1585,61 @@ async function subscribeToTransactions(force = false) {
           filter: `user_id=eq.${uid}`   // ← using user_id as confirmed
         },
         (payload) => {
-          console.log('[Tx Realtime] 🔔 EVENT RECEIVED:', payload.eventType);
-          console.log('[Tx Realtime] Payload:', JSON.stringify(payload, null, 2));
+  console.log('[Tx Realtime] 🔔 EVENT RECEIVED:', payload.eventType);
+  console.log('[Tx Realtime] Payload:', JSON.stringify(payload, null, 2));
 
-          if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-            const raw = payload.new;
+  if (payload.eventType !== 'INSERT' && payload.eventType !== 'UPDATE') return;
 
-            const normalized = {
-              id: raw.id || raw.reference || `rt-${Date.now()}`,
-              reference: raw.reference || raw.id,
-              type: raw.type || (Number(raw.amount || 0) > 0 ? 'credit' : 'debit'),
-              amount: Math.abs(Number(raw.amount || 0)),
-              description: (raw.description || raw.narration || 'Transaction').trim(),
-              time: raw.created_at || raw.date || new Date().toISOString(),
-              status: (raw.status || 'SUCCESS').toUpperCase(),
-              provider: raw.provider,
-              phone: raw.phone
-            };
+  const raw = payload.new;
 
-            if (!state.items.some(t => t.id === normalized.id)) {
-              state.items.unshift(normalized);
-              console.log('[Tx Realtime] Added new tx:', normalized.reference);
+  const normalized = {
+    id: raw.id || raw.reference || `rt-${Date.now()}`,
+    reference: raw.reference || raw.id,
+    type: raw.type || (Number(raw.amount || 0) > 0 ? 'credit' : 'debit'),
+    amount: Math.abs(Number(raw.amount || 0)),
+    description: (raw.description || raw.narration || 'Transaction').trim(),
+    time: raw.created_at || raw.date || new Date().toISOString(),
+    status: (raw.status || 'SUCCESS').toUpperCase(),
+    provider: raw.provider,
+    phone: raw.phone
+  };
 
-              if (state.open) {
-                applyTransformsAndRender();
-                document.getElementById('historyList')?.scrollTo({ top: 0, behavior: 'smooth' });
-              }
+  const txId = normalized.id;
 
-              window.dispatchEvent(new CustomEvent('transaction_update', { detail: normalized }));
-            }
-          }
-        }
+  // Find if this transaction already exists in our list
+  const existingIndex = state.items.findIndex(t => t.id === txId);
+
+  if (existingIndex !== -1) {
+    // UPDATE: merge new data into existing item (especially status)
+    console.log('[Tx Realtime] Updating existing tx:', txId, 'new status:', normalized.status);
+
+    // Preserve original time/description if not changed, but update status + anything new
+    state.items[existingIndex] = {
+      ...state.items[existingIndex],       // keep old fields
+      ...normalized,                       // override with new values
+      status: normalized.status            // always take latest status
+    };
+
+    // Re-render if modal is open
+    if (state.open) {
+      applyTransformsAndRender();
+      // Optional: scroll to the updated item if you want to highlight it
+      // document.querySelector(`[data-tx-id="${txId}"]`)?.scrollIntoView({ behavior: 'smooth' });
+    }
+  } else if (payload.eventType === 'INSERT') {
+    // INSERT: only add if truly new
+    console.log('[Tx Realtime] Adding new tx:', normalized.reference);
+    state.items.unshift(normalized);
+
+    if (state.open) {
+      applyTransformsAndRender();
+      historyList.scrollTop = 0;
+    }
+  }
+
+  // Always dispatch event (your existing listener will handle toast/sound/etc. if needed)
+  window.dispatchEvent(new CustomEvent('transaction_update', { detail: normalized }));
+}
       )
             .subscribe((status, err) => {
         console.log('[Tx Realtime] SUBSCRIBE STATUS:', status);
