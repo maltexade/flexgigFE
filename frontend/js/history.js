@@ -1599,42 +1599,60 @@ async function subscribeToTransactions(force = false) {
     description: (raw.description || raw.narration || 'Transaction').trim(),
     time: raw.created_at || raw.date || new Date().toISOString(),
     status: (raw.status || 'SUCCESS').toUpperCase(),
-    provider: raw.provider,
+    provider: raw.provider?.toUpperCase() || '',
     phone: raw.phone
   };
 
   const txId = normalized.id;
 
-  // Special handling for REFUND
+  // Special refund handling (force credit + fixed description)
   if (normalized.status.toLowerCase().includes('refund') || normalized.status.toLowerCase() === 'refunded') {
-    normalized.type = 'credit';                              // Force credit (incoming + green)
-    normalized.description = `Refund for Failed Data`;       // Fixed client-side description
-    console.log('[Tx Realtime] Refund detected → forced credit type + fixed description');
+    normalized.type = 'credit';
+    normalized.description = 'Refund for Failed Data';
+    console.log('[Tx Realtime] Refund → forced credit + fixed desc');
   }
 
   const existingIndex = state.items.findIndex(t => t.id === txId);
 
   if (existingIndex !== -1) {
-    // UPDATE: only update status + type if refund + keep original description unless refund
+    // UPDATE: keep most fields, but upgrade description on final status
     const existingTx = state.items[existingIndex];
+    console.log('[Tx Realtime] Updating tx:', txId, 'new status:', normalized.status);
 
-    console.log('[Tx Realtime] Updating existing tx:', txId, 'new status:', normalized.status);
+    let finalDescription = existingTx.description;
+
+    // Upgrade description only when moving from pending to final (success/failed)
+    const oldStatus = existingTx.status.toLowerCase();
+    const newStatus = normalized.status.toLowerCase();
+
+    if ((oldStatus.includes('pending') || oldStatus.includes('processing')) &&
+        (newStatus === 'success' || newStatus === 'failed')) {
+
+      // Reconstruct clean final description
+      const bundleMatch = existingTx.description.match(/\d+\.?\d* ?(?:GB|MB|Days?|hrs?)/gi);
+      const bundle = bundleMatch ? bundleMatch[0] : '';
+      const network = existingTx.provider?.toUpperCase() || 
+                      existingTx.description.match(/mtn|airtel|glo|9mobile/i)?.[0]?.toUpperCase() || '';
+
+      if (bundle) {
+        finalDescription = network 
+          ? `${network} ${bundle} Data Purchase`
+          : `${bundle} Data Purchase`;
+        console.log('[Tx Realtime] Upgraded description to final:', finalDescription);
+      }
+    }
 
     state.items[existingIndex] = {
-      ...existingTx,                        // Keep original description, time, etc.
-      status: normalized.status,            // Always update status
-      type: normalized.type,                // Allow type change (e.g. debit → credit for refund)
-      // Do NOT overwrite description unless it's a refund
-      description: normalized.status.toLowerCase().includes('refund') 
-        ? normalized.description 
-        : existingTx.description
+      ...existingTx,
+      status: normalized.status,
+      description: finalDescription,     // controlled upgrade
+      type: normalized.type,             // allow refund to force credit
     };
 
     if (state.open) {
       applyTransformsAndRender();
     }
   } else if (payload.eventType === 'INSERT') {
-    // New tx — add as is (description from provider)
     console.log('[Tx Realtime] Adding new tx:', normalized.reference);
     state.items.unshift(normalized);
 
