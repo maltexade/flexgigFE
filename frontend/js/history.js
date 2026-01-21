@@ -1,7 +1,7 @@
-/* transaction-history.js — REALTIME-FIRST + FALLBACK VERSION
-   Priority: Supabase realtime → API only if realtime fails/silent
+/* transaction-history.js — REALTIME-FIRST VERSION using window.supabaseClient
+   Priority: Supabase realtime (postgres_changes) → API fallback only if needed
    No forced initial full-page load when opening history tab
-   Preserves: month grouping, sticky headers, receipt modal, search, truncation
+   Uses existing window.supabaseClient from dashboard.js
 */
 
 (() => {
@@ -9,12 +9,9 @@
 
   /* ──────────────────────────────── CONFIG ──────────────────────────────── */
   const CONFIG = {
-    apiEndpoint: 'https://api.flexgig.com.ng/api/transactions',
-    supabaseUrl: window.SUPABASE_URL || 'https://your-project-ref.supabase.co',
-    supabaseAnonKey: window.SUPABASE_ANON_KEY || 'your-anon-key-here',
+    apiEndpoint: `${window.__SEC_API_BASE}/transactions`,
     currencySymbol: '₦',
     dateLocale: 'en-GB',
-    pageSize: 30,
     chunkRenderSize: 12,
     realtimeRetryMs: 14000,
     realtimeHealthyThresholdMs: 8000,
@@ -27,12 +24,11 @@
   const historyList = document.getElementById('historyList');
   const loadingEl = document.getElementById('historyLoading');
   const emptyEl = document.getElementById('historyEmpty');
-  const errorEl = document.getElementById('historyError') || document.createElement('div');
   const downloadBtn = document.getElementById('downloadHistory');
   const searchInput = document.getElementById('historySearch');
 
   if (!modal || !historyList) {
-    console.error('[TxHistory] Critical DOM missing — aborting');
+    console.error('[TxHistory] Critical DOM elements missing');
     return;
   }
 
@@ -41,7 +37,7 @@
   /* ──────────────────────────────── STATE ──────────────────────────────── */
   let state = {
     open: false,
-    items: [],                    // newest → oldest
+    items: [],                    // newest first
     grouped: [],
     searchTerm: '',
     lastRenderIndex: 0,
@@ -53,7 +49,7 @@
     fallbackPollTimer: null
   };
 
-  let selectedMonth = null; // { year: number, month: number } or null = all time
+  let selectedMonth = null; // null = all time, or {year, month}
 
   /* ──────────────────────────────── UTILITIES ──────────────────────────────── */
   function formatCurrency(amount) {
@@ -74,7 +70,7 @@
         month: 'short'
       });
     } catch {
-      return iso?.slice(0, 16).replace('T', ' ') || '—';
+      return iso?.slice(0,16).replace('T',' ') || '—';
     }
   }
 
@@ -85,7 +81,7 @@
     if (text.includes('mtn'))       return { cls: 'mtn targets',    img: '/frontend/img/mtn.svg',       alt: 'MTN' };
     if (text.includes('airtel'))    return { cls: 'airtel targets', img: '/frontend/svg/airtel-icon.svg', alt: 'Airtel' };
     if (text.includes('glo'))       return { cls: 'glo targets',    img: '/frontend/svg/GLO-icon.svg',  alt: 'GLO' };
-    if (text.includes('9mobile') || text.includes('etisalat') || text.includes('nine mobile')) {
+    if (text.includes('9mobile') || text.includes('etisalat') || text.includes('nine')) {
       return { cls: 'nine-mobile targets', img: '/frontend/svg/9mobile-icon.svg', alt: '9Mobile' };
     }
     if (text.includes('refund'))    return { cls: 'refund incoming', img: '/frontend/svg/refund.svg', alt: 'Refund' };
@@ -103,7 +99,7 @@
   }
 
   function safeFetch(url, opts = {}) {
-    const headers = { ...opts.headers, ...(window.APP_TOKEN ? { Authorization: window.APP_TOKEN } : {}) };
+    const headers = { ...(window.APP_TOKEN ? { Authorization: window.APP_TOKEN } : {}) };
     return fetch(url, { ...opts, headers, credentials: 'include' })
       .then(res => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -111,7 +107,7 @@
       });
   }
 
-  /* ──────────────────────────────── TRANSACTION NODE ──────────────────────────────── */
+  /* ──────────────────────────────── TRANSACTION ITEM RENDER ──────────────────────────────── */
   function makeTxNode(tx) {
     try {
       const isCredit = tx.type === 'credit';
@@ -123,15 +119,15 @@
 
       let statusClass = 'success', statusText = 'SUCCESS';
       const st = (tx.status || 'success').toLowerCase().trim();
-      if (st.includes('fail'))   { statusClass = 'failed';  statusText = 'FAILED'; }
+      if (st.includes('fail'))   { statusClass = 'failed';  statusText = 'FAILED';  }
       else if (st.includes('refund')) { statusClass = 'refund'; statusText = 'REFUNDED'; }
       else if (st.includes('pend'))   { statusClass = 'pending'; statusText = 'PENDING'; }
 
-      const item = document.createElement('article');
-      item.className = 'tx-item';
-      item.setAttribute('role', 'listitem');
+      const article = document.createElement('article');
+      article.className = 'tx-item';
+      article.setAttribute('role', 'listitem');
 
-      item.innerHTML = `
+      article.innerHTML = `
         <div class="tx-icon ${icon.cls}" aria-hidden="true">
           ${icon.img
             ? `<img class="tx-img" src="${icon.img}" alt="${icon.alt}" />`
@@ -151,13 +147,13 @@
         </div>
       `;
 
-      item.addEventListener('click', () => showTransactionReceipt(tx));
-      return item;
+      article.addEventListener('click', () => showTransactionReceipt(tx));
+      return article;
     } catch (err) {
-      console.error('Render error:', err, tx);
+      console.error('[Tx Render] Error:', err, tx);
       const fallback = document.createElement('div');
       fallback.className = 'tx-item error';
-      fallback.textContent = 'Transaction render failed';
+      fallback.textContent = 'Could not display transaction';
       return fallback;
     }
   }
@@ -169,25 +165,27 @@
 
     const icon = getTxIcon(tx);
     const amount = formatCurrency(Math.abs(Number(tx.amount || 0)));
-    const date = new Date(tx.time || tx.created_at);
-    const formattedDate = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-    const formattedTime = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+    const dateObj = new Date(tx.time || tx.created_at);
+    const dateStr = dateObj.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+    const timeStr = dateObj.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
 
-    const recipientPhone = tx.description?.match(/\d{11}/)?.[0] || null;
-    const dataBundle = tx.description?.match(/\d+\.?\d* ?GB|[\d.]+ ?Days?/gi)?.join(' ') || null;
+    const phoneMatch = tx.description?.match(/\d{11}/)?.[0] || null;
+    const bundleMatch = tx.description?.match(/\d+\.?\d* ?GB|[\d.]+ ?Days?/gi)?.join(' ') || null;
 
-    const statusConfig = {
+    const statusMap = {
       success:  { text: 'Successful', color: '#00D4AA' },
       failed:   { text: 'Failed',     color: '#FF3B30' },
       pending:  { text: 'Pending',    color: '#FF9500' },
-      refund:   { text: 'Refunded',   color: '#00D4AA' }
+      refunded: { text: 'Refunded',   color: '#00D4AA' }
     };
 
-    const st = (tx.status || 'success').toLowerCase();
-    const statusKey = st.includes('fail') ? 'failed' : st.includes('refund') ? 'refund' : st.includes('pend') ? 'pending' : 'success';
-    const status = statusConfig[statusKey];
+    const stLower = (tx.status || 'success').toLowerCase();
+    const statusKey = stLower.includes('fail') ? 'failed' :
+                      stLower.includes('refund') ? 'refunded' :
+                      stLower.includes('pend') ? 'pending' : 'success';
+    const status = statusMap[statusKey];
 
-    const networkInfo = (() => {
+    const network = (() => {
       const d = (tx.description || '').toLowerCase();
       if (d.includes('mtn'))    return { name: 'MTN',    color: '#FFC107' };
       if (d.includes('airtel')) return { name: 'Airtel', color: '#E4002B' };
@@ -200,7 +198,7 @@
 
     const html = `
       <div id="receiptModal" style="position:fixed;inset:0;z-index:100000;background:#000;display:flex;flex-direction:column;font-family:system-ui,sans-serif;">
-        <div class="opay-backdrop" onclick="this.parentElement.remove()" style="position:absolute;inset:0;"></div>
+        <div class="backdrop" onclick="this.parentElement.remove()" style="position:absolute;inset:0;"></div>
         <div style="background:#1e1e1e;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;z-index:10;">
           <button onclick="document.getElementById('receiptModal')?.remove()" style="background:none;border:none;color:#aaa;padding:8px;border-radius:50%;">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
@@ -210,7 +208,7 @@
         </div>
         <div style="flex:1;background:#121212;padding:16px;display:flex;flex-direction:column;gap:24px;overflow-y:auto;">
           <div style="background:#1e1e1e;border-radius:16px;padding:32px 24px 24px;position:relative;text-align:center;">
-            <div class="tx-icon ${icon.cls}" style="width:56px;height:56px;border-radius:50%;position:absolute;top:-28px;left:50%;transform:translateX(-50%);background:${networkInfo.color};box-shadow:0 6px 16px #0006;display:flex;align-items:center;justify-content:center;">
+            <div class="${icon.cls}" style="width:56px;height:56px;border-radius:50%;position:absolute;top:-28px;left:50%;transform:translateX(-50%);background:${network.color};box-shadow:0 6px 16px #0006;display:flex;align-items:center;justify-content:center;">
               ${icon.img ? `<img src="${icon.img}" alt="${icon.alt}" style="width:32px;height:32px;object-fit:contain;">` : ''}
             </div>
             <div style="font-size:36px;font-weight:800;color:white;margin:40px 0 8px;">${amount}</div>
@@ -219,16 +217,16 @@
 
           <div style="background:#1e1e1e;border-radius:16px;padding:20px;display:flex;flex-direction:column;gap:14px;">
             <h3 style="margin:0;color:#ccc;font-size:15px;font-weight:600;">Details</h3>
-            ${recipientPhone ? `<div style="display:flex;justify-content:space-between;color:#e0e0e0;font-size:14px;"><span>Phone</span><strong>${recipientPhone}</strong></div>` : ''}
-            ${dataBundle    ? `<div style="display:flex;justify-content:space-between;color:#e0e0e0;font-size:14px;"><span>Bundle</span><strong>${dataBundle}</strong></div>` : ''}
+            ${phoneMatch ? `<div style="display:flex;justify-content:space-between;color:#e0e0e0;font-size:14px;"><span>Phone</span><strong>${phoneMatch}</strong></div>` : ''}
+            ${bundleMatch ? `<div style="display:flex;justify-content:space-between;color:#e0e0e0;font-size:14px;"><span>Bundle</span><strong>${bundleMatch}</strong></div>` : ''}
             <div style="display:flex;justify-content:space-between;color:#e0e0e0;font-size:14px;"><span>Type</span><strong>${tx.type === 'credit' ? 'Credit' : 'Debit'}</strong></div>
-            <div style="display:flex;justify-content:space-between;color:#e0e0e0;font-size:14px;"><span>Ref</span><strong style="font-family:monospace;">${tx.reference || tx.id || '—'}</strong></div>
-            <div style="display:flex;justify-content:space-between;color:#e0e0e0;font-size:14px;"><span>Date</span><strong>${formattedDate} ${formattedTime}</strong></div>
+            <div style="display:flex;justify-content:space-between;color:#e0e0e0;font-size:14px;"><span>Reference</span><strong style="font-family:monospace;">${tx.reference || tx.id || '—'}</strong></div>
+            <div style="display:flex;justify-content:space-between;color:#e0e0e0;font-size:14px;"><span>Date</span><strong>${dateStr} ${timeStr}</strong></div>
           </div>
 
           <div style="display:flex;gap:12px;margin-top:auto;">
-            <button onclick="reportTransactionIssue('${tx.reference || tx.id}')" style="flex:1;background:#2c2c2c;color:#00d4aa;border:1px solid #00d4aa;border-radius:50px;padding:14px;font-weight:600;">Report Issue</button>
-            <button onclick="shareReceipt(this.closest('#receiptModal'), '${tx.reference || tx.id}', '${amount}', '${(tx.description||'').replace(/'/g,"\\'")}', '${formattedDate}', '${formattedTime}', '${status.text}', '${networkInfo.name}', '${networkInfo.color}', '${icon.img||''}', '${tx.type}')" style="flex:1;background:linear-gradient(90deg,#00d4aa,#00bfa5);color:white;border:none;border-radius:50px;padding:14px;font-weight:600;">Share Receipt</button>
+            <button onclick="reportTransactionIssue('${tx.reference || tx.id || ''}')" style="flex:1;background:#2c2c2c;color:#00d4aa;border:1px solid #00d4aa;border-radius:50px;padding:14px;font-weight:600;">Report Issue</button>
+            <button onclick="shareReceipt(this.closest('#receiptModal'), '${tx.reference || tx.id || ''}', '${amount}', '${(tx.description||'').replace(/'/g,"\\'")}', '${dateStr}', '${timeStr}', '${status.text}', '${network.name}', '${network.color}', '${icon.img||''}', '${tx.type}')" style="flex:1;background:linear-gradient(90deg,#00d4aa,#00bfa5);color:white;border:none;border-radius:50px;padding:14px;font-weight:600;">Share Receipt</button>
           </div>
         </div>
       </div>
@@ -238,14 +236,15 @@
   }
 
   window.reportTransactionIssue = (id) => {
-    alert(`Reporting issue for ${id} — support chat would open here`);
+    alert(`Issue report for transaction ${id} — support flow would open here`);
     document.getElementById('receiptModal')?.remove();
   };
+
+  // Note: keep your original shareReceipt function here (it's long, so not duplicated)
+
   window.reportTransactionIssue = reportTransactionIssue;
 window.shareReceipt = shareReceipt;
 
-  // shareReceipt function remains the same as in your original code — omitted here for brevity but should be kept
-  
 /**
  * shareReceipt - Generates receipt matching the EXACT minimalist design
  * Clean white card, properly centered, with smart credit transaction handling
@@ -553,6 +552,14 @@ function shareReceipt(modalEl, ref, amount, desc, date, time, statusText, networ
   if (modalEl) modalEl.remove();
 }
 
+
+  window.addEventListener('resize', () => {
+    document.querySelectorAll('.tx-desc').forEach(descEl => {
+      const fullText = descEl.getAttribute('title') || descEl.textContent;
+      descEl.textContent = truncateDescription(fullText);
+    });
+  });
+
   /* ──────────────────────────────── MONTH GROUPING & STICKY HEADERS ──────────────────────────────── */
   function groupTransactions(items) {
     const map = new Map();
@@ -586,7 +593,7 @@ function shareReceipt(modalEl, ref, amount, desc, date, time, statusText, networ
     div.className = 'month-section-header';
     div.dataset.monthKey = month.monthKey;
     div.innerHTML = `
-      <div style="padding:12px 16px;background:#1e1e1e;display:flex;justify-content:space-between;align-items:center;">
+      <div style="padding:12px 16px;background:#1e1e1e;display:flex;justify-content:space-between;align-items:center;border-top-left-radius:10px;border-top-right-radius:10px;">
         <div style="font-size:16px;font-weight:600;color:white;">${month.prettyMonth}</div>
       </div>
       <div style="padding:0 16px 12px;background:#1e1e1e;display:flex;justify-content:space-between;font-size:14px;color:#aaa;">
@@ -643,7 +650,7 @@ function shareReceipt(modalEl, ref, amount, desc, date, time, statusText, networ
     renderNext();
   }
 
-  /* ──────────────────────────────── FILTER & RENDER ──────────────────────────────── */
+  /* ──────────────────────────────── FILTER & RENDER LOGIC ──────────────────────────────── */
   function filterBySelectedMonth(items) {
     if (!selectedMonth) return items;
     return items.filter(tx => {
@@ -653,7 +660,7 @@ function shareReceipt(modalEl, ref, amount, desc, date, time, statusText, networ
   }
 
   function applyTransformsAndRender() {
-    let items = state.items.slice();
+    let items = [...state.items];
 
     if (state.searchTerm) {
       const term = state.searchTerm.toLowerCase();
@@ -669,12 +676,12 @@ function shareReceipt(modalEl, ref, amount, desc, date, time, statusText, networ
 
     if (items.length === 0) {
       if (selectedMonth) {
-        const empty = {
+        const emptyMonth = {
           monthKey: `${selectedMonth.year}-${selectedMonth.month}`,
           prettyMonth: new Date(selectedMonth.year, selectedMonth.month).toLocaleDateString('en-GB', {month:'short',year:'numeric'}),
           totalIn: 0, totalOut: 0, txs: []
         };
-        renderChunked([empty]);
+        renderChunked([emptyMonth]);
       } else {
         emptyEl?.classList.remove('hidden');
       }
@@ -685,7 +692,7 @@ function shareReceipt(modalEl, ref, amount, desc, date, time, statusText, networ
 
   window.applyTransformsAndRender = applyTransformsAndRender;
 
-  /* ──────────────────────────────── REALTIME SUBSCRIPTION ──────────────────────────────── */
+  /* ──────────────────────────────── REALTIME SUBSCRIPTION (using window.supabaseClient) ──────────────────────────────── */
   async function subscribeToTransactions(force = false) {
     const now = Date.now();
     if (state.isSubscribing) return;
@@ -694,36 +701,26 @@ function shareReceipt(modalEl, ref, amount, desc, date, time, statusText, networ
     state.isSubscribing = true;
 
     try {
-      let uid =
+      const uid =
         window.__USER_UID ||
         localStorage.getItem('userId') ||
         JSON.parse(localStorage.getItem('userData')||'{}')?.uid ||
         null;
 
-      if (!uid) throw new Error('No user UID found');
+      if (!uid) {
+        console.warn('[Tx RT] No user UID available — cannot subscribe');
+        return;
+      }
 
-      const tokenRes = await fetch('https://api.flexgig.com.ng/api/supabase/token', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Accept': 'application/json' }
-      });
+      if (!window.supabaseClient) {
+        console.error('[Tx RT] window.supabaseClient not found');
+        return;
+      }
 
-      if (!tokenRes.ok) throw new Error(`Token fetch failed ${tokenRes.status}`);
+      const client = window.supabaseClient;
 
-      const { token } = await tokenRes.json();
-      if (!token) throw new Error('No token received');
-
-      const { createClient } = window.supabase || {};
-      if (typeof createClient !== 'function') throw new Error('Supabase client not loaded');
-
-      const client = createClient(CONFIG.supabaseUrl, CONFIG.supabaseAnonKey, {
-        auth: { autoRefreshToken: false, persistSession: false }
-      });
-
-      const { error: sessErr } = await client.auth.setSession({ access_token: token, refresh_token: token });
-      if (sessErr) throw sessErr;
-
-      const channelName = `tx:${uid.replace(/-/g,'')}`;
+      // Subscribe
+      const channelName = `tx-user:${uid.replace(/-/g,'')}`;
       state.realtimeChannel = client.channel(channelName);
 
       state.realtimeChannel
@@ -732,11 +729,12 @@ function shareReceipt(modalEl, ref, amount, desc, date, time, statusText, networ
           schema: 'public',
           table: 'transactions',
           filter: `user_uid=eq.${uid}`
-        }, payload => {
+        }, (payload) => {
           if (payload.eventType !== 'INSERT' && payload.eventType !== 'UPDATE') return;
 
           const tx = payload.new;
-          const norm = {
+
+          const normalized = {
             id: tx.id || tx.reference || `tx-${Date.now()}`,
             reference: tx.reference || tx.id,
             type: tx.type || (Number(tx.amount||0) > 0 ? 'credit' : 'debit'),
@@ -748,7 +746,8 @@ function shareReceipt(modalEl, ref, amount, desc, date, time, statusText, networ
             phone: tx.phone
           };
 
-          state.items = [norm, ...state.items.filter(t => t.id !== norm.id)];
+          // Deduplicate & add to top
+          state.items = [normalized, ...state.items.filter(t => t.id !== normalized.id)];
           state.realtimeHealthyTs = Date.now();
           state.realtimeActive = true;
 
@@ -757,22 +756,25 @@ function shareReceipt(modalEl, ref, amount, desc, date, time, statusText, networ
             historyList.scrollTop = 0;
           }
 
-          window.dispatchEvent(new CustomEvent('transaction_update', { detail: norm }));
+          window.dispatchEvent(new CustomEvent('transaction_update', { detail: normalized }));
         })
         .subscribe((status, err) => {
-          console.log('[Tx RT] status:', status);
+          console.log('[Tx RT] Channel status:', status);
           if (status === 'SUBSCRIBED') {
             state.realtimeHealthyTs = Date.now();
             state.realtimeActive = true;
-            console.log('[Tx RT] → ACTIVE');
-          } else if (['CLOSED','CHANNEL_ERROR','TIMED_OUT'].includes(status)) {
+            console.log('[Tx RT] → ACTIVE & LISTENING');
+          } else if (['CLOSED', 'CHANNEL_ERROR', 'TIMED_OUT'].includes(status)) {
+            console.warn('[Tx RT] Channel issue →', status, err?.message);
             state.realtimeActive = false;
             scheduleRealtimeRetry();
           }
         });
 
+      console.log('[Tx RT] Subscription attempt completed for user:', uid);
+
     } catch (err) {
-      console.error('[Tx RT] failed:', err.message || err);
+      console.error('[Tx RT] Subscription setup failed:', err);
       scheduleRealtimeRetry();
     } finally {
       state.isSubscribing = false;
@@ -781,23 +783,25 @@ function shareReceipt(modalEl, ref, amount, desc, date, time, statusText, networ
 
   function scheduleRealtimeRetry() {
     if (state.retryTimer) clearTimeout(state.retryTimer);
-    state.retryTimer = setTimeout(() => subscribeToTransactions(true), CONFIG.realtimeRetryMs);
+    state.retryTimer = setTimeout(() => {
+      subscribeToTransactions(true);
+    }, CONFIG.realtimeRetryMs);
   }
 
   /* ──────────────────────────────── FALLBACK POLLING ──────────────────────────────── */
   function startFallbackPolling() {
     if (state.fallbackPollTimer) return;
-    console.warn('[Tx] Realtime silent → fallback polling started');
+    console.warn('[Tx History] Realtime not healthy → fallback polling activated');
 
     const poll = async () => {
       try {
         const data = await safeFetch(`${CONFIG.apiEndpoint}?page=1&limit=60`);
-        const newItems = (data.items || []).reverse(); // oldest → newest
+        const received = (data.items || []).reverse(); // oldest → newest
 
-        let added = 0;
-        const seen = new Set(state.items.map(t => t.id));
+        let addedCount = 0;
+        const existing = new Set(state.items.map(t => t.id));
 
-        for (const raw of newItems) {
+        for (const raw of received) {
           const norm = {
             id: raw.id || raw.reference,
             reference: raw.reference || raw.id,
@@ -807,23 +811,23 @@ function shareReceipt(modalEl, ref, amount, desc, date, time, statusText, networ
             time: raw.created_at || raw.time || new Date().toISOString(),
             status: raw.status || 'SUCCESS'
           };
-          if (!seen.has(norm.id)) {
+          if (!existing.has(norm.id)) {
             state.items.unshift(norm);
-            added++;
-            seen.add(norm.id);
+            existing.add(norm.id);
+            addedCount++;
           }
         }
 
-        if (added > 0 && state.open) {
+        if (addedCount > 0 && state.open) {
           applyTransformsAndRender();
           historyList.scrollTop = 0;
         }
       } catch (err) {
-        console.warn('[Tx Poll] failed:', err);
+        console.warn('[Tx Poll] Failed:', err);
       }
     };
 
-    poll();
+    poll(); // immediate
     state.fallbackPollTimer = setInterval(poll, CONFIG.fallbackPollIntervalMs);
   }
 
@@ -834,25 +838,29 @@ function shareReceipt(modalEl, ref, amount, desc, date, time, statusText, networ
     }
   }
 
-  /* ──────────────────────────────── MODAL LIFECYCLE ──────────────────────────────── */
+  /* ──────────────────────────────── MODAL OPEN / CLOSE ──────────────────────────────── */
   async function handleModalOpened() {
     state.open = true;
     selectedMonth = null;
 
-    loadingEl?.classList.add('hidden');
-    emptyEl?.classList.add('hidden');
+    if (loadingEl) loadingEl.classList.add('hidden');
+    if (emptyEl) emptyEl.classList.add('hidden');
 
+    // Try realtime (non-blocking)
     await subscribeToTransactions();
 
+    // If realtime is silent for too long → fallback
     setTimeout(() => {
-      if (!state.realtimeActive && state.open && !state.fallbackPollTimer) {
+      if (state.open && !state.realtimeActive && !state.fallbackPollTimer) {
         startFallbackPolling();
       }
     }, CONFIG.fallbackAfterNoRealtimeMs);
   }
 
   document.addEventListener('modalOpened', e => {
-    if (e.detail === 'historyModal') handleModalOpened();
+    if (e.detail === 'historyModal') {
+      handleModalOpened();
+    }
   });
 
   document.addEventListener('modalClosed', e => {
@@ -870,28 +878,28 @@ function shareReceipt(modalEl, ref, amount, desc, date, time, statusText, networ
       timeout = setTimeout(() => {
         state.searchTerm = e.target.value.trim();
         if (state.open) applyTransformsAndRender();
-      }, 300);
+      }, 280);
     });
   }
 
   /* ──────────────────────────────── DOWNLOAD ──────────────────────────────── */
   downloadBtn?.addEventListener('click', () => {
-    const format = prompt('Download as csv or json?', 'csv')?.toLowerCase();
-    if (!format || !['csv','json'].includes(format)) return;
+    const fmt = prompt('Download format (csv or json)?', 'csv')?.toLowerCase();
+    if (!fmt || !['csv','json'].includes(fmt)) return;
 
-    if (format === 'json') {
+    if (fmt === 'json') {
       const blob = new Blob([JSON.stringify(state.items, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `flexgig-transactions-${new Date().toISOString().slice(0,10)}.json`;
+      a.download = `flexgig-tx-${new Date().toISOString().slice(0,10)}.json`;
       a.click();
       URL.revokeObjectURL(url);
       return;
     }
 
     // CSV
-    const rows = [['Date','Description','Ref','Type','Amount','Status']];
+    const rows = [['Date','Description','Reference','Type','Amount','Status']];
     state.items.forEach(tx => {
       rows.push([
         new Date(tx.time).toISOString(),
@@ -908,12 +916,12 @@ function shareReceipt(modalEl, ref, amount, desc, date, time, statusText, networ
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `flexgig-transactions-${new Date().toISOString().slice(0,10)}.csv`;
+    a.download = `flexgig-tx-${new Date().toISOString().slice(0,10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   });
 
-  /* ──────────────────────────────── TRUNCATION ON RESIZE ──────────────────────────────── */
+  /* ──────────────────────────────── TRUNCATE ON RESIZE ──────────────────────────────── */
   function trunTx() {
     document.querySelectorAll('.tx-desc').forEach(el => {
       const full = el.getAttribute('title') || el.textContent;
@@ -926,6 +934,6 @@ function shareReceipt(modalEl, ref, amount, desc, date, time, statusText, networ
   /* ──────────────────────────────── START REALTIME EARLY ──────────────────────────────── */
   subscribeToTransactions();
 
-  console.log('[TransactionHistory] Realtime-first initialized — no bulk load on open');
+  console.log('[TransactionHistory] Initialized — using window.supabaseClient • realtime first • no bulk load on open');
 
 })();
