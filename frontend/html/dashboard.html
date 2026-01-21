@@ -531,21 +531,67 @@
           <div class="recent-transactions-list"></div>
         </div>
       </div>
-      <div class="transactions-section">
-        <div class="transactions-header">
-          <h3>Transactions</h3>
-          <a href="#" class="view-all-link">View All</a>
-        </div>
-        <div class="no-transactions">
-          <svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 24 24" fill="none" stroke="#888" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M3 7h18v12H3z"/>
-            <path d="M3 7l9 6 9-6"/>
-            <line x1="12" y1="13" x2="12" y2="19"/>
-          </svg>
-          <p>No Transaction Yet</p>
-        </div>
-        <div class="transactions-list"></div>
+      <div class="dash-tx-section-wrapper">
+<div class="dash-tx-header-row">
+  <h3 class="dash-tx-main-title">Recent Transactions</h3>
+  <button
+    type="button"
+    class="dash-tx-view-full-link"
+    id="dashViewAllTxBtn"
+    onclick="
+      console.log('[Button Clicked] View All was clicked!');
+      if (typeof window.openHistoryModal === 'function') {
+        window.openHistoryModal();
+        console.log('History modal function called');
+      } else {
+        ModalManager?.openModal('historyModal');
+        console.log('Fallback: ModalManager opened historyModal. Open modals:', ModalManager?.getOpenModals());
+      }
+      return false;
+    "
+  >
+    <span>View All</span>
+    <span class="arrow">→</span>
+  </button>
+</div>
+
+
+
+  <!-- Compact recent list container -->
+  <div class="db-recent-tx-container" id="dbRecentTransactionsHolder">
+    <!-- JS will fill this -->
+  </div>
+
+  <!-- Dashboard-specific empty state -->
+  <div class="db-no-activity-placeholder hidden" id="dbNoRecentActivity">
+    <svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="#666" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 7h18v12H3z"/>
+      <path d="M3 7l9 6 9-6"/>
+      <line x1="12" y1="13" x2="12" y2="19"/>
+    </svg>
+    <p>No Recent Activity Yet</p>
+    <small>Transactions will show here once you start using your wallet</small>
+  </div>
+
+  <!-- All-time stats block -->
+  <div class="alltime-activity-card">
+    <h4 class="alltime-card-title">All-Time Activity</h4>
+    <div class="alltime-stats-grid-layout">
+      <div class="alltime-stat-block">
+        <span class="alltime-stat-label">Total Funded</span>
+        <span class="alltime-stat-value incoming-highlight" id="dbTotalFundedDisplay">₦0.00</span>
       </div>
+      <div class="alltime-stat-block">
+        <span class="alltime-stat-label">Total Spent</span>
+        <span class="alltime-stat-value outgoing-highlight" id="dbTotalSpentDisplay">₦0.00</span>
+      </div>
+      <div class="alltime-stat-block">
+        <span class="alltime-stat-label">Total Count</span>
+        <span class="alltime-stat-value neutral-count" id="dbTotalTxCountDisplay">0</span>
+      </div>
+    </div>
+  </div>
+</div>
       <div id="pinModal" class="pin-modal hidden">
   <div class="pin-header">
     <button 
