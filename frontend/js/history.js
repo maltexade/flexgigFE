@@ -1059,6 +1059,7 @@ async function loadLatestHistoryAsFallback() {
   applyTransformsAndRender();
   hide(loadingEl);
 }
+window.loadLatestHistoryAsFallback = loadLatestHistoryAsFallback;
 
   /* -------------------------- MONTH FILTER FUNCTIONS -------------------------- */
   function formatMonthYear(date) {
