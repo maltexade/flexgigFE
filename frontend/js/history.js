@@ -1005,50 +1005,55 @@ function renderChunked(groupedMonths) {
     else if (state.items.length === 0 && !state.fullHistoryLoaded) show(emptyEl);
   }
 
-  /* -------------------------- PRELOAD FULL HISTORY -------------------------- */
-async function loadLatestHistory() {
-  // Always try to get the latest — but don't block UI
-  console.log('[TransactionHistory] Loading latest transactions...');
+/* -------------------------- FALLBACK: LOAD FROM API ONLY IF REALTIME FAILS -------------------------- */
+async function loadLatestHistoryAsFallback() {
+  // Prevent duplicate calls if we already have data
+  if (state.fullHistoryLoaded) {
+    console.log('[Tx Fallback] Already have loaded data — skipping API call');
+    return;
+  }
 
-  let allTx = state.items.slice(); // Start with what we have (from WS)
+  console.log('[Tx Fallback] Realtime not working → loading latest from API');
+
+  let allTx = state.items.slice(); // Start with whatever realtime gave us
 
   try {
-    // Always fetch page 1 (newest) to catch anything WS missed
+    // Fetch only the most recent page
     const data = await safeFetch(`${CONFIG.apiEndpoint}?limit=200&page=1`);
     const newItems = data.items || [];
 
     if (newItems.length > 0) {
-      // Merge: replace duplicates, add new ones at top
       const existingIds = new Set(allTx.map(tx => tx.id));
       const trulyNew = newItems.filter(tx => !existingIds.has(tx.id || tx.reference));
 
       if (trulyNew.length > 0) {
         allTx.unshift(...trulyNew);
-        console.log(`[TransactionHistory] Added ${trulyNew.length} new tx from server sync`);
+        console.log(`[Tx Fallback] Added ${trulyNew.length} new items from API`);
       }
     }
   } catch (err) {
-    console.warn('[TransactionHistory] Failed to sync latest page:', err);
-    // Fall back to what we have (from WS)
+    console.warn('[Tx Fallback] API fetch failed:', err);
+    // Optionally show error UI here
+    // show(errorEl);
+    return; // Don't mark as loaded if failed
   }
 
-  // Normalize and update state
+  // Normalize (same as before)
   state.items = allTx.map(raw => ({
     id: raw.id || raw.reference,
     reference: raw.reference || raw.id,
     type: raw.type || (Number(raw.amount) > 0 ? 'credit' : 'debit'),
     amount: Math.abs(Number(raw.amount || 0)),
     description: (raw.description || raw.narration || 'Transaction')
-  .replace(/\s*\(pending\)\s*/gi, '')
-  .trim(),
-
+      .replace(/\s*\(pending\)\s*/gi, '')
+      .trim(),
     time: raw.time || raw.created_at || new Date().toISOString(),
     status: raw.status || 'SUCCESS',
     provider: raw.provider,
     phone: raw.phone
   }));
 
-  state.fullHistoryLoaded = true; // We have at least recent ones
+  state.fullHistoryLoaded = true;
   state.preloaded = true;
 
   applyTransformsAndRender();
@@ -1293,15 +1298,15 @@ function createMonthPickerModal() {
   state.open = true;
   selectedMonth = null;
 
-  show(loadingEl);
-  hide(emptyEl);
-
-  // Always load latest (combines WS + server sync)
-  await loadLatestHistory();
-
+  // Fast open: no loading spinner, show empty or "connecting" state
+  hide(loadingEl);
   if (state.items.length === 0) {
-    show(emptyEl);
+    show(emptyEl); // or show a custom "Connecting realtime..." element if you add one
   }
+
+  // Force realtime retry (in case it failed earlier)
+  subscribeToTransactions(true);
+  // NO loadLatestHistory() call here anymore
 }
 const container = document.getElementById('historyList');
 
@@ -1453,6 +1458,7 @@ let txRealtimeChannel = null;
 let txIsSubscribing = false;
 let txRetryTimer = null;
 let lastTxHealthy = 0;
+let realtimeFailedCount = 0;
 
 const TX_RETRY_MS = 15000;
 const TX_HEALTHY_THRESHOLD = 5000;
@@ -1610,17 +1616,26 @@ async function subscribeToTransactions(force = false) {
           }
         }
       )
-      .subscribe((status, err) => {
+            .subscribe((status, err) => {
         console.log('[Tx Realtime] SUBSCRIBE STATUS:', status);
-        if (err) console.error('[Tx Realtime] SUBSCRIBE ERROR:', err);
+        if (err) console.error('[Tx Realtime] SUBSCRIBE ERROR:', err?.message || err);
 
         if (status === 'SUBSCRIBED') {
           console.log('[Tx Realtime] ✅ SUBSCRIBED & LISTENING');
           lastTxHealthy = Date.now();
+          realtimeFailedCount = 0;          // Reset failure count on success
           if (txRetryTimer) clearTimeout(txRetryTimer);
-        } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          console.warn('[Tx Realtime] Channel issue:', status);
-          scheduleTxRetry();
+        } 
+        else if (['CLOSED', 'CHANNEL_ERROR', 'TIMED_OUT'].includes(status)) {
+          realtimeFailedCount++;
+          console.warn('[Tx Realtime] Channel failed - attempt:', realtimeFailedCount);
+
+          if (realtimeFailedCount >= 3 && state.open) {
+            console.warn('[Tx Realtime] Max failures reached → falling back to API');
+            loadLatestHistoryAsFallback();   // ← This is where you add the fallback
+          } else {
+            scheduleTxRetry();
+          }
         }
       });
 
@@ -1656,7 +1671,7 @@ subscribeToTransactions();
   updateMonthDisplay();
   console.log('[TransactionHistory] READY - Controlled by ModalManager');
 
-  loadLatestHistory()
+
 
   function trunTx() {
     const rows = document.querySelectorAll('.tx-row');
