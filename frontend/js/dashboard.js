@@ -3638,6 +3638,12 @@ async function onDashboardLoad() {
   setupBroadcastSubscription();
   subscribeToWalletBalance();
 
+  // ← Add this:
+if (window.subscribeToTransactions) {
+  console.log('[Auth] Session ready → triggering transaction realtime subscription');
+  window.subscribeToTransactions(true);  // force = true to bypass healthy check
+}
+
 
 
   // 🔥 ADD THESE TWO LINES (after the single getSession)

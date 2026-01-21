@@ -1458,6 +1458,15 @@ const TX_RETRY_MS = 12000;
 const TX_HEALTHY_THRESHOLD = 7000;
 
 async function subscribeToTransactions(force = false) {
+
+    const { data: { user } } = await window.supabaseClient.auth.getUser();
+  if (!user) {
+    console.log('[Tx Realtime] No Supabase user yet — waiting for session');
+    return;  // will be called again from getSession success
+  }
+
+  const uid = user.id;
+  console.log('[Tx Realtime] Using authenticated uid:', uid);
   const now = Date.now();
   if (txIsSubscribing) return;
   if (!force && now - lastTxHealthy < TX_HEALTHY_THRESHOLD) return;
