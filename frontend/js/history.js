@@ -1446,7 +1446,7 @@ document.addEventListener('transaction_update', (e) => {
 });
 
 // ────────────────────────────────────────────────
-// REAL-TIME TRANSACTIONS SUBSCRIPTION (minimal version)
+// REAL-TIME TRANSACTIONS SUBSCRIPTION – WALLET-STYLE (PROVEN)
 // ────────────────────────────────────────────────
 
 let txRealtimeChannel = null;
@@ -1454,51 +1454,119 @@ let txIsSubscribing = false;
 let txRetryTimer = null;
 let lastTxHealthy = 0;
 
-const TX_RETRY_MS = 12000;
-const TX_HEALTHY_THRESHOLD = 7000;
+const TX_RETRY_MS = 15000;
+const TX_HEALTHY_THRESHOLD = 5000;
 
 async function subscribeToTransactions(force = false) {
+  const now = Date.now();
+  console.log(`[Tx Realtime] subscribeToTransactions called | force=${force} | ts=${now}`);
 
-    const { data: { user } } = await window.supabaseClient.auth.getUser();
-  if (!user) {
-    console.log('[Tx Realtime] No Supabase user yet — waiting for session');
-    return;  // will be called again from getSession success
+  if (txIsSubscribing) {
+    console.debug('[Tx Realtime] Already subscribing — skip');
+    return;
   }
 
-  const uid = user.id;
-  console.log('[Tx Realtime] Using authenticated uid:', uid);
-  const now = Date.now();
-  if (txIsSubscribing) return;
-  if (!force && now - lastTxHealthy < TX_HEALTHY_THRESHOLD) return;
+  if (!force && now - lastTxHealthy < TX_HEALTHY_THRESHOLD) {
+    console.debug('[Tx Realtime] Recently healthy — skip');
+    return;
+  }
 
   txIsSubscribing = true;
 
   try {
-    // Get user uid (same logic you use elsewhere)
-    let uid = 
+    // 1. Get UID (same sources as wallet)
+    let uid =
       window.__USER_UID ||
       localStorage.getItem('userId') ||
       JSON.parse(localStorage.getItem('userData') || '{}')?.uid ||
+      (await getSession())?.user?.uid ||
       null;
 
-    if (!uid) {
-      console.warn('[Tx Realtime] No UID found — cannot subscribe');
+    console.log('[Tx Realtime DEBUG] UID sources:', {
+      __USER_UID: window.__USER_UID,
+      local_userId: localStorage.getItem('userId'),
+      local_userData: JSON.parse(localStorage.getItem('userData') || '{}')?.uid,
+      getSession: (await getSession())?.user?.uid,
+      final: uid
+    });
+
+    if (!uid || !uid.includes('-')) {
+      console.error('[Tx Realtime] INVALID UID — aborting', uid);
       return;
     }
 
-    console.log('[Tx Realtime] Subscribing for user:', uid);
+    console.log('[Tx Realtime] Using UID:', uid);
 
-    // Use the global supabaseClient you already have
-    if (!window.supabaseClient) {
-      console.error('[Tx Realtime] window.supabaseClient is missing');
+    // 2. Fetch fresh JWT (exact same endpoint as wallet)
+    console.log('[Tx Realtime] Fetching JWT...');
+    let token;
+    try {
+      const res = await fetch('https://api.flexgig.com.ng/api/supabase/token', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Accept': 'application/json' }
+      });
+
+      console.log('[Tx Realtime] JWT response status:', res.status, res.ok);
+
+      if (!res.ok) {
+        const text = await res.text();
+        console.error('[Tx Realtime] JWT fetch failed:', res.status, text);
+        throw new Error(`Token fetch failed: ${res.status}`);
+      }
+
+      ({ token } = await res.json());
+      console.log('[Tx Realtime] JWT acquired (length):', token?.length || 0);
+    } catch (err) {
+      console.error('[Tx Realtime] JWT fetch crashed:', err);
+      scheduleTxRetry();
       return;
     }
 
-    const client = window.supabaseClient;
+    // 3. Create temp client (same as wallet – no global headers)
+    const tempClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: { 
+        autoRefreshToken: false, 
+        persistSession: false, 
+        storageKey: 'flexgig_tx_private_jwt_v1'
+      }
+    });
+    console.log('[Tx Realtime] Temp client created');
 
-    // Create channel
-    const channelName = `public:transactions:user:${uid.replace(/-/g, '')}`;
-    txRealtimeChannel = client.channel(channelName);
+    // 4. Set session with fresh JWT (THIS FIXES THE RACE CONDITION)
+    console.log('[Tx Realtime] Setting session with JWT...');
+    const { data: sessionData, error: sessionError } = await tempClient.auth.setSession({
+      access_token: token,
+      refresh_token: token
+    });
+
+    if (sessionError) {
+      console.error('[Tx Realtime] setSession FAILED:', sessionError.message);
+      scheduleTxRetry();
+      return;
+    }
+
+    console.log('[Tx Realtime] ✅ Session set successfully');
+    console.log('[Tx Realtime] Session user ID:', sessionData.user?.id);
+
+    // 5. Quick visibility test (like wallet)
+    console.log('[Tx Realtime] Testing SELECT visibility...');
+    const { data: testRow, error: testErr } = await tempClient
+      .from('transactions')
+      .select('id, user_id, reference')
+      .eq('user_id', uid)
+      .limit(1);
+
+    if (testErr) {
+      console.error('[Tx Realtime] SELECT TEST FAILED (likely RLS):', testErr.message);
+    } else {
+      console.log('[Tx Realtime] SELECT TEST OK — can see rows');
+    }
+
+    // 6. Create & subscribe channel
+    const channelName = `tx:${uid}`;
+    txRealtimeChannel = tempClient.channel(channelName);
+    console.log('[Tx Realtime] Channel created:', channelName);
 
     txRealtimeChannel
       .on(
@@ -1507,16 +1575,17 @@ async function subscribeToTransactions(force = false) {
           event: '*',
           schema: 'public',
           table: 'transactions',
-          filter: `user_id=eq.${uid}`   // ← change to user_id / owner / whatever your real column is
+          filter: `user_id=eq.${uid}`   // ← using user_id as confirmed
         },
         (payload) => {
-          console.log('[Tx Realtime] Event received:', payload.eventType);
+          console.log('[Tx Realtime] 🔔 EVENT RECEIVED:', payload.eventType);
+          console.log('[Tx Realtime] Payload:', JSON.stringify(payload, null, 2));
 
           if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
             const raw = payload.new;
 
             const normalized = {
-              id: raw.id || raw.reference || `realtime-${Date.now()}`,
+              id: raw.id || raw.reference || `rt-${Date.now()}`,
               reference: raw.reference || raw.id,
               type: raw.type || (Number(raw.amount || 0) > 0 ? 'credit' : 'debit'),
               amount: Math.abs(Number(raw.amount || 0)),
@@ -1527,57 +1596,61 @@ async function subscribeToTransactions(force = false) {
               phone: raw.phone
             };
 
-            // Add to top if not duplicate
-            if (!state.items.some(item => item.id === normalized.id)) {
+            if (!state.items.some(t => t.id === normalized.id)) {
               state.items.unshift(normalized);
-              console.log('[Tx Realtime] New tx added →', normalized.reference);
+              console.log('[Tx Realtime] Added new tx:', normalized.reference);
 
-              // Re-render only if modal is open
               if (state.open) {
                 applyTransformsAndRender();
-                document.getElementById('historyList').scrollTop = 0;
+                document.getElementById('historyList')?.scrollTo({ top: 0, behavior: 'smooth' });
               }
 
-              // Also dispatch the event you already listen to
               window.dispatchEvent(new CustomEvent('transaction_update', { detail: normalized }));
             }
           }
         }
       )
-      .subscribe((status) => {
-        console.log('[Tx Realtime] Status:', status);
+      .subscribe((status, err) => {
+        console.log('[Tx Realtime] SUBSCRIBE STATUS:', status);
+        if (err) console.error('[Tx Realtime] SUBSCRIBE ERROR:', err);
 
         if (status === 'SUBSCRIBED') {
+          console.log('[Tx Realtime] ✅ SUBSCRIBED & LISTENING');
           lastTxHealthy = Date.now();
-          console.log('[Tx Realtime] → SUBSCRIBED SUCCESSFULLY');
-          if (txRetryTimer) {
-            clearTimeout(txRetryTimer);
-            txRetryTimer = null;
-          }
-        } else if (['CLOSED', 'CHANNEL_ERROR', 'TIMED_OUT'].includes(status)) {
-          console.warn('[Tx Realtime] Channel lost → retrying later');
-          txRetryTimer = setTimeout(() => subscribeToTransactions(true), TX_RETRY_MS);
+          if (txRetryTimer) clearTimeout(txRetryTimer);
+        } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.warn('[Tx Realtime] Channel issue:', status);
+          scheduleTxRetry();
         }
       });
 
+    window.__txRealtimeChannel = txRealtimeChannel;
+
   } catch (err) {
-    console.error('[Tx Realtime] Setup failed:', err);
-    txRetryTimer = setTimeout(() => subscribeToTransactions(true), TX_RETRY_MS);
+    console.error('[Tx Realtime] CRASH:', err);
+    scheduleTxRetry();
   } finally {
     txIsSubscribing = false;
   }
 }
 
-// Start realtime subscription as early as possible
+function scheduleTxRetry() {
+  if (txRetryTimer) return;
+  txRetryTimer = setTimeout(() => {
+    txRetryTimer = null;
+    subscribeToTransactions(true);
+  }, TX_RETRY_MS);
+}
+
+// Expose globally
+window.subscribeToTransactions = subscribeToTransactions;
+
+// Call it early (will skip if no uid/session)
 subscribeToTransactions();
 
-// Also try again when modal opens (in case it failed earlier)
-const originalHandleModalOpened = handleModalOpened;
-handleModalOpened = async function() {
-  await originalHandleModalOpened.apply(this, arguments);
-  subscribeToTransactions(true);   // force retry on open
-};
-window.subscribeToTransactions = window.subscribeToTransactions || subscribeToTransactions;
+
+
+  /* -------------------------- INITIALIZATION -------------------------- */
 
   showStateUI();
   updateMonthDisplay();
