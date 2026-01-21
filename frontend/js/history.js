@@ -1,248 +1,538 @@
-/* transaction-history.js — REALTIME-FIRST VERSION using window.supabaseClient
-   Priority: Supabase realtime (postgres_changes) → API fallback only if needed
-   No forced initial full-page load when opening history tab
-   Uses existing window.supabaseClient from dashboard.js
+/* transaction-history.js - FULLY FIXED VERSION
+   - Clear hardcoded HTML on init
+   - Default to current month
+   - Uses existing HTML month header structure
+   - Sticky month headers that push each other
+   - Accurate month filtering from server data
 */
 
 (() => {
   'use strict';
 
-  /* ──────────────────────────────── CONFIG ──────────────────────────────── */
+  /* -------------------------- CONFIG -------------------------- */
   const CONFIG = {
-    apiEndpoint: `${window.__SEC_API_BASE}/transactions`,
-    currencySymbol: '₦',
-    dateLocale: 'en-GB',
+    apiEndpoint: 'https://api.flexgig.com.ng/api/transactions',
+    pageSize: 30,
     chunkRenderSize: 12,
-    realtimeRetryMs: 14000,
-    realtimeHealthyThresholdMs: 8000,
-    fallbackPollIntervalMs: 18000,
-    fallbackAfterNoRealtimeMs: 25000
+    useBackend: true,
+    authHeader: () => window.APP_TOKEN ? { Authorization: window.APP_TOKEN } : {},
+    dateLocale: 'en-GB',
+    currencySymbol: '₦',
+    maxCachedPages: 10
   };
 
-  /* ──────────────────────────────── DOM ELEMENTS ──────────────────────────────── */
+  /* -------------------------- FAKE DATA GENERATOR (FOR TESTING) -------------------------- */
+const USE_FAKE_DATA = false;  // Set to false to use real API
+
+function generateFakeTransactions() {
+  const transactions = [];
+  const now = new Date();
+  
+  // Network options for variety
+  const networks = ['MTN', 'Airtel', 'GLO', '9Mobile'];
+  const types = ['credit', 'debit'];
+  const statuses = ['success', 'failed', 'pending', 'refund'];
+  
+  const descriptions = [
+    'MTN 2.0GB Data',
+    'Airtel 1.5GB Data',
+    'GLO 3.0GB Data',
+    '9Mobile 5.0GB Data',
+    'Received From Opay',
+    'Bank Transfer',
+    'Wallet Funding',
+    'SafeBox Interest',
+    'OWealth Interest Earned',
+    'Failed Transaction Refund',
+    'Mobile Data Purchase',
+    'Airtime Purchase',
+    'Cable TV Subscription',
+    'Electricity Bill Payment'
+  ];
+  
+  // Generate 3 months of data
+  for (let monthOffset = 0; monthOffset < 3; monthOffset++) {
+    // Generate 10 transactions per month
+    for (let i = 0; i < 10; i++) {
+      const date = new Date(now.getFullYear(), now.getMonth() - monthOffset, Math.floor(Math.random() * 28) + 1);
+      date.setHours(Math.floor(Math.random() * 24), Math.floor(Math.random() * 60), 0);
+      
+      const isCredit = Math.random() > 0.6; // 40% credit, 60% debit
+      const amount = isCredit 
+        ? (Math.random() * 10000 + 100).toFixed(2)  // Credits: 100 - 10,100
+        : (Math.random() * 5000 + 500).toFixed(2);   // Debits: 500 - 5,500
+      
+      const desc = descriptions[Math.floor(Math.random() * descriptions.length)];
+      const status = statuses[Math.floor(Math.random() * (i === 0 ? 1 : 4))]; // First tx always success
+      
+      transactions.push({
+        id: `fake-tx-${monthOffset}-${i}-${Date.now()}`,
+        reference: `REF${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
+        type: isCredit ? 'credit' : 'debit',
+        amount: amount,
+        description: desc + (isCredit ? '' : ` - 0${Math.floor(Math.random() * 90000000 + 8010000000)}`),
+        time: date.toISOString(),
+        created_at: date.toISOString(),
+        status: status.toUpperCase()
+      });
+    }
+  }
+  
+  // Sort by date (newest first)
+  return transactions.sort((a, b) => new Date(b.time) - new Date(a.time));
+}
+
+  /* -------------------------- DOM -------------------------- */
   const modal = document.getElementById('historyModal');
+  const panel = modal?.querySelector('.opay-panel');
+  const backdrop = modal?.querySelector('.opay-backdrop');
   const historyList = document.getElementById('historyList');
   const loadingEl = document.getElementById('historyLoading');
   const emptyEl = document.getElementById('historyEmpty');
+  const errorEl = document.getElementById('historyError');
   const downloadBtn = document.getElementById('downloadHistory');
-  const searchInput = document.getElementById('historySearch');
 
-  if (!modal || !historyList) {
-    console.error('[TxHistory] Critical DOM elements missing');
+
+  if (!modal || !panel) {
+    console.error('[TransactionHistory] Modal elements not found - check your HTML');
     return;
   }
 
-  historyList.innerHTML = ''; // clear any pre-existing static content
+  /* -------------------------- CLEAR HARDCODED HTML ON INIT -------------------------- */
+  if (historyList) {
+    historyList.innerHTML = '';
+    console.log('[TransactionHistory] Cleared hardcoded HTML from historyList');
+  }
 
-  /* ──────────────────────────────── STATE ──────────────────────────────── */
+  /* -------------------------- STATE -------------------------- */
   let state = {
     open: false,
-    items: [],                    // newest first
+    page: 1,
+    isLoading: false,
+    done: false,
+    items: [],
     grouped: [],
+    sort: { by: 'time', dir: 'desc' },
+    filters: {},
     searchTerm: '',
     lastRenderIndex: 0,
-    realtimeActive: false,
-    realtimeChannel: null,
-    realtimeHealthyTs: 0,
-    isSubscribing: false,
-    retryTimer: null,
-    fallbackPollTimer: null
+    cachePages: new Map(),
+    fullHistoryLoaded: false,
+    accurateTotalsCalculated: false,
+    preloaded: false,
+    preloadingInProgress: false
   };
 
-  let selectedMonth = null; // null = all time, or {year, month}
+  /* -------------------------- MONTH FILTER STATE - DEFAULT TO CURRENT MONTH -------------------------- */
+  const today = new Date();
+  let selectedMonth = null; // No filter by default
 
-  /* ──────────────────────────────── UTILITIES ──────────────────────────────── */
+  /* -------------------------- UTIL -------------------------- */
   function formatCurrency(amount) {
-    const n = Number(amount) || 0;
-    return CONFIG.currencySymbol + n.toLocaleString('en-NG', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    });
+    try {
+      const n = Number(amount) || 0;
+      return CONFIG.currencySymbol + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    } catch (e) {
+      return CONFIG.currencySymbol + amount;
+    }
   }
 
   function formatTime(iso) {
     try {
       const d = new Date(iso);
-      return d.toLocaleString('en-NG', {
-        hour: '2-digit',
-        minute: '2-digit',
-        day: 'numeric',
-        month: 'short'
-      });
-    } catch {
-      return iso?.slice(0,16).replace('T',' ') || '—';
+      return d.toLocaleString('en-NG', { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' });
+    } catch (e) {
+      return iso;
     }
   }
 
-  function getTxIcon(tx) {
-    let text = (tx.description || tx.narration || tx.service || tx.provider || '').toLowerCase();
+function getTxIcon(tx) {
+  // Combine description + narration + any possible provider field for broader matching
+  let text = '';
+  if (tx.description) text += tx.description.toLowerCase() + ' ';
+  if (tx.narration) text += tx.narration.toLowerCase() + ' ';
+  if (tx.provider) text += tx.provider.toLowerCase() + ' ';
+  if (tx.service) text += tx.service.toLowerCase() + ' '; // some APIs use 'service'
 
-    if (text.includes('opay'))      return { cls: 'incoming',       img: '/frontend/svg/bank.svg',      alt: 'Opay' };
-    if (text.includes('mtn'))       return { cls: 'mtn targets',    img: '/frontend/img/mtn.svg',       alt: 'MTN' };
-    if (text.includes('airtel'))    return { cls: 'airtel targets', img: '/frontend/svg/airtel-icon.svg', alt: 'Airtel' };
-    if (text.includes('glo'))       return { cls: 'glo targets',    img: '/frontend/svg/GLO-icon.svg',  alt: 'GLO' };
-    if (text.includes('9mobile') || text.includes('etisalat') || text.includes('nine')) {
-      return { cls: 'nine-mobile targets', img: '/frontend/svg/9mobile-icon.svg', alt: '9Mobile' };
-    }
-    if (text.includes('refund'))    return { cls: 'refund incoming', img: '/frontend/svg/refund.svg', alt: 'Refund' };
-
-    return { cls: tx.type === 'credit' ? 'incoming' : 'outgoing', img: '', alt: '' };
+  if (text.includes('opay')) {
+    return { cls: 'incoming', img: '/frontend/svg/bank.svg', alt: 'Opay' };
+  }
+  if (text.includes('mtn')) {
+    return { cls: 'mtn targets', img: '/frontend/img/mtn.svg', alt: 'MTN' };
+  }
+  if (text.includes('airtel')) {
+    return { cls: 'airtel targets', img: '/frontend/svg/airtel-icon.svg', alt: 'Airtel' };
+  }
+  if (text.includes('glo')) {
+    return { cls: 'glo targets', img: '/frontend/svg/GLO-icon.svg', alt: 'GLO' };
+  }
+  if (text.includes('9mobile') || text.includes('etisalat') || text.includes('nine mobile') || text.includes('nine-mobile')) {
+    return { cls: 'nine-mobile targets', img: '/frontend/svg/9mobile-icon.svg', alt: '9Mobile' };
+  }
+  if (text.includes('refund')) {
+    return { cls: 'refund incoming', img: '/frontend/svg/refund.svg', alt: 'Refund' };
   }
 
-  function truncateDescription(text) {
-    if (!text) return '';
-    let max = 25;
-    const w = window.innerWidth;
-    if (w >= 640  && w < 1024) max = 30;
-    if (w >= 1024)             max = 40;
-    return text.length > max ? text.slice(0, max) + '…' : text;
+  // Fallback to credit/debit arrow if no specific icon found
+  return { cls: tx.type === 'credit' ? 'incoming' : 'outgoing', img: '', alt: '' };
+}
+
+  // Add this array to collect any pending waiters
+let preloadWaiters = [];
+
+// Modify the early return in preloadHistoryForInstantOpen():
+if (state.preloadingInProgress) {
+  return new Promise((resolve) => {
+    preloadWaiters.push(resolve);  // Collect the resolver
+  });
+}
+
+// Then add this helper function:
+function resolvePreloadWaiters() {
+  preloadWaiters.forEach(resolve => resolve());
+  preloadWaiters = []; // Clear for next time
+}
+window.resolvePreloadWaiters = resolvePreloadWaiters; // optional for debugging
+
+  function groupTransactions(items) {
+    const monthMap = new Map();
+
+    items.forEach(tx => {
+      const date = new Date(tx.time || tx.created_at);
+      const key = `${date.getFullYear()}-${date.getMonth()}`;
+
+      if (!monthMap.has(key)) {
+        monthMap.set(key, { txs: [], totalIn: 0, totalOut: 0 });
+      }
+
+      const group = monthMap.get(key);
+      group.txs.push(tx);
+
+      const amt = Math.abs(Number(tx.amount || 0));
+      if (tx.type === 'credit') group.totalIn += amt;
+      else group.totalOut += amt;
+    });
+
+    const sorted = Array.from(monthMap.entries()).sort((a, b) => b[0].localeCompare(a[0]));
+
+    return sorted.map(([key, data]) => {
+      const [year, month] = key.split('-');
+      const date = new Date(year, month);
+      return {
+        monthKey: key,
+        prettyMonth: date.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }),
+        totalIn: data.totalIn,
+        totalOut: data.totalOut,
+        txs: data.txs.sort((a, b) => new Date(b.time || b.created_at) - new Date(a.time || a.created_at))
+      };
+    });
   }
+
+  function setState(newState) {
+    Object.assign(state, newState);
+  }
+
+  function show(el) { el?.classList.remove('hidden'); }
+  function hide(el) { el?.classList.add('hidden'); }
 
   function safeFetch(url, opts = {}) {
-    const headers = { ...(window.APP_TOKEN ? { Authorization: window.APP_TOKEN } : {}) };
+    const headers = Object.assign({}, opts.headers || {}, CONFIG.authHeader());
     return fetch(url, { ...opts, headers, credentials: 'include' })
       .then(res => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) {
+          const err = new Error('Network response was not ok');
+          err.status = res.status;
+          throw err;
+        }
         return res.json();
       });
   }
 
-  /* ──────────────────────────────── TRANSACTION ITEM RENDER ──────────────────────────────── */
+  function truncateDescription(text) {
+    if (!text) return '';
+    
+    let maxChars = 25;
+    const width = window.innerWidth;
+
+    if (width >= 640 && width < 1024) maxChars = 30;
+    else if (width >= 1024) maxChars = 40;
+
+    return text.length > maxChars ? text.slice(0, maxChars) + '…' : text;
+  }
+
   function makeTxNode(tx) {
     try {
+      const safeTruncate = (text) => {
+        if (typeof truncateDescription === 'function') return truncateDescription(text);
+        const w = window.innerWidth;
+        const max = w >= 1024 ? 40 : w >= 640 ? 30 : 25;
+        return text && text.length > max ? text.slice(0, max) + '…' : text || '';
+      };
+
+      const formatAmountDisplay = (v) => {
+        const n = Math.abs(Number(v) || 0);
+        const full = '₦' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        return { display: full, full };
+      };
+
+      const fmtDateTime = (iso) => {
+        const d = new Date(iso || Date.now());
+        const dateStr = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+        const timeStr = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+        return `${dateStr} · ${timeStr}`;
+      };
+
+      const item = document.createElement('article');
+      item.className = 'tx-item';
+      item.setAttribute('role', 'listitem');
+
       const isCredit = tx.type === 'credit';
       const icon = getTxIcon(tx);
+
       const rawDesc = tx.description || tx.narration || tx.type || 'Transaction';
-      const truncated = truncateDescription(rawDesc);
-      const amountStr = formatCurrency(tx.amount);
-      const dateTime = formatTime(tx.time || tx.created_at);
+      const truncatedDesc = safeTruncate(rawDesc);
+      const amountObj = formatAmountDisplay(tx.amount);
+      const formattedDateTime = fmtDateTime(tx.time || tx.created_at);
 
-      let statusClass = 'success', statusText = 'SUCCESS';
-      const st = (tx.status || 'success').toLowerCase().trim();
-      if (st.includes('fail'))   { statusClass = 'failed';  statusText = 'FAILED';  }
-      else if (st.includes('refund')) { statusClass = 'refund'; statusText = 'REFUNDED'; }
-      else if (st.includes('pend'))   { statusClass = 'pending'; statusText = 'PENDING'; }
+// === STATUS HANDLING (IMPROVED FOR REAL SERVER DATA) ===
+const statusRaw = (tx.status || 'success').toString().toLowerCase().trim();
+let statusClass = 'success';
+let statusText = 'SUCCESS';
 
-      const article = document.createElement('article');
-      article.className = 'tx-item';
-      article.setAttribute('role', 'listitem');
+if (statusRaw.includes('fail') || statusRaw.includes('failed')) {
+  statusClass = 'failed';
+  statusText = 'FAILED';
+} else if (statusRaw.includes('refund')) {
+  statusClass = 'refund';
+  statusText = 'REFUNDED';
+} else if (statusRaw.includes('pending')) {
+  statusClass = 'pending';
+  statusText = 'PENDING';
+} else if (statusRaw.includes('success') || statusRaw === 'successful' || statusRaw === 'true') {
+  statusClass = 'success';
+  statusText = 'SUCCESS';
+}
+// Any other unknown status → treat as pending/suspicious
+else {
+  statusClass = 'pending';
+  statusText = statusRaw.toUpperCase() || 'UNKNOWN';
+}
 
-      article.innerHTML = `
+      item.innerHTML = `
         <div class="tx-icon ${icon.cls}" aria-hidden="true">
-          ${icon.img
-            ? `<img class="tx-img" src="${icon.img}" alt="${icon.alt}" />`
-            : (isCredit ? '↓' : '↑')}
+          ${icon.img 
+            ? `<div class="tx-svg" aria-hidden="true"><img class="tx-img" src="${icon.img}" alt="${icon.alt}" /></div>`
+            : (isCredit ? 'Down Arrow' : 'Up Arrow')
+          }
         </div>
         <div class="tx-content">
           <div class="tx-row">
-            <div class="tx-desc" title="${rawDesc.replace(/"/g,'&quot;')}">${truncated}</div>
-            <div class="tx-amount ${isCredit ? 'credit' : 'debit'}">
-              ${isCredit ? '+' : '-'} ${amountStr}
+            <div class="tx-desc" title="${rawDesc}">${truncatedDesc}</div>
+            <div class="tx-amount ${isCredit ? 'credit' : 'debit'}" title="${amountObj.full}">
+              ${isCredit ? '+' : '-'} ${amountObj.display}
             </div>
           </div>
           <div class="tx-row meta">
-            <div class="tx-time">${dateTime}</div>
-            <div class="tx-status" data-status="${statusClass}">${statusText}</div>
-          </div>
+  <div class="tx-time">${formattedDateTime}</div>
+  <div class="tx-status" data-status="${statusClass}" title="${tx.status || 'SUCCESS'}">
+    ${statusText}
+  </div>
+</div>
         </div>
       `;
 
-      article.addEventListener('click', () => showTransactionReceipt(tx));
-      return article;
+      item.addEventListener('click', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+
+  // Reuse the same logic but show beautiful receipt instead
+  showTransactionReceipt(tx);
+});
+
+      return item;
+
     } catch (err) {
-      console.error('[Tx Render] Error:', err, tx);
+      console.error('FATAL RENDER ERROR in makeTxNode:', err, tx);
       const fallback = document.createElement('div');
-      fallback.className = 'tx-item error';
-      fallback.textContent = 'Could not display transaction';
+      fallback.className = 'tx-item';
+      fallback.textContent = 'Could not render transaction';
       return fallback;
     }
   }
 
-  /* ──────────────────────────────── RECEIPT MODAL ──────────────────────────────── */
-  function showTransactionReceipt(tx) {
-    const existing = document.getElementById('receiptModal');
-    if (existing) existing.remove();
+function showTransactionReceipt(tx) {
+  const existing = document.getElementById('receiptModal');
+  if (existing) existing.remove();
 
-    const icon = getTxIcon(tx);
-    const amount = formatCurrency(Math.abs(Number(tx.amount || 0)));
-    const dateObj = new Date(tx.time || tx.created_at);
-    const dateStr = dateObj.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-    const timeStr = dateObj.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+  // Reuse the same icon logic from getTxIcon
+  const icon = getTxIcon(tx);
+  
+  const networkInfo = (() => {
+    const desc = (tx.description || '').toLowerCase();
+    if (desc.includes('mtn')) return { name: 'MTN', color: '#FFC107' };
+    if (desc.includes('airtel')) return { name: 'Airtel', color: '#E4002B' };
+    if (desc.includes('glo')) return { name: 'GLO', color: '#6FBF48' };
+    if (desc.includes('9mobile') || desc.includes('etisalat')) return { name: '9Mobile', color: '#00A650' };
+    if (desc.includes('opay')) return { name: 'Opay', color: '#1E3225' };
+    if (desc.includes('refund')) return { name: 'Refund', color: '#fb923c' };
+    return { name: 'Transaction', color: '' };
+  })();
 
-    const phoneMatch = tx.description?.match(/\d{11}/)?.[0] || null;
-    const bundleMatch = tx.description?.match(/\d+\.?\d* ?GB|[\d.]+ ?Days?/gi)?.join(' ') || null;
+  const amount = formatCurrency(Math.abs(Number(tx.amount || 0)));
+  const date = new Date(tx.time || tx.created_at);
+  const formattedDate = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  const formattedTime = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
 
-    const statusMap = {
-      success:  { text: 'Successful', color: '#00D4AA' },
-      failed:   { text: 'Failed',     color: '#FF3B30' },
-      pending:  { text: 'Pending',    color: '#FF9500' },
-      refunded: { text: 'Refunded',   color: '#00D4AA' }
-    };
+  const recipientPhone = tx.description?.match(/\d{11}/)?.[0] || null;
+  const dataBundle = tx.description?.match(/\d+\.?\d* ?GB|[\d.]+ ?Days?/gi)?.join(' ') || null;
 
-    const stLower = (tx.status || 'success').toLowerCase();
-    const statusKey = stLower.includes('fail') ? 'failed' :
-                      stLower.includes('refund') ? 'refunded' :
-                      stLower.includes('pend') ? 'pending' : 'success';
-    const status = statusMap[statusKey];
-
-    const network = (() => {
-      const d = (tx.description || '').toLowerCase();
-      if (d.includes('mtn'))    return { name: 'MTN',    color: '#FFC107' };
-      if (d.includes('airtel')) return { name: 'Airtel', color: '#E4002B' };
-      if (d.includes('glo'))    return { name: 'GLO',    color: '#6FBF48' };
-      if (d.includes('9mobile')||d.includes('etisalat')) return { name: '9Mobile', color: '#00A650' };
-      if (d.includes('opay'))   return { name: 'Opay',   color: '#1E3225' };
-      if (d.includes('refund')) return { name: 'Refund', color: '#fb923c' };
-      return { name: 'Transaction', color: '' };
-    })();
-
-    const html = `
-      <div id="receiptModal" style="position:fixed;inset:0;z-index:100000;background:#000;display:flex;flex-direction:column;font-family:system-ui,sans-serif;">
-        <div class="backdrop" onclick="this.parentElement.remove()" style="position:absolute;inset:0;"></div>
-        <div style="background:#1e1e1e;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;z-index:10;">
-          <button onclick="document.getElementById('receiptModal')?.remove()" style="background:none;border:none;color:#aaa;padding:8px;border-radius:50%;">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-          </button>
-          <h2 style="margin:0;color:white;font-size:17px;font-weight:700;">Transaction Details</h2>
-          <div style="width:40px;"></div>
-        </div>
-        <div style="flex:1;background:#121212;padding:16px;display:flex;flex-direction:column;gap:24px;overflow-y:auto;">
-          <div style="background:#1e1e1e;border-radius:16px;padding:32px 24px 24px;position:relative;text-align:center;">
-            <div class="${icon.cls}" style="width:56px;height:56px;border-radius:50%;position:absolute;top:-28px;left:50%;transform:translateX(-50%);background:${network.color};box-shadow:0 6px 16px #0006;display:flex;align-items:center;justify-content:center;">
-              ${icon.img ? `<img src="${icon.img}" alt="${icon.alt}" style="width:32px;height:32px;object-fit:contain;">` : ''}
-            </div>
-            <div style="font-size:36px;font-weight:800;color:white;margin:40px 0 8px;">${amount}</div>
-            <div style="color:${status.color};font-size:17px;font-weight:600;">${status.text}</div>
-          </div>
-
-          <div style="background:#1e1e1e;border-radius:16px;padding:20px;display:flex;flex-direction:column;gap:14px;">
-            <h3 style="margin:0;color:#ccc;font-size:15px;font-weight:600;">Details</h3>
-            ${phoneMatch ? `<div style="display:flex;justify-content:space-between;color:#e0e0e0;font-size:14px;"><span>Phone</span><strong>${phoneMatch}</strong></div>` : ''}
-            ${bundleMatch ? `<div style="display:flex;justify-content:space-between;color:#e0e0e0;font-size:14px;"><span>Bundle</span><strong>${bundleMatch}</strong></div>` : ''}
-            <div style="display:flex;justify-content:space-between;color:#e0e0e0;font-size:14px;"><span>Type</span><strong>${tx.type === 'credit' ? 'Credit' : 'Debit'}</strong></div>
-            <div style="display:flex;justify-content:space-between;color:#e0e0e0;font-size:14px;"><span>Reference</span><strong style="font-family:monospace;">${tx.reference || tx.id || '—'}</strong></div>
-            <div style="display:flex;justify-content:space-between;color:#e0e0e0;font-size:14px;"><span>Date</span><strong>${dateStr} ${timeStr}</strong></div>
-          </div>
-
-          <div style="display:flex;gap:12px;margin-top:auto;">
-            <button onclick="reportTransactionIssue('${tx.reference || tx.id || ''}')" style="flex:1;background:#2c2c2c;color:#00d4aa;border:1px solid #00d4aa;border-radius:50px;padding:14px;font-weight:600;">Report Issue</button>
-            <button onclick="shareReceipt(this.closest('#receiptModal'), '${tx.reference || tx.id || ''}', '${amount}', '${(tx.description||'').replace(/'/g,"\\'")}', '${dateStr}', '${timeStr}', '${status.text}', '${network.name}', '${network.color}', '${icon.img||''}', '${tx.type}')" style="flex:1;background:linear-gradient(90deg,#00d4aa,#00bfa5);color:white;border:none;border-radius:50px;padding:14px;font-weight:600;">Share Receipt</button>
-          </div>
-        </div>
-      </div>
-    `;
-
-    document.body.insertAdjacentHTML('beforeend', html);
-  }
-
-  window.reportTransactionIssue = (id) => {
-    alert(`Issue report for transaction ${id} — support flow would open here`);
-    document.getElementById('receiptModal')?.remove();
+  const statusConfig = {
+    success: { text: 'Successful', color: '#00D4AA' },
+    failed: { text: 'Failed', color: '#FF3B30' },
+    pending: { text: 'Pending', color: '#FF9500' },
+    refund: { text: 'Refunded', color: '#00D4AA' }
   };
 
-  // Note: keep your original shareReceipt function here (it's long, so not duplicated)
+  const statusKey = (tx.status || 'success').toLowerCase();
+  const status = statusConfig[statusKey.includes('fail') ? 'failed' : statusKey.includes('refund') ? 'refund' : statusKey.includes('pending') ? 'pending' : 'success'];
 
-  window.reportTransactionIssue = reportTransactionIssue;
+  const modalHTML = `
+    <div id="receiptModal" style="position:fixed;inset:0;z-index:100000;background:#000;display:flex;flex-direction:column;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+      <div class="opay-backdrop" onclick="this.parentElement.remove()" style="position:absolute;inset:0;"></div>
+      
+      <!-- Top Header Bar -->
+      <div style="background:#1e1e1e;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;position:relative;z-index:10;">
+        <button onclick="this.closest('#receiptModal').remove()" style="background:none;border:none;color:#aaa;cursor:pointer;padding:8px;border-radius:50%;">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M19 12H5M12 19l-7-7 7-7"/>
+          </svg>
+        </button>
+        <h2 style="margin:0;color:white;font-size:17px;font-weight:700;letter-spacing:-0.2px;">Transaction Details</h2>
+        <div style="width:40px;"></div>
+      </div>
+      
+      <div style="flex:1;display:flex;flex-direction:column;background:#121212;margin-top:env(safe-area-inset-top);overflow:hidden;transform:translateZ(0);padding:16px;gap:30px;">
+        
+        <!-- Amount & Status Card -->
+        <div style="max-height:40%;background:#1e1e1e;border-radius:16px;padding:32px 24px 24px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;position:relative;margin-top:35px;">
+          
+          <!-- Floating Logo Circle -->
+          <div class="tx-icon ${icon.cls}" style="
+  width:50px; height:50px; border-radius:50%;
+  display:flex; align-items:center; justify-content:center;
+  position:absolute; top:-25px; left:50%; transform:translateX(-50%);
+  background:${networkInfo.color}; box-shadow:0 6px 16px rgba(0,0,0,0.5);
+">
+  ${icon.img
+    ? `<img src="${icon.img}" alt="${icon.alt}" class="tx-img" style="width:28px;height:28px;object-fit:contain;image-rendering:crisp-edges;">`
+    : `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+         ${tx.type === 'credit' 
+            ? '<path d="M12 19V5M5 12l7 7 7-7"/>' 
+            : '<path d="M12 5v14M19 12l-7-7-7 7"/>'}
+       </svg>`
+  }
+</div>
+
+
+          <!-- Amount -->
+          <div style="font-size:32px;font-weight:800;color:white;margin-top:32px;margin-bottom:8px;line-height:1;letter-spacing:-1px;">${amount}</div>
+
+          <!-- Status -->
+          <div style="color:${status.color};font-size:16px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:7px;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="M8 12l2 2 4-4"/>
+            </svg>
+            ${status.text}
+          </div>
+        </div>
+
+        <!-- Details Card -->
+        <div style="max-height:45%;background:#1e1e1e;border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:12px;overflow:hidden;">
+          <h3 style="margin:0 0 8px;color:#ccc;font-size:16px;font-weight:600;letter-spacing:0.2px;">Transaction Details</h3>
+          
+          ${recipientPhone ? `<div class="detail-row"><span>Recipient Mobile</span><strong>${recipientPhone}</strong></div>` : ''}
+          ${dataBundle ? `<div class="detail-row"><span>Data Bundle</span><strong>${dataBundle}</strong></div>` : ''}
+
+          <div class="detail-row">
+            <span>Transaction Type</span>
+            <strong>${tx.description.includes('Data') ? 'Mobile Data' : tx.description.includes('Airtime') ? 'Airtime Top-up' : tx.type === 'credit' ? 'Credit' : 'Debit'}</strong>
+          </div>
+
+          ${tx.type !== 'credit' ? `<div class="detail-row"><span>Payment Method</span><strong>Wallet Balance</strong></div>` : ''}
+
+          <div class="detail-row">
+            <span>Transaction No.</span>
+            <div style="display:flex;align-items:center;gap:10px;">
+              <strong style="font-family:ui-monospace,monospace;font-size:13px;letter-spacing:0.8px;">${tx.reference || tx.id || '—'}</strong>
+              <button onclick="navigator.clipboard.writeText('${tx.reference || tx.id}');this.innerHTML='Copied';setTimeout(()=>this.innerHTML=copySvg,1500)" style="background:none;border:none;color:#00d4aa;cursor:pointer;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="detail-row">
+            <span>Transaction Date</span>
+            <strong>${formattedDate} ${formattedTime}</strong>
+          </div>
+        </div>
+
+        <!-- Action Buttons -->
+        <div style="display:flex;gap:12px;margin-top:auto;">
+          <button onclick="reportTransactionIssue('${tx.id || tx.reference}')" style="flex:1;background:#2c2c2c;color:#00d4aa;border:1.5px solid #00d4aa;border-radius:50px;padding:12px;font-weight:600;cursor:pointer;">Report Issue</button>
+          <button onclick="shareReceipt(this.closest('#receiptModal'), '${tx.reference || tx.id}', '${amount}', '${(tx.description || '').replace(/'/g, "\\'")}', '${formattedDate}', '${formattedTime}', '${status.text}', '${networkInfo.name}', '${networkInfo.color}', '${icon.img || ''}', '${tx.type}')" style="flex:1;background:linear-gradient(90deg,#00d4aa,#00bfa5);color:white;border:none;border-radius:50px;padding:12px;font-weight:600;cursor:pointer;">Share Receipt</button>
+        </div>
+
+      </div>
+    </div>
+
+    <style>
+      #receiptModal * { 
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        text-rendering: optimizeLegibility;
+        box-sizing: border-box;
+      }
+      .detail-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        color: #e0e0e0;
+        font-size: 13px;
+      }
+      .detail-row span { 
+        color: #aaa; 
+        font-weight: 500;
+      }
+      .detail-row strong { 
+        color: white; 
+        font-weight: 600;
+      }
+      .detail-row button svg { transition: all 0.2s; }
+      .detail-row button:active svg { transform: scale(0.9); }
+    </style>
+
+    <script>
+      const copySvg = \`<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+      </svg>\`;
+    </script>
+  `;
+
+  document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
+
+function reportTransactionIssue(txId) {
+  alert(`Report issue for transaction ${txId}\n\nThis will open support chat in production`);
+  // Later: open WhatsApp, email, or in-app support
+  document.getElementById('receiptModal')?.remove();
+}
+
+window.reportTransactionIssue = reportTransactionIssue;
 window.shareReceipt = shareReceipt;
 
 /**
@@ -560,380 +850,763 @@ function shareReceipt(modalEl, ref, amount, desc, date, time, statusText, networ
     });
   });
 
-  /* ──────────────────────────────── MONTH GROUPING & STICKY HEADERS ──────────────────────────────── */
-  function groupTransactions(items) {
-    const map = new Map();
-    items.forEach(tx => {
-      const d = new Date(tx.time || tx.created_at);
-      const key = `${d.getFullYear()}-${d.getMonth()}`;
-      if (!map.has(key)) map.set(key, { txs: [], totalIn: 0, totalOut: 0 });
-      const g = map.get(key);
-      g.txs.push(tx);
-      const amt = Math.abs(Number(tx.amount || 0));
-      if (tx.type === 'credit') g.totalIn += amt; else g.totalOut += amt;
-    });
+  /* -------------------------- STICKY MONTH DIVIDERS (matching HTML structure) -------------------------- */
+/* -------------------------- STICKY MONTH DIVIDERS (Opay-style with full header) -------------------------- */
+function makeMonthDivider(month) {
+  const container = document.createElement('div');
+  container.className = 'month-section-header';
+  container.dataset.monthKey = month.monthKey;
+  
+  container.style.cssText = `
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: #1e1e1e;
+    margin: 0;
+    padding: 0;
+    transform: translateZ(0);
+    backface-visibility: hidden;
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
+    overflow: hidden;
+  `;
+  
+  // Create the full Opay-style header with month selector and totals
+  container.innerHTML = `
+  <div class="opay-month-header" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 12px; background: #1e1e1e; gap: 12px;">
+    <div class="opay-month-selector" style="display: inline-flex; align-items: center; gap: 6px; font-size: 16px; font-weight: 600; color: white; cursor: pointer; flex: 1;">
+      <span>${month.prettyMonth}</span>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M6 9l6 6 6-6"/>
+      </svg>
+    </div>
+  </div>
+    
+    <div class="opay-summary" style="display: flex; justify-content: space-between; padding: 12px 12px; background: #1e1e1e; font-size: 14px; color: #999; gap: 16px; border-bottom: none;">
+      <div>In: <strong style="color: white; font-weight: 600; margin-left: 4px;">${formatCurrency(month.totalIn)}</strong></div>
+      <div>Out: <strong style="color: white; font-weight: 600; margin-left: 4px;">${formatCurrency(month.totalOut)}</strong></div>
+    </div>
+  `;
+  
+  // Make the month selector clickable to open month picker
+  const monthSelector = container.querySelector('.opay-month-selector');
+  if (monthSelector) {
+    monthSelector.addEventListener('click', (e) => {
+      e.stopPropagation();
+      // Extract year and month from the month object
+      const [year, monthNum] = month.monthKey.split('-');
+      selectedMonth = { year: parseInt(year), month: parseInt(monthNum) };
+      window.currentMonthPickerYear = parseInt(year);
+      
+      // Open month picker modal
+      createMonthPickerModal();
+      const modalEl = document.getElementById('monthFilterModal');
+      modalEl.classList.remove('hidden');
+      generateMonthGrid();
 
-    return Array.from(map.entries())
-      .sort((a,b) => b[0].localeCompare(a[0]))
-      .map(([key, data]) => {
-        const [y, m] = key.split('-').map(Number);
-        const date = new Date(y, m);
-        return {
-          monthKey: key,
-          prettyMonth: date.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }),
-          totalIn: data.totalIn,
-          totalOut: data.totalOut,
-          txs: data.txs.sort((a,b) => new Date(b.time||b.created_at) - new Date(a.time||a.created_at))
-        };
-      });
-  }
-
-  function makeMonthDivider(month) {
-    const div = document.createElement('div');
-    div.className = 'month-section-header';
-    div.dataset.monthKey = month.monthKey;
-    div.innerHTML = `
-      <div style="padding:12px 16px;background:#1e1e1e;display:flex;justify-content:space-between;align-items:center;border-top-left-radius:10px;border-top-right-radius:10px;">
-        <div style="font-size:16px;font-weight:600;color:white;">${month.prettyMonth}</div>
-      </div>
-      <div style="padding:0 16px 12px;background:#1e1e1e;display:flex;justify-content:space-between;font-size:14px;color:#aaa;">
-        <div>In: <strong style="color:white;">${formatCurrency(month.totalIn)}</strong></div>
-        <div>Out: <strong style="color:white;">${formatCurrency(month.totalOut)}</strong></div>
-      </div>
-    `;
-    return div;
-  }
-
-  function renderChunked(grouped) {
-    historyList.innerHTML = '';
-    state.lastRenderIndex = 0;
-
-    const flat = [];
-    grouped.forEach(m => {
-      flat.push({ type: 'header', month: m });
-      if (m.txs.length === 0) {
-        flat.push({ type: 'empty-month', month: m });
-      } else {
-        m.txs.forEach(tx => flat.push({ type: 'tx', tx }));
-      }
-    });
-
-    function renderNext() {
-      const start = state.lastRenderIndex;
-      const end = Math.min(flat.length, start + CONFIG.chunkRenderSize);
-      const frag = document.createDocumentFragment();
-
-      for (let i = start; i < end; i++) {
-        const entry = flat[i];
-        if (entry.type === 'header') {
-          frag.appendChild(makeMonthDivider(entry.month));
-        } else if (entry.type === 'tx') {
-          frag.appendChild(makeTxNode(entry.tx));
-        } else if (entry.type === 'empty-month') {
-          const el = document.createElement('div');
-          el.style.cssText = 'padding:60px 20px;text-align:center;color:#777;font-size:15px;';
-          el.textContent = `No transactions in ${entry.month.prettyMonth}`;
-          frag.appendChild(el);
+      setTimeout(() => {
+        const panel = modalEl.querySelector('.opay-panel');
+        if (panel) {
+          panel.style.transform = 'scale(1)';
+          panel.style.opacity = '1';
         }
+      }, 10);
+    });
+  }
+  
+  return container;
+}
+
+/* -------------------------- RENDER WITH MONTH DIVIDERS -------------------------- */
+  /* -------------------------- RENDER WITH MONTH DIVIDERS -------------------------- */
+function renderChunked(groupedMonths) {
+  historyList.innerHTML = '';
+  state.lastRenderIndex = 0;
+
+  const flat = [];
+
+  groupedMonths.forEach(month => {
+    // Always push the month divider (even if empty)
+    flat.push({ type: 'month-divider', month });
+
+    // If month has transactions → push them
+    if (month.txs.length > 0) {
+      month.txs.forEach(tx => flat.push({ type: 'tx', tx }));
+    } else {
+      // Empty month → push a special "no transactions" entry
+      flat.push({ type: 'no-tx', month });
+    }
+  });
+
+  function renderNextChunk() {
+    const start = state.lastRenderIndex;
+    const end = Math.min(flat.length, start + CONFIG.chunkRenderSize);
+    const fragment = document.createDocumentFragment();
+
+    for (let i = start; i < end; i++) {
+      const entry = flat[i];
+
+      if (entry.type === 'month-divider') {
+        fragment.appendChild(makeMonthDivider(entry.month));
+      } 
+      else if (entry.type === 'tx') {
+        fragment.appendChild(makeTxNode(entry.tx));
       }
-
-      historyList.appendChild(frag);
-      state.lastRenderIndex = end;
-
-      if (end < flat.length) {
-        requestAnimationFrame(renderNext);
-      } else {
-        window.trunTx?.();
+      else if (entry.type === 'no-tx') {
+        // Create "No transactions" placeholder
+        const noTxEl = document.createElement('div');
+        noTxEl.className = 'no-transactions-placeholder';
+        noTxEl.style.cssText = `
+          padding: 40px 20px;
+          text-align: center;
+          color: #999;
+          font-size: 15px;
+          background: transparent;
+          margin-bottom: 20px;
+        `;
+        noTxEl.textContent = `No transactions in ${entry.month.prettyMonth}`;
+        fragment.appendChild(noTxEl);
       }
     }
 
-    renderNext();
+    historyList.appendChild(fragment);
+    state.lastRenderIndex = end;
+
+    // Re-apply bottom margin to last item of each month (including no-tx placeholder)
+    const monthSections = document.querySelectorAll('.month-section-header');
+    monthSections.forEach(section => {
+      let lastItem = null;
+      let next = section.nextElementSibling;
+
+      while (next && !next.classList.contains('month-section-header')) {
+        if (next.classList.contains('tx-item') || next.classList.contains('no-transactions-placeholder')) {
+          next.style.marginBottom = '0';
+          lastItem = next;
+        }
+        next = next.nextElementSibling;
+      }
+      if (lastItem) lastItem.style.marginBottom = '20px';
+    });
+
+    if (end < flat.length) {
+      requestAnimationFrame(renderNextChunk);
+    } else {
+      window.trunTx?.();
+    }
   }
 
-  /* ──────────────────────────────── FILTER & RENDER LOGIC ──────────────────────────────── */
+  renderNextChunk();
+}
+
+
+  function showStateUI() {
+    hide(loadingEl); hide(emptyEl); hide(errorEl);
+    if (state.isLoading) show(loadingEl);
+    else if (state.items.length === 0 && !state.fullHistoryLoaded) show(emptyEl);
+  }
+
+  /* -------------------------- PRELOAD FULL HISTORY -------------------------- */
+async function loadLatestHistory() {
+  // Always try to get the latest — but don't block UI
+  console.log('[TransactionHistory] Loading latest transactions...');
+
+  let allTx = state.items.slice(); // Start with what we have (from WS)
+
+  try {
+    // Always fetch page 1 (newest) to catch anything WS missed
+    const data = await safeFetch(`${CONFIG.apiEndpoint}?limit=200&page=1`);
+    const newItems = data.items || [];
+
+    if (newItems.length > 0) {
+      // Merge: replace duplicates, add new ones at top
+      const existingIds = new Set(allTx.map(tx => tx.id));
+      const trulyNew = newItems.filter(tx => !existingIds.has(tx.id || tx.reference));
+
+      if (trulyNew.length > 0) {
+        allTx.unshift(...trulyNew);
+        console.log(`[TransactionHistory] Added ${trulyNew.length} new tx from server sync`);
+      }
+    }
+  } catch (err) {
+    console.warn('[TransactionHistory] Failed to sync latest page:', err);
+    // Fall back to what we have (from WS)
+  }
+
+  // Normalize and update state
+  state.items = allTx.map(raw => ({
+    id: raw.id || raw.reference,
+    reference: raw.reference || raw.id,
+    type: raw.type || (Number(raw.amount) > 0 ? 'credit' : 'debit'),
+    amount: Math.abs(Number(raw.amount || 0)),
+    description: (raw.description || raw.narration || 'Transaction')
+  .replace(/\s*\(pending\)\s*/gi, '')
+  .trim(),
+
+    time: raw.time || raw.created_at || new Date().toISOString(),
+    status: raw.status || 'SUCCESS',
+    provider: raw.provider,
+    phone: raw.phone
+  }));
+
+  state.fullHistoryLoaded = true; // We have at least recent ones
+  state.preloaded = true;
+
+  applyTransformsAndRender();
+  hide(loadingEl);
+}
+
+  /* -------------------------- MONTH FILTER FUNCTIONS -------------------------- */
+  function formatMonthYear(date) {
+    return date.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
+  }
+
+function updateMonthDisplay() {
+  // This function is no longer needed since each month header shows its own date
+  console.log('[TransactionHistory] Month display updated in individual headers');
+}
+
   function filterBySelectedMonth(items) {
     if (!selectedMonth) return items;
+
+    const { year, month } = selectedMonth;
     return items.filter(tx => {
-      const d = new Date(tx.time || tx.created_at);
-      return d.getFullYear() === selectedMonth.year && d.getMonth() === selectedMonth.month;
+      const txDate = new Date(tx.time || tx.created_at);
+      return txDate.getFullYear() === year && txDate.getMonth() === month;
     });
+  }
+
+  function computeFilteredSummary(filteredItems) {
+  let totalIn = 0, totalOut = 0;
+  filteredItems.forEach(tx => {
+    const amt = Math.abs(Number(tx.amount || 0));
+    if (tx.type === 'credit') totalIn += amt;
+    else totalOut += amt;
+  });
+
+  // Update will happen in the month headers themselves
+  console.log(`[TransactionHistory] Total In: ${formatCurrency(totalIn)}, Total Out: ${formatCurrency(totalOut)}`);
+}
+
+  function applyMonthFilterAndRender() {
+    let itemsToRender;
+    
+    if (!selectedMonth) {
+      itemsToRender = state.items;
+    } else {
+      itemsToRender = filterBySelectedMonth(state.items);
+    }
+
+    const grouped = groupTransactions(itemsToRender);
+    setState({ grouped });
+    renderChunked(grouped);
+    computeFilteredSummary(itemsToRender);
+
+    // In applyMonthFilterAndRender()
+if (itemsToRender.length === 0) {
+  // Show month header + "No transactions" message
+  const emptyMonth = {
+    monthKey: `${selectedMonth.year}-${selectedMonth.month}`,
+    prettyMonth: new Date(selectedMonth.year, selectedMonth.month).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }),
+    totalIn: 0,
+    totalOut: 0,
+    txs: []
+  };
+  renderChunked([emptyMonth]);
+  hide(emptyEl);
+} else {
+  const grouped = groupTransactions(itemsToRender);
+  renderChunked(grouped);
+  hide(emptyEl);
+}
   }
 
   function applyTransformsAndRender() {
-    let items = [...state.items];
+    let items = state.items.slice();
 
     if (state.searchTerm) {
-      const term = state.searchTerm.toLowerCase();
+      const s = state.searchTerm.toLowerCase();
       items = items.filter(tx =>
-        (tx.description || '').toLowerCase().includes(term) ||
-        (tx.reference || tx.id || '').toLowerCase().includes(term)
+        (tx.description || '').toLowerCase().includes(s) ||
+        (tx.id || '').toLowerCase().includes(s)
       );
     }
 
-    items = filterBySelectedMonth(items);
-    const grouped = groupTransactions(items);
-    renderChunked(grouped);
-
-    if (items.length === 0) {
-      if (selectedMonth) {
-        const emptyMonth = {
-          monthKey: `${selectedMonth.year}-${selectedMonth.month}`,
-          prettyMonth: new Date(selectedMonth.year, selectedMonth.month).toLocaleDateString('en-GB', {month:'short',year:'numeric'}),
-          totalIn: 0, totalOut: 0, txs: []
-        };
-        renderChunked([emptyMonth]);
-      } else {
-        emptyEl?.classList.remove('hidden');
-      }
-    } else {
-      emptyEl?.classList.add('hidden');
+    if (selectedMonth) {
+      items = filterBySelectedMonth(items);
     }
+
+    const groupedMonths = groupTransactions(items);
+    setState({ grouped: groupedMonths });
+    renderChunked(groupedMonths);
+
+    computeFilteredSummary(items);
+
+    // In applyTransformsAndRender() — replace the final if/else
+if (items.length === 0) {
+  if (selectedMonth) {
+    // User selected a month with no tx → show month header + empty message
+    const emptyMonth = {
+      monthKey: `${selectedMonth.year}-${selectedMonth.month}`,
+      prettyMonth: new Date(selectedMonth.year, selectedMonth.month).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }),
+      totalIn: 0,
+      totalOut: 0,
+      txs: []
+    };
+    renderChunked([emptyMonth]);
+  } else {
+    // Truly no transactions ever → show global empty state
+    show(emptyEl);
+  }
+} else {
+  const groupedMonths = groupTransactions(items);
+  renderChunked(groupedMonths);
+  hide(emptyEl);
+}
   }
 
   window.applyTransformsAndRender = applyTransformsAndRender;
 
-  /* ──────────────────────────────── REALTIME SUBSCRIPTION (using window.supabaseClient) ──────────────────────────────── */
-  async function subscribeToTransactions(force = false) {
-    const now = Date.now();
-    if (state.isSubscribing) return;
-    if (!force && now - state.realtimeHealthyTs < CONFIG.realtimeHealthyThresholdMs) return;
+  /* -------------------------- MONTH PICKER MODAL -------------------------- */
+function createMonthPickerModal() {
+  const existing = document.getElementById('monthFilterModal');
+  if (existing) existing.remove();
 
-    state.isSubscribing = true;
+  // Track current year being displayed in the grid
+  window.currentMonthPickerYear = window.currentMonthPickerYear || new Date().getFullYear();
 
-    try {
-      const uid =
-        window.__USER_UID ||
-        localStorage.getItem('userId') ||
-        JSON.parse(localStorage.getItem('userData')||'{}')?.uid ||
-        null;
+  const modalHTML = `
+    <div id="monthFilterModal" class="opay-modal hidden" style="position: fixed; inset: 0; z-index: 10000000; display: flex; align-items: center; justify-content: center; font-family: 'Inter', sans-serif;">
+      <div class="opay-backdrop" data-close-month style="position: absolute; inset: 0; background: rgba(0,0,0,0.5); backdrop-filter: blur(2px);"></div>
+      
+      <div class="opay-panel" style="position: relative; max-width: 380px; width: 90%; background: #fff; border-radius: 10px; box-shadow: 0 20px 40px rgba(0,0,0,0.2); overflow: hidden; transform: scale(0.9); opacity: 0; transition: all 0.3s ease-in-out;">
+        
+        <div class="opay-header" style="padding: 18px 16px; border-bottom: 1px solid #eee; font-weight: 600; text-align: center; position: relative; color: #222; font-size: 18px;">
+          <button data-close-month style="position: absolute; left: 16px; background: transparent; border: none; font-size: 24px; cursor: pointer; color: #999;">×</button>
+          Select Month
+        </div>
 
-      if (!uid) {
-        console.warn('[Tx RT] No user UID available — cannot subscribe');
-        return;
-      }
+        <!-- YEAR NAVIGATION -->
+        <div style="padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; background: #f8f9fa; border-bottom: 1px solid #eee;">
+          <button id="prevYearBtn" style="background:none; border:none; font-size:28px; cursor:pointer; color:#00d4aa; padding:4px 8px;">‹</button>
+          <div id="currentYearDisplay" style="font-weight:700; font-size:18px; color:#222;">${window.currentMonthPickerYear}</div>
+          <button id="nextYearBtn" style="background:none; border:none; font-size:28px; cursor:pointer; color:#00d4aa; padding:4px 8px;">›</button>
+        </div>
+        
+        <div id="monthGrid" style="padding: 24px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;"></div>
+        
+        <div style="padding: 16px; border-top: 1px solid #eee; display: flex; gap: 12px; justify-content: center;">
+          <button id="allTimeBtn" style="background: #6c757d; color: white; border: none; padding: 12px 24px; border-radius: 10px; font-weight: 600; cursor: pointer;">All Time</button>
+          <button id="confirmMonthBtn" style="background: linear-gradient(90deg,#00d4aa,#00bfa5); color: white; border: none; padding: 12px 32px; border-radius: 10px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 10px rgba(0,212,170,0.3);">Confirm</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.insertAdjacentHTML('beforeend', modalHTML);
 
-      if (!window.supabaseClient) {
-        console.error('[Tx RT] window.supabaseClient not found');
-        return;
-      }
+  const modalEl = document.getElementById('monthFilterModal');
 
-      const client = window.supabaseClient;
+  // Year navigation
+  modalEl.querySelector('#prevYearBtn').onclick = () => {
+    window.currentMonthPickerYear--;
+    generateMonthGrid();
+    modalEl.querySelector('#currentYearDisplay').textContent = window.currentMonthPickerYear;
+  };
 
-      // Subscribe
-      const channelName = `tx-user:${uid.replace(/-/g,'')}`;
-      state.realtimeChannel = client.channel(channelName);
+  modalEl.querySelector('#nextYearBtn').onclick = () => {
+    window.currentMonthPickerYear++;
+    generateMonthGrid();
+    modalEl.querySelector('#currentYearDisplay').textContent = window.currentMonthPickerYear;
+  };
 
-      state.realtimeChannel
-        .on('postgres_changes', {
-          event: '*',
-          schema: 'public',
-          table: 'transactions',
-          filter: `user_uid=eq.${uid}`
-        }, (payload) => {
-          if (payload.eventType !== 'INSERT' && payload.eventType !== 'UPDATE') return;
+  // Confirm / All Time / Close
+  modalEl.querySelector('#confirmMonthBtn').onclick = () => {
+    applyMonthFilterAndRender();
+    modalEl.classList.add('hidden');
+  };
 
-          const tx = payload.new;
-
-          const normalized = {
-            id: tx.id || tx.reference || `tx-${Date.now()}`,
-            reference: tx.reference || tx.id,
-            type: tx.type || (Number(tx.amount||0) > 0 ? 'credit' : 'debit'),
-            amount: Math.abs(Number(tx.amount || 0)),
-            description: (tx.description || tx.narration || 'Transaction').trim(),
-            time: tx.created_at || tx.time || new Date().toISOString(),
-            status: tx.status || 'SUCCESS',
-            provider: tx.provider,
-            phone: tx.phone
-          };
-
-          // Deduplicate & add to top
-          state.items = [normalized, ...state.items.filter(t => t.id !== normalized.id)];
-          state.realtimeHealthyTs = Date.now();
-          state.realtimeActive = true;
-
-          if (state.open) {
-            applyTransformsAndRender();
-            historyList.scrollTop = 0;
-          }
-
-          window.dispatchEvent(new CustomEvent('transaction_update', { detail: normalized }));
-        })
-        .subscribe((status, err) => {
-          console.log('[Tx RT] Channel status:', status);
-          if (status === 'SUBSCRIBED') {
-            state.realtimeHealthyTs = Date.now();
-            state.realtimeActive = true;
-            console.log('[Tx RT] → ACTIVE & LISTENING');
-          } else if (['CLOSED', 'CHANNEL_ERROR', 'TIMED_OUT'].includes(status)) {
-            console.warn('[Tx RT] Channel issue →', status, err?.message);
-            state.realtimeActive = false;
-            scheduleRealtimeRetry();
-          }
-        });
-
-      console.log('[Tx RT] Subscription attempt completed for user:', uid);
-
-    } catch (err) {
-      console.error('[Tx RT] Subscription setup failed:', err);
-      scheduleRealtimeRetry();
-    } finally {
-      state.isSubscribing = false;
-    }
-  }
-
-  function scheduleRealtimeRetry() {
-    if (state.retryTimer) clearTimeout(state.retryTimer);
-    state.retryTimer = setTimeout(() => {
-      subscribeToTransactions(true);
-    }, CONFIG.realtimeRetryMs);
-  }
-
-  /* ──────────────────────────────── FALLBACK POLLING ──────────────────────────────── */
-  function startFallbackPolling() {
-    if (state.fallbackPollTimer) return;
-    console.warn('[Tx History] Realtime not healthy → fallback polling activated');
-
-    const poll = async () => {
-      try {
-        const data = await safeFetch(`${CONFIG.apiEndpoint}?page=1&limit=60`);
-        const received = (data.items || []).reverse(); // oldest → newest
-
-        let addedCount = 0;
-        const existing = new Set(state.items.map(t => t.id));
-
-        for (const raw of received) {
-          const norm = {
-            id: raw.id || raw.reference,
-            reference: raw.reference || raw.id,
-            type: raw.type || (Number(raw.amount||0) > 0 ? 'credit' : 'debit'),
-            amount: Math.abs(Number(raw.amount || 0)),
-            description: (raw.description || raw.narration || 'Transaction').trim(),
-            time: raw.created_at || raw.time || new Date().toISOString(),
-            status: raw.status || 'SUCCESS'
-          };
-          if (!existing.has(norm.id)) {
-            state.items.unshift(norm);
-            existing.add(norm.id);
-            addedCount++;
-          }
-        }
-
-        if (addedCount > 0 && state.open) {
-          applyTransformsAndRender();
-          historyList.scrollTop = 0;
-        }
-      } catch (err) {
-        console.warn('[Tx Poll] Failed:', err);
-      }
-    };
-
-    poll(); // immediate
-    state.fallbackPollTimer = setInterval(poll, CONFIG.fallbackPollIntervalMs);
-  }
-
-  function stopFallbackPolling() {
-    if (state.fallbackPollTimer) {
-      clearInterval(state.fallbackPollTimer);
-      state.fallbackPollTimer = null;
-    }
-  }
-
-  /* ──────────────────────────────── MODAL OPEN / CLOSE ──────────────────────────────── */
-  async function handleModalOpened() {
-    state.open = true;
+  modalEl.querySelector('#allTimeBtn').onclick = () => {
     selectedMonth = null;
+    applyMonthFilterAndRender();
+    modalEl.classList.add('hidden');
+  };
 
-    if (loadingEl) loadingEl.classList.add('hidden');
-    if (emptyEl) emptyEl.classList.add('hidden');
+  modalEl.querySelectorAll('[data-close-month]').forEach(el => {
+    el.onclick = () => modalEl.classList.add('hidden');
+  });
 
-    // Try realtime (non-blocking)
-    await subscribeToTransactions();
+  modalEl.querySelector('.opay-backdrop').onclick = () => modalEl.classList.add('hidden');
+}
 
-    // If realtime is silent for too long → fallback
-    setTimeout(() => {
-      if (state.open && !state.realtimeActive && !state.fallbackPollTimer) {
-        startFallbackPolling();
-      }
-    }, CONFIG.fallbackAfterNoRealtimeMs);
+  function generateMonthGrid() {
+  const grid = document.getElementById('monthGrid');
+  if (!grid) return;
+  grid.innerHTML = '';
+
+  const year = window.currentMonthPickerYear || new Date().getFullYear();
+
+  for (let month = 0; month < 12; month++) {
+    const date = new Date(year, month, 1);
+    const pretty = date.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
+
+    const btn = document.createElement('button');
+    btn.textContent = date.toLocaleDateString('en-GB', { month: 'short' });
+    btn.style.cssText = `
+      padding: 16px 8px; border: 1px solid #ddd; border-radius: 8px; background: white;
+      font-size: 15px; font-weight: 500; cursor: pointer; transition: all 0.2s;
+    `;
+
+    // Highlight selected month
+    const isSelected = selectedMonth &&
+      selectedMonth.year === year &&
+      selectedMonth.month === month;
+
+    if (isSelected) {
+      btn.style.background = '#00d4aa';
+      btn.style.color = 'white';
+      btn.style.borderColor = '#00d4aa';
+    }
+
+    // Highlight current month (today)
+    const today = new Date();
+    if (year === today.getFullYear() && month === today.getMonth()) {
+      if (!isSelected) btn.style.fontWeight = '700';
+    }
+
+    btn.addEventListener('click', () => {
+      selectedMonth = { year, month };
+      generateMonthGrid(); // Re-render to update highlight
+    });
+
+    grid.appendChild(btn);
   }
+}
 
-  document.addEventListener('modalOpened', e => {
+  /* -------------------------- MODAL OPEN/CLOSE -------------------------- */
+  document.addEventListener('modalOpened', (e) => {
     if (e.detail === 'historyModal') {
+      console.log('[TransactionHistory] Modal opened by ModalManager');
       handleModalOpened();
     }
   });
 
-  document.addEventListener('modalClosed', e => {
-    if (e.detail === 'historyModal') {
-      state.open = false;
-      stopFallbackPolling();
+  async function handleModalOpened() {
+  state.open = true;
+  selectedMonth = null;
+
+  show(loadingEl);
+  hide(emptyEl);
+
+  // Always load latest (combines WS + server sync)
+  await loadLatestHistory();
+
+  if (state.items.length === 0) {
+    show(emptyEl);
+  }
+}
+const container = document.getElementById('historyList');
+
+function updateHeaders() {
+  const headers = container.querySelectorAll('.month-section-header');
+  
+  headers.forEach((header, i) => {
+    const nextHeader = headers[i + 1];
+    const headerRect = header.getBoundingClientRect();
+    const containerRect = container.getBoundingClientRect();
+
+    if (nextHeader) {
+      const nextRect = nextHeader.getBoundingClientRect();
+      let offset = 0;
+
+      if (nextRect.top - containerRect.top <= header.offsetHeight) {
+        offset = nextRect.top - containerRect.top - header.offsetHeight;
+      }
+
+      header.style.transform = `translateY(${offset}px)`;
     }
   });
+}
 
-  /* ──────────────────────────────── SEARCH ──────────────────────────────── */
-  if (searchInput) {
-    let timeout;
-    searchInput.addEventListener('input', e => {
-      clearTimeout(timeout);
-      timeout = setTimeout(() => {
-        state.searchTerm = e.target.value.trim();
-        if (state.open) applyTransformsAndRender();
-      }, 280);
-    });
-  }
 
-  /* ──────────────────────────────── DOWNLOAD ──────────────────────────────── */
-  downloadBtn?.addEventListener('click', () => {
-    const fmt = prompt('Download format (csv or json)?', 'csv')?.toLowerCase();
-    if (!fmt || !['csv','json'].includes(fmt)) return;
+  /* -------------------------- EVENT LISTENERS -------------------------- */
+  document.addEventListener('keydown', e => {
+    if (!state.open) return;
+    if (e.key === 'ArrowDown') historyList.scrollBy({ top: 120, behavior: 'smooth' });
+    if (e.key === 'ArrowUp') historyList.scrollBy({ top: -120, behavior: 'smooth' });
+  });
 
-    if (fmt === 'json') {
+  downloadBtn?.addEventListener('click', async () => {
+    const fmt = prompt('Download format: "csv" or "json"', 'csv');
+    if (!fmt) return;
+
+    if (fmt.toLowerCase() === 'json') {
       const blob = new Blob([JSON.stringify(state.items, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `flexgig-tx-${new Date().toISOString().slice(0,10)}.json`;
+      a.download = `transactions-${Date.now()}.json`;
       a.click();
       URL.revokeObjectURL(url);
+    } else {
+      const cols = ['Date', 'Description', 'Reference', 'Type', 'Amount', 'Status'];
+      const rows = [cols.join(',')];
+      state.items.forEach(tx => {
+        rows.push([
+          new Date(tx.time || tx.created_at).toLocaleString(),
+          `"${(tx.description || '').replace(/"/g, '""')}"`,
+          tx.id || '',
+          tx.type,
+          tx.amount,
+          tx.status || 'SUCCESS'
+        ].join(','));
+      });
+      const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `flexgig-transactions-${new Date().toISOString().slice(0,10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+  });
+
+  const searchInput = document.getElementById('historySearch');
+  if (searchInput) {
+    let t;
+    searchInput.addEventListener('input', e => {
+      clearTimeout(t);
+      t = setTimeout(() => {
+        state.searchTerm = e.target.value.trim();
+        applyTransformsAndRender();
+      }, 250);
+    });
+  }
+
+  /* -------------------------- PUBLIC API -------------------------- */
+  window.TransactionHistory = {
+    reload: () => {
+      state.items = [];
+      state.page = 1;
+      state.done = false;
+      state.cachePages.clear();
+      state.fullHistoryLoaded = false;
+      state.accurateTotalsCalculated = false;
+      state.preloaded = false;
+      state.preloadingInProgress = false;
+      if (state.open) handleModalOpened();
+    },
+    setApi: (url) => { CONFIG.apiEndpoint = url; },
+    setAuthToken: (token) => { window.APP_TOKEN = token; },
+    setUseBackend: (v) => { CONFIG.useBackend = !!v; },
+    addItems: (items) => {
+      state.items = state.items.concat(items);
+      applyTransformsAndRender();
+    },
+    getAll: () => state.items.slice()
+  };
+
+  // REAL-TIME TRANSACTION UPDATES — INSTANT, NO RELOAD
+// REAL-TIME TRANSACTION UPDATES — WORKS EVEN WHEN CLOSED
+document.addEventListener('transaction_update', (e) => {
+  const newTx = e?.detail;
+
+  if (!newTx) {
+    console.warn('[TransactionHistory] transaction_update received but no detail');
+    return;
+  }
+
+  console.log('[TransactionHistory] New transaction received via WS', newTx);
+
+  // Normalize the transaction format
+  const normalizedTx = {
+    id: newTx.id || newTx.reference || `ws-${Date.now()}`,
+    reference: newTx.reference || newTx.id,
+    type: newTx.type || (newTx.amount > 0 ? 'credit' : 'debit'),
+    amount: Math.abs(Number(newTx.amount || 0)),
+    description: newTx.description || newTx.narration || 'Transaction',
+    time: newTx.time || newTx.created_at || new Date().toISOString(),
+    status: newTx.status || 'SUCCESS',
+    provider: newTx.provider,
+    phone: newTx.phone
+  };
+
+  // ✅ Add to state even if modal is closed (keeps preload fresh)
+  state.items.unshift(normalizedTx);
+  console.log('[TransactionHistory] Transaction added to state (total:', state.items.length, ')');
+
+  // ✅ Only re-render if modal is currently open
+  if (state.open) {
+    console.log('[TransactionHistory] Modal is open → re-rendering with new transaction');
+    applyTransformsAndRender();
+    
+    // Scroll to top to show the new transaction
+    historyList.scrollTop = 0;
+  } else {
+    console.log('[TransactionHistory] Modal closed → transaction stored for next open');
+  }
+});
+
+// ────────────────────────────────────────────────
+// REAL-TIME TRANSACTIONS SUBSCRIPTION (minimal version)
+// ────────────────────────────────────────────────
+
+let txRealtimeChannel = null;
+let txIsSubscribing = false;
+let txRetryTimer = null;
+let lastTxHealthy = 0;
+
+const TX_RETRY_MS = 12000;
+const TX_HEALTHY_THRESHOLD = 7000;
+
+async function subscribeToTransactions(force = false) {
+  const now = Date.now();
+  if (txIsSubscribing) return;
+  if (!force && now - lastTxHealthy < TX_HEALTHY_THRESHOLD) return;
+
+  txIsSubscribing = true;
+
+  try {
+    // Get user uid (same logic you use elsewhere)
+    let uid = 
+      window.__USER_UID ||
+      localStorage.getItem('userId') ||
+      JSON.parse(localStorage.getItem('userData') || '{}')?.uid ||
+      null;
+
+    if (!uid) {
+      console.warn('[Tx Realtime] No UID found — cannot subscribe');
       return;
     }
 
-    // CSV
-    const rows = [['Date','Description','Reference','Type','Amount','Status']];
-    state.items.forEach(tx => {
-      rows.push([
-        new Date(tx.time).toISOString(),
-        `"${(tx.description||'').replace(/"/g,'""')}"`,
-        tx.reference || tx.id || '',
-        tx.type,
-        tx.amount,
-        tx.status || 'SUCCESS'
-      ]);
-    });
+    console.log('[Tx Realtime] Subscribing for user:', uid);
 
-    const csv = rows.map(r => r.join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `flexgig-tx-${new Date().toISOString().slice(0,10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  });
+    // Use the global supabaseClient you already have
+    if (!window.supabaseClient) {
+      console.error('[Tx Realtime] window.supabaseClient is missing');
+      return;
+    }
 
-  /* ──────────────────────────────── TRUNCATE ON RESIZE ──────────────────────────────── */
-  function trunTx() {
-    document.querySelectorAll('.tx-desc').forEach(el => {
-      const full = el.getAttribute('title') || el.textContent;
-      el.textContent = truncateDescription(full);
-    });
+    const client = window.supabaseClient;
+
+    // Create channel
+    const channelName = `public:transactions:user:${uid.replace(/-/g, '')}`;
+    txRealtimeChannel = client.channel(channelName);
+
+    txRealtimeChannel
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'transactions',
+          filter: `user_id=eq.${uid}`   // ← change to user_id / owner / whatever your real column is
+        },
+        (payload) => {
+          console.log('[Tx Realtime] Event received:', payload.eventType);
+
+          if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+            const raw = payload.new;
+
+            const normalized = {
+              id: raw.id || raw.reference || `realtime-${Date.now()}`,
+              reference: raw.reference || raw.id,
+              type: raw.type || (Number(raw.amount || 0) > 0 ? 'credit' : 'debit'),
+              amount: Math.abs(Number(raw.amount || 0)),
+              description: (raw.description || raw.narration || 'Transaction').trim(),
+              time: raw.created_at || raw.date || new Date().toISOString(),
+              status: (raw.status || 'SUCCESS').toUpperCase(),
+              provider: raw.provider,
+              phone: raw.phone
+            };
+
+            // Add to top if not duplicate
+            if (!state.items.some(item => item.id === normalized.id)) {
+              state.items.unshift(normalized);
+              console.log('[Tx Realtime] New tx added →', normalized.reference);
+
+              // Re-render only if modal is open
+              if (state.open) {
+                applyTransformsAndRender();
+                document.getElementById('historyList').scrollTop = 0;
+              }
+
+              // Also dispatch the event you already listen to
+              window.dispatchEvent(new CustomEvent('transaction_update', { detail: normalized }));
+            }
+          }
+        }
+      )
+      .subscribe((status) => {
+        console.log('[Tx Realtime] Status:', status);
+
+        if (status === 'SUBSCRIBED') {
+          lastTxHealthy = Date.now();
+          console.log('[Tx Realtime] → SUBSCRIBED SUCCESSFULLY');
+          if (txRetryTimer) {
+            clearTimeout(txRetryTimer);
+            txRetryTimer = null;
+          }
+        } else if (['CLOSED', 'CHANNEL_ERROR', 'TIMED_OUT'].includes(status)) {
+          console.warn('[Tx Realtime] Channel lost → retrying later');
+          txRetryTimer = setTimeout(() => subscribeToTransactions(true), TX_RETRY_MS);
+        }
+      });
+
+  } catch (err) {
+    console.error('[Tx Realtime] Setup failed:', err);
+    txRetryTimer = setTimeout(() => subscribeToTransactions(true), TX_RETRY_MS);
+  } finally {
+    txIsSubscribing = false;
   }
-  window.trunTx = trunTx;
-  window.addEventListener('resize', trunTx);
+}
 
-  /* ──────────────────────────────── START REALTIME EARLY ──────────────────────────────── */
-  subscribeToTransactions();
+// Start realtime subscription as early as possible
+subscribeToTransactions();
 
-  console.log('[TransactionHistory] Initialized — using window.supabaseClient • realtime first • no bulk load on open');
+// Also try again when modal opens (in case it failed earlier)
+const originalHandleModalOpened = handleModalOpened;
+handleModalOpened = async function() {
+  await originalHandleModalOpened.apply(this, arguments);
+  subscribeToTransactions(true);   // force retry on open
+};
+
+  showStateUI();
+  updateMonthDisplay();
+  console.log('[TransactionHistory] READY - Controlled by ModalManager');
+
+  loadLatestHistory()
+
+  function trunTx() {
+    const rows = document.querySelectorAll('.tx-row');
+
+    rows.forEach(row => {
+      const desc = row.querySelector('.tx-desc');
+      if (!desc) return;
+
+      if (!desc.dataset.fullText) {
+        desc.dataset.fullText = desc.textContent;
+      }
+
+      let fullText = desc.dataset.fullText;
+      let maxChars = 25;
+
+      const width = window.innerWidth;
+
+      if (width >= 640 && width < 1024) {
+        maxChars = 30;
+      } else if (width >= 1024) {
+        maxChars = 40;
+      }
+
+      if (fullText.length > maxChars) {
+        desc.textContent = fullText.slice(0, maxChars) + '…';
+      } else {
+        desc.textContent = fullText;
+      }
+    }); 
+  }
+  window.trunTx = window.trunTx || trunTx;
+
+  window.trunTx();
+  window.addEventListener('resize', window.trunTx);
 
 })();
