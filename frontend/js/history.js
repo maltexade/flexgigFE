@@ -1007,57 +1007,90 @@ function renderChunked(groupedMonths) {
 
 /* -------------------------- FALLBACK: LOAD FROM API ONLY IF REALTIME FAILS -------------------------- */
 async function loadLatestHistoryAsFallback() {
-  // Prevent duplicate calls if we already have data
   if (state.fullHistoryLoaded) {
-    console.log('[Tx Fallback] Already have loaded data — skipping API call');
+    console.log('[Tx Fallback] Already fully loaded — skipping');
     return;
   }
 
-  console.log('[Tx Fallback] Realtime not working → loading latest from API');
+  console.log('[Tx Fallback] Realtime failed → loading from API (page 1, limit 200)');
 
-  let allTx = state.items.slice(); // Start with whatever realtime gave us
+  show(loadingEl);
+  hide(emptyEl);
+
+  let allTx = state.items.slice();
 
   try {
-    // Fetch only the most recent page
     const data = await safeFetch(`${CONFIG.apiEndpoint}?limit=200&page=1`);
-    const newItems = data.items || [];
+    const apiItems = data.items || [];
 
-    if (newItems.length > 0) {
-      const existingIds = new Set(allTx.map(tx => tx.id));
-      const trulyNew = newItems.filter(tx => !existingIds.has(tx.id || tx.reference));
+    if (apiItems.length === 0) {
+      console.log('[Tx Fallback] API returned no items');
+    } else {
+      // Merge: update existing + add truly new
+      const existingById = new Map(allTx.map(tx => [tx.id, tx]));
 
-      if (trulyNew.length > 0) {
-        allTx.unshift(...trulyNew);
-        console.log(`[Tx Fallback] Added ${trulyNew.length} new items from API`);
-      }
+      apiItems.forEach(raw => {
+        const id = raw.id || raw.reference;
+        if (!id) return;
+
+        const normalized = {
+          id,
+          reference: raw.reference || raw.id,
+          type: raw.type || (Number(raw.amount) > 0 ? 'credit' : 'debit'),
+          amount: Math.abs(Number(raw.amount || 0)),
+          description: (raw.description || raw.narration || 'Transaction')
+            .replace(/\s*\(pending\)\s*/gi, '')
+            .trim(),
+          time: raw.time || raw.created_at || new Date().toISOString(),
+          status: (raw.status || 'SUCCESS').toUpperCase(),
+          provider: raw.provider,
+          phone: raw.phone
+        };
+
+        // Special refund fix: force credit type + refund icon trigger
+        if (normalized.status.toLowerCase().includes('refund') || 
+            normalized.status.toLowerCase() === 'refunded') {
+          normalized.type = 'credit';
+          normalized.description = 'Refund for Failed Data'; // optional fixed text
+          console.log('[Tx Fallback] Forced refund → credit type + fixed desc');
+        }
+
+        if (existingById.has(id)) {
+          // UPDATE existing row (e.g. status change to refund/failed/success)
+          console.log('[Tx Fallback] Updating existing tx:', id, 'new status:', normalized.status);
+          existingById.set(id, {
+            ...existingById.get(id),       // keep original
+            status: normalized.status,     // update status
+            type: normalized.type,         // allow credit override for refund
+            description: normalized.description.includes('Refund') 
+              ? normalized.description      // allow refund desc
+              : existingById.get(id).description  // protect original for others
+          });
+        } else {
+          // ADD new row
+          console.log('[Tx Fallback] Adding new tx:', id);
+          allTx.unshift(normalized);
+          existingById.set(id, normalized);
+        }
+      });
+
+      // Rebuild array from map to preserve order
+      allTx = Array.from(existingById.values()).sort((a, b) => 
+        new Date(b.time) - new Date(a.time)
+      );
     }
+
+    state.items = allTx;
+    state.fullHistoryLoaded = true;
+    state.preloaded = true;
+
+    applyTransformsAndRender();
+    console.log('[Tx Fallback] Success — total items now:', state.items.length);
   } catch (err) {
-    console.warn('[Tx Fallback] API fetch failed:', err);
-    // Optionally show error UI here
-    // show(errorEl);
-    return; // Don't mark as loaded if failed
+    console.error('[Tx Fallback] API fetch failed:', err);
+  } finally {
+    hide(loadingEl);
   }
-
-  // Normalize (same as before)
-  state.items = allTx.map(raw => ({
-    id: raw.id || raw.reference,
-    reference: raw.reference || raw.id,
-    type: raw.type || (Number(raw.amount) > 0 ? 'credit' : 'debit'),
-    amount: Math.abs(Number(raw.amount || 0)),
-    description: (raw.description || raw.narration || 'Transaction')
-      .replace(/\s*\(pending\)\s*/gi, '')
-      .trim(),
-    time: raw.time || raw.created_at || new Date().toISOString(),
-    status: raw.status || 'SUCCESS',
-    provider: raw.provider,
-    phone: raw.phone
-  }));
-
-  state.fullHistoryLoaded = true;
-  state.preloaded = true;
-
-  applyTransformsAndRender();
-  hide(loadingEl);
 }
 window.loadLatestHistoryAsFallback = loadLatestHistoryAsFallback;
 
