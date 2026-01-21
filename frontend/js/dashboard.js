@@ -36,6 +36,7 @@ const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 window.supabaseClient = supabaseClient;   
+window.createClient = createClient; 
 
 
     // NUCLEAR OPTION: Total scroll control - disables restore, forces top, blocks jumps
