@@ -1613,11 +1613,15 @@ async function subscribeToTransactions(force = false) {
     // UPDATE: merge new data into existing item (especially status)
     console.log('[Tx Realtime] Updating existing tx:', txId, 'new status:', normalized.status);
 
+    const existingTx = state.items[existingIndex];
+
     // Preserve original time/description if not changed, but update status + anything new
     state.items[existingIndex] = {
+      ...existingTx,
       ...state.items[existingIndex],       // keep old fields
       ...normalized,                       // override with new values
-      status: normalized.status            // always take latest status
+      status: normalized.status,            // always take latest status
+      description: existingTx.description
     };
 
     // Re-render if modal is open
