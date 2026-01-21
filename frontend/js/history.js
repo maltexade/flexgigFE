@@ -1586,7 +1586,6 @@ async function subscribeToTransactions(force = false) {
         },
         (payload) => {
   console.log('[Tx Realtime] 🔔 EVENT RECEIVED:', payload.eventType);
-  console.log('[Tx Realtime] Payload:', JSON.stringify(payload, null, 2));
 
   if (payload.eventType !== 'INSERT' && payload.eventType !== 'UPDATE') return;
 
@@ -1606,32 +1605,44 @@ async function subscribeToTransactions(force = false) {
 
   const txId = normalized.id;
 
-  // Find if this transaction already exists in our list
   const existingIndex = state.items.findIndex(t => t.id === txId);
 
   if (existingIndex !== -1) {
-    // UPDATE: merge new data into existing item (especially status)
-    console.log('[Tx Realtime] Updating existing tx:', txId, 'new status:', normalized.status);
-
+    // UPDATE: smart merge — allow description update only if it's meaningful
     const existingTx = state.items[existingIndex];
 
-    // Preserve original time/description if not changed, but update status + anything new
+    console.log('[Tx Realtime] Updating existing tx:', txId);
+
+    // Decide whether to take the new description
+    let finalDescription = existingTx.description;
+
+    // If new description is better/more final (customize this logic)
+    if (normalized.description && 
+        normalized.description !== existingTx.description && 
+        !existingTx.description.toLowerCase().includes('pending')) {
+      // Example: only update if old one was "pending" related
+      if (existingTx.description.toLowerCase().includes('pending') || 
+          existingTx.description.toLowerCase().includes('processing')) {
+        finalDescription = normalized.description;  // e.g. "Data purchase"
+        console.log('[Tx Realtime] Description upgraded:', finalDescription);
+      }
+    }
+
     state.items[existingIndex] = {
-      ...existingTx,
-      ...state.items[existingIndex],       // keep old fields
-      ...normalized,                       // override with new values
-      status: normalized.status,            // always take latest status
-      description: existingTx.description
+      ...existingTx,                      // keep original fields
+      status: normalized.status,          // always update status
+      description: finalDescription,      // controlled update
+      // Add other fields if needed:
+      // provider: normalized.provider,
+      // phone: normalized.phone,
+      // but never blindly overwrite everything
     };
 
-    // Re-render if modal is open
     if (state.open) {
       applyTransformsAndRender();
-      // Optional: scroll to the updated item if you want to highlight it
-      // document.querySelector(`[data-tx-id="${txId}"]`)?.scrollIntoView({ behavior: 'smooth' });
     }
   } else if (payload.eventType === 'INSERT') {
-    // INSERT: only add if truly new
+    // New transaction — add full object
     console.log('[Tx Realtime] Adding new tx:', normalized.reference);
     state.items.unshift(normalized);
 
@@ -1641,7 +1652,7 @@ async function subscribeToTransactions(force = false) {
     }
   }
 
-  // Always dispatch event (your existing listener will handle toast/sound/etc. if needed)
+  // Keep dispatching event
   window.dispatchEvent(new CustomEvent('transaction_update', { detail: normalized }));
 }
       )
