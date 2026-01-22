@@ -1808,9 +1808,8 @@ subscribeToTransactions();
   // ────────────────────────────────────────────────
 
   function renderDashboardRecent() {
-    const listEl   = document.getElementById('dashboardRecentTxList');
-    const emptyEl  = document.getElementById('dashboardNoTx');
-    const viewAll  = document.getElementById('view-all-transactions');
+    const listEl   = document.getElementById('dbRecentTransactionsHolder');  // ← CHANGED
+    const emptyEl  = document.getElementById('dbNoRecentActivity');
 
     // ✅ CRITICAL: Exit safely if elements don't exist (not on dashboard page)
     if (!listEl) {
@@ -1877,9 +1876,10 @@ subscribeToTransactions();
       maximumFractionDigits: 2
     });
 
-    const totalFundedEl = document.getElementById('totalFunded');
-    const totalSpentEl = document.getElementById('totalSpent');
-    const totalTxCountEl = document.getElementById('totalTxCount');
+     const totalFundedEl = document.getElementById('dbTotalFundedDisplay');   // ← CHANGED
+  const totalSpentEl = document.getElementById('dbTotalSpentDisplay');     // ← CHANGED
+  const totalTxCountEl = document.getElementById('dbTotalTxCountDisplay'); // ← CHANGED
+
 
     if (totalFundedEl) totalFundedEl.textContent = fmt(inAmt);
     if (totalSpentEl) totalSpentEl.textContent = fmt(outAmt);
@@ -1916,6 +1916,7 @@ subscribeToTransactions();
 
   // Expose for manual calls if needed
   window.renderDashboardRecent = renderDashboardRecent;
+  window.initDashboard = initDashboard;
 
 
 })();
