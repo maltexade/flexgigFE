@@ -1345,15 +1345,31 @@ function createMonthPickerModal() {
   state.open = true;
   selectedMonth = null;
 
-  // Fast open: no loading spinner, show empty or "connecting" state
-  hide(loadingEl);
-  if (state.items.length === 0) {
-    show(emptyEl); // or show a custom "Connecting realtime..." element if you add one
+  // If we already have data from realtime, show it immediately
+  if (state.items.length > 0) {
+    hide(loadingEl);
+    hide(emptyEl);
+    applyTransformsAndRender();
+  } 
+  // Otherwise show loading and fetch from API as backup
+  else {
+    show(loadingEl);
+    hide(emptyEl);
+    
+    // Try realtime first (non-blocking)
+    subscribeToTransactions(true);
+    
+    // But also load from API as backup after 2 seconds if realtime hasn't delivered
+    setTimeout(() => {
+      if (state.items.length === 0 && state.open) {
+        console.log('[TransactionHistory] Realtime slow/failed → loading from API');
+        loadLatestHistoryAsFallback();
+      }
+    }, 2000);
   }
 
-  // Force realtime retry (in case it failed earlier)
+  // Always try to reconnect realtime (in case it was disconnected)
   subscribeToTransactions(true);
-  // NO loadLatestHistory() call here anymore
 }
 const container = document.getElementById('historyList');
 
