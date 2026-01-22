@@ -799,8 +799,8 @@
 .dash-tx-section-wrapper {
   background: #121212;
   border-radius: 14px;
-  padding: 20px;
-  margin: 0 0 28px;
+  padding: 10px;
+  margin: 10px 0 28px;
 }
 
 .dash-tx-header-row {
@@ -857,6 +857,11 @@
   margin-bottom: 5px;
 }
 
+.db-recent-tx-container {
+  border-radius: 10px;
+  padding: 5px;
+}
+
 
 .db-recent-tx-container .tx-item {
   padding: 12px 0;
@@ -875,7 +880,7 @@
 
 .db-recent-tx-container .tx-icon {
   width: 36px;
-  height: 46px;
+  height: 40px;
   margin-right: 14px;
   flex-shrink: 0;
 }
@@ -886,7 +891,7 @@
 }
 
 .db-recent-tx-container .tx-amount {
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 600;
 }
 
@@ -896,16 +901,19 @@
 }
 
 .db-recent-tx-container .tx-status {
-  font-size: 11px;
+  font-size: 9px;
   padding: 3px 9px;
   border-radius: 12px;
 }
 
 /* Status colors – slightly adjusted green for freshness */
-.db-recent-tx-container .tx-status[data-status="success"],
-.db-recent-tx-container .tx-status[data-status="refund"] {
+.db-recent-tx-container .tx-status[data-status="success"] {
   color: #00e0b8;
   background: rgba(0, 224, 184, 0.14);
+}
+.db-recent-tx-container .tx-status[data-status="refund"] {
+  color: #ffffff;
+  background: #FB923C;
 }
 
 .db-recent-tx-container .tx-status[data-status="failed"] {
