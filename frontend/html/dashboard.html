@@ -538,11 +538,23 @@
     type="button"
     class="dash-tx-view-full-link"
     id="dashViewAllTxBtn"
+    onclick="
+      console.log('[Button Clicked] View All was clicked!');
+      if (typeof window.openHistoryModal === 'function') {
+        window.openHistoryModal();
+        console.log('History modal function called');
+      } else {
+        ModalManager?.openModal('historyModal');
+        console.log('Fallback: ModalManager opened historyModal. Open modals:', ModalManager?.getOpenModals());
+      }
+      return false;
+    "
   >
     <span>View All</span>
-  <span class="arrow">→</span>
+    <span class="arrow">→</span>
   </button>
 </div>
+
 
 
   <!-- Compact recent list container -->
