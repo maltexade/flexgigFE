@@ -1698,6 +1698,7 @@ async function subscribeToTransactions(force = false) {
     if (state.open) {
       applyTransformsAndRender();
     }
+    renderDashboardRecent();
   } else if (payload.eventType === 'INSERT') {
     console.log('[Tx Realtime] Adding new tx:', normalized.reference);
     state.items.unshift(normalized);
