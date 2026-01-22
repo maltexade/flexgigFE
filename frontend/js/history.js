@@ -123,6 +123,31 @@ function generateFakeTransactions() {
     preloadingInProgress: false
   };
 
+  if (modal) {
+  const modalObserver = new MutationObserver((mutations) => {
+    mutations.forEach((mutation) => {
+      if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
+        const isHidden = modal.classList.contains('hidden');
+        if (!isHidden && !state.open) {
+          console.log('[TransactionHistory] Modal shown via observer → handling open');
+          handleModalOpened();
+        } else if (isHidden && state.open) {
+          console.log('[TransactionHistory] Modal hidden via observer → setting state.open = false');
+          state.open = false;
+        }
+      }
+    });
+  });
+
+  modalObserver.observe(modal, { attributes: true, attributeFilter: ['class'] });
+
+  // Initial check (if modal already open on load)
+  if (!modal.classList.contains('hidden')) {
+    console.log('[TransactionHistory] Modal already open on init → handling');
+    handleModalOpened();
+  }
+}
+
   /* -------------------------- MONTH FILTER STATE - DEFAULT TO CURRENT MONTH -------------------------- */
   const today = new Date();
   let selectedMonth = null; // No filter by default
