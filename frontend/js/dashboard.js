@@ -3647,6 +3647,7 @@ async function onDashboardLoad() {
   setupBroadcastSubscription();
   subscribeToWalletBalance();
   loadLatestHistoryAsFallback();
+  renderDashboardRecent();
 
 
 
