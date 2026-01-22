@@ -1096,6 +1096,7 @@ async function loadLatestHistoryAsFallback() {
     state.preloaded = true;
 
     applyTransformsAndRender();
+    renderDashboardRecent();
     console.log('[Tx Fallback] Success — total items now:', state.items.length);
   } catch (err) {
     console.error('[Tx Fallback] API fetch failed:', err.message || err);
