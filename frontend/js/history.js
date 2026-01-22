@@ -1096,6 +1096,7 @@ async function loadLatestHistoryAsFallback() {
     state.preloaded = true;
 
     applyTransformsAndRender();
+    renderDashboardRecent();
     console.log('[Tx Fallback] Success — total items now:', state.items.length);
   } catch (err) {
     console.error('[Tx Fallback] API fetch failed:', err.message || err);
@@ -1697,6 +1698,7 @@ async function subscribeToTransactions(force = false) {
     if (state.open) {
       applyTransformsAndRender();
     }
+    renderDashboardRecent();
   } else if (payload.eventType === 'INSERT') {
     console.log('[Tx Realtime] Adding new tx:', normalized.reference);
     state.items.unshift(normalized);
@@ -1802,5 +1804,121 @@ subscribeToTransactions();
   window.addEventListener('resize', window.trunTx);
 
   
+
+ // ────────────────────────────────────────────────
+  // DASHBOARD – 10 MOST RECENT TRANSACTIONS + TOTALS
+  // ────────────────────────────────────────────────
+
+  function renderDashboardRecent() {
+    const listEl   = document.getElementById('dbRecentTransactionsHolder');  // ← CHANGED
+    const emptyEl  = document.getElementById('dbNoRecentActivity');
+
+    // ✅ CRITICAL: Exit safely if elements don't exist (not on dashboard page)
+    if (!listEl) {
+      console.log('[Dashboard] dashboardRecentTxList not found - skipping render');
+      return;
+    }
+
+    listEl.innerHTML = '';
+
+    if (state.items.length === 0) {
+      emptyEl?.classList.remove('hidden');
+      updateDashboardTotals(0, 0, 0);
+      return;
+    }
+
+    emptyEl?.classList.add('hidden');
+
+    // Take newest 10
+    const recent10 = state.items.slice(0, 10);
+
+    const fragment = document.createDocumentFragment();
+
+    recent10.forEach(tx => {
+      const node = makeTxNode(tx);
+
+      // Make it more compact for dashboard
+      const timeEl = node.querySelector('.tx-time');
+      if (timeEl) timeEl.style.fontSize = '12px';
+
+      const descEl = node.querySelector('.tx-desc');
+      if (descEl) descEl.style.fontSize = '14px';
+
+      const amountEl = node.querySelector('.tx-amount');
+      if (amountEl) amountEl.style.fontSize = '15px';
+
+      // Keep click to show receipt
+      node.addEventListener('click', (e) => {
+        e.preventDefault();
+        showTransactionReceipt(tx);
+      });
+
+      fragment.appendChild(node);
+    });
+
+    listEl.appendChild(fragment);
+
+    // Compute totals from ALL items (not just 10)
+    let totalIn    = 0;
+    let totalOut   = 0;
+    let totalCount = state.items.length;
+
+    state.items.forEach(tx => {
+      const amt = Math.abs(Number(tx.amount) || 0);
+      if (tx.type === 'credit') totalIn  += amt;
+      else                     totalOut += amt;
+    });
+
+    updateDashboardTotals(totalIn, totalOut, totalCount);
+  }
+
+  function updateDashboardTotals(inAmt, outAmt, count) {
+    const fmt = (n) => '₦' + Number(n).toLocaleString('en-NG', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+
+     const totalFundedEl = document.getElementById('dbTotalFundedDisplay');   // ← CHANGED
+  const totalSpentEl = document.getElementById('dbTotalSpentDisplay');     // ← CHANGED
+  const totalTxCountEl = document.getElementById('dbTotalTxCountDisplay'); // ← CHANGED
+
+
+    if (totalFundedEl) totalFundedEl.textContent = fmt(inAmt);
+    if (totalSpentEl) totalSpentEl.textContent = fmt(outAmt);
+    if (totalTxCountEl) totalTxCountEl.textContent = count.toLocaleString('en-NG');
+  }
+
+  // ✅ CRITICAL: Only call if we're on the dashboard page
+  function initDashboard() {
+    if (document.getElementById('dashboardRecentTxList')) {
+      console.log('[Dashboard] Initializing dashboard view');
+      renderDashboardRecent();
+    } else {
+      console.log('[Dashboard] Not on dashboard page - skipping initial render');
+    }
+  }
+
+  // Run once on load (with safety check)
+  initDashboard();
+
+  // Auto-update when new transaction arrives
+  document.addEventListener('transaction_update', () => {
+    // Only render if we're on dashboard
+    if (document.getElementById('dashboardRecentTxList')) {
+      renderDashboardRecent();
+    }
+  });
+
+  // Also update after full history load / filter change
+  window.addEventListener('transactionHistoryUpdated', () => {
+    if (document.getElementById('dashboardRecentTxList')) {
+      renderDashboardRecent();
+    }
+  });
+
+  // Expose for manual calls if needed
+  window.renderDashboardRecent = renderDashboardRecent;
+  window.initDashboard = initDashboard;
+
 
 })();
