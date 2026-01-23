@@ -1379,6 +1379,9 @@ function createMonthPickerModal() {
   // Force realtime retry (in case it failed earlier)
   subscribeToTransactions(true);
   // NO loadLatestHistory() call here anymore
+
+  applyTransformsAndRender();
+  console.log('[TransactionHistory] Modal opened → rendered current state (items:', state.items.length, ')');
 }
 const container = document.getElementById('historyList');
 
