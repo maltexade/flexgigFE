@@ -5608,8 +5608,10 @@ async function loadAllPlansOnce() {
 }
 
 
+// dashboard.js - ADD THESE FUNCTIONS / UPDATES
+
 // ==========================================
-// REWRITTEN: renderDashboardPlans (FIXED - adds data-provider)
+// FIXED renderDashboardPlans - ADDS SPECIAL FOR MTN AS THIRD PLAN
 // ==========================================
 async function renderDashboardPlans(provider) {
   console.log('%c[RENDER] Starting renderDashboardPlans for:', 'color:cyan;font-weight:bold', provider);
@@ -5642,10 +5644,13 @@ async function renderDashboardPlans(provider) {
     const awoof = providerPlans.find(p => p.category === 'AWOOF');
     const cg = providerPlans.find(p => p.category === 'CG');
     const gifting = providerPlans.find(p => p.category === 'GIFTING');
+    
+    // 🔥 NEW: Find special plan for MTN
+    const special = providerPlans.find(p => p.category === 'SPECIAL');
 
-    console.log('[RENDER] Categories found →', { awoof: !!awoof, cg: !!cg, gifting: !!gifting });
+    console.log('[RENDER] Categories found →', { awoof: !!awoof, cg: !!cg, gifting: !!gifting, special: !!special });
 
-    // AIRTEL: Show AWOOF + CG
+    // AIRTEL: AWOOF + CG
     if (provider === 'airtel') {
       if (awoof) {
         plansToShow.push(awoof);
@@ -5670,7 +5675,7 @@ async function renderDashboardPlans(provider) {
         console.log('[RENDER] Added GIFTING plan');
       }
     }
-    // MTN: AWOOF + GIFTING
+    // MTN: AWOOF + GIFTING + SPECIAL (as third)
     else if (provider === 'mtn') {
       if (awoof) {
         plansToShow.push(awoof);
@@ -5679,6 +5684,10 @@ async function renderDashboardPlans(provider) {
       if (gifting) {
         plansToShow.push(gifting);
         console.log('[RENDER] Added GIFTING plan');
+      }
+      if (special) {
+        plansToShow.push(special);
+        console.log('[RENDER] Added SPECIAL plan as third');
       }
     }
   }
@@ -5696,18 +5705,23 @@ async function renderDashboardPlans(provider) {
     box.className = `plan-box ${provider}`;
     box.dataset.id = plan.plan_id;
     
-    // 🔥 FIX #1: ADD data-provider attribute
+    // 🔥 FIX: ADD data-provider attribute
     box.dataset.provider = provider;
 
     const tag = (plan.category && !['STANDARD', 'NORMAL'].includes(plan.category))
       ? `<span class="plan-type-tag">${plan.category}</span>`
       : '';
 
+    // 🔥 NEW: Special badge for the special plan
+    const specialBadge = plan.category === 'SPECIAL' 
+      ? `<span class="plan-type-tag special-tag">LIMITED</span>`
+      : tag;
+
     box.innerHTML = `
       <div class="plan-price plan-amount">₦${plan.price}</div>
       <div class="plan-data plan-gb">${plan.data || plan.data_amount}</div>
       <div class="plan-duration">${plan.validity || plan.duration}</div>
-      ${tag}
+      ${specialBadge}
     `;
 
     plansRow.insertBefore(box, seeAllBtn);
@@ -5720,8 +5734,7 @@ async function renderDashboardPlans(provider) {
 }
 
 // ==========================================
-// FIX 2: GLO GIFTING section fix - renderModalPlans
-// WITH PRICE SORTING (smallest to biggest)
+// FIXED renderModalPlans - ADDS SPECIAL FOR MTN AS THIRD SECTION
 // ==========================================
 async function renderModalPlans(provider) {
   console.log('%c[RENDER MODAL] Starting for:', 'color:purple;font-weight:bold', provider);
@@ -5767,14 +5780,18 @@ async function renderModalPlans(provider) {
   const awoofPlans = sortByPrice(providerPlans.filter(p => p.category === 'AWOOF'));
   const cgPlans = sortByPrice(providerPlans.filter(p => p.category === 'CG'));
   const giftingPlans = sortByPrice(providerPlans.filter(p => p.category === 'GIFTING'));
+  
+  // 🔥 NEW: Special plans
+  const specialPlans = sortByPrice(providerPlans.filter(p => p.category === 'SPECIAL'));
 
   console.log(`[RENDER MODAL] ${provider.toUpperCase()} categories:`, {
     awoof: awoofPlans.length,
     cg: cgPlans.length,
-    gifting: giftingPlans.length
+    gifting: giftingPlans.length,
+    special: specialPlans.length
   });
 
-  // MTN: AWOOF + GIFTING
+  // MTN: AWOOF + GIFTING + SPECIAL (as third section)
   if (provider === 'mtn') {
     if (awoofSection) {
       if (awoofPlans.length > 0) {
@@ -5795,6 +5812,29 @@ async function renderModalPlans(provider) {
         giftingSection.style.display = 'block';
       } else {
         giftingSection.style.display = 'none';
+      }
+    }
+
+    // 🔥 NEW: Add special section for MTN (clone gifting and modify)
+    let specialSection = modal.querySelector('.plan-section.special-section');
+    if (!specialSection && specialPlans.length > 0) {
+      specialSection = giftingSection.cloneNode(true);
+      specialSection.classList.add('special-section');
+      specialSection.classList.remove('gifting-section');
+      specialSection.querySelector('.plans-grid').innerHTML = ''; // Clear cloned plans
+      modal.querySelector('.plan-modal-content').appendChild(specialSection);
+      console.log('[RENDER MODAL] Created new SPECIAL section for MTN');
+    }
+
+    if (specialSection) {
+      if (specialPlans.length > 0) {
+        fillPlanSection(specialSection, provider, 'special', specialPlans,
+          'MTN SPECIAL LIMITED', svgShapes[provider]
+        );
+        specialSection.style.display = 'block';
+        console.log('[RENDER MODAL] SPECIAL section rendered with', specialPlans.length, 'plans');
+      } else {
+        specialSection.style.display = 'none';
       }
     }
   }
@@ -5822,7 +5862,7 @@ async function renderModalPlans(provider) {
       }
     }
   }
-  // GLO: CG + GIFTING (FIXED!)
+  // GLO: CG + GIFTING
   else if (provider === 'glo') {
     if (awoofSection) {
       if (cgPlans.length > 0) {
@@ -5841,14 +5881,12 @@ async function renderModalPlans(provider) {
       }
     }
 
-    // GLO GIFTING in second section
     if (giftingSection) {
       if (giftingPlans.length > 0) {
         fillPlanSection(giftingSection, provider, 'gifting', giftingPlans,
           'GLO GIFTING', svgShapes[provider]
         );
         giftingSection.style.display = 'block';
-        console.log('[RENDER MODAL] GLO GIFTING section rendered with', giftingPlans.length, 'plans');
       } else {
         giftingSection.style.display = 'none';
       }
@@ -5860,7 +5898,7 @@ async function renderModalPlans(provider) {
 }
 
 // ==========================================
-// REWRITTEN: fillPlanSection (FIXED - adds data-provider)
+// FIXED fillPlanSection - ADDS LIMITED TAG FOR SPECIAL
 // ==========================================
 function fillPlanSection(sectionEl, provider, subType, plans, title, svg) {
   sectionEl.setAttribute('data-provider', provider);
@@ -5874,13 +5912,19 @@ function fillPlanSection(sectionEl, provider, subType, plans, title, svg) {
     box.className = `plan-box ${provider}`;
     box.dataset.id = plan.plan_id;
     
-    // 🔥 FIX #2: ADD data-provider attribute to modal plans
+    // ADD data-provider attribute
     box.dataset.provider = provider;
+
+    // 🔥 NEW: Limited badge for special plans
+    const tag = (plan.category && !['STANDARD', 'NORMAL'].includes(plan.category))
+      ? `<span class="plan-type-tag">${plan.category === 'SPECIAL' ? 'LIMITED' : plan.category}</span>`
+      : '';
 
     box.innerHTML = `
       <div class="plan-amount">₦${plan.price}</div>
       <div class="plan-data">${plan.data || plan.data_amount}</div>
       <div class="plan-days">${plan.validity || plan.duration}</div>
+      ${tag}
     `;
 
     grid.appendChild(box);
@@ -5905,8 +5949,11 @@ window.fillPlanSection = fillPlanSection;
 window.loadAllPlansOnce = loadAllPlansOnce;
 
 console.log('%c✅ FIXED FUNCTIONS LOADED', 'color:lime;font-size:16px;font-weight:bold');
-console.log('%c✅ All plans now have data-provider attribute', 'color:lime;font-weight:bold');
-console.log('%c✅ Modal clicks should now work!', 'color:lime;font-weight:bold');
+console.log('%c✅ Special plan now appears in MTN dashboard (3rd) + modal (3rd section)', 'color:lime;font-weight:bold');
+console.log('%c✅ All plans have data-provider attribute', 'color:lime;font-weight:bold');
+console.log('%c✅ Special plans have "LIMITED" badge', 'color:lime;font-weight:bold');
+
+
 
 
 
