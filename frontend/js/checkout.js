@@ -237,7 +237,6 @@ function openCheckoutModal(data) {
   checkoutData = checkoutInfo;
   // Inside openCheckoutModal(), after checkoutData = checkoutInfo;
 localStorage.setItem('lastCheckoutPrice', checkoutInfo.price.toString());
-localStorage.setItem('lastCheckoutReference', result.reference || 'pending'); // optional, for cross-check
 
   const modal = document.getElementById('checkoutModal');
   const payBtn = document.getElementById('payBtn');
