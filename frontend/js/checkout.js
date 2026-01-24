@@ -366,6 +366,11 @@ async function continueCheckoutFlow() {
       return;
     }
 
+    // Force-save price again (extra safety)
+if (checkoutData && checkoutData.price && !isNaN(checkoutData.price)) {
+  localStorage.setItem('lastCheckoutPrice', checkoutData.price.toString());
+  console.log('[PRICE LOCK] Re-saved price before receipt:', checkoutData.price);
+}
     showProcessingReceipt(checkoutData);
 
     const result = await processPayment();
@@ -1145,8 +1150,26 @@ async function updateReceiptToSuccess(result) {
     
     document.getElementById('receipt-phone').textContent = data.number;
     document.getElementById('receipt-plan').textContent = `${data.dataAmount} / ${data.validity}`;
-    const safePrice = getSafeReceiptPrice();
-document.getElementById('receipt-amount').textContent = `₦${safePrice.toLocaleString('en-NG', { minimumFractionDigits: 2 })}`;
+    // In updateReceiptToSuccess() and updateReceiptToPending()
+const safePrice = getSafeReceiptPrice();
+console.log('[RECEIPT DEBUG]', {
+  safePriceFromHelper: safePrice,
+  _currentDataPrice: window._currentCheckoutData?.price,
+  localStoragePrice: localStorage.getItem('lastCheckoutPrice'),
+  elementExists: !!document.getElementById('receipt-amount')
+});
+
+const receiptAmountEl = document.getElementById('receipt-amount');
+if (receiptAmountEl) {
+  const formatted = `₦${safePrice.toLocaleString('en-NG', { minimumFractionDigits: 2 })}`;
+  receiptAmountEl.textContent = formatted;
+  // Force repaint to prevent any CSS/JS override
+  receiptAmountEl.style.opacity = '0';
+  setTimeout(() => { receiptAmountEl.style.opacity = '1'; }, 10);
+  console.log('[RECEIPT] Forced price update:', formatted);
+} else {
+  console.error('[RECEIPT] #receipt-amount element missing!');
+}
     document.getElementById('receipt-transaction-id').textContent = transactionRef;
     document.getElementById('receipt-balance').textContent = `₦${Number(data.new_balance || 0).toLocaleString()}`;
     document.getElementById('receipt-time').textContent = new Date().toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
@@ -1191,6 +1214,11 @@ document.getElementById('receipt-amount').textContent = `₦${safePrice.toLocale
       window.renderRecentTransactions(fallback);
     }
   }
+  // Clean up only after success is fully shown
+setTimeout(() => {
+  localStorage.removeItem('lastCheckoutPrice');
+  console.log('[PRICE CLEANUP] Removed lastCheckoutPrice after success');
+}, 2000);
 }
 
 function updateReceiptToFailed(errorMessage) {
@@ -1308,8 +1336,26 @@ function updateReceiptToPending() {
   document.getElementById('receipt-provider').innerHTML = `${svg} ${data.provider.toUpperCase()}`;
   document.getElementById('receipt-phone').textContent = data.number;
   document.getElementById('receipt-plan').textContent = `${data.dataAmount} / ${data.validity}`;
-  const safePrice = getSafeReceiptPrice();
-document.getElementById('receipt-amount').textContent = `₦${safePrice.toLocaleString('en-NG', { minimumFractionDigits: 2 })}`;
+  // In updateReceiptToSuccess() and updateReceiptToPending()
+const safePrice = getSafeReceiptPrice();
+console.log('[RECEIPT DEBUG]', {
+  safePriceFromHelper: safePrice,
+  _currentDataPrice: window._currentCheckoutData?.price,
+  localStoragePrice: localStorage.getItem('lastCheckoutPrice'),
+  elementExists: !!document.getElementById('receipt-amount')
+});
+
+const receiptAmountEl = document.getElementById('receipt-amount');
+if (receiptAmountEl) {
+  const formatted = `₦${safePrice.toLocaleString('en-NG', { minimumFractionDigits: 2 })}`;
+  receiptAmountEl.textContent = formatted;
+  // Force repaint to prevent any CSS/JS override
+  receiptAmountEl.style.opacity = '0';
+  setTimeout(() => { receiptAmountEl.style.opacity = '1'; }, 10);
+  console.log('[RECEIPT] Forced price update:', formatted);
+} else {
+  console.error('[RECEIPT] #receipt-amount element missing!');
+}
   document.getElementById('receipt-transaction-id').textContent = data.reference || 'N/A';
   document.getElementById('receipt-balance').textContent = `₦${Number(data.new_balance || 0).toLocaleString()}`;
   document.getElementById('receipt-time').textContent = new Date().toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
