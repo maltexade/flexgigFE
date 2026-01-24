@@ -22,7 +22,17 @@ const safeGetUserState = () => {
     return {};
   }
 };
-
+// Add this helper near the top of checkout.js
+function getSafeReceiptPrice() {
+  // Prefer the original checkoutData if still alive
+  if (window._currentCheckoutData && typeof window._currentCheckoutData.price === 'number') {
+    return window._currentCheckoutData.price;
+  }
+  
+  // Fallback to localStorage (persists even if window var is cleared)
+  const savedPrice = localStorage.getItem('lastCheckoutPrice');
+  return savedPrice ? Number(savedPrice) : 0;
+}
 
 // Synchronous PIN check using localStorage
 function checkPinExists(context = 'checkout') {
@@ -225,6 +235,9 @@ function openCheckoutModal(data) {
   }
 
   checkoutData = checkoutInfo;
+  // Inside openCheckoutModal(), after checkoutData = checkoutInfo;
+localStorage.setItem('lastCheckoutPrice', checkoutInfo.price.toString());
+localStorage.setItem('lastCheckoutReference', result.reference || 'pending'); // optional, for cross-check
 
   const modal = document.getElementById('checkoutModal');
   const payBtn = document.getElementById('payBtn');
@@ -899,7 +912,6 @@ window.openForgetPinFlow = async function openForgetPinFlow() {
     }
   });
 
-// PIN verification
 async function verifyPin(pin) {
   return await withLoader(async () => {
     try {
@@ -914,19 +926,27 @@ async function verifyPin(pin) {
         body: JSON.stringify({ pin })
       });
 
-      const data = await res.json().catch(() => ({}));
+      // ✅ SAFE PARSE
+      const raw = await res.text();
+      let data = {};
+      try {
+        data = raw ? JSON.parse(raw) : {};
+      } catch (_) {}
+
+      console.warn('[PIN VERIFY RESPONSE]', {
+        status: res.status,
+        code: data.code,
+        message: data.message
+      });
 
       // ✅ SUCCESS
       if (res.ok) {
         hideCheckoutPinModal();
-
-        if (window._checkoutPinResolve) {
-          window._checkoutPinResolve(true);
-        }
+        window._checkoutPinResolve?.(true);
         return;
       }
 
-      // ❌ HANDLE ERRORS BY CODE
+      // ❌ ERROR HANDLING
       switch (data.code) {
         case 'WRONG_PIN':
           showToast('Incorrect PIN. Try again.', 'error');
@@ -936,20 +956,19 @@ async function verifyPin(pin) {
         case 'PIN_NOT_SET':
           showToast('You have not set a PIN yet.', 'warning');
           hideCheckoutPinModal();
-          // optional: openSetPinModal();
           break;
 
         case 'PIN_RATE_LIMITED':
-          showToast('Too many attempts. Please wait and try again.', 'error');
-          break;
-
-        case 'PIN_SERVICE_UNAVAILABLE':
-          showToast('Network issue. Try again shortly.', 'error');
+          showToast('Too many attempts. Please wait.', 'error');
           break;
 
         case 'INVALID_SESSION':
           showToast('Session expired. Please login again.', 'error');
           forceLogout?.();
+          break;
+
+        case 'PIN_SERVICE_UNAVAILABLE':
+          showToast('Network issue. Try again shortly.', 'error');
           break;
 
         default:
@@ -958,12 +977,13 @@ async function verifyPin(pin) {
       }
 
     } catch (err) {
-      console.error('[verifyPin] network error:', err);
+      console.error('[verifyPin] fetch error:', err);
       showToast('Unable to verify PIN. Check your connection.', 'error');
       resetPin();
     }
   });
 }
+
 
 
   window.showCheckoutPinModal = showCheckoutPinModal;
@@ -1120,7 +1140,8 @@ async function updateReceiptToSuccess(result) {
     
     document.getElementById('receipt-phone').textContent = data.number;
     document.getElementById('receipt-plan').textContent = `${data.dataAmount} / ${data.validity}`;
-    document.getElementById('receipt-amount').textContent = `₦${Number(data.price).toLocaleString()}`;
+    const safePrice = getSafeReceiptPrice();
+document.getElementById('receipt-amount').textContent = `₦${safePrice.toLocaleString('en-NG', { minimumFractionDigits: 2 })}`;
     document.getElementById('receipt-transaction-id').textContent = transactionRef;
     document.getElementById('receipt-balance').textContent = `₦${Number(data.new_balance || 0).toLocaleString()}`;
     document.getElementById('receipt-time').textContent = new Date().toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
@@ -1186,9 +1207,6 @@ function updateReceiptToFailed(errorMessage) {
   const actions = document.getElementById('receipt-actions');
   actions.style.display = 'flex';
   actions.innerHTML = `
-    <button id="receipt-buy-again" style="flex:1; background:#ff4444; color:white; border:none; border-radius:50px; padding:14px; font-weight:600; margin-right:8px;">
-      Try Again
-    </button>
     <button id="receipt-done" style="flex:1; background:#333; color:white; border:none; border-radius:50px; padding:14px; font-weight:600;">
       Close
     </button>
@@ -1285,7 +1303,8 @@ function updateReceiptToPending() {
   document.getElementById('receipt-provider').innerHTML = `${svg} ${data.provider.toUpperCase()}`;
   document.getElementById('receipt-phone').textContent = data.number;
   document.getElementById('receipt-plan').textContent = `${data.dataAmount} / ${data.validity}`;
-  document.getElementById('receipt-amount').textContent = `₦${Number(data.price).toLocaleString()}`;
+  const safePrice = getSafeReceiptPrice();
+document.getElementById('receipt-amount').textContent = `₦${safePrice.toLocaleString('en-NG', { minimumFractionDigits: 2 })}`;
   document.getElementById('receipt-transaction-id').textContent = data.reference || 'N/A';
   document.getElementById('receipt-balance').textContent = `₦${Number(data.new_balance || 0).toLocaleString()}`;
   document.getElementById('receipt-time').textContent = new Date().toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
