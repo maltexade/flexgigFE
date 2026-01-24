@@ -237,6 +237,11 @@ function openCheckoutModal(data) {
   checkoutData = checkoutInfo;
   // Inside openCheckoutModal(), after checkoutData = checkoutInfo;
 localStorage.setItem('lastCheckoutPrice', checkoutInfo.price.toString());
+console.log('[PRICE DEBUG] Saved to localStorage:', {
+  price: checkoutInfo.price,
+  savedValue: localStorage.getItem('lastCheckoutPrice'),
+  isSpecial: checkoutInfo.planId.includes('special') || checkoutInfo.planName?.toLowerCase().includes('special')
+});
 
   const modal = document.getElementById('checkoutModal');
   const payBtn = document.getElementById('payBtn');
