@@ -6195,7 +6195,7 @@ function selectPlanById(id) {
 
   // Clear previous (ONLY remove 'selected' — keep provider class!)
   document.querySelectorAll(`.plan-box.selected[data-provider="${activeProvider}"]`).forEach(p => {
-    p.classList.remove('selected', activeProvider);
+    p.classList.remove('selected');
     console.log('[SELECT] Cleared:', p.dataset.id);
   });
 
