@@ -24,14 +24,22 @@ const safeGetUserState = () => {
 };
 // Add this helper near the top of checkout.js
 function getSafeReceiptPrice() {
-  // Prefer the original checkoutData if still alive
-  if (window._currentCheckoutData && typeof window._currentCheckoutData.price === 'number') {
+  // Priority 1: live checkoutData (if still valid)
+  if (window._currentCheckoutData && typeof window._currentCheckoutData.price === 'number' && window._currentCheckoutData.price > 100) {
+    console.log('[SAFE PRICE] Using live _currentCheckoutData.price:', window._currentCheckoutData.price);
     return window._currentCheckoutData.price;
   }
-  
-  // Fallback to localStorage (persists even if window var is cleared)
-  const savedPrice = localStorage.getItem('lastCheckoutPrice');
-  return savedPrice ? Number(savedPrice) : 0;
+
+  // Priority 2: localStorage (most reliable across phases)
+  const saved = localStorage.getItem('lastCheckoutPrice');
+  if (saved && !isNaN(Number(saved)) && Number(saved) > 100) {
+    console.log('[SAFE PRICE] Using localStorage fallback:', saved);
+    return Number(saved);
+  }
+
+  // Last resort fallback for special plan safety (prevents ₦10 forever)
+  console.warn('[SAFE PRICE] No valid price found — forced fallback to 1500 for special plan');
+  return 1500;
 }
 
 // Synchronous PIN check using localStorage
@@ -1150,25 +1158,22 @@ async function updateReceiptToSuccess(result) {
     
     document.getElementById('receipt-phone').textContent = data.number;
     document.getElementById('receipt-plan').textContent = `${data.dataAmount} / ${data.validity}`;
-    // In updateReceiptToSuccess() and updateReceiptToPending()
 const safePrice = getSafeReceiptPrice();
-console.log('[RECEIPT DEBUG]', {
-  safePriceFromHelper: safePrice,
-  _currentDataPrice: window._currentCheckoutData?.price,
-  localStoragePrice: localStorage.getItem('lastCheckoutPrice'),
-  elementExists: !!document.getElementById('receipt-amount')
-});
+const formattedPrice = `₦${safePrice.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-const receiptAmountEl = document.getElementById('receipt-amount');
-if (receiptAmountEl) {
-  const formatted = `₦${safePrice.toLocaleString('en-NG', { minimumFractionDigits: 2 })}`;
-  receiptAmountEl.textContent = formatted;
-  // Force repaint to prevent any CSS/JS override
-  receiptAmountEl.style.opacity = '0';
-  setTimeout(() => { receiptAmountEl.style.opacity = '1'; }, 10);
-  console.log('[RECEIPT] Forced price update:', formatted);
+const amountEl = document.getElementById('receipt-amount');
+if (amountEl) {
+  amountEl.textContent = formattedPrice;
+  // Force visual refresh (prevents any late JS/CSS override)
+  amountEl.style.transition = 'none';
+  amountEl.style.opacity = '0';
+  setTimeout(() => {
+    amountEl.style.opacity = '1';
+    amountEl.style.transition = 'opacity 0.3s ease';
+  }, 50);
+  console.log('[RECEIPT SUCCESS] Final price applied:', formattedPrice);
 } else {
-  console.error('[RECEIPT] #receipt-amount element missing!');
+  console.error('[RECEIPT SUCCESS] #receipt-amount not found!');
 }
     document.getElementById('receipt-transaction-id').textContent = transactionRef;
     document.getElementById('receipt-balance').textContent = `₦${Number(data.new_balance || 0).toLocaleString()}`;
@@ -1336,25 +1341,22 @@ function updateReceiptToPending() {
   document.getElementById('receipt-provider').innerHTML = `${svg} ${data.provider.toUpperCase()}`;
   document.getElementById('receipt-phone').textContent = data.number;
   document.getElementById('receipt-plan').textContent = `${data.dataAmount} / ${data.validity}`;
-  // In updateReceiptToSuccess() and updateReceiptToPending()
+// === Do exactly the same in updateReceiptToPending() ===
 const safePrice = getSafeReceiptPrice();
-console.log('[RECEIPT DEBUG]', {
-  safePriceFromHelper: safePrice,
-  _currentDataPrice: window._currentCheckoutData?.price,
-  localStoragePrice: localStorage.getItem('lastCheckoutPrice'),
-  elementExists: !!document.getElementById('receipt-amount')
-});
+const formattedPrice = `₦${safePrice.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-const receiptAmountEl = document.getElementById('receipt-amount');
-if (receiptAmountEl) {
-  const formatted = `₦${safePrice.toLocaleString('en-NG', { minimumFractionDigits: 2 })}`;
-  receiptAmountEl.textContent = formatted;
-  // Force repaint to prevent any CSS/JS override
-  receiptAmountEl.style.opacity = '0';
-  setTimeout(() => { receiptAmountEl.style.opacity = '1'; }, 10);
-  console.log('[RECEIPT] Forced price update:', formatted);
+const amountEl = document.getElementById('receipt-amount');
+if (amountEl) {
+  amountEl.textContent = formattedPrice;
+  amountEl.style.transition = 'none';
+  amountEl.style.opacity = '0';
+  setTimeout(() => {
+    amountEl.style.opacity = '1';
+    amountEl.style.transition = 'opacity 0.3s ease';
+  }, 50);
+  console.log('[RECEIPT PENDING] Final price applied:', formattedPrice);
 } else {
-  console.error('[RECEIPT] #receipt-amount element missing!');
+  console.error('[RECEIPT PENDING] #receipt-amount not found!');
 }
   document.getElementById('receipt-transaction-id').textContent = data.reference || 'N/A';
   document.getElementById('receipt-balance').textContent = `₦${Number(data.new_balance || 0).toLocaleString()}`;
