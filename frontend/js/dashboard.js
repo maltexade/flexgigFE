@@ -5608,10 +5608,105 @@ async function loadAllPlansOnce() {
 }
 
 
-// dashboard.js - ADD THESE FUNCTIONS / UPDATES
+function syncSpecialPlanGradientState() {
+  console.log('%c[GRADIENT SYNC] Starting...', 'color:yellow;font-weight:bold');
+  
+  const specialPlans = document.querySelectorAll('.plan-box.mtn.special-plan');
+  console.log(`[GRADIENT SYNC] Found ${specialPlans.length} special plans`);
+  
+  specialPlans.forEach(plan => {
+    const isSelected = plan.classList.contains('selected');
+    console.log(`[GRADIENT SYNC] Plan ${plan.dataset.id} - Selected: ${isSelected}`);
+    
+    // Remove existing style to start fresh
+    const existingStyle = plan.querySelector('style');
+    if (existingStyle) {
+      existingStyle.remove();
+    }
+    
+    const gradientStyle = document.createElement('style');
+    
+    // ALWAYS include the FULL gradient definition
+    // Only change opacity/animation based on selected state
+    gradientStyle.textContent = `
+      .plan-box.mtn.special-plan[data-id="${plan.dataset.id}"]::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        border-radius: 16px;
+        padding: 2px;
+        background: conic-gradient(red, orange, yellow, cyan, red);
+        -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+        -webkit-mask-composite: xor;
+        mask-composite: exclude;
+        pointer-events: none;
+        z-index: 1;
+        transition: opacity 0.3s ease;  /* Smooth fade in/out */
+        opacity: ${isSelected ? '0' : '1'};
+        animation: ${isSelected ? 'none' : 'borderTrain 6s linear infinite, hueShift 10s linear infinite'};
+      }
+      
+      @keyframes borderTrain {
+        0% { background-position: 0% 50%; }
+        100% { background-position: 400% 50%; }
+      }
+      
+      @keyframes hueShift {
+        0% { filter: hue-rotate(0deg); }
+        100% { filter: hue-rotate(360deg); }
+      }
+    `;
+    
+    plan.appendChild(gradientStyle);
+    plan.style.position = 'relative';
+    plan.style.overflow = 'hidden';
+    
+    console.log(`[GRADIENT] ${isSelected ? 'OFF' : 'ON'} for:`, plan.dataset.id);
+  });
+  
+  console.log('%c[GRADIENT SYNC] Complete', 'color:lime;font-weight:bold');
+}
+
+
+
+window.syncSpecialPlanGradientState = window.syncSpecialPlanGradientState || syncSpecialPlanGradientState;
+
+
+function attach9mobileModalListeners() {
+  const modalPlans = document.querySelectorAll(
+    '.plan-modal-content .plan-box.ninemobile'
+  );
+
+  modalPlans.forEach(plan => {
+    // Remove old listener if exists
+    plan.removeEventListener('click', plan._forcedClickListener);
+
+    // Define new listener
+    const listener = e => {
+      console.log('[9MOBILE CLICK] Modal plan clicked', {
+        id: plan.dataset.id,
+        provider: plan.dataset.provider || 'ninemobile',
+        classes: plan.className
+      });
+
+      // Trigger existing plan handler
+      if (typeof window.handlePlanClick === 'function') {
+        handlePlanClick(e);
+      }
+    };
+
+    plan._forcedClickListener = listener;
+    plan.addEventListener('click', listener);
+  });
+
+  console.log(`[9MOBILE LISTENERS] ${modalPlans.length} plans are clickable`);
+}
+
+window.attach9mobileModalListeners = window.attach9mobileModalListeners || attach9mobileModalListeners;
+// dashboard.js - UPDATED FUNCTIONS (REPLACE EXISTING)
 
 // ==========================================
-// FIXED renderDashboardPlans - ADDS SPECIAL FOR MTN AS THIRD PLAN
+// FIXED renderDashboardPlans - SPECIAL FIRST FOR MTN (TWO PLANS TOTAL)
 // ==========================================
 async function renderDashboardPlans(provider) {
   console.log('%c[RENDER] Starting renderDashboardPlans for:', 'color:cyan;font-weight:bold', provider);
@@ -5641,53 +5736,38 @@ async function renderDashboardPlans(provider) {
     plansToShow = providerPlans.slice(0, 2);
     console.log('[RENDER] 9mobile → showing first 2 plans');
   } else {
-    const awoof = providerPlans.find(p => p.category === 'AWOOF');
-    const cg = providerPlans.find(p => p.category === 'CG');
-    const gifting = providerPlans.find(p => p.category === 'GIFTING');
+    const awoof = providerPlans.find(p => p.category.toUpperCase() === 'AWOOF');
+    const cg = providerPlans.find(p => p.category.toUpperCase() === 'CG');
+    const gifting = providerPlans.find(p => p.category.toUpperCase() === 'GIFTING');
     
-    // 🔥 NEW: Find special plan for MTN
-    const special = providerPlans.find(p => p.category === 'SPECIAL');
+    // 🔥 FIXED: Normalize category case + find special
+    const special = providerPlans.find(p => p.category.toUpperCase() === 'SPECIAL');
 
     console.log('[RENDER] Categories found →', { awoof: !!awoof, cg: !!cg, gifting: !!gifting, special: !!special });
 
     // AIRTEL: AWOOF + CG
     if (provider === 'airtel') {
-      if (awoof) {
-        plansToShow.push(awoof);
-        console.log('[RENDER] Added AWOOF plan');
-      }
-      if (cg) {
-        plansToShow.push(cg);
-        console.log('[RENDER] Added CG plan');
-      }
+      if (awoof) plansToShow.push(awoof);
+      if (cg) plansToShow.push(cg);
     }
     // GLO: CG first, then GIFTING
     else if (provider === 'glo') {
-      if (cg) {
-        plansToShow.push(cg);
-        console.log('[RENDER] Added CG plan');
-      } else if (awoof) {
-        plansToShow.push(awoof);
-        console.log('[RENDER] Added AWOOF plan (fallback)');
-      }
-      if (gifting) {
-        plansToShow.push(gifting);
-        console.log('[RENDER] Added GIFTING plan');
-      }
+      if (cg) plansToShow.push(cg);
+      else if (awoof) plansToShow.push(awoof);
+      if (gifting) plansToShow.push(gifting);
     }
-    // MTN: AWOOF + GIFTING + SPECIAL (as third)
+    // MTN: SPECIAL FIRST + ONE OTHER (AWOOF or GIFTING)
     else if (provider === 'mtn') {
-      if (awoof) {
-        plansToShow.push(awoof);
-        console.log('[RENDER] Added AWOOF plan');
-      }
-      if (gifting) {
-        plansToShow.push(gifting);
-        console.log('[RENDER] Added GIFTING plan');
-      }
       if (special) {
         plansToShow.push(special);
-        console.log('[RENDER] Added SPECIAL plan as third');
+        console.log('[RENDER] Added SPECIAL as first');
+      }
+      if (awoof) {
+        plansToShow.push(awoof);
+        console.log('[RENDER] Added AWOOF as second');
+      } else if (gifting) {
+        plansToShow.push(gifting);
+        console.log('[RENDER] Added GIFTING as second');
       }
     }
   }
@@ -5701,40 +5781,79 @@ async function renderDashboardPlans(provider) {
   console.log(`[RENDER] Final plans to show: ${plansToShow.length}`);
 
   plansToShow.forEach((plan, i) => {
-    const box = document.createElement('div');
-    box.className = `plan-box ${provider}`;
-    box.dataset.id = plan.plan_id;
+  const already = plansRow.querySelector(`.plan-box[data-id="${plan.plan_id}"][data-provider="${provider}"]`);
+  if (already) {
+    console.log('[RENDER] Skipping duplicate dashboard plan (already exists):', plan.plan_id);
+    return;
+  }
+
+  const box = document.createElement('div');
+  box.className = `plan-box ${provider}`;
+  box.dataset.id = plan.plan_id;
+  box.dataset.provider = provider;
+
+  const categoryUpper = plan.category ? plan.category.toUpperCase() : '';
+  if (categoryUpper === 'SPECIAL' && provider === 'mtn') {
+    box.classList.add('special-plan');
     
-    // 🔥 FIX: ADD data-provider attribute
-    box.dataset.provider = provider;
-
-    const tag = (plan.category && !['STANDARD', 'NORMAL'].includes(plan.category))
-      ? `<span class="plan-type-tag">${plan.category}</span>`
-      : '';
-
-    // 🔥 NEW: Special badge for the special plan
-    const specialBadge = plan.category === 'SPECIAL' 
-      ? `<span class="plan-type-tag special-tag">LIMITED</span>`
-      : tag;
-
-    box.innerHTML = `
-      <div class="plan-price plan-amount">₦${plan.price}</div>
-      <div class="plan-data plan-gb">${plan.data || plan.data_amount}</div>
-      <div class="plan-duration">${plan.validity || plan.duration}</div>
-      ${specialBadge}
+    // 🔥 ADD INLINE GRADIENT IMMEDIATELY
+    const gradientStyle = document.createElement('style');
+    gradientStyle.textContent = `
+      .plan-box.mtn.special-plan[data-id="${plan.plan_id}"]::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        border-radius: 16px;
+        padding: 2px;
+        background: conic-gradient(red, orange, yellow, cyan, red);
+        -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+        -webkit-mask-composite: xor;
+        mask-composite: exclude;
+        pointer-events: none;
+        z-index: 1;
+        opacity: 1;
+        animation: borderTrain 6s linear infinite, hueShift 10s linear infinite;
+      }
+      
+      @keyframes borderTrain {
+        0% { background-position: 0% 50%; }
+        100% { background-position: 400% 50%; }
+      }
+      
+      @keyframes hueShift {
+        0% { filter: hue-rotate(0deg); }
+        100% { filter: hue-rotate(360deg); }
+      }
     `;
+    box.appendChild(gradientStyle);
+    box.style.position = 'relative';
+    box.style.overflow = 'hidden';
+  }
 
-    plansRow.insertBefore(box, seeAllBtn);
-    console.log(`[RENDER] Added plan ${i + 1}: ${plan.category || 'Standard'} ₦${plan.price} [data-provider="${provider}"]`);
-  });
+  const tag = (plan.category && !['STANDARD', 'NORMAL'].includes(categoryUpper))
+    ? `<span class="plan-type-tag">${categoryUpper}</span>`
+    : '';
 
-  // Force re-attach listeners
+  box.innerHTML = `
+    <div class="plan-price plan-amount">₦${plan.price}</div>
+    <div class="plan-data plan-gb">${plan.data_amount || plan.data}</div>
+    <div class="plan-duration">${plan.duration || plan.validity}</div>
+    ${tag}
+  `;
+
+  plansRow.insertBefore(box, seeAllBtn);
+  console.log(`[RENDER] Added plan ${i + 1}: ${plan.category || 'Standard'} ₦${plan.price}`);
+});
+
+
   attachPlanListeners();
-  console.log('%c[RENDER] Dashboard render complete - data-provider set on all plans', 'color:lime;font-weight:bold');
+  syncSpecialPlanGradientState();
+
+  console.log('%c[RENDER] Dashboard complete', 'color:lime;font-weight:bold');
 }
 
 // ==========================================
-// FIXED renderModalPlans - ADDS SPECIAL FOR MTN AS THIRD SECTION
+// FIXED renderModalPlans - ADDS SPECIAL SECTION FOR MTN
 // ==========================================
 async function renderModalPlans(provider) {
   console.log('%c[RENDER MODAL] Starting for:', 'color:purple;font-weight:bold', provider);
@@ -5750,6 +5869,15 @@ async function renderModalPlans(provider) {
     p.provider?.toLowerCase() === (provider === 'ninemobile' ? '9mobile' : provider.toLowerCase()) &&
     p.active === true
   );
+
+  // 🔒 REMOVE SPECIAL SECTION FOR NON-MTN PROVIDERS
+const existingSpecialSection = modal.querySelector('.plan-section.special-section');
+
+if (provider !== 'mtn' && existingSpecialSection) {
+  existingSpecialSection.remove();
+  console.log('[RENDER MODAL] SPECIAL section removed for', provider);
+}
+
 
   // Helper function to sort plans by price (smallest to biggest)
   const sortByPrice = (planArray) => {
@@ -5776,13 +5904,13 @@ async function renderModalPlans(provider) {
     return;
   }
 
-  // Filter plans by category
-  const awoofPlans = sortByPrice(providerPlans.filter(p => p.category === 'AWOOF'));
-  const cgPlans = sortByPrice(providerPlans.filter(p => p.category === 'CG'));
-  const giftingPlans = sortByPrice(providerPlans.filter(p => p.category === 'GIFTING'));
+  // Filter plans by category (normalize case)
+  const awoofPlans = sortByPrice(providerPlans.filter(p => p.category.toUpperCase() === 'AWOOF'));
+  const cgPlans = sortByPrice(providerPlans.filter(p => p.category.toUpperCase() === 'CG'));
+  const giftingPlans = sortByPrice(providerPlans.filter(p => p.category.toUpperCase() === 'GIFTING'));
   
-  // 🔥 NEW: Special plans
-  const specialPlans = sortByPrice(providerPlans.filter(p => p.category === 'SPECIAL'));
+  // 🔥 FIXED: Normalize category case for special
+  const specialPlans = sortByPrice(providerPlans.filter(p => p.category.toUpperCase() === 'SPECIAL'));
 
   console.log(`[RENDER MODAL] ${provider.toUpperCase()} categories:`, {
     awoof: awoofPlans.length,
@@ -5791,8 +5919,31 @@ async function renderModalPlans(provider) {
     special: specialPlans.length
   });
 
-  // MTN: AWOOF + GIFTING + SPECIAL (as third section)
+  // MTN: SPECIAL + AWOOF + GIFTING
   if (provider === 'mtn') {
+    // 🔥 NEW: Add special section for MTN (clone awoof and modify)
+    let specialSection = modal.querySelector('.plan-section.special-section');
+    if (!specialSection && specialPlans.length > 0) {
+      specialSection = awoofSection.cloneNode(true);
+      specialSection.classList.add('special-section');
+      specialSection.classList.remove('awoof-section');
+      specialSection.querySelector('.plans-grid').innerHTML = ''; // Clear cloned plans
+      modal.querySelector('.plan-modal-content').insertBefore(specialSection, awoofSection);
+      console.log('[RENDER MODAL] Created new SPECIAL section for MTN');
+    }
+
+    if (specialSection) {
+      if (specialPlans.length > 0) {
+        fillPlanSection(specialSection, provider, 'special', specialPlans,
+          'MTN SPECIAL LIMITED', svgShapes[provider]
+        );
+        specialSection.style.display = 'block';
+        console.log('[RENDER MODAL] SPECIAL section rendered with', specialPlans.length, 'plans');
+      } else {
+        specialSection.style.display = 'none';
+      }
+    }
+
     if (awoofSection) {
       if (awoofPlans.length > 0) {
         fillPlanSection(awoofSection, provider, 'awoof', awoofPlans,
@@ -5812,29 +5963,6 @@ async function renderModalPlans(provider) {
         giftingSection.style.display = 'block';
       } else {
         giftingSection.style.display = 'none';
-      }
-    }
-
-    // 🔥 NEW: Add special section for MTN (clone gifting and modify)
-    let specialSection = modal.querySelector('.plan-section.special-section');
-    if (!specialSection && specialPlans.length > 0) {
-      specialSection = giftingSection.cloneNode(true);
-      specialSection.classList.add('special-section');
-      specialSection.classList.remove('gifting-section');
-      specialSection.querySelector('.plans-grid').innerHTML = ''; // Clear cloned plans
-      modal.querySelector('.plan-modal-content').appendChild(specialSection);
-      console.log('[RENDER MODAL] Created new SPECIAL section for MTN');
-    }
-
-    if (specialSection) {
-      if (specialPlans.length > 0) {
-        fillPlanSection(specialSection, provider, 'special', specialPlans,
-          'MTN SPECIAL LIMITED', svgShapes[provider]
-        );
-        specialSection.style.display = 'block';
-        console.log('[RENDER MODAL] SPECIAL section rendered with', specialPlans.length, 'plans');
-      } else {
-        specialSection.style.display = 'none';
       }
     }
   }
@@ -5871,7 +5999,6 @@ async function renderModalPlans(provider) {
         );
         awoofSection.style.display = 'block';
       } else if (awoofPlans.length > 0) {
-        // Fallback to AWOOF if no CG
         fillPlanSection(awoofSection, provider, 'awoof', awoofPlans,
           'GLO AWOOF', svgShapes[provider]
         );
@@ -5895,10 +6022,12 @@ async function renderModalPlans(provider) {
   
   console.log('%c[RENDER MODAL] Complete - sections configured for', 'color:lime;font-weight:bold', provider);
   attachPlanListeners();
+  syncSpecialPlanGradientState();
+
 }
 
 // ==========================================
-// FIXED fillPlanSection - ADDS LIMITED TAG FOR SPECIAL
+// FIXED fillPlanSection - LIMITED TAG FOR SPECIAL
 // ==========================================
 function fillPlanSection(sectionEl, provider, subType, plans, title, svg) {
   sectionEl.setAttribute('data-provider', provider);
@@ -5908,28 +6037,64 @@ function fillPlanSection(sectionEl, provider, subType, plans, title, svg) {
   grid.innerHTML = '';
   
   plans.forEach((plan, index) => {
-    const box = document.createElement('div');
-    box.className = `plan-box ${provider}`;
-    box.dataset.id = plan.plan_id;
+  const box = document.createElement('div');
+  box.className = `plan-box ${provider}`;
+  box.dataset.id = plan.plan_id;
+  box.dataset.provider = provider;
+
+  const categoryUpper = plan.category ? plan.category.toUpperCase() : '';
+  
+  if (categoryUpper === 'SPECIAL' && provider === 'mtn') {
+    box.classList.add('special-plan');
     
-    // ADD data-provider attribute
-    box.dataset.provider = provider;
-
-    // 🔥 NEW: Limited badge for special plans
-    const tag = (plan.category && !['STANDARD', 'NORMAL'].includes(plan.category))
-      ? `<span class="plan-type-tag">${plan.category === 'SPECIAL' ? 'LIMITED' : plan.category}</span>`
-      : '';
-
-    box.innerHTML = `
-      <div class="plan-amount">₦${plan.price}</div>
-      <div class="plan-data">${plan.data || plan.data_amount}</div>
-      <div class="plan-days">${plan.validity || plan.duration}</div>
-      ${tag}
+    // 🔥 ADD INLINE GRADIENT IMMEDIATELY
+    const gradientStyle = document.createElement('style');
+    gradientStyle.textContent = `
+      .plan-box.mtn.special-plan[data-id="${plan.plan_id}"]::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        border-radius: 16px;
+        padding: 2px;
+        background: conic-gradient(red, orange, yellow, cyan, red);
+        -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+        -webkit-mask-composite: xor;
+        mask-composite: exclude;
+        pointer-events: none;
+        z-index: 1;
+        opacity: 1;
+        animation: borderTrain 6s linear infinite, hueShift 10s linear infinite;
+      }
+      
+      @keyframes borderTrain {
+        0% { background-position: 0% 50%; }
+        100% { background-position: 400% 50%; }
+      }
+      
+      @keyframes hueShift {
+        0% { filter: hue-rotate(0deg); }
+        100% { filter: hue-rotate(360deg); }
+      }
     `;
+    box.appendChild(gradientStyle);
+    box.style.position = 'relative';
+    box.style.overflow = 'hidden';
+  }
 
-    grid.appendChild(box);
-    console.log(`[FILL SECTION] Added modal plan ${index + 1}: ${plan.plan_id} [data-provider="${provider}"]`);
-  });
+  const tag = (categoryUpper && !['STANDARD', 'NORMAL'].includes(categoryUpper))
+    ? `<span class="plan-type-tag ${categoryUpper === 'SPECIAL' ? 'special-tag' : ''}">${categoryUpper}</span>`
+    : '';
+
+  box.innerHTML = `
+    <div class="plan-amount">₦${plan.price}</div>
+    <div class="plan-data">${plan.data_amount || plan.data}</div>
+    <div class="plan-days">${plan.duration || plan.validity}</div>
+    ${tag}
+  `;
+
+  grid.appendChild(box);
+  console.log(`[FILL SECTION] Added modal plan ${index + 1}: ${plan.plan_id}`);
+});
 
   const header = sectionEl.querySelector('.section-header');
   if (header) {
@@ -5939,7 +6104,7 @@ function fillPlanSection(sectionEl, provider, subType, plans, title, svg) {
     if (h2) h2.textContent = title;
   }
   
-  console.log(`[FILL SECTION] ${title}: ${plans.length} plans added with data-provider="${provider}"`);
+  console.log(`[FILL SECTION] ${title}: ${plans.length} plans added`);
 }
 
 // Make functions globally available
@@ -5949,11 +6114,8 @@ window.fillPlanSection = fillPlanSection;
 window.loadAllPlansOnce = loadAllPlansOnce;
 
 console.log('%c✅ FIXED FUNCTIONS LOADED', 'color:lime;font-size:16px;font-weight:bold');
-console.log('%c✅ Special plan now appears in MTN dashboard (3rd) + modal (3rd section)', 'color:lime;font-weight:bold');
-console.log('%c✅ All plans have data-provider attribute', 'color:lime;font-weight:bold');
-console.log('%c✅ Special plans have "LIMITED" badge', 'color:lime;font-weight:bold');
-
-
+console.log('%c✅ All plans now have data-provider attribute', 'color:lime;font-weight:bold');
+console.log('%c✅ Modal clicks should now work!', 'color:lime;font-weight:bold');
 
 
 
@@ -5967,6 +6129,7 @@ const seeAllBtn = document.querySelector('.see-all-plans');
 if (seeAllBtn) {
   seeAllBtn.addEventListener('click', () => {
     ModalManager.openModal('allPlansModal');
+    attach9mobileModalListeners();
 
     setTimeout(() => {
       const dashSelected = plansRow.querySelector('.plan-box.selected');
@@ -6030,7 +6193,7 @@ function selectPlanById(id) {
 
   console.log('%c[SELECT] START', 'color:blue;font-weight:bold', { id, activeProvider });
 
-  // Clear previous
+  // Clear previous (ONLY remove 'selected' — keep provider class!)
   document.querySelectorAll(`.plan-box.selected[data-provider="${activeProvider}"]`).forEach(p => {
     p.classList.remove('selected', activeProvider);
     console.log('[SELECT] Cleared:', p.dataset.id);
@@ -6040,7 +6203,7 @@ function selectPlanById(id) {
 
   const dashPlan = plansRow.querySelector(`.plan-box[data-id="${id}"][data-provider="${activeProvider}"]`);
   if (dashPlan) {
-    dashPlan.classList.add('selected', activeProvider);
+    dashPlan.classList.add('selected');
     console.log('[SELECT] Dashboard selected:', id);
 
     // === SAVE FULL PLAN DATA ===
@@ -6067,9 +6230,9 @@ function selectPlanById(id) {
     console.log('%c[SELECT] Full plan saved!', 'color:lime;font-weight:bold', fullPlan);
   }
 
-  // Modal sync
+  // Modal sync (add 'selected' only)
   const modalPlan = allPlansModal.querySelector(`.plan-box[data-id="${id}"][data-provider="${activeProvider}"]`);
-  if (modalPlan) modalPlan.classList.add('selected', activeProvider);
+  if (modalPlan) modalPlan.classList.add('selected');
 
   // Price styling + state save
   document.querySelectorAll('.plan-box').forEach(p => {
@@ -6081,6 +6244,8 @@ function selectPlanById(id) {
       amount.classList.remove('plan-price');
     }
   });
+
+  syncSpecialPlanGradientState();
 
   updateContinueState?.();
   saveUserState?.();
@@ -6198,6 +6363,8 @@ function handlePlanClick(e) {
   /* ------------------ Dashboard click ------------------ */
   e.stopPropagation(); // 🔥 Prevent event bubbling
   selectPlanById(id);
+  syncSpecialPlanGradientState();
+
   return; // 🔥 CRITICAL FIX: Stop further execution
 }
 
