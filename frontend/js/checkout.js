@@ -977,6 +977,7 @@ async function verifyPin(pin) {
 
     } catch (err) {
       console.error('[verifyPin] fetch error:', err);
+      console.log('RAW PIN RESPONSE:', raw);
       showToast('Unable to verify PIN. Check your connection.', 'error');
       resetPin();
     }
