@@ -5561,3 +5561,23 @@ p:has(.balance-real, .balance-masked) {
 @keyframes spin { 
   to { transform: rotate(360deg); } 
 }
+
+
+.remaining-count {
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  background: var(--airtel-red);
+  color: #fff;
+  font-size: 7px;
+  font-weight: 600;
+  padding: 2px 4px;
+  border-radius: 12px;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.remaining-count.sold-out {
+  background: rgba(255, 0, 0, 0.8);
+  color: white;
+}

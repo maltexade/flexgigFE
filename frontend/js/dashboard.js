@@ -5834,12 +5834,28 @@ async function renderDashboardPlans(provider) {
     ? `<span class="plan-type-tag">${categoryUpper}</span>`
     : '';
 
-  box.innerHTML = `
-    <div class="plan-price plan-amount">₦${plan.price}</div>
-    <div class="plan-data plan-gb">${plan.data_amount || plan.data}</div>
-    <div class="plan-duration">${plan.duration || plan.validity}</div>
-    ${tag}
+  let remainingCountHTML = '';
+
+if (categoryUpper === 'SPECIAL' && provider === 'mtn') {
+  const sentToday = Number(plan.daily_purchase_count) || 0;
+  const remaining = 10 - sentToday;
+  const remainingText = remaining > 0 ? `${remaining} left today` : 'Sold out today';
+  const remainingClass = remaining > 0 ? 'remaining-count' : 'remaining-count sold-out';
+
+  remainingCountHTML = `
+    <div class="${remainingClass}">
+      ${remainingText}
+    </div>
   `;
+}
+
+box.innerHTML = `
+  ${remainingCountHTML}
+  <div class="plan-price plan-amount">₦${plan.price}</div>
+  <div class="plan-data plan-gb">${plan.data_amount || plan.data}</div>
+  <div class="plan-duration">${plan.duration || plan.validity}</div>
+  ${tag}
+`;
 
   plansRow.insertBefore(box, seeAllBtn);
   console.log(`[RENDER] Added plan ${i + 1}: ${plan.category || 'Standard'} ₦${plan.price}`);
@@ -6085,12 +6101,30 @@ function fillPlanSection(sectionEl, provider, subType, plans, title, svg) {
     ? `<span class="plan-type-tag ${categoryUpper === 'SPECIAL' ? 'special-tag' : ''}">${categoryUpper}</span>`
     : '';
 
-  box.innerHTML = `
-    <div class="plan-amount">₦${plan.price}</div>
-    <div class="plan-data">${plan.data_amount || plan.data}</div>
-    <div class="plan-days">${plan.duration || plan.validity}</div>
-    ${tag}
+  let remainingCountHTML = '';
+
+// Only show remaining count for MTN special plan
+if (categoryUpper === 'SPECIAL' && provider === 'mtn') {
+  const sentToday = Number(plan.daily_purchase_count) || 0;
+  const remaining = 10 - sentToday;
+  const remainingText = remaining > 0 ? `${remaining} left today` : 'Sold out today';
+  const remainingClass = remaining > 0 ? 'remaining-count' : 'remaining-count sold-out';
+
+  remainingCountHTML = `
+    <div class="${remainingClass}">
+      ${remainingText}
+    </div>
   `;
+}
+
+box.innerHTML = `
+  ${remainingCountHTML}
+  <div class="plan-amount">₦${plan.price}</div>
+  <div class="plan-data">${plan.data_amount || plan.data}</div>
+  <div class="plan-days">${plan.duration || plan.validity}</div>
+  ${tag}
+`;
+
 
   grid.appendChild(box);
   console.log(`[FILL SECTION] Added modal plan ${index + 1}: ${plan.plan_id}`);
