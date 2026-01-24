@@ -899,8 +899,8 @@ window.openForgetPinFlow = async function openForgetPinFlow() {
     }
   });
 
-  // PIN verification
-  async function verifyPin(pin) {
+// PIN verification
+async function verifyPin(pin) {
   return await withLoader(async () => {
     try {
       const token = localStorage.getItem('token') || '';
@@ -914,25 +914,57 @@ window.openForgetPinFlow = async function openForgetPinFlow() {
         body: JSON.stringify({ pin })
       });
 
+      const data = await res.json().catch(() => ({}));
+
+      // ✅ SUCCESS
       if (res.ok) {
         hideCheckoutPinModal();
-        // DO NOT call processPayment() here
-        // Just resolve success — the main flow will handle payment
+
         if (window._checkoutPinResolve) {
           window._checkoutPinResolve(true);
         }
-      } else {
-        const data = await res.json().catch(() => ({}));
-        showToast(data.message || 'Invalid PIN. Please try again.', 'error');
-        resetPin();
-        // Do NOT resolve — let user try again
+        return;
       }
+
+      // ❌ HANDLE ERRORS BY CODE
+      switch (data.code) {
+        case 'WRONG_PIN':
+          showToast('Incorrect PIN. Try again.', 'error');
+          resetPin();
+          break;
+
+        case 'PIN_NOT_SET':
+          showToast('You have not set a PIN yet.', 'warning');
+          hideCheckoutPinModal();
+          // optional: openSetPinModal();
+          break;
+
+        case 'PIN_RATE_LIMITED':
+          showToast('Too many attempts. Please wait and try again.', 'error');
+          break;
+
+        case 'PIN_SERVICE_UNAVAILABLE':
+          showToast('Network issue. Try again shortly.', 'error');
+          break;
+
+        case 'INVALID_SESSION':
+          showToast('Session expired. Please login again.', 'error');
+          forceLogout?.();
+          break;
+
+        default:
+          showToast(data.message || 'PIN verification failed.', 'error');
+          resetPin();
+      }
+
     } catch (err) {
-      showToast('PIN verification failed. Check your connection.', 'error');
+      console.error('[verifyPin] network error:', err);
+      showToast('Unable to verify PIN. Check your connection.', 'error');
       resetPin();
     }
   });
 }
+
 
   window.showCheckoutPinModal = showCheckoutPinModal;
   window.hideCheckoutPinModal = hideCheckoutPinModal;
