@@ -1313,17 +1313,24 @@ function updateReceiptToPending() {
   document.getElementById('receipt-message').textContent = 'Your data is being delivered. This may take a few minutes due to network. Money safe - auto refund on fail.';
 
   const data = window._currentCheckoutData;
-  const safePrice = Number(data?.price) || 0;
+
+  
+  const displayAmount = tx?.amount ?? data?.price ?? 0;
+  const displayBalance = tx?.new_balance ?? data?.new_balance ?? 0;
+  const transactionRef = tx?.reference ?? data?.reference ?? 'N/A';
+
+
   const providerKey = data.provider.toLowerCase() === '9mobile' ? 'ninemobile' : data.provider.toLowerCase();
   const svg = svgShapes[providerKey] || '';
   document.getElementById('receipt-provider').innerHTML = `${svg} ${data.provider.toUpperCase()}`;
   document.getElementById('receipt-phone').textContent = data.number;
   document.getElementById('receipt-plan').textContent = `${data.dataAmount} / ${data.validity}`;
   document.getElementById('receipt-amount').textContent = 
-    `₦${safePrice.toLocaleString()}`;
+    `₦${Number(displayAmount).toLocaleString('en-NG')}`;
 
   document.getElementById('receipt-balance').textContent = 
-    `₦${Number(data?.new_balance || 0).toLocaleString()}`;
+    `₦${Number(displayBalance).toLocaleString('en-NG')}`;
+
   document.getElementById('receipt-transaction-id').textContent = data.reference || 'N/A';
   document.getElementById('receipt-time').textContent = new Date().toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
 
