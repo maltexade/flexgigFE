@@ -943,16 +943,23 @@ async function verifyPin(pin) {
         body: JSON.stringify({ pin })
       });
 
-      // ✅ Capture raw response
+      // ✅ Read raw response as text first
       raw = await res.text();
       let data = {};
+
+      // ✅ Try parse JSON safely
       try {
         data = raw ? JSON.parse(raw) : {};
+        // Handle nested error object
+        if (data.error) {
+          data.code = data.error.code;
+          data.message = data.error.message;
+        }
       } catch (_) {
-        console.warn('[verifyPin] Failed to parse JSON, raw:', raw);
+        console.warn('[verifyPin] JSON parse failed, raw:', raw);
       }
 
-      // ✅ Log everything for debug
+      // ✅ Log full info for debugging
       console.warn('[PIN VERIFY RESPONSE]', {
         status: res.status,
         code: data.code,
@@ -960,14 +967,14 @@ async function verifyPin(pin) {
         raw
       });
 
-      // ✅ SUCCESS
+      // ✅ Success path
       if (res.ok) {
         hideCheckoutPinModal();
         window._checkoutPinResolve?.(true);
-        return data;
+        return;
       }
 
-      // ❌ ERROR HANDLING
+      // ❌ Error handling based on real server code/message
       switch (data.code) {
         case 'WRONG_PIN':
           showToast('Incorrect PIN. Try again.', 'error');
@@ -997,13 +1004,11 @@ async function verifyPin(pin) {
           resetPin();
       }
 
-      return data; // always return the backend payload
     } catch (err) {
       console.error('[verifyPin] fetch error:', err);
       console.log('RAW PIN RESPONSE:', raw);
       showToast('Unable to verify PIN. Check your connection.', 'error');
       resetPin();
-      return { success: false, message: 'Fetch error', code: 'FETCH_ERROR' };
     }
   });
 }
