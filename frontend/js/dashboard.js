@@ -6229,91 +6229,108 @@ function selectPlanById(id) {
 
   // Clear previous selection (same provider only)
   document.querySelectorAll(`.plan-box.selected[data-provider="${activeProvider}"]`)
-    .forEach(p => p.classList.remove('selected'));
+    .forEach(p => {
+      p.classList.remove('selected');
+      console.log('[SELECT] Cleared:', p.dataset.id);
+    });
 
   selectedPlanByProvider[activeProvider] = id;
 
-  // ────────────────────────────────────────────────
-  //   ★★★  THE IMPORTANT CHANGE  ★★★
-  // ────────────────────────────────────────────────
-  const allPlans = window.cachedPlans || (await loadAllPlansOnce()); // assuming you keep them in a global cache
-  const selectedPlanObj = allPlans.find(p => 
-    p.plan_id === id && 
-    p.provider?.toLowerCase() === (activeProvider === 'ninemobile' ? '9mobile' : activeProvider.toLowerCase())
-  );
-
-  if (!selectedPlanObj) {
-    console.error('[SELECT] Plan object not found in loaded plans!', id, activeProvider);
-    // fallback to DOM parsing (but log warning)
+  // Try to get the real plan object from cache (preferred)
+  let selectedPlanObj = null;
+  if (window.cachedPlans && Array.isArray(window.cachedPlans)) {
+    selectedPlanObj = window.cachedPlans.find(p => 
+      p.plan_id === id && 
+      p.provider?.toLowerCase() === (activeProvider === 'ninemobile' ? '9mobile' : activeProvider.toLowerCase())
+    );
   }
 
-  // ────────────────────────────────────────────────
-
-  // Dashboard visual selection
-  const dashPlan = plansRow.querySelector(`.plan-box[data-id="${id}"][data-provider="${activeProvider}"]`);
-  if (dashPlan) {
-    dashPlan.classList.add('selected');
-    console.log('[SELECT] Dashboard selected:', id);
-  }
-
-  // ─── Save full & correct plan data ───────────────────────────────
   let planToSave;
 
   if (selectedPlanObj) {
-    // Best case — use real data from DB/source
+    // ── Best case: use real data from loaded plans ──
+    console.log('[SELECT] Using cached plan object for:', id);
+
     planToSave = {
-      planId:     selectedPlanObj.plan_id || selectedPlanObj.planId,
+      planId:     selectedPlanObj.plan_id || selectedPlanObj.planId || id,
       price:      Number(selectedPlanObj.price) || 0,
       dataAmount: selectedPlanObj.data_amount || selectedPlanObj.data || "N/A",
       validity:   selectedPlanObj.validity || selectedPlanObj.duration || "N/A",
       type:       selectedPlanObj.planType || selectedPlanObj.category || "STANDARD",
-      category:   selectedPlanObj.category || "NORMAL",      // ← keep it!
-      daily_purchase_count: selectedPlanObj.daily_purchase_count || 0,
-      // ... add any other fields you need later (number, rawNumber, etc.)
+      category:   selectedPlanObj.category || "NORMAL",
+      daily_purchase_count: Number(selectedPlanObj.daily_purchase_count) || 0,
+      // Add more fields if your app needs them later
+      // e.g. provider: selectedPlanObj.provider,
+      //      planName: selectedPlanObj.planName,
     };
   } else {
-    // Fallback — old DOM scraping way (less reliable)
-    console.warn('[SELECT] Falling back to DOM parsing — special fields may be lost');
-    const divs = dashPlan?.querySelectorAll('div') || [];
-    const priceText = divs[0]?.textContent?.trim() || '0';
-    const dataAmount = divs[1]?.textContent?.trim() || 'N/A';
-    const validity   = divs[2]?.textContent?.trim() || 'N/A';
+    // ── Fallback: parse from dashboard DOM (what you had before) ──
+    console.warn('[SELECT] No cached plan found → falling back to DOM parsing');
+
+    const dashPlan = plansRow.querySelector(`.plan-box[data-id="${id}"][data-provider="${activeProvider}"]`);
+    if (!dashPlan) {
+      console.error('[SELECT] Dashboard plan element not found:', id);
+      return;
+    }
+
+    dashPlan.classList.add('selected');
+    console.log('[SELECT] Dashboard selected (fallback):', id);
+
+    const divs = dashPlan.querySelectorAll('div');
+    const priceText   = divs[0]?.textContent?.trim() || '0';
+    const dataAmount  = divs[1]?.textContent?.trim() || 'N/A';
+    const validity    = divs[2]?.textContent?.trim() || 'N/A';
 
     planToSave = {
       planId: id,
       price: parseFloat(priceText.replace(/[₦,\s]/g, '')) || 0,
       dataAmount,
       validity,
-      type: 'GIFTING'           // ← this was the problem — don't hardcode
+      type: 'GIFTING',           // fallback default – you can try to improve this later
+      category: 'NORMAL',
+      daily_purchase_count: 0
     };
   }
 
-  // Save to storage
+  // ── Save to localStorage ───────────────────────────────
   let state = {};
-  try { state = JSON.parse(localStorage.getItem('userState') || '{}'); } catch {}
+  try {
+    state = JSON.parse(localStorage.getItem('userState') || '{}');
+  } catch (e) {}
+
   state.selectedPlan = planToSave;
   localStorage.setItem('userState', JSON.stringify(state));
   localStorage.setItem('lastSelectedPlan', JSON.stringify(planToSave));
 
   console.log('%c[SELECT] Full plan saved!', 'color:lime;font-weight:bold', planToSave);
 
-  // ─── Rest of your function (modal sync, price styling, etc.) ───
+  // ── Visual updates ─────────────────────────────────────
+  const dashPlan = plansRow.querySelector(`.plan-box[data-id="${id}"][data-provider="${activeProvider}"]`);
+  if (dashPlan) {
+    dashPlan.classList.add('selected');
+  }
+
+  // Modal sync
   const modalPlan = allPlansModal.querySelector(`.plan-box[data-id="${id}"][data-provider="${activeProvider}"]`);
-  if (modalPlan) modalPlan.classList.add('selected');
+  if (modalPlan) {
+    modalPlan.classList.add('selected');
+  }
 
   // Price styling
   document.querySelectorAll('.plan-box').forEach(p => {
-    const amount = p.querySelector('.plan-amount, .plan-price');
-    if (amount) {
-      if (p.classList.contains('selected') && p.dataset.provider === activeProvider && !p.closest('.plan-modal-content')) {
-        amount.classList.add('plan-price');
-      } else {
-        amount.classList.remove('plan-price');
-      }
+    const amount = p.querySelector('.plan-amount');
+    if (!amount) return;
+    if (p.classList.contains('selected') && 
+        p.dataset.provider === activeProvider && 
+        !p.closest('.plan-modal-content')) {
+      amount.classList.add('plan-price');
+    } else {
+      amount.classList.remove('plan-price');
     }
   });
 
   syncSpecialPlanGradientState();
+
   updateContinueState?.();
   saveUserState?.();
   saveCurrentAppState?.();
