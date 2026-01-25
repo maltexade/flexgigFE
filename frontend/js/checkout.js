@@ -1299,7 +1299,7 @@ function updateReceiptToInsufficient(message, currentBalance = 0) {
 }
 
 
-function updateReceiptToPending() {
+function updateReceiptToPending(tx = null) {
   const icon = document.getElementById('receipt-icon');
   icon.className = 'receipt-icon pending';
   icon.innerHTML = `
@@ -1414,7 +1414,7 @@ async function pollForFinalStatus(reference) {
     if (showedPending) {
       document.getElementById('receipt-message').textContent = 'Taking longer than expected. Check history later.';
     } else {
-      updateReceiptToPending();
+      updateReceiptToPending(null);
       document.getElementById('receipt-message').textContent = 'Delivery taking longer than expected. Check history.';
     }
   }
