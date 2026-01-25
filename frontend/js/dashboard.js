@@ -217,6 +217,14 @@ if (typeof onDashboardLoad === 'function') {
 // For manual debug calls
 window.forceBroadcastCheck = () => pollStatus(true);
 
+if (!window.__specialPlanRealtimeAttached__) {
+  window.addEventListener('planUpdated', (e) => {
+    const plan = e.detail;
+    updateSpecialRemainingCount(plan);
+  });
+
+  window.__specialPlanRealtimeAttached__ = true;
+}
 
 
 // ────────────────────────────────────────────────
@@ -5704,6 +5712,39 @@ function attach9mobileModalListeners() {
 
 window.attach9mobileModalListeners = window.attach9mobileModalListeners || attach9mobileModalListeners;
 // dashboard.js - UPDATED FUNCTIONS (REPLACE EXISTING)
+
+function updateSpecialRemainingCount(plan) {
+  if (
+    plan.category?.toUpperCase() !== 'SPECIAL' ||
+    plan.provider?.toLowerCase() !== 'mtn'
+  ) return;
+
+  const boxes = document.querySelectorAll(
+    `.plan-box.mtn.special-plan[data-id="${plan.plan_id}"]`
+  );
+
+  boxes.forEach(box => {
+    const sentToday = Number(plan.daily_purchase_count) || 0;
+    const remaining = 10 - sentToday;
+
+    let el = box.querySelector('.remaining-count');
+
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'remaining-count';
+      box.prepend(el);
+    }
+
+    if (remaining > 0) {
+      el.textContent = `${remaining} left today`;
+      el.classList.remove('sold-out');
+    } else {
+      el.textContent = 'Sold out today';
+      el.classList.add('sold-out');
+    }
+  });
+}
+window.updateSpecialRemainingCount = window.updateSpecialRemainingCount || updateSpecialRemainingCount;
 
 // ==========================================
 // FIXED renderDashboardPlans - SPECIAL FIRST FOR MTN (TWO PLANS TOTAL)

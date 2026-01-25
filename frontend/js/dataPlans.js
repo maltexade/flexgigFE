@@ -156,21 +156,41 @@ export const subscribeToPlans = () => {
           // Add new plan to cache
           plansCache.push(payload.new);
           updateCache(plansCache);
+
+          window.dispatchEvent(new CustomEvent('planUpdated', {
+            detail: payload.new
+          }));
+
         } else if (payload.eventType === 'UPDATE') {
           // Update existing plan in cache
           const index = plansCache.findIndex(p => p.id === payload.new.id);
           if (index !== -1) {
             plansCache[index] = payload.new;
             updateCache(plansCache);
+
+            window.dispatchEvent(new CustomEvent('planUpdated', {
+              detail: payload.new
+            }));
+
           } else {
             // If not found in cache, add it
             plansCache.push(payload.new);
             updateCache(plansCache);
+
+            window.dispatchEvent(new CustomEvent('planUpdated', {
+              detail: payload.new
+            }));
+
           }
         } else if (payload.eventType === 'DELETE') {
           // Remove plan from cache
           plansCache = plansCache.filter(p => p.id !== payload.old.id);
           updateCache(plansCache);
+
+          window.dispatchEvent(new CustomEvent('planUpdated', {
+            detail: payload.new
+          }));
+
         }
       }
     )
