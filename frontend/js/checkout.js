@@ -1234,6 +1234,7 @@ function updateReceiptToFailed(errorMessage) {
       backdrop.classList.add('hidden');
       backdrop.setAttribute('aria-hidden', 'true');
       lockScrollForReceiptModal(backdrop, false);
+      closeCheckoutModal();
     }
   });
 }
@@ -1350,6 +1351,7 @@ function updateReceiptToPending(tx = null) {
       backdrop.classList.add('hidden');
       backdrop.setAttribute('aria-hidden', 'true');
       lockScrollForReceiptModal(backdrop, false);
+      closeCheckoutModal();
     }
   });
 }
