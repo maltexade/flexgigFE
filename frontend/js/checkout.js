@@ -1142,7 +1142,7 @@ async function updateReceiptToSuccess(result) {
     console.warn('Failed to fetch transaction reference:', e);
     transactionRef = 'Unavailable';
   }
-
+const displayAmount = result?.amount ?? data?.price ?? 0;
   // === FILL RECEIPT DETAILS ===
   if (data) {
     const providerKey = data.provider.toLowerCase() === '9mobile' ? 'ninemobile' : data.provider.toLowerCase();
@@ -1151,7 +1151,11 @@ async function updateReceiptToSuccess(result) {
     
     document.getElementById('receipt-phone').textContent = data.number;
     document.getElementById('receipt-plan').textContent = `${data.dataAmount} / ${data.validity}`;
-    document.getElementById('receipt-amount').textContent = `₦${Number(data.price).toLocaleString()}`;
+      document.getElementById('receipt-amount').textContent = 
+    `₦${Number(displayAmount).toLocaleString()}`;
+
+  document.getElementById('receipt-balance').textContent = 
+    `₦${Number(result?.new_balance ?? data?.new_balance ?? 0).toLocaleString()}`;
     document.getElementById('receipt-transaction-id').textContent = transactionRef;
     document.getElementById('receipt-balance').textContent = `₦${Number(data.new_balance || 0).toLocaleString()}`;
     document.getElementById('receipt-time').textContent = new Date().toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
