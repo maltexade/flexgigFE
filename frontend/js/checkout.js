@@ -928,9 +928,9 @@ window.openForgetPinFlow = async function openForgetPinFlow() {
       if (window._checkoutPinResolve) window._checkoutPinResolve(false);
     }
   });
-
 async function verifyPin(pin) {
   return await withLoader(async () => {
+    let raw = '';
     try {
       const token = localStorage.getItem('token') || '';
       const res = await fetch('https://api.flexgig.com.ng/api/verify-pin', {
@@ -943,24 +943,28 @@ async function verifyPin(pin) {
         body: JSON.stringify({ pin })
       });
 
-      // ✅ SAFE PARSE
-      const raw = await res.text();
+      // ✅ Capture raw response
+      raw = await res.text();
       let data = {};
       try {
         data = raw ? JSON.parse(raw) : {};
-      } catch (_) {}
+      } catch (_) {
+        console.warn('[verifyPin] Failed to parse JSON, raw:', raw);
+      }
 
+      // ✅ Log everything for debug
       console.warn('[PIN VERIFY RESPONSE]', {
         status: res.status,
         code: data.code,
-        message: data.message
+        message: data.message,
+        raw
       });
 
       // ✅ SUCCESS
       if (res.ok) {
         hideCheckoutPinModal();
         window._checkoutPinResolve?.(true);
-        return;
+        return data;
       }
 
       // ❌ ERROR HANDLING
@@ -993,11 +997,13 @@ async function verifyPin(pin) {
           resetPin();
       }
 
+      return data; // always return the backend payload
     } catch (err) {
       console.error('[verifyPin] fetch error:', err);
       console.log('RAW PIN RESPONSE:', raw);
       showToast('Unable to verify PIN. Check your connection.', 'error');
       resetPin();
+      return { success: false, message: 'Fetch error', code: 'FETCH_ERROR' };
     }
   });
 }
