@@ -5641,7 +5641,7 @@ function syncSpecialPlanGradientState() {
         content: '';
         position: absolute;
         inset: 0;
-        border-radius: 16px;
+        border-radius: 8px;
         padding: 2px;
         background: conic-gradient(red, orange, yellow, cyan, red);
         -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);

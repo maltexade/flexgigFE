@@ -5569,7 +5569,7 @@ p:has(.balance-real, .balance-masked) {
   left: 5px;
   background: var(--airtel-red);
   color: #fff;
-  font-size: 7px;
+  font-size: 8px;
   font-weight: 600;
   padding: 2px 4px;
   border-radius: 12px;
