@@ -1331,7 +1331,7 @@ function updateReceiptToPending() {
   document.getElementById('receipt-balance').textContent = 
     `₦${Number(displayBalance).toLocaleString('en-NG')}`;
 
-  document.getElementById('receipt-transaction-id').textContent = data.reference || 'N/A';
+  document.getElementById('receipt-transaction-id').textContent = transactionRef;
   document.getElementById('receipt-time').textContent = new Date().toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
 
   document.getElementById('receipt-details').style.display = 'block';
@@ -1396,7 +1396,7 @@ async function pollForFinalStatus(reference) {
           // Still pending — after ~30s (2 polls) → first attempt failed → show Pending once
           if (!showedPending && attempts >= 2) {
             showedPending = true;
-            updateReceiptToPending();
+            updateReceiptToPending(tx);
           }
         }
       }
