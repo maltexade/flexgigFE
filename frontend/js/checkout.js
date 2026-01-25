@@ -22,25 +22,7 @@ const safeGetUserState = () => {
     return {};
   }
 };
-// Add this helper near the top of checkout.js
-function getSafeReceiptPrice() {
-  // Priority 1: live checkoutData (if still valid)
-  if (window._currentCheckoutData && typeof window._currentCheckoutData.price === 'number' && window._currentCheckoutData.price > 100) {
-    console.log('[SAFE PRICE] Using live _currentCheckoutData.price:', window._currentCheckoutData.price);
-    return window._currentCheckoutData.price;
-  }
 
-  // Priority 2: localStorage (most reliable across phases)
-  const saved = localStorage.getItem('lastCheckoutPrice');
-  if (saved && !isNaN(Number(saved)) && Number(saved) > 100) {
-    console.log('[SAFE PRICE] Using localStorage fallback:', saved);
-    return Number(saved);
-  }
-
-  // Last resort fallback for special plan safety (prevents ₦10 forever)
-  console.warn('[SAFE PRICE] No valid price found — forced fallback to 1500 for special plan');
-  return 1500;
-}
 
 // Synchronous PIN check using localStorage
 function checkPinExists(context = 'checkout') {
@@ -1169,23 +1151,7 @@ async function updateReceiptToSuccess(result) {
     
     document.getElementById('receipt-phone').textContent = data.number;
     document.getElementById('receipt-plan').textContent = `${data.dataAmount} / ${data.validity}`;
-const safePrice = getSafeReceiptPrice();
-const formattedPrice = `₦${safePrice.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
-const amountEl = document.getElementById('receipt-amount');
-if (amountEl) {
-  amountEl.textContent = formattedPrice;
-  // Force visual refresh (prevents any late JS/CSS override)
-  amountEl.style.transition = 'none';
-  amountEl.style.opacity = '0';
-  setTimeout(() => {
-    amountEl.style.opacity = '1';
-    amountEl.style.transition = 'opacity 0.3s ease';
-  }, 50);
-  console.log('[RECEIPT SUCCESS] Final price applied:', formattedPrice);
-} else {
-  console.error('[RECEIPT SUCCESS] #receipt-amount not found!');
-}
+    document.getElementById('receipt-amount').textContent = `₦${Number(data.price).toLocaleString()}`;
     document.getElementById('receipt-transaction-id').textContent = transactionRef;
     document.getElementById('receipt-balance').textContent = `₦${Number(data.new_balance || 0).toLocaleString()}`;
     document.getElementById('receipt-time').textContent = new Date().toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
@@ -1230,11 +1196,7 @@ if (amountEl) {
       window.renderRecentTransactions(fallback);
     }
   }
-  // Clean up only after success is fully shown
-setTimeout(() => {
-  localStorage.removeItem('lastCheckoutPrice');
-  console.log('[PRICE CLEANUP] Removed lastCheckoutPrice after success');
-}, 2000);
+
 }
 
 function updateReceiptToFailed(errorMessage) {
@@ -1352,23 +1314,7 @@ function updateReceiptToPending() {
   document.getElementById('receipt-provider').innerHTML = `${svg} ${data.provider.toUpperCase()}`;
   document.getElementById('receipt-phone').textContent = data.number;
   document.getElementById('receipt-plan').textContent = `${data.dataAmount} / ${data.validity}`;
-// === Do exactly the same in updateReceiptToPending() ===
-const safePrice = getSafeReceiptPrice();
-const formattedPrice = `₦${safePrice.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
-const amountEl = document.getElementById('receipt-amount');
-if (amountEl) {
-  amountEl.textContent = formattedPrice;
-  amountEl.style.transition = 'none';
-  amountEl.style.opacity = '0';
-  setTimeout(() => {
-    amountEl.style.opacity = '1';
-    amountEl.style.transition = 'opacity 0.3s ease';
-  }, 50);
-  console.log('[RECEIPT PENDING] Final price applied:', formattedPrice);
-} else {
-  console.error('[RECEIPT PENDING] #receipt-amount not found!');
-}
+  document.getElementById('receipt-amount').textContent = `₦${Number(data.price).toLocaleString()}`;
   document.getElementById('receipt-transaction-id').textContent = data.reference || 'N/A';
   document.getElementById('receipt-balance').textContent = `₦${Number(data.new_balance || 0).toLocaleString()}`;
   document.getElementById('receipt-time').textContent = new Date().toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
