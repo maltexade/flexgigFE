@@ -5714,6 +5714,7 @@ window.attach9mobileModalListeners = window.attach9mobileModalListeners || attac
 // dashboard.js - UPDATED FUNCTIONS (REPLACE EXISTING)
 
 function updateSpecialRemainingCount(plan) {
+  // Only MTN SPECIAL plans
   if (
     plan.category?.toUpperCase() !== 'SPECIAL' ||
     plan.provider?.toLowerCase() !== 'mtn'
@@ -5724,8 +5725,8 @@ function updateSpecialRemainingCount(plan) {
   );
 
   boxes.forEach(box => {
-    const sentToday = Number(plan.daily_purchase_count) || 0;
-    const remaining = 10 - sentToday;
+    // Use the real daily_available_slots from DB, fallback to 0
+    const remaining = Number(plan.daily_available_slots) || 0;
 
     let el = box.querySelector('.remaining-count');
 
@@ -5742,8 +5743,18 @@ function updateSpecialRemainingCount(plan) {
       el.textContent = 'Sold out today';
       el.classList.add('sold-out');
     }
+
+    // Optionally block clicks if sold out
+    if (remaining <= 0) {
+      box.classList.add('sold-out');
+      box.style.pointerEvents = 'none';
+    } else {
+      box.classList.remove('sold-out');
+      box.style.pointerEvents = '';
+    }
   });
 }
+
 window.updateSpecialRemainingCount = window.updateSpecialRemainingCount || updateSpecialRemainingCount;
 
 // ==========================================
@@ -5878,8 +5889,8 @@ async function renderDashboardPlans(provider) {
   let remainingCountHTML = '';
 
 if (categoryUpper === 'SPECIAL' && provider === 'mtn') {
-  const sentToday = Number(plan.daily_purchase_count) || 0;
-  const remaining = 10 - sentToday;
+  // Use the real daily_available_slots from DB
+  const remaining = Number(plan.daily_available_slots) || 0;
   const remainingText = remaining > 0 ? `${remaining} left today` : 'Sold out today';
   const remainingClass = remaining > 0 ? 'remaining-count' : 'remaining-count sold-out';
 
@@ -5889,6 +5900,7 @@ if (categoryUpper === 'SPECIAL' && provider === 'mtn') {
     </div>
   `;
 }
+
 
 box.innerHTML = `
   ${remainingCountHTML}
@@ -6144,10 +6156,9 @@ function fillPlanSection(sectionEl, provider, subType, plans, title, svg) {
 
   let remainingCountHTML = '';
 
-// Only show remaining count for MTN special plan
 if (categoryUpper === 'SPECIAL' && provider === 'mtn') {
-  const sentToday = Number(plan.daily_purchase_count) || 0;
-  const remaining = 10 - sentToday;
+  // Use the real daily_available_slots from DB
+  const remaining = Number(plan.daily_available_slots) || 0;
   const remainingText = remaining > 0 ? `${remaining} left today` : 'Sold out today';
   const remainingClass = remaining > 0 ? 'remaining-count' : 'remaining-count sold-out';
 
@@ -6157,6 +6168,7 @@ if (categoryUpper === 'SPECIAL' && provider === 'mtn') {
     </div>
   `;
 }
+
 
 box.innerHTML = `
   ${remainingCountHTML}
