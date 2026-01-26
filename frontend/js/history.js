@@ -1795,6 +1795,7 @@ function createMonthPickerModal() {
     if (e.detail === 'historyModal') {
       console.log('[TransactionHistory] Modal opened by ModalManager');
       handleModalOpened();
+      resetPagination();
     }
   });
 
@@ -2369,6 +2370,7 @@ subscribeToTransactions();
   // Expose for manual calls if needed
   window.renderDashboardRecent = renderDashboardRecent;
   window.initDashboard = initDashboard;
+  window.resetPagination = window.resetPagination || resetPagination;
 
 
 })();

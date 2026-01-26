@@ -542,6 +542,7 @@
       console.log('[Button Clicked] View All was clicked!');
       if (typeof window.openHistoryModal === 'function') {
         window.openHistoryModal();
+        window.resetPagination();
         console.log('History modal function called');
       } else {
         ModalManager?.openModal('historyModal');

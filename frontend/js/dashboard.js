@@ -3424,6 +3424,11 @@ function updateLocalStorageFromUser(user) {
       profileCompleted: user.profileCompleted || false,
       fullNameEdited: user.fullNameEdited || false,
       lastUsernameUpdate: user.lastUsernameUpdate || '',
+      monthlyHistory: user.monthlyHistory || [],
+      allTimeIn: user.allTimeIn || 0,
+      allTimeOut: user.allTimeOut || 0,
+      totalDataTxCount: user.totalDataTxCount || 0,
+
       cachedAt: Date.now()
     };
 
@@ -3441,6 +3446,10 @@ function updateLocalStorageFromUser(user) {
     localStorage.setItem('profileCompleted', user.profileCompleted ? 'true' : 'false');
     localStorage.setItem('fullNameEdited', user.fullNameEdited ? 'true' : 'false');
     localStorage.setItem('lastUsernameUpdate', user.lastUsernameUpdate || '');
+    localStorage.setItem('monthlyHistory', JSON.stringify(user.monthlyHistory || []));
+    localStorage.setItem('allTimeIn', user.allTimeIn || 0);
+    localStorage.setItem('allTimeOut', user.allTimeOut || 0);
+    localStorage.setItem('totalDataTxCount', user.totalDataTxCount || 0);
 
     console.log('[DEBUG] updateLocalStorageFromUser: Updated', {
       hasPin: user.hasPin,
