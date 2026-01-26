@@ -231,98 +231,31 @@ function applyFilters(items) {
   return filtered;
 }
 
-/* -------------------------- INFINITE SCROLL PAGINATION (NON-BLOCKING) -------------------------- */
+/* ------------------- INFINITE SCROLL + FALLBACK WITH BACKEND TOTALS ------------------- */
+
 let isLoadingMore = false;
-let currentPage = 1;
-let hasMorePages = true;
 let lastScrollPosition = 0;
 
-const PAGE_SIZE = 50;        // keep or reduce to 25 if still heavy
-const CHUNK_PROCESS = 20;    // number of API items to normalize per tick
-
-// tiny helper: yield to the event loop / next paint
-function yieldFrame() {
-  // prefer requestIdleCallback if available for background work
-  if (typeof requestIdleCallback === 'function') {
-    return new Promise(resolve => requestIdleCallback(resolve, { timeout: 50 }));
-  }
-  return new Promise(resolve => setTimeout(resolve, 0));
-}
-
-// merge two arrays already sorted DESC by timestamp (newest first)
-function mergeSortedDesc(existing, incoming) {
-  const merged = [];
-  let i = 0, j = 0;
-  while (i < existing.length && j < incoming.length) {
-    const ti = new Date(existing[i].time).getTime();
-    const tj = new Date(incoming[j].time).getTime();
-    if (ti >= tj) {
-      merged.push(existing[i++]);
-    } else {
-      merged.push(incoming[j++]);
-    }
-  }
-  // append leftovers
-  while (i < existing.length) merged.push(existing[i++]);
-  while (j < incoming.length) merged.push(incoming[j++]);
-  return merged;
-}
-
-async function loadMoreTransactions() {
-  if (isLoadingMore || !hasMorePages || !state.open) return;
+async function loadTransactionsPage(page = 1, pageSize = 200) {
+  if (isLoadingMore) return;
 
   isLoadingMore = true;
-  currentPage++;
-
-  // Save scroll BEFORE loading
   lastScrollPosition = historyList.scrollTop;
-  console.log('[Tx Pagination] Loading page', currentPage, '| saved scroll:', lastScrollPosition);
-
-  // show loading indicator
-  const loadingIndicator = document.createElement('div');
-  loadingIndicator.id = 'loadMoreIndicator';
-  loadingIndicator.style.cssText = `
-    padding: 20px;
-    text-align: center;
-    color: #999;
-    font-size: 14px;
-  `;
-  loadingIndicator.innerHTML = `
-    <div style="display:inline-flex;align-items:center;gap:10px;">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation:spin 1s linear infinite;">
-        <circle cx="12" cy="12" r="10" stroke-opacity="0.25"/>
-        <path d="M12 2a10 10 0 0 1 10 10" stroke-opacity="0.75"/>
-      </svg>
-      Loading more transactions...
-    </div>
-    <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
-  `;
-  historyList.appendChild(loadingIndicator);
 
   try {
-    const res = await safeFetch(`${CONFIG.apiEndpoint}?limit=${PAGE_SIZE}&page=${currentPage}`);
-    const apiItems = res.items || [];
+    // Fetch page + totals if page 1
+    const url = `${CONFIG.apiEndpoint}?limit=${pageSize}&page=${page}`;
+    const data = await safeFetch(url);
+    const apiItems = data.items || [];
+    const totalsFromApi = data.totals; // optional: if API returns totals
 
-    console.log('[Tx Pagination] Fetched', apiItems.length, 'items from page', currentPage);
+    const existingIds = new Set(state.items.map(t => t.id));
+    const incoming = [];
 
-    if (apiItems.length === 0) {
-      hasMorePages = false;
-      loadingIndicator.innerHTML = `
-        <div style="padding:20px;text-align:center;color:#666;font-size:14px;">
-          <div style="font-weight:600;margin-bottom:4px;">You've reached the end</div>
-          <div style="font-size:12px;color:#888;">No more transactions to load</div>
-        </div>`;
-      isLoadingMore = false;
-      return;
-    }
+    const CHUNK = 20;
+    for (let i = 0; i < apiItems.length; i += CHUNK) {
+      const slice = apiItems.slice(i, i + CHUNK);
 
-    // Build a set of existing ids for quick dedupe
-    const existingIds = new Set(state.items.map(tx => tx.id));
-    const incomingNormalized = [];
-
-    // Process API items in chunks so we yield to UI regularly
-    for (let i = 0; i < apiItems.length; i += CHUNK_PROCESS) {
-      const slice = apiItems.slice(i, i + CHUNK_PROCESS);
       for (const raw of slice) {
         const id = raw.id || raw.reference;
         if (!id || existingIds.has(id)) continue;
@@ -330,96 +263,106 @@ async function loadMoreTransactions() {
         const normalized = {
           id,
           reference: raw.reference || raw.id,
-          type: raw.type || (Number(raw.amount || 0) > 0 ? 'credit' : 'debit'),
+          type: raw.type || (Number(raw.amount) > 0 ? 'credit' : 'debit'),
           amount: Math.abs(Number(raw.amount || 0)),
-          description: (raw.description || raw.narration || 'Transaction').trim(),
-          time: raw.created_at || raw.time || new Date().toISOString(),
+          description: (raw.description || raw.narration || 'Transaction')
+            .replace(/\s*\(pending\)\s*/gi, '')
+            .trim(),
+          time: raw.time || raw.created_at || new Date().toISOString(),
           status: (raw.status || 'SUCCESS').toUpperCase(),
           provider: raw.provider,
           phone: raw.phone
         };
 
-        incomingNormalized.push(normalized);
+        // Normalize refunds
+        const statusLower = normalized.status.toLowerCase();
+        if (statusLower.includes('refund') || statusLower === 'refunded') {
+          normalized.type = 'credit';
+          normalized.description = 'Refund for Failed Data';
+        }
+
+        incoming.push(normalized);
         existingIds.add(id);
       }
-      // yield so the main thread can update UI / respond to input
-      await yieldFrame();
+
+      // Yield to UI
+      await new Promise(r => setTimeout(r, 0));
     }
 
-    if (incomingNormalized.length === 0) {
-      console.log('[Tx Pagination] No new unique items in this page');
-      loadingIndicator.remove();
-      isLoadingMore = false;
-      return;
-    }
+    // Append to state
+    state.items = [...state.items, ...incoming];
 
-    // sort incomingNormalized descending by time (fast: only for new chunk)
-    incomingNormalized.sort((a, b) => new Date(b.time) - new Date(a.time));
-
-    // Determine whether we can cheaply append (common when paginating older items)
-    let mergedItems = [];
-    if (state.items.length === 0) {
-      mergedItems = incomingNormalized;
-    } else {
-      // assume state.items is sorted DESC (newest first)
-      const lastExistingTs = new Date(state.items[state.items.length - 1].time).getTime();
-      const newestIncomingTs = new Date(incomingNormalized[0].time).getTime();
-
-      if (newestIncomingTs <= lastExistingTs) {
-        // incoming are older than existing → cheap append
-        mergedItems = state.items.concat(incomingNormalized);
+    // Only fetch backend totals if page 1 (authoritative)
+    if (page === 1) {
+      if (totalsFromApi) {
+        state.totals = {
+          ...state.totals,
+          allTimeIn: totalsFromApi.all_time_in,
+          allTimeOut: totalsFromApi.all_time_out,
+          successfulDataTxCount: totalsFromApi.successful_data_tx_count
+        };
       } else {
-        // need to merge sorted lists (O(n+m))
-        mergedItems = mergeSortedDesc(state.items, incomingNormalized);
+        // Fallback: fetch from backend totals endpoint
+        const totals = await safeFetch(`${CONFIG.apiEndpoint}/user-totals?userId=${CURRENT_USER_UID}`);
+        state.totals = {
+          ...state.totals,
+          allTimeIn: totals.all_time_in,
+          allTimeOut: totals.all_time_out,
+          successfulDataTxCount: totals.successful_data_tx_count
+        };
       }
     }
 
-    // reduce rendering cost: update state once, then render in one go
-    state.items = mergedItems;
+    // Compute monthly totals locally
+    const monthKey = state.totals.monthKey || new Date().toISOString().slice(0, 7);
+    state.totals.monthIn = state.items
+      .filter(t => t.time.slice(0, 7) === monthKey && t.type === 'credit')
+      .reduce((sum, t) => sum + t.amount, 0);
 
-    // build grouped structure (this may be heavy - leave as is but it runs once)
-    const grouped = groupTransactions(state.items);
-    setState({ grouped });
+    state.totals.monthOut = state.items
+      .filter(t => t.time.slice(0, 7) === monthKey && t.type === 'debit')
+      .reduce((sum, t) => sum + t.amount, 0);
 
-    // renderChunked should already be chunked; call it once
-    renderChunked(grouped);
+    // Re-render safely
+    applyTransformsAndRender();
+    renderDashboardRecent();
 
-    // restore scroll after next paint
-    requestAnimationFrame(() => {
-      historyList.scrollTop = lastScrollPosition;
-      console.log('[Tx Pagination] Scroll restored to:', lastScrollPosition);
-    });
+    // Update pagination
+    state.pagination = state.pagination || {};
+    state.pagination.currentPage = page;
+    state.pagination.hasMore = apiItems.length === pageSize;
+    if (!state.pagination.hasMore) state.fullHistoryLoaded = true;
 
-    loadingIndicator.remove();
-
-    // if fewer items than requested, we've reached the end
-    if (apiItems.length < PAGE_SIZE) {
-      hasMorePages = false;
-      const endMessage = document.createElement('div');
-      endMessage.style.cssText = `padding: 30px 20px; text-align:center; color:#666; font-size:14px;`;
-      endMessage.innerHTML = `
-        <div style="font-weight:600;margin-bottom:4px;">All transactions loaded</div>
-        <div style="font-size:12px;color:#888;">You've seen all ${state.items.length} transactions</div>
-      `;
-      historyList.appendChild(endMessage);
-    }
-
-    console.log('[Tx Pagination] Added', incomingNormalized.length, 'new transactions - total', state.items.length);
+    console.log(`[Tx Loader] Page ${page} loaded:`, incoming.length, 'new tx');
+    console.log('[Tx Totals]', state.totals);
 
   } catch (err) {
-    console.error('[Tx Pagination] Failed:', err);
-    loadingIndicator.innerHTML = '<div style="color:#ff3b30;padding:10px;">Failed to load more. Tap to retry.</div>';
-    loadingIndicator.style.cursor = 'pointer';
-    loadingIndicator.onclick = () => {
-      loadingIndicator.remove();
-      currentPage--;
-      isLoadingMore = false;
-      loadMoreTransactions();
-    };
+    console.error('[Tx Loader] Failed to load page', page, err);
   } finally {
     isLoadingMore = false;
+    // Restore scroll after render
+    requestAnimationFrame(() => {
+      historyList.scrollTop = lastScrollPosition;
+    });
   }
 }
+
+// Trigger next page on scroll
+historyList.addEventListener('scroll', () => {
+  if (state.fullHistoryLoaded || isLoadingMore) return;
+
+  const scrollBottom = historyList.scrollTop + historyList.clientHeight;
+  if (scrollBottom + 100 >= historyList.scrollHeight) {
+    loadTransactionsPage((state.pagination?.currentPage || 1) + 1);
+  }
+});
+
+// Initial fallback load
+// async function loadLatestHistoryAsFallback() {
+//   if (state.fullHistoryLoaded) return;
+//   await loadTransactionsPage(1);
+// }
+
 
 
 /* -------------------------- RESET PAGINATION HELPER -------------------------- */
@@ -1386,102 +1329,53 @@ function renderChunked(groupedMonths) {
 /* -------------------------- FALLBACK: LOAD FROM API ONLY IF REALTIME FAILS -------------------------- */
 /* -------------------------- FALLBACK: LOAD FROM API ONLY IF REALTIME FAILS -------------------------- */
 async function loadLatestHistoryAsFallback() {
-  if (state.fullHistoryLoaded) {
-    console.log('[Tx Fallback] Already fully loaded — skipping API call');
-    return;
-  }
-
-  console.log('[Tx Fallback] Realtime not working → loading latest from API (limit 200, page 1)');
+  if (state.fullHistoryLoaded) return;
 
   show(loadingEl);
   hide(emptyEl);
-
-  let allTx = state.items.slice(); // Start with whatever realtime already gave us
 
   try {
     const data = await safeFetch(`${CONFIG.apiEndpoint}?limit=200&page=1`);
     const apiItems = data.items || [];
 
-    console.log('[Tx Fallback] API returned', apiItems.length, 'items');
+    const existingIds = new Set(state.items.map(t => t.id));
+    const incoming = apiItems.filter(t => !existingIds.has(t.id));
 
-    if (apiItems.length > 0) {
-      // Track existing IDs to prevent exact duplicates
-      const existingIds = new Set(allTx.map(tx => tx.id));
-
-      apiItems.forEach(raw => {
-        const id = raw.id || raw.reference;
-        if (!id) {
-          console.warn('[Tx Fallback] Skipping row with no ID/reference:', raw);
-          return;
-        }
-
-        // Normalize the row
-        let normalized = {
-          id,
-          reference: raw.reference || raw.id,
-          type: raw.type || (Number(raw.amount) > 0 ? 'credit' : 'debit'),
-          amount: Math.abs(Number(raw.amount || 0)),
-          description: (raw.description || raw.narration || 'Transaction')
-            .replace(/\s*\(pending\)\s*/gi, '')
-            .trim(),
-          time: raw.time || raw.created_at || new Date().toISOString(),
-          status: (raw.status || 'SUCCESS').toUpperCase(),
-          provider: raw.provider,
-          phone: raw.phone
-        };
-
-        const statusLower = normalized.status.toLowerCase();
-
-        // Special handling for REFUND rows — always separate
-        if (statusLower.includes('refund') || statusLower === 'refunded') {
-          normalized.type = 'credit';                        // Green incoming
-          normalized.description = 'Refund for Failed Data'; // Fixed client-side text
-          console.log('[Tx Fallback] Added SEPARATE refund tx:', {
-            id,
-            ref: normalized.reference,
-            status: normalized.status,
-            amount: normalized.amount
-          });
-        } 
-        // Log failed rows for visibility
-        else if (statusLower.includes('fail') || statusLower === 'failed') {
-          console.log('[Tx Fallback] Added failed tx:', {
-            id,
-            ref: normalized.reference,
-            status: normalized.status,
-            description: normalized.description
-          });
-        }
-
-        // Only add if this exact ID doesn't exist yet
-        if (!existingIds.has(id)) {
-          allTx.unshift(normalized);
-          existingIds.add(id);
-          console.log('[Tx Fallback] Successfully added tx:', id);
-        } else {
-          console.log('[Tx Fallback] Skipped duplicate ID:', id);
-        }
-      });
-    } else {
-      console.log('[Tx Fallback] API returned no items');
-    }
-
-    // Final sort: newest first
-    allTx.sort((a, b) => new Date(b.time) - new Date(a.time));
-
-    state.items = allTx;
+    state.items = [...state.items, ...incoming];
     state.fullHistoryLoaded = true;
     state.preloaded = true;
 
+    // Fetch authoritative totals
+    const totals = await safeFetch(`${CONFIG.apiEndpoint}/user-totals?userId=${CURRENT_USER_UID}`);
+    state.totals = {
+      ...state.totals,
+      allTimeIn: totals.all_time_in,
+      allTimeOut: totals.all_time_out,
+      successfulDataTxCount: totals.successful_data_tx_count
+    };
+
+    // Compute monthly totals locally
+    const monthKey = state.totals.monthKey;
+    state.totals.monthIn = state.items
+      .filter(t => t.time.slice(0, 7) === monthKey && t.type === 'credit')
+      .reduce((sum, t) => sum + t.amount, 0);
+    state.totals.monthOut = state.items
+      .filter(t => t.time.slice(0, 7) === monthKey && t.type === 'debit')
+      .reduce((sum, t) => sum + t.amount, 0);
+
     applyTransformsAndRender();
     renderDashboardRecent();
-    console.log('[Tx Fallback] Success — total items now:', state.items.length);
+
+    console.log('[Tx Fallback] Loaded', incoming.length, 'new tx');
+    console.log('[Tx Totals]', state.totals);
+
   } catch (err) {
-    console.error('[Tx Fallback] API fetch failed:', err.message || err);
+    console.error('[Tx Fallback] Failed:', err);
   } finally {
     hide(loadingEl);
   }
 }
+
 
 window.loadLatestHistoryAsFallback = loadLatestHistoryAsFallback;
 
@@ -2347,34 +2241,76 @@ subscribeToTransactions();
     updateDashboardTotals(totalIn, totalOut, totalCount);
   }
 
-  function updateDashboardTotals(inAmt, outAmt, count) {
-    const fmt = (n) => '₦' + Number(n).toLocaleString('en-NG', {
+  // ------------------- DASHBOARD TOTALS USING ALL-TIME -------------------
+
+function updateDashboardTotalsFromAllTime() {
+  if (!state.totals) {
+    console.warn('[Dashboard] No totals available yet');
+    return;
+  }
+
+  const { allTimeIn, allTimeOut, successfulDataTxCount } = state.totals;
+
+  const fmt = (n) =>
+    '₦' + Number(n).toLocaleString('en-NG', {
       minimumFractionDigits: 2,
-      maximumFractionDigits: 2
+      maximumFractionDigits: 2,
     });
 
-     const totalFundedEl = document.getElementById('dbTotalFundedDisplay');   // ← CHANGED
-  const totalSpentEl = document.getElementById('dbTotalSpentDisplay');     // ← CHANGED
-  const totalTxCountEl = document.getElementById('dbTotalTxCountDisplay'); // ← CHANGED
+  const totalFundedEl = document.getElementById('dbTotalFundedDisplay');
+  const totalSpentEl = document.getElementById('dbTotalSpentDisplay');
+  const totalTxCountEl = document.getElementById('dbTotalTxCountDisplay');
 
+  if (totalFundedEl) totalFundedEl.textContent = fmt(allTimeIn);
+  if (totalSpentEl) totalSpentEl.textContent = fmt(allTimeOut);
+  if (totalTxCountEl) totalTxCountEl.textContent = successfulDataTxCount.toLocaleString('en-NG');
 
-    if (totalFundedEl) totalFundedEl.textContent = fmt(inAmt);
-    if (totalSpentEl) totalSpentEl.textContent = fmt(outAmt);
-    if (totalTxCountEl) totalTxCountEl.textContent = count.toLocaleString('en-NG');
+  console.log('[Dashboard] Totals updated from all-time:', state.totals);
+}
+
+// ------------------- INITIALIZE DASHBOARD -------------------
+function initDashboard() {
+  const recentList = document.getElementById('dashboardRecentTxList');
+  if (!recentList) {
+    console.log('[Dashboard] Not on dashboard page - skipping');
+    return;
   }
 
-  // ✅ CRITICAL: Only call if we're on the dashboard page
-  function initDashboard() {
-    if (document.getElementById('dashboardRecentTxList')) {
-      console.log('[Dashboard] Initializing dashboard view');
-      renderDashboardRecent();
-    } else {
-      console.log('[Dashboard] Not on dashboard page - skipping initial render');
-    }
-  }
+  console.log('[Dashboard] Initializing dashboard view');
 
-  // Run once on load (with safety check)
-  initDashboard();
+  // First render recent transactions
+  renderDashboardRecent();
+
+  // Update totals from authoritative all-time
+  updateDashboardTotalsFromAllTime();
+}
+
+// ------------------- LISTENERS -------------------
+
+// Auto-update when a new transaction arrives
+document.addEventListener('transaction_update', () => {
+  if (document.getElementById('dashboardRecentTxList')) {
+    renderDashboardRecent();
+    updateDashboardTotalsFromAllTime();
+  }
+});
+
+// Update after full history load / filter change
+window.addEventListener('transactionHistoryUpdated', () => {
+  if (document.getElementById('dashboardRecentTxList')) {
+    renderDashboardRecent();
+    updateDashboardTotalsFromAllTime();
+  }
+});
+
+// Expose functions for manual calls if needed
+window.renderDashboardRecent = renderDashboardRecent;
+window.initDashboard = initDashboard;
+window.updateDashboardTotalsFromAllTime = updateDashboardTotalsFromAllTime;
+
+// ------------------- INITIAL CALL -------------------
+initDashboard();
+
 
   // Auto-update when new transaction arrives
   document.addEventListener('transaction_update', () => {
