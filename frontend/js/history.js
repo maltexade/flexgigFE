@@ -231,11 +231,42 @@ function applyFilters(items) {
   return filtered;
 }
 
-/* -------------------------- INFINITE SCROLL PAGINATION (FIXED) -------------------------- */
+/* -------------------------- INFINITE SCROLL PAGINATION (NON-BLOCKING) -------------------------- */
 let isLoadingMore = false;
 let currentPage = 1;
 let hasMorePages = true;
-let lastScrollPosition = 0; // Track scroll position
+let lastScrollPosition = 0;
+
+const PAGE_SIZE = 50;        // keep or reduce to 25 if still heavy
+const CHUNK_PROCESS = 20;    // number of API items to normalize per tick
+
+// tiny helper: yield to the event loop / next paint
+function yieldFrame() {
+  // prefer requestIdleCallback if available for background work
+  if (typeof requestIdleCallback === 'function') {
+    return new Promise(resolve => requestIdleCallback(resolve, { timeout: 50 }));
+  }
+  return new Promise(resolve => setTimeout(resolve, 0));
+}
+
+// merge two arrays already sorted DESC by timestamp (newest first)
+function mergeSortedDesc(existing, incoming) {
+  const merged = [];
+  let i = 0, j = 0;
+  while (i < existing.length && j < incoming.length) {
+    const ti = new Date(existing[i].time).getTime();
+    const tj = new Date(incoming[j].time).getTime();
+    if (ti >= tj) {
+      merged.push(existing[i++]);
+    } else {
+      merged.push(incoming[j++]);
+    }
+  }
+  // append leftovers
+  while (i < existing.length) merged.push(existing[i++]);
+  while (j < incoming.length) merged.push(incoming[j++]);
+  return merged;
+}
 
 async function loadMoreTransactions() {
   if (isLoadingMore || !hasMorePages || !state.open) return;
@@ -243,12 +274,11 @@ async function loadMoreTransactions() {
   isLoadingMore = true;
   currentPage++;
 
-  // Save current scroll position BEFORE loading
+  // Save scroll BEFORE loading
   lastScrollPosition = historyList.scrollTop;
+  console.log('[Tx Pagination] Loading page', currentPage, '| saved scroll:', lastScrollPosition);
 
-  console.log('[Tx Pagination] Loading page', currentPage, '| Scroll position saved:', lastScrollPosition);
-
-  // Show loading indicator at bottom
+  // show loading indicator
   const loadingIndicator = document.createElement('div');
   loadingIndicator.id = 'loadMoreIndicator';
   loadingIndicator.style.cssText = `
@@ -265,15 +295,13 @@ async function loadMoreTransactions() {
       </svg>
       Loading more transactions...
     </div>
-    <style>
-      @keyframes spin { to { transform: rotate(360deg); } }
-    </style>
+    <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
   `;
   historyList.appendChild(loadingIndicator);
 
   try {
-    const data = await safeFetch(`${CONFIG.apiEndpoint}?limit=50&page=${currentPage}`);
-    const apiItems = data.items || [];
+    const res = await safeFetch(`${CONFIG.apiEndpoint}?limit=${PAGE_SIZE}&page=${currentPage}`);
+    const apiItems = res.items || [];
 
     console.log('[Tx Pagination] Fetched', apiItems.length, 'items from page', currentPage);
 
@@ -281,84 +309,102 @@ async function loadMoreTransactions() {
       hasMorePages = false;
       loadingIndicator.innerHTML = `
         <div style="padding:20px;text-align:center;color:#666;font-size:14px;">
-          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin:0 auto 12px;opacity:0.3;">
-            <circle cx="12" cy="12" r="10"/>
-            <path d="M12 6v6M12 16h.01"/>
-          </svg>
           <div style="font-weight:600;margin-bottom:4px;">You've reached the end</div>
           <div style="font-size:12px;color:#888;">No more transactions to load</div>
-        </div>
-      `;
+        </div>`;
       isLoadingMore = false;
       return;
     }
 
+    // Build a set of existing ids for quick dedupe
     const existingIds = new Set(state.items.map(tx => tx.id));
-    let addedCount = 0;
+    const incomingNormalized = [];
 
-    apiItems.forEach(raw => {
-      const id = raw.id || raw.reference;
-      if (!id || existingIds.has(id)) return;
+    // Process API items in chunks so we yield to UI regularly
+    for (let i = 0; i < apiItems.length; i += CHUNK_PROCESS) {
+      const slice = apiItems.slice(i, i + CHUNK_PROCESS);
+      for (const raw of slice) {
+        const id = raw.id || raw.reference;
+        if (!id || existingIds.has(id)) continue;
 
-      const normalized = {
-        id,
-        reference: raw.reference || raw.id,
-        type: raw.type || (Number(raw.amount) > 0 ? 'credit' : 'debit'),
-        amount: Math.abs(Number(raw.amount || 0)),
-        description: (raw.description || raw.narration || 'Transaction').trim(),
-        time: raw.created_at || raw.time || new Date().toISOString(),
-        status: (raw.status || 'SUCCESS').toUpperCase(),
-        provider: raw.provider,
-        phone: raw.phone
-      };
+        const normalized = {
+          id,
+          reference: raw.reference || raw.id,
+          type: raw.type || (Number(raw.amount || 0) > 0 ? 'credit' : 'debit'),
+          amount: Math.abs(Number(raw.amount || 0)),
+          description: (raw.description || raw.narration || 'Transaction').trim(),
+          time: raw.created_at || raw.time || new Date().toISOString(),
+          status: (raw.status || 'SUCCESS').toUpperCase(),
+          provider: raw.provider,
+          phone: raw.phone
+        };
 
-      state.items.push(normalized);
-      existingIds.add(id);
-      addedCount++;
-    });
+        incomingNormalized.push(normalized);
+        existingIds.add(id);
+      }
+      // yield so the main thread can update UI / respond to input
+      await yieldFrame();
+    }
 
-    // Sort by date
-    state.items.sort((a, b) => new Date(b.time) - new Date(a.time));
+    if (incomingNormalized.length === 0) {
+      console.log('[Tx Pagination] No new unique items in this page');
+      loadingIndicator.remove();
+      isLoadingMore = false;
+      return;
+    }
 
-    console.log('[Tx Pagination] Added', addedCount, 'new transactions');
+    // sort incomingNormalized descending by time (fast: only for new chunk)
+    incomingNormalized.sort((a, b) => new Date(b.time) - new Date(a.time));
 
-    // Re-render WITHOUT resetting scroll
+    // Determine whether we can cheaply append (common when paginating older items)
+    let mergedItems = [];
+    if (state.items.length === 0) {
+      mergedItems = incomingNormalized;
+    } else {
+      // assume state.items is sorted DESC (newest first)
+      const lastExistingTs = new Date(state.items[state.items.length - 1].time).getTime();
+      const newestIncomingTs = new Date(incomingNormalized[0].time).getTime();
+
+      if (newestIncomingTs <= lastExistingTs) {
+        // incoming are older than existing → cheap append
+        mergedItems = state.items.concat(incomingNormalized);
+      } else {
+        // need to merge sorted lists (O(n+m))
+        mergedItems = mergeSortedDesc(state.items, incomingNormalized);
+      }
+    }
+
+    // reduce rendering cost: update state once, then render in one go
+    state.items = mergedItems;
+
+    // build grouped structure (this may be heavy - leave as is but it runs once)
     const grouped = groupTransactions(state.items);
     setState({ grouped });
-    
-    // Use renderChunked but restore scroll position after
+
+    // renderChunked should already be chunked; call it once
     renderChunked(grouped);
-    
-    // CRITICAL: Restore scroll position in next frame
+
+    // restore scroll after next paint
     requestAnimationFrame(() => {
       historyList.scrollTop = lastScrollPosition;
-      console.log('[Tx Pagination] Scroll position restored to:', lastScrollPosition);
+      console.log('[Tx Pagination] Scroll restored to:', lastScrollPosition);
     });
 
     loadingIndicator.remove();
 
-    // Check if we got fewer items than requested (means we're at the end)
-    if (apiItems.length < 50) {
+    // if fewer items than requested, we've reached the end
+    if (apiItems.length < PAGE_SIZE) {
       hasMorePages = false;
-      
-      // Show "end of history" message
       const endMessage = document.createElement('div');
-      endMessage.style.cssText = `
-        padding: 30px 20px;
-        text-align: center;
-        color: #666;
-        font-size: 14px;
-      `;
+      endMessage.style.cssText = `padding: 30px 20px; text-align:center; color:#666; font-size:14px;`;
       endMessage.innerHTML = `
-        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin:0 auto 12px;opacity:0.3;">
-          <path d="M9 11l3 3L22 4"/>
-          <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
-        </svg>
         <div style="font-weight:600;margin-bottom:4px;">All transactions loaded</div>
         <div style="font-size:12px;color:#888;">You've seen all ${state.items.length} transactions</div>
       `;
       historyList.appendChild(endMessage);
     }
+
+    console.log('[Tx Pagination] Added', incomingNormalized.length, 'new transactions - total', state.items.length);
 
   } catch (err) {
     console.error('[Tx Pagination] Failed:', err);
@@ -366,7 +412,7 @@ async function loadMoreTransactions() {
     loadingIndicator.style.cursor = 'pointer';
     loadingIndicator.onclick = () => {
       loadingIndicator.remove();
-      currentPage--; // Reset page counter
+      currentPage--;
       isLoadingMore = false;
       loadMoreTransactions();
     };
@@ -374,6 +420,7 @@ async function loadMoreTransactions() {
     isLoadingMore = false;
   }
 }
+
 
 /* -------------------------- RESET PAGINATION HELPER -------------------------- */
 function resetPagination() {
