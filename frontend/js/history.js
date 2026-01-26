@@ -231,10 +231,11 @@ function applyFilters(items) {
   return filtered;
 }
 
-/* -------------------------- INFINITE SCROLL PAGINATION -------------------------- */
+/* -------------------------- INFINITE SCROLL PAGINATION (FIXED) -------------------------- */
 let isLoadingMore = false;
 let currentPage = 1;
 let hasMorePages = true;
+let lastScrollPosition = 0; // Track scroll position
 
 async function loadMoreTransactions() {
   if (isLoadingMore || !hasMorePages || !state.open) return;
@@ -242,7 +243,10 @@ async function loadMoreTransactions() {
   isLoadingMore = true;
   currentPage++;
 
-  console.log('[Tx Pagination] Loading page', currentPage);
+  // Save current scroll position BEFORE loading
+  lastScrollPosition = historyList.scrollTop;
+
+  console.log('[Tx Pagination] Loading page', currentPage, '| Scroll position saved:', lastScrollPosition);
 
   // Show loading indicator at bottom
   const loadingIndicator = document.createElement('div');
@@ -275,8 +279,16 @@ async function loadMoreTransactions() {
 
     if (apiItems.length === 0) {
       hasMorePages = false;
-      loadingIndicator.innerHTML = '<div style="color:#666;font-size:13px;">No more transactions</div>';
-      setTimeout(() => loadingIndicator.remove(), 2000);
+      loadingIndicator.innerHTML = `
+        <div style="padding:20px;text-align:center;color:#666;font-size:14px;">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin:0 auto 12px;opacity:0.3;">
+            <circle cx="12" cy="12" r="10"/>
+            <path d="M12 6v6M12 16h.01"/>
+          </svg>
+          <div style="font-weight:600;margin-bottom:4px;">You've reached the end</div>
+          <div style="font-size:12px;color:#888;">No more transactions to load</div>
+        </div>
+      `;
       isLoadingMore = false;
       return;
     }
@@ -310,20 +322,54 @@ async function loadMoreTransactions() {
 
     console.log('[Tx Pagination] Added', addedCount, 'new transactions');
 
-    // Re-render with new data (filters will be applied automatically)
-    applyTransformsAndRender();
+    // Re-render WITHOUT resetting scroll
+    const grouped = groupTransactions(state.items);
+    setState({ grouped });
+    
+    // Use renderChunked but restore scroll position after
+    renderChunked(grouped);
+    
+    // CRITICAL: Restore scroll position in next frame
+    requestAnimationFrame(() => {
+      historyList.scrollTop = lastScrollPosition;
+      console.log('[Tx Pagination] Scroll position restored to:', lastScrollPosition);
+    });
 
     loadingIndicator.remove();
 
-    // Check if we got fewer items than requested (means we're near the end)
+    // Check if we got fewer items than requested (means we're at the end)
     if (apiItems.length < 50) {
       hasMorePages = false;
+      
+      // Show "end of history" message
+      const endMessage = document.createElement('div');
+      endMessage.style.cssText = `
+        padding: 30px 20px;
+        text-align: center;
+        color: #666;
+        font-size: 14px;
+      `;
+      endMessage.innerHTML = `
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin:0 auto 12px;opacity:0.3;">
+          <path d="M9 11l3 3L22 4"/>
+          <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+        </svg>
+        <div style="font-weight:600;margin-bottom:4px;">All transactions loaded</div>
+        <div style="font-size:12px;color:#888;">You've seen all ${state.items.length} transactions</div>
+      `;
+      historyList.appendChild(endMessage);
     }
 
   } catch (err) {
     console.error('[Tx Pagination] Failed:', err);
-    loadingIndicator.innerHTML = '<div style="color:#ff3b30;">Failed to load more</div>';
-    setTimeout(() => loadingIndicator.remove(), 2000);
+    loadingIndicator.innerHTML = '<div style="color:#ff3b30;padding:10px;">Failed to load more. Tap to retry.</div>';
+    loadingIndicator.style.cursor = 'pointer';
+    loadingIndicator.onclick = () => {
+      loadingIndicator.remove();
+      currentPage--; // Reset page counter
+      isLoadingMore = false;
+      loadMoreTransactions();
+    };
   } finally {
     isLoadingMore = false;
   }
@@ -1942,31 +1988,21 @@ async function subscribeToTransactions(force = false) {
 
     console.log('[Tx Realtime] Using UID:', uid);
 
-    // 2. Fetch fresh JWT (exact same endpoint as wallet)
+
+
+    // REPLACE JWT FETCH SECTION WITH:
     console.log('[Tx Realtime] Fetching JWT...');
-    let token;
-    try {
-      const res = await fetch('https://api.flexgig.com.ng/api/supabase/token', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Accept': 'application/json' }
-      });
+    const token = await getSharedJWT(force); // force refresh if force=true
 
-      console.log('[Tx Realtime] JWT response status:', res.status, res.ok);
-
-      if (!res.ok) {
-        const text = await res.text();
-        console.error('[Tx Realtime] JWT fetch failed:', res.status, text);
-        throw new Error(`Token fetch failed: ${res.status}`);
-      }
-
-      ({ token } = await res.json());
-      console.log('[Tx Realtime] JWT acquired (length):', token?.length || 0);
-    } catch (err) {
-      console.error('[Tx Realtime] JWT fetch crashed:', err);
+    if (!token) {
+      console.error('[Tx Realtime] Failed to get JWT');
       scheduleTxRetry();
       return;
     }
+
+    console.log('[Tx Realtime] JWT acquired (length):', token.length);
+
+
 
     // 3. Create temp client (same as wallet – no global headers)
     const tempClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {

@@ -228,6 +228,94 @@ if (!window.__specialPlanRealtimeAttached__) {
 
 
 // ────────────────────────────────────────────────
+// SHARED JWT CACHE - ONE FETCH FOR ALL
+// Prevents multiple simultaneous JWT requests
+// ────────────────────────────────────────────────
+
+const JWT_CACHE = {
+  token: null,
+  expiry: 0,
+  pendingRequest: null, // Track in-flight request
+  BUFFER_MS: 5 * 60 * 1000 // Refresh 5 min before expiry
+};
+
+/**
+ * Get JWT - uses cache, shares pending requests
+ * @param {boolean} forceRefresh - Force new token even if cached
+ * @returns {Promise<string|null>} JWT token or null
+ */
+async function getSharedJWT(forceRefresh = false) {
+  const now = Date.now();
+
+  // 1. If we have a valid cached token, return it immediately
+  if (!forceRefresh && JWT_CACHE.token && now < JWT_CACHE.expiry - JWT_CACHE.BUFFER_MS) {
+    console.log('[JWT Cache] Using cached token (expires in', Math.round((JWT_CACHE.expiry - now) / 1000), 'seconds)');
+    return JWT_CACHE.token;
+  }
+
+  // 2. If there's already a request in flight, wait for it
+  if (JWT_CACHE.pendingRequest) {
+    console.log('[JWT Cache] Waiting for pending request...');
+    return JWT_CACHE.pendingRequest;
+  }
+
+  // 3. Make new request and cache the promise
+  console.log('[JWT Cache] Fetching new JWT...');
+  
+  JWT_CACHE.pendingRequest = (async () => {
+    try {
+      const res = await fetch('https://api.flexgig.com.ng/api/supabase/token', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Accept': 'application/json' }
+      });
+
+      if (!res.ok) {
+        throw new Error(`JWT fetch failed: ${res.status}`);
+      }
+
+      const { token } = await res.json();
+
+      // Decode to get expiry
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      const expiry = payload.exp * 1000; // Convert to milliseconds
+
+      // Cache the token
+      JWT_CACHE.token = token;
+      JWT_CACHE.expiry = expiry;
+
+      console.log('[JWT Cache] ✅ New token cached (expires:', new Date(expiry).toISOString(), ')');
+
+      return token;
+
+    } catch (err) {
+      console.error('[JWT Cache] ❌ Fetch failed:', err);
+      return null;
+    } finally {
+      // Clear pending request
+      JWT_CACHE.pendingRequest = null;
+    }
+  })();
+
+  return JWT_CACHE.pendingRequest;
+}
+
+/**
+ * Clear JWT cache (useful for logout)
+ */
+function clearJWTCache() {
+  JWT_CACHE.token = null;
+  JWT_CACHE.expiry = 0;
+  JWT_CACHE.pendingRequest = null;
+  console.log('[JWT Cache] Cache cleared');
+}
+
+// Expose globally
+window.getSharedJWT = getSharedJWT;
+window.clearJWTCache = clearJWTCache;
+
+
+// ────────────────────────────────────────────────
 // DIRECT SUPABASE REAUTH LOCK HELPERS
 // Secure client-side with RLS - no backend needed
 // ────────────────────────────────────────────────
@@ -249,24 +337,13 @@ async function getReauthClient() {
   console.log('[REAUTH] Creating new authenticated client...');
 
   try {
-    const res = await fetch(window.__SEC_API_BASE + '/api/supabase/token', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Accept': 'application/json' }
-    });
-
-    // 🔥 LOCK SIGNAL — NOT AN ERROR
-    if (res.status === 423) {
-      console.warn('[REAUTH] Backend reports active reauth lock (423)');
-      return { __locked: true };
-    }
-
-    if (!res.ok) {
-      console.error('[REAUTH] JWT fetch failed:', res.status);
+    // USE SHARED JWT CACHE
+    const token = await getSharedJWT();
+    
+    if (!token) {
+      console.error('[REAUTH] Failed to get JWT');
       return null;
     }
-
-    const { token } = await res.json();
 
     _reauthClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       auth: {
@@ -506,31 +583,18 @@ async function subscribeToWalletBalance(force = false) {
 
     console.log('[Wallet Realtime] Using UID:', uid);
 
-    // 2. Fetch JWT
+    // 2. Fetch JWT (shared + cached)
     console.log('[Wallet Realtime] Fetching JWT...');
-    let token;
-    try {
-      const res = await fetch('https://api.flexgig.com.ng/api/supabase/token', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Accept': 'application/json' }
-      });
+    const token = await getSharedJWT(force); // force refresh if needed
 
-      console.log('[Wallet Realtime] JWT response status:', res.status, res.ok);
-
-      if (!res.ok) {
-        const text = await res.text();
-        console.error('[Wallet Realtime] JWT fetch failed:', res.status, text);
-        throw new Error(`Token fetch failed: ${res.status}`);
-      }
-
-      ({ token } = await res.json());
-      console.log('[Wallet Realtime] JWT acquired (length):', token?.length || 0);
-    } catch (err) {
-      console.error('[Wallet Realtime] JWT fetch crashed:', err);
+    if (!token) {
+      console.error('[Wallet Realtime] Failed to get JWT');
       scheduleRetry();
       return;
     }
+
+    console.log('[Wallet Realtime] JWT acquired (length):', token.length);
+
 
     // 3. Decode & log JWT fully
     try {
