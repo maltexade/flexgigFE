@@ -231,6 +231,131 @@ function applyFilters(items) {
   return filtered;
 }
 
+/* -------------------------- INFINITE SCROLL PAGINATION -------------------------- */
+let isLoadingMore = false;
+let currentPage = 1;
+let hasMorePages = true;
+
+async function loadMoreTransactions() {
+  if (isLoadingMore || !hasMorePages || !state.open) return;
+
+  isLoadingMore = true;
+  currentPage++;
+
+  console.log('[Tx Pagination] Loading page', currentPage);
+
+  // Show loading indicator at bottom
+  const loadingIndicator = document.createElement('div');
+  loadingIndicator.id = 'loadMoreIndicator';
+  loadingIndicator.style.cssText = `
+    padding: 20px;
+    text-align: center;
+    color: #999;
+    font-size: 14px;
+  `;
+  loadingIndicator.innerHTML = `
+    <div style="display:inline-flex;align-items:center;gap:10px;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation:spin 1s linear infinite;">
+        <circle cx="12" cy="12" r="10" stroke-opacity="0.25"/>
+        <path d="M12 2a10 10 0 0 1 10 10" stroke-opacity="0.75"/>
+      </svg>
+      Loading more transactions...
+    </div>
+    <style>
+      @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+  `;
+  historyList.appendChild(loadingIndicator);
+
+  try {
+    const data = await safeFetch(`${CONFIG.apiEndpoint}?limit=50&page=${currentPage}`);
+    const apiItems = data.items || [];
+
+    console.log('[Tx Pagination] Fetched', apiItems.length, 'items from page', currentPage);
+
+    if (apiItems.length === 0) {
+      hasMorePages = false;
+      loadingIndicator.innerHTML = '<div style="color:#666;font-size:13px;">No more transactions</div>';
+      setTimeout(() => loadingIndicator.remove(), 2000);
+      isLoadingMore = false;
+      return;
+    }
+
+    const existingIds = new Set(state.items.map(tx => tx.id));
+    let addedCount = 0;
+
+    apiItems.forEach(raw => {
+      const id = raw.id || raw.reference;
+      if (!id || existingIds.has(id)) return;
+
+      const normalized = {
+        id,
+        reference: raw.reference || raw.id,
+        type: raw.type || (Number(raw.amount) > 0 ? 'credit' : 'debit'),
+        amount: Math.abs(Number(raw.amount || 0)),
+        description: (raw.description || raw.narration || 'Transaction').trim(),
+        time: raw.created_at || raw.time || new Date().toISOString(),
+        status: (raw.status || 'SUCCESS').toUpperCase(),
+        provider: raw.provider,
+        phone: raw.phone
+      };
+
+      state.items.push(normalized);
+      existingIds.add(id);
+      addedCount++;
+    });
+
+    // Sort by date
+    state.items.sort((a, b) => new Date(b.time) - new Date(a.time));
+
+    console.log('[Tx Pagination] Added', addedCount, 'new transactions');
+
+    // Re-render with new data (filters will be applied automatically)
+    applyTransformsAndRender();
+
+    loadingIndicator.remove();
+
+    // Check if we got fewer items than requested (means we're near the end)
+    if (apiItems.length < 50) {
+      hasMorePages = false;
+    }
+
+  } catch (err) {
+    console.error('[Tx Pagination] Failed:', err);
+    loadingIndicator.innerHTML = '<div style="color:#ff3b30;">Failed to load more</div>';
+    setTimeout(() => loadingIndicator.remove(), 2000);
+  } finally {
+    isLoadingMore = false;
+  }
+}
+
+/* -------------------------- RESET PAGINATION HELPER -------------------------- */
+function resetPagination() {
+  currentPage = 1;
+  hasMorePages = true;
+  console.log('[Tx Pagination] Reset to page 1');
+}
+
+// Attach scroll listener to history list
+if (historyList) {
+  historyList.addEventListener('scroll', () => {
+    if (!state.open || !hasMorePages) return;
+
+    const scrollTop = historyList.scrollTop;
+    const scrollHeight = historyList.scrollHeight;
+    const clientHeight = historyList.clientHeight;
+
+    // Trigger when user scrolls to 80% of the list
+    if (scrollTop + clientHeight >= scrollHeight * 0.8) {
+      loadMoreTransactions();
+    }
+  });
+}
+
+// Expose for manual calls
+window.loadMoreTransactions = loadMoreTransactions;
+window.resetPagination = resetPagination;
+
 function getTxIcon(tx) {
   const statusRaw = (tx.status || '').toLowerCase().trim();
 
@@ -449,18 +574,19 @@ function showTransactionReceipt(tx) {
   const existing = document.getElementById('receiptModal');
   if (existing) existing.remove();
 
-  // Reuse the same icon logic from getTxIcon
   const icon = getTxIcon(tx);
   
   const networkInfo = (() => {
     const desc = (tx.description || '').toLowerCase();
-    if (desc.includes('mtn')) return { name: 'MTN', color: '#FFC107' };
-    if (desc.includes('airtel')) return { name: 'Airtel', color: '#E4002B' };
-    if (desc.includes('glo')) return { name: 'GLO', color: '#6FBF48' };
-    if (desc.includes('9mobile') || desc.includes('etisalat')) return { name: '9Mobile', color: '#00A650' };
+    const provider = (tx.provider || '').toLowerCase();
+    
+    if (desc.includes('mtn') || provider.includes('mtn')) return { name: 'MTN', color: '#FFC107' };
+    if (desc.includes('airtel') || provider.includes('airtel')) return { name: 'Airtel', color: '#E4002B' };
+    if (desc.includes('glo') || provider.includes('glo')) return { name: 'GLO', color: '#6FBF48' };
+    if (desc.includes('9mobile') || desc.includes('etisalat') || provider.includes('9mobile')) return { name: '9Mobile', color: '#00A650' };
     if (desc.includes('opay')) return { name: 'Opay', color: '#1E3225' };
     if (desc.includes('refund')) return { name: 'Refund', color: '#fb923c' };
-    return { name: 'Transaction', color: '' };
+    return { name: 'Transaction', color: '#6c757d' };
   })();
 
   const amount = formatCurrency(Math.abs(Number(tx.amount || 0)));
@@ -468,8 +594,24 @@ function showTransactionReceipt(tx) {
   const formattedDate = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
   const formattedTime = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
 
-  const recipientPhone = tx.description?.match(/\d{11}/)?.[0] || null;
-  const dataBundle = tx.description?.match(/\d+\.?\d* ?GB|[\d.]+ ?Days?/gi)?.join(' ') || null;
+  // IMPROVED DATA EXTRACTION
+  const fullDesc = tx.description || tx.narration || '';
+  
+  // Extract phone number (11 digits starting with 0, or 10 digits)
+  const phoneMatch = fullDesc.match(/\b0\d{10}\b|\b[7-9]\d{9}\b/);
+  const recipientPhone = phoneMatch ? phoneMatch[0] : (tx.phone || null);
+  
+  // Extract data bundle (GB, MB, or Days)
+  const dataMatch = fullDesc.match(/(\d+\.?\d*)\s*(GB|MB)|(\d+\.?\d*)\s*(Days?|Hrs?)/gi);
+  const dataBundle = dataMatch ? dataMatch.join(', ') : null;
+  
+  // Extract account info for credits
+  const accountNumberMatch = fullDesc.match(/\b\d{10}\b/);
+  const accountNumber = accountNumberMatch ? accountNumberMatch[0] : null;
+  
+  // Better name extraction (look for capitalized words)
+  const nameMatch = fullDesc.match(/(?:from|via|to)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/i);
+  const accountName = nameMatch ? nameMatch[1].trim() : null;
 
   const statusConfig = {
     success: { text: 'Successful', color: '#00D4AA' },
@@ -479,7 +621,17 @@ function showTransactionReceipt(tx) {
   };
 
   const statusKey = (tx.status || 'success').toLowerCase();
-  const status = statusConfig[statusKey.includes('fail') ? 'failed' : statusKey.includes('refund') ? 'refund' : statusKey.includes('pending') ? 'pending' : 'success'];
+  const status = statusConfig[
+    statusKey.includes('fail') ? 'failed' : 
+    statusKey.includes('refund') ? 'refund' : 
+    statusKey.includes('pending') ? 'pending' : 
+    'success'
+  ];
+
+  // Determine transaction category
+  const isDataPurchase = fullDesc.toLowerCase().includes('data') || dataBundle;
+  const isAirtimePurchase = fullDesc.toLowerCase().includes('airtime');
+  const isCreditTransaction = tx.type === 'credit';
 
   const modalHTML = `
     <div id="receiptModal" style="position:fixed;inset:0;z-index:100000;background:#000;display:flex;flex-direction:column;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
@@ -496,28 +648,27 @@ function showTransactionReceipt(tx) {
         <div style="width:40px;"></div>
       </div>
       
-      <div style="flex:1;display:flex;flex-direction:column;background:#121212;margin-top:env(safe-area-inset-top);overflow:hidden;transform:translateZ(0);padding:16px;gap:30px;">
+      <div style="flex:1;display:flex;flex-direction:column;background:#121212;margin-top:env(safe-area-inset-top);overflow-y:auto;transform:translateZ(0);padding:16px;gap:24px;">
         
         <!-- Amount & Status Card -->
-        <div style="max-height:40%;background:#1e1e1e;border-radius:16px;padding:32px 24px 24px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;position:relative;margin-top:35px;">
+        <div style="background:#1e1e1e;border-radius:16px;padding:32px 24px 24px;display:flex;flex-direction:column;align-items:center;position:relative;margin-top:35px;">
           
           <!-- Floating Logo Circle -->
           <div class="tx-icon ${icon.cls}" style="
-  width:50px; height:50px; border-radius:50%;
-  display:flex; align-items:center; justify-content:center;
-  position:absolute; top:-25px; left:50%; transform:translateX(-50%);
-  background:${networkInfo.color}; box-shadow:0 6px 16px rgba(0,0,0,0.5);
-">
-  ${icon.img
-    ? `<img src="${icon.img}" alt="${icon.alt}" class="tx-img" style="width:28px;height:28px;object-fit:contain;image-rendering:crisp-edges;">`
-    : `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-         ${tx.type === 'credit' 
-            ? '<path d="M12 19V5M5 12l7 7 7-7"/>' 
-            : '<path d="M12 5v14M19 12l-7-7-7 7"/>'}
-       </svg>`
-  }
-</div>
-
+            width:50px; height:50px; border-radius:50%;
+            display:flex; align-items:center; justify-content:center;
+            position:absolute; top:-25px; left:50%; transform:translateX(-50%);
+            background:${networkInfo.color}; box-shadow:0 6px 16px rgba(0,0,0,0.5);
+          ">
+            ${icon.img
+              ? `<img src="${icon.img}" alt="${icon.alt}" class="tx-img" style="width:28px;height:28px;object-fit:contain;image-rendering:crisp-edges;">`
+              : `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                   ${tx.type === 'credit' 
+                      ? '<path d="M12 19V5M5 12l7 7 7-7"/>' 
+                      : '<path d="M12 5v14M19 12l-7-7-7 7"/>'}
+                 </svg>`
+            }
+          </div>
 
           <!-- Amount -->
           <div style="font-size:32px;font-weight:800;color:white;margin-top:32px;margin-bottom:8px;line-height:1;letter-spacing:-1px;">${amount}</div>
@@ -533,25 +684,67 @@ function showTransactionReceipt(tx) {
         </div>
 
         <!-- Details Card -->
-        <div style="max-height:45%;background:#1e1e1e;border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:12px;overflow:hidden;">
+        <div style="background:#1e1e1e;border-radius:16px;padding:20px;display:flex;flex-direction:column;gap:14px;">
           <h3 style="margin:0 0 8px;color:#ccc;font-size:16px;font-weight:600;letter-spacing:0.2px;">Transaction Details</h3>
           
-          ${recipientPhone ? `<div class="detail-row"><span>Recipient Mobile</span><strong>${recipientPhone}</strong></div>` : ''}
-          ${dataBundle ? `<div class="detail-row"><span>Data Bundle</span><strong>${dataBundle}</strong></div>` : ''}
+          ${isDataPurchase && recipientPhone ? `
+            <div class="detail-row">
+              <span>Recipient Number</span>
+              <strong style="font-family:ui-monospace,monospace;letter-spacing:0.5px;">${recipientPhone}</strong>
+            </div>
+          ` : ''}
+          
+          ${isDataPurchase && dataBundle ? `
+            <div class="detail-row">
+              <span>Data Bundle</span>
+              <strong>${dataBundle}</strong>
+            </div>
+          ` : ''}
+          
+          ${isDataPurchase && networkInfo.name !== 'Transaction' ? `
+            <div class="detail-row">
+              <span>Network Provider</span>
+              <strong>${networkInfo.name}</strong>
+            </div>
+          ` : ''}
+
+          ${isCreditTransaction && accountName ? `
+            <div class="detail-row">
+              <span>Source Name</span>
+              <strong>${accountName}</strong>
+            </div>
+          ` : ''}
+          
+          ${isCreditTransaction && accountNumber ? `
+            <div class="detail-row">
+              <span>Account Number</span>
+              <strong style="font-family:ui-monospace,monospace;letter-spacing:0.5px;">${accountNumber}</strong>
+            </div>
+          ` : ''}
 
           <div class="detail-row">
             <span>Transaction Type</span>
-            <strong>${tx.description.includes('Data') ? 'Mobile Data' : tx.description.includes('Airtime') ? 'Airtime Top-up' : tx.type === 'credit' ? 'Credit' : 'Debit'}</strong>
+            <strong>${
+              isDataPurchase ? 'Mobile Data' : 
+              isAirtimePurchase ? 'Airtime Top-up' : 
+              isCreditTransaction ? 'Wallet Credit' : 
+              'Debit'
+            }</strong>
           </div>
 
-          ${tx.type !== 'credit' ? `<div class="detail-row"><span>Payment Method</span><strong>Wallet Balance</strong></div>` : ''}
+          ${!isCreditTransaction ? `
+            <div class="detail-row">
+              <span>Payment Method</span>
+              <strong>Wallet Balance</strong>
+            </div>
+          ` : ''}
 
           <div class="detail-row">
             <span>Transaction No.</span>
             <div style="display:flex;align-items:center;gap:10px;">
-              <strong style="font-family:ui-monospace,monospace;font-size:13px;letter-spacing:0.8px;">${tx.reference || tx.id || '—'}</strong>
-              <button onclick="navigator.clipboard.writeText('${tx.reference || tx.id}');this.innerHTML='Copied';setTimeout(()=>this.innerHTML=copySvg,1500)" style="background:none;border:none;color:#00d4aa;cursor:pointer;">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <strong style="font-family:ui-monospace,monospace;font-size:12px;letter-spacing:0.8px;">${tx.reference || tx.id || '—'}</strong>
+              <button onclick="navigator.clipboard.writeText('${tx.reference || tx.id}');this.innerHTML='✓';setTimeout(()=>this.innerHTML=copySvg,1500)" style="background:none;border:none;color:#00d4aa;cursor:pointer;padding:4px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                   <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
                   <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
                 </svg>
@@ -561,14 +754,21 @@ function showTransactionReceipt(tx) {
 
           <div class="detail-row">
             <span>Transaction Date</span>
-            <strong>${formattedDate} ${formattedTime}</strong>
+            <strong>${formattedDate} · ${formattedTime}</strong>
           </div>
+          
+          ${fullDesc ? `
+            <div class="detail-row" style="flex-direction:column;align-items:flex-start;gap:6px;">
+              <span>Description</span>
+              <strong style="color:#ccc;font-weight:400;font-size:13px;line-height:1.5;">${fullDesc}</strong>
+            </div>
+          ` : ''}
         </div>
 
         <!-- Action Buttons -->
-        <div style="display:flex;gap:12px;margin-top:auto;">
-          <button onclick="reportTransactionIssue('${tx.id || tx.reference}')" style="flex:1;background:#2c2c2c;color:#00d4aa;border:1.5px solid #00d4aa;border-radius:50px;padding:12px;font-weight:600;cursor:pointer;">Report Issue</button>
-          <button onclick="shareReceipt(this.closest('#receiptModal'), '${tx.reference || tx.id}', '${amount}', '${(tx.description || '').replace(/'/g, "\\'")}', '${formattedDate}', '${formattedTime}', '${status.text}', '${networkInfo.name}', '${networkInfo.color}', '${icon.img || ''}', '${tx.type}')" style="flex:1;background:linear-gradient(90deg,#00d4aa,#00bfa5);color:white;border:none;border-radius:50px;padding:12px;font-weight:600;cursor:pointer;">Share Receipt</button>
+        <div style="display:flex;gap:12px;margin-top:auto;padding-bottom:env(safe-area-inset-bottom);">
+          <button onclick="reportTransactionIssue('${tx.id || tx.reference}')" style="flex:1;background:#2c2c2c;color:#00d4aa;border:1.5px solid #00d4aa;border-radius:50px;padding:14px;font-weight:600;cursor:pointer;font-size:14px;">Report Issue</button>
+          <button onclick="shareReceipt(this.closest('#receiptModal'), '${(tx.reference || tx.id || '').replace(/'/g, "\\'")}', '${amount.replace(/'/g, "\\'")}', '${fullDesc.replace(/'/g, "\\'")}', '${formattedDate}', '${formattedTime}', '${status.text}', '${networkInfo.name}', '${networkInfo.color}', '${icon.img || ''}', '${tx.type}')" style="flex:1;background:linear-gradient(90deg,#00d4aa,#00bfa5);color:white;border:none;border-radius:50px;padding:14px;font-weight:600;cursor:pointer;font-size:14px;">Share Receipt</button>
         </div>
 
       </div>
@@ -586,10 +786,10 @@ function showTransactionReceipt(tx) {
         justify-content: space-between;
         align-items: center;
         color: #e0e0e0;
-        font-size: 13px;
+        font-size: 14px;
       }
       .detail-row span { 
-        color: #aaa; 
+        color: #999; 
         font-weight: 500;
       }
       .detail-row strong { 
@@ -601,7 +801,7 @@ function showTransactionReceipt(tx) {
     </style>
 
     <script>
-      const copySvg = \`<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      const copySvg = \`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
         <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
         <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
       </svg>\`;
@@ -1225,37 +1425,37 @@ function updateMonthDisplay() {
 }
 
   function applyMonthFilterAndRender() {
-    let itemsToRender;
-    
-    if (!selectedMonth) {
-      itemsToRender = state.items;
-    } else {
-      itemsToRender = filterBySelectedMonth(state.items);
-    }
-
-    const grouped = groupTransactions(itemsToRender);
-    setState({ grouped });
-    renderChunked(grouped);
-    computeFilteredSummary(itemsToRender);
-
-    // In applyMonthFilterAndRender()
-if (itemsToRender.length === 0) {
-  // Show month header + "No transactions" message
-  const emptyMonth = {
-    monthKey: `${selectedMonth.year}-${selectedMonth.month}`,
-    prettyMonth: new Date(selectedMonth.year, selectedMonth.month).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }),
-    totalIn: 0,
-    totalOut: 0,
-    txs: []
-  };
-  renderChunked([emptyMonth]);
-  hide(emptyEl);
-} else {
-  const grouped = groupTransactions(itemsToRender);
-  renderChunked(grouped);
-  hide(emptyEl);
-}
+  resetPagination(); // Reset pagination when month changes
+  
+  let itemsToRender;
+  
+  if (!selectedMonth) {
+    itemsToRender = state.items;
+  } else {
+    itemsToRender = filterBySelectedMonth(state.items);
   }
+
+  const grouped = groupTransactions(itemsToRender);
+  setState({ grouped });
+  renderChunked(grouped);
+  computeFilteredSummary(itemsToRender);
+
+  if (itemsToRender.length === 0) {
+    const emptyMonth = {
+      monthKey: `${selectedMonth.year}-${selectedMonth.month}`,
+      prettyMonth: new Date(selectedMonth.year, selectedMonth.month).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }),
+      totalIn: 0,
+      totalOut: 0,
+      txs: []
+    };
+    renderChunked([emptyMonth]);
+    hide(emptyEl);
+  } else {
+    const grouped = groupTransactions(itemsToRender);
+    renderChunked(grouped);
+    hide(emptyEl);
+  }
+}
 
   function applyTransformsAndRender() {
   let items = state.items.slice();
@@ -1343,13 +1543,8 @@ function initCustomDropdowns() {
   if (categoryTrigger && categoryDropdown) {
     categoryTrigger.addEventListener('click', (e) => {
       e.stopPropagation();
-      const isOpen = categoryDropdown.classList.contains('show');
-      
-      // Close status dropdown
       statusDropdown?.classList.remove('show');
       statusTrigger?.classList.remove('active');
-      
-      // Toggle category dropdown
       categoryDropdown.classList.toggle('show');
       categoryTrigger.classList.toggle('active');
     });
@@ -1359,19 +1554,17 @@ function initCustomDropdowns() {
         const value = e.currentTarget.getAttribute('data-value');
         const text = e.currentTarget.textContent.trim();
         
-        // Update UI
         categoryTrigger.querySelector('.selected-value').textContent = text;
         categoryDropdown.querySelectorAll('.dropdown-option').forEach(opt => 
           opt.classList.remove('active')
         );
         e.currentTarget.classList.add('active');
         
-        // Update state and filter
         state.filters.category = value;
+        resetPagination(); // Reset pagination when category changes
         console.log('[TransactionHistory] Category filter changed to:', value);
         applyTransformsAndRender();
         
-        // Close dropdown
         categoryDropdown.classList.remove('show');
         categoryTrigger.classList.remove('active');
       });
@@ -1382,12 +1575,8 @@ function initCustomDropdowns() {
   if (statusTrigger && statusDropdown) {
     statusTrigger.addEventListener('click', (e) => {
       e.stopPropagation();
-      
-      // Close category dropdown
       categoryDropdown?.classList.remove('show');
       categoryTrigger?.classList.remove('active');
-      
-      // Toggle status dropdown
       statusDropdown.classList.toggle('show');
       statusTrigger.classList.toggle('active');
     });
@@ -1397,19 +1586,17 @@ function initCustomDropdowns() {
         const value = e.currentTarget.getAttribute('data-value');
         const text = e.currentTarget.textContent.trim();
         
-        // Update UI
         statusTrigger.querySelector('.selected-value').textContent = text;
         statusDropdown.querySelectorAll('.dropdown-option').forEach(opt => 
           opt.classList.remove('active')
         );
         e.currentTarget.classList.add('active');
         
-        // Update state and filter
         state.filters.status = value;
+        resetPagination(); // Reset pagination when status changes
         console.log('[TransactionHistory] Status filter changed to:', value);
         applyTransformsAndRender();
         
-        // Close dropdown
         statusDropdown.classList.remove('show');
         statusTrigger.classList.remove('active');
       });
