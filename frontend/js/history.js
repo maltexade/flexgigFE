@@ -2323,21 +2323,211 @@ subscribeToTransactions();
     updateDashboardTotals(totalIn, totalOut, totalCount);
   }
 
-  function updateDashboardTotals(inAmt, outAmt, count) {
-    const fmt = (n) => '₦' + Number(n).toLocaleString('en-NG', {
+  // REAL-TIME DASHBOARD SUBSCRIPTION (SEPARATE FROM HISTORY)
+  
+
+  let userRealtimeChannel = null;
+let userIsSubscribing = false;
+let userRetryTimer = null;
+let lastUserHealthy = 0;
+let userRealtimeFailedCount = 0;
+
+const USER_RETRY_MS = 15000;
+const USER_HEALTHY_THRESHOLD = 5000;
+
+async function subscribeToUserRealtime(force = false) {
+  const now = Date.now();
+  console.log(`[User Realtime] subscribe called | force=${force} | ts=${now}`);
+
+  if (userIsSubscribing) {
+    console.debug('[User Realtime] Already subscribing — skip');
+    return;
+  }
+
+  if (!force && now - lastUserHealthy < USER_HEALTHY_THRESHOLD) {
+    console.debug('[User Realtime] Recently healthy — skip');
+    return;
+  }
+
+  userIsSubscribing = true;
+
+  try {
+    // 1️⃣ Resolve UID (same sources as tx realtime)
+    let uid =
+      window.__USER_UID ||
+      localStorage.getItem('userId') ||
+      JSON.parse(localStorage.getItem('userData') || '{}')?.uid ||
+      (await getSession())?.user?.uid ||
+      null;
+
+    console.log('[User Realtime DEBUG] UID resolved:', uid);
+
+    if (!uid || !uid.includes('-')) {
+      console.error('[User Realtime] INVALID UID — aborting', uid);
+      return;
+    }
+
+    // 2️⃣ Get shared JWT
+    console.log('[User Realtime] Fetching JWT...');
+    const token = await getSharedJWT(force);
+
+    if (!token) {
+      console.error('[User Realtime] Failed to get JWT');
+      scheduleUserRetry();
+      return;
+    }
+
+    // 3️⃣ Temp client (no global auth bleed)
+    const tempClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+        storageKey: 'flexgig_user_private_jwt_v1'
+      }
+    });
+
+    // 4️⃣ Set session (critical)
+    const { error: sessionError } = await tempClient.auth.setSession({
+      access_token: token,
+      refresh_token: token
+    });
+
+    if (sessionError) {
+      console.error('[User Realtime] setSession FAILED:', sessionError.message);
+      scheduleUserRetry();
+      return;
+    }
+
+    console.log('[User Realtime] ✅ Session set');
+
+    // 5️⃣ Visibility test (RLS sanity check)
+    const { error: testErr } = await tempClient
+      .from('users')
+      .select('id')
+      .eq('id', uid)
+      .limit(1);
+
+    if (testErr) {
+      console.error('[User Realtime] SELECT TEST FAILED:', testErr.message);
+    } else {
+      console.log('[User Realtime] SELECT TEST OK');
+    }
+
+    // 6️⃣ Subscribe
+    const channelName = `user:${uid}`;
+    userRealtimeChannel = tempClient.channel(channelName);
+
+    console.log('[User Realtime] Channel created:', channelName);
+
+    userRealtimeChannel
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'users',
+          filter: `id=eq.${uid}`
+        },
+        (payload) => {
+          console.log('[User Realtime] 🔔 UPDATE RECEIVED');
+
+          const raw = payload.new;
+          if (!raw) return;
+
+          // 🔄 Normalize + persist
+          const allTimeIn = Number(raw.all_time_in || 0);
+          const allTimeOut = Number(raw.all_time_out || 0);
+          const totalTxCount = Number(raw.total_data_tx_count || 0);
+
+          localStorage.setItem('allTimeIn', allTimeIn);
+          localStorage.setItem('allTimeOut', allTimeOut);
+          localStorage.setItem('totalDataTxCount', totalTxCount);
+
+          console.log('[User Realtime] Storage updated:', {
+            allTimeIn,
+            allTimeOut,
+            totalTxCount
+          });
+
+          // 🖥️ Update dashboard instantly
+          updateDashboardTotals();
+
+          window.dispatchEvent(
+            new CustomEvent('user_totals_update', {
+              detail: { allTimeIn, allTimeOut, totalTxCount }
+            })
+          );
+        }
+      )
+      .subscribe((status, err) => {
+        console.log('[User Realtime] SUBSCRIBE STATUS:', status);
+
+        if (err) {
+          console.error('[User Realtime] SUBSCRIBE ERROR:', err.message || err);
+        }
+
+        if (status === 'SUBSCRIBED') {
+          console.log('[User Realtime] ✅ SUBSCRIBED & LISTENING');
+          lastUserHealthy = Date.now();
+          userRealtimeFailedCount = 0;
+          if (userRetryTimer) clearTimeout(userRetryTimer);
+        } else if (['CLOSED', 'CHANNEL_ERROR', 'TIMED_OUT'].includes(status)) {
+          userRealtimeFailedCount++;
+          console.warn('[User Realtime] Channel failed:', userRealtimeFailedCount);
+
+          if (userRealtimeFailedCount >= 3) {
+            console.warn('[User Realtime] Max failures → fallback refresh');
+            refreshUserTotalsFromAPI?.();
+          } else {
+            scheduleUserRetry();
+          }
+        }
+      });
+
+    window.__userRealtimeChannel = userRealtimeChannel;
+
+  } catch (err) {
+    console.error('[User Realtime] CRASH:', err);
+    scheduleUserRetry();
+  } finally {
+    userIsSubscribing = false;
+  }
+}
+
+function scheduleUserRetry() {
+  if (userRetryTimer) return;
+
+  userRetryTimer = setTimeout(() => {
+    userRetryTimer = null;
+    subscribeToUserRealtime(true);
+  }, USER_RETRY_MS);
+}
+window.subscribeToUserRealtime = subscribeToUserRealtime;
+
+
+  function updateDashboardTotals() {
+  const fmt = (n) =>
+    '₦' + Number(n).toLocaleString('en-NG', {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2
     });
 
-     const totalFundedEl = document.getElementById('dbTotalFundedDisplay');   // ← CHANGED
-  const totalSpentEl = document.getElementById('dbTotalSpentDisplay');     // ← CHANGED
-  const totalTxCountEl = document.getElementById('dbTotalTxCountDisplay'); // ← CHANGED
+  // 🔹 Read from localStorage
+  const allTimeIn = Number(localStorage.getItem('allTimeIn')) || 0;
+  const allTimeOut = Number(localStorage.getItem('allTimeOut')) || 0;
+  const totalTxCount = Number(localStorage.getItem('totalDataTxCount')) || 0;
 
+  // 🔹 Elements
+  const totalFundedEl = document.getElementById('dbTotalFundedDisplay');
+  const totalSpentEl = document.getElementById('dbTotalSpentDisplay');
+  const totalTxCountEl = document.getElementById('dbTotalTxCountDisplay');
 
-    if (totalFundedEl) totalFundedEl.textContent = fmt(inAmt);
-    if (totalSpentEl) totalSpentEl.textContent = fmt(outAmt);
-    if (totalTxCountEl) totalTxCountEl.textContent = count.toLocaleString('en-NG');
-  }
+  // 🔹 Update UI
+  if (totalFundedEl) totalFundedEl.textContent = fmt(allTimeIn);
+  if (totalSpentEl) totalSpentEl.textContent = fmt(allTimeOut);
+  if (totalTxCountEl)
+    totalTxCountEl.textContent = totalTxCount.toLocaleString('en-NG');
+}
 
   // ✅ CRITICAL: Only call if we're on the dashboard page
   function initDashboard() {
