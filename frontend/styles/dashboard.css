@@ -4303,27 +4303,292 @@ a[style*="color: #f00"] { color: var(--danger); }
   margin-bottom: 20px;
 } 
 
-/* Filters - NOW VISIBLE ON MOBILE */
+/* Filters - Slick Modern Design */
 .opay-filters { 
-  display: flex;  /* Changed from display: none */
-  gap: 12px; 
+  display: flex;
+  gap: 10px; 
+  padding: 16px; 
+  background: linear-gradient(135deg, #1a1a1a 0%, #252525 100%);
+  flex-wrap: wrap;
+  position: sticky;
   top: 0;
   z-index: 20;
-  padding: 12px 16px; 
-  background: #1e1e1e;
-  flex-wrap: wrap;
-  margin-top: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
 }
 
 .opay-select { 
   flex: 1; 
-  min-width: 140px;
-  background: #2d2d2d; 
-  color: white; 
-  border: none; 
-  padding: 10px; 
-  border-radius: 8px; 
+  min-width: 145px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff; 
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 12px 16px; 
+  border-radius: 12px; 
   font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 12px;
+  padding-right: 36px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.opay-select:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(0, 212, 170, 0.4);
+  box-shadow: 0 4px 12px rgba(0, 212, 170, 0.15);
+  transform: translateY(-1px);
+}
+
+.opay-select:focus {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: #00d4aa;
+  box-shadow: 0 0 0 3px rgba(0, 212, 170, 0.15),
+              0 4px 12px rgba(0, 212, 170, 0.2);
+}
+
+.opay-select:active {
+  transform: translateY(0);
+}
+
+/* Dropdown options styling */
+.opay-select option {
+  background: #2d2d2d;
+  color: #fff;
+  padding: 10px;
+  font-weight: 500;
+}
+
+.opay-select option:checked {
+  background: linear-gradient(90deg, #00d4aa, #00bfa5);
+  color: white;
+}
+
+/* Responsive adjustments */
+@media (max-width: 640px) {
+  .opay-filters {
+    padding: 12px;
+    gap: 8px;
+  }
+  
+  .opay-select {
+    min-width: calc(50% - 4px);
+    font-size: 13px;
+    padding: 10px 32px 10px 14px;
+  }
+}
+
+/* Glass morphism variant (optional - comment out if you prefer the above) */
+
+.opay-filters {
+  background: rgba(30, 30, 30, 0.85);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.opay-select {
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+
+/* Custom Select Styling */
+.custom-select-wrapper {
+  position: relative;
+  flex: 1;
+  min-width: 145px;
+}
+
+.custom-select-trigger {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 12px 16px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.custom-select-trigger:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(0, 212, 170, 0.4);
+  box-shadow: 0 4px 12px rgba(0, 212, 170, 0.15);
+  transform: translateY(-1px);
+}
+
+.custom-select-trigger.active {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: #00d4aa;
+  box-shadow: 0 0 0 3px rgba(0, 212, 170, 0.15);
+}
+
+.custom-select-trigger .dropdown-arrow {
+  transition: transform 0.3s ease;
+  flex-shrink: 0;
+}
+
+.custom-select-trigger.active .dropdown-arrow {
+  transform: rotate(180deg);
+}
+
+.custom-select-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  background: #2d2d2d;
+  border: 1px solid rgba(0, 212, 170, 0.2);
+  border-radius: 12px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5),
+              0 0 0 1px rgba(255, 255, 255, 0.05);
+  z-index: 1000;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-10px);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  max-height: 320px;
+  overflow-y: auto;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.custom-select-dropdown.show {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.dropdown-option {
+  padding: 12px 16px;
+  color: #ccc;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 500;
+}
+
+.dropdown-option:first-child {
+  border-top-left-radius: 12px;
+  border-top-right-radius: 12px;
+}
+
+.dropdown-option:last-child {
+  border-bottom-left-radius: 12px;
+  border-bottom-right-radius: 12px;
+}
+
+.dropdown-option:hover {
+  background: rgba(0, 212, 170, 0.1);
+  color: #00d4aa;
+  padding-left: 20px;
+}
+
+.dropdown-option.active {
+  background: linear-gradient(90deg, rgba(0, 212, 170, 0.15), rgba(0, 191, 165, 0.1));
+  color: #00d4aa;
+  font-weight: 600;
+  border-left: 3px solid #00d4aa;
+}
+
+.dropdown-separator {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 8px 0;
+}
+
+/* Status dots */
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.status-dot.success {
+  background: #00d4aa;
+  box-shadow: 0 0 8px rgba(0, 212, 170, 0.5);
+}
+
+.status-dot.failed {
+  background: #ff3b30;
+  box-shadow: 0 0 8px rgba(255, 59, 48, 0.5);
+}
+
+.status-dot.pending {
+  background: #ff9500;
+  box-shadow: 0 0 8px rgba(255, 149, 0, 0.5);
+}
+
+.status-dot.refund {
+  background: #fb923c;
+  box-shadow: 0 0 8px rgba(251, 146, 60, 0.5);
+}
+
+.status-dot.credit {
+  background: #00d4aa;
+  box-shadow: 0 0 8px rgba(0, 212, 170, 0.5);
+}
+
+.network-icon {
+  font-size: 16px;
+}
+
+/* Scrollbar styling for dropdown */
+.custom-select-dropdown::-webkit-scrollbar {
+  width: 6px;
+}
+
+.custom-select-dropdown::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 10px;
+}
+
+.custom-select-dropdown::-webkit-scrollbar-thumb {
+  background: rgba(0, 212, 170, 0.3);
+  border-radius: 10px;
+}
+
+.custom-select-dropdown::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 212, 170, 0.5);
+}
+
+/* Mobile responsive */
+@media (max-width: 640px) {
+  .custom-select-wrapper {
+    min-width: calc(50% - 4px);
+  }
+  
+  .custom-select-trigger {
+    font-size: 13px;
+    padding: 10px 14px;
+  }
+  
+  .dropdown-option {
+    padding: 10px 14px;
+    font-size: 13px;
+  }
 }
 
 /* Body - Transaction List Container */

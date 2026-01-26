@@ -5758,7 +5758,7 @@ function updateSpecialRemainingCount(plan) {
 window.updateSpecialRemainingCount = window.updateSpecialRemainingCount || updateSpecialRemainingCount;
 
 // ==========================================
-// FIXED renderDashboardPlans - SPECIAL FIRST FOR MTN (TWO PLANS TOTAL)
+// FIXED renderDashboardPlans - HIDES SOLD OUT SPECIAL PLANS
 // ==========================================
 async function renderDashboardPlans(provider) {
   console.log('%c[RENDER] Starting renderDashboardPlans for:', 'color:cyan;font-weight:bold', provider);
@@ -5785,41 +5785,76 @@ async function renderDashboardPlans(provider) {
   let plansToShow = [];
 
   if (provider === 'ninemobile') {
-    plansToShow = providerPlans.slice(0, 2);
-    console.log('[RENDER] 9mobile → showing first 2 plans');
+    // 🔥 NEW: Take first 2 plans sorted by price
+    const sortedPlans = [...providerPlans].sort((a, b) => parseFloat(a.price) - parseFloat(b.price));
+    plansToShow = sortedPlans.slice(0, 2);
+    console.log('[RENDER] 9mobile → showing first 2 plans by price');
   } else {
-    const awoof = providerPlans.find(p => p.category.toUpperCase() === 'AWOOF');
-    const cg = providerPlans.find(p => p.category.toUpperCase() === 'CG');
-    const gifting = providerPlans.find(p => p.category.toUpperCase() === 'GIFTING');
-    
-    // 🔥 FIXED: Normalize category case + find special
-    const special = providerPlans.find(p => p.category.toUpperCase() === 'SPECIAL');
+    const awoof = providerPlans.filter(p => p.category.toUpperCase() === 'AWOOF').sort((a, b) => parseFloat(a.price) - parseFloat(b.price));
+    const cg = providerPlans.filter(p => p.category.toUpperCase() === 'CG').sort((a, b) => parseFloat(a.price) - parseFloat(b.price));
+    const gifting = providerPlans.filter(p => p.category.toUpperCase() === 'GIFTING').sort((a, b) => parseFloat(a.price) - parseFloat(b.price));
+    const special = providerPlans.filter(p => p.category.toUpperCase() === 'SPECIAL').sort((a, b) => parseFloat(a.price) - parseFloat(b.price));
 
-    console.log('[RENDER] Categories found →', { awoof: !!awoof, cg: !!cg, gifting: !!gifting, special: !!special });
+    console.log('[RENDER] Categories found →', { 
+      awoof: awoof.length, 
+      cg: cg.length, 
+      gifting: gifting.length, 
+      special: special.length 
+    });
 
-    // AIRTEL: AWOOF + CG
+    // AIRTEL: First AWOOF + First CG
     if (provider === 'airtel') {
-      if (awoof) plansToShow.push(awoof);
-      if (cg) plansToShow.push(cg);
+      if (awoof.length > 0) plansToShow.push(awoof[0]);
+      if (cg.length > 0) plansToShow.push(cg[0]);
     }
-    // GLO: CG first, then GIFTING
+    // GLO: First CG (or AWOOF if no CG) + First GIFTING
     else if (provider === 'glo') {
-      if (cg) plansToShow.push(cg);
-      else if (awoof) plansToShow.push(awoof);
-      if (gifting) plansToShow.push(gifting);
-    }
-    // MTN: SPECIAL FIRST + ONE OTHER (AWOOF or GIFTING)
-    else if (provider === 'mtn') {
-      if (special) {
-        plansToShow.push(special);
-        console.log('[RENDER] Added SPECIAL as first');
+      if (cg.length > 0) {
+        plansToShow.push(cg[0]);
+      } else if (awoof.length > 0) {
+        plansToShow.push(awoof[0]);
       }
-      if (awoof) {
-        plansToShow.push(awoof);
-        console.log('[RENDER] Added AWOOF as second');
-      } else if (gifting) {
-        plansToShow.push(gifting);
-        console.log('[RENDER] Added GIFTING as second');
+      if (gifting.length > 0) plansToShow.push(gifting[0]);
+    }
+    // MTN: SPECIAL (if not sold out) + First AWOOF or GIFTING
+    else if (provider === 'mtn') {
+      let specialAvailable = false;
+      
+      // 🔥 NEW: Only show special if NOT sold out
+      if (special.length > 0) {
+        const firstSpecial = special[0];
+        const remaining = Number(firstSpecial.daily_available_slots) || 0;
+        
+        if (remaining > 0) {
+          plansToShow.push(firstSpecial);
+          specialAvailable = true;
+          console.log('[RENDER] Added SPECIAL as first (not sold out)');
+        } else {
+          console.log('[RENDER] SPECIAL is sold out - skipping dashboard display');
+        }
+      }
+      
+      // 🔥 FIXED: If special is sold out, show first AWOOF + first GIFTING
+      // If special is available, show only one more plan
+      if (!specialAvailable) {
+        // Special sold out → show first AWOOF and first GIFTING
+        if (awoof.length > 0) {
+          plansToShow.push(awoof[0]);
+          console.log('[RENDER] Added first AWOOF (position 1 - special sold out)');
+        }
+        if (gifting.length > 0) {
+          plansToShow.push(gifting[0]);
+          console.log('[RENDER] Added first GIFTING (position 2 - special sold out)');
+        }
+      } else {
+        // Special available → show one more plan (AWOOF or GIFTING)
+        if (awoof.length > 0) {
+          plansToShow.push(awoof[0]);
+          console.log('[RENDER] Added first AWOOF as second');
+        } else if (gifting.length > 0) {
+          plansToShow.push(gifting[0]);
+          console.log('[RENDER] Added first GIFTING as second');
+        }
       }
     }
   }
@@ -5833,87 +5868,83 @@ async function renderDashboardPlans(provider) {
   console.log(`[RENDER] Final plans to show: ${plansToShow.length}`);
 
   plansToShow.forEach((plan, i) => {
-  const already = plansRow.querySelector(`.plan-box[data-id="${plan.plan_id}"][data-provider="${provider}"]`);
-  if (already) {
-    console.log('[RENDER] Skipping duplicate dashboard plan (already exists):', plan.plan_id);
-    return;
-  }
+    const already = plansRow.querySelector(`.plan-box[data-id="${plan.plan_id}"][data-provider="${provider}"]`);
+    if (already) {
+      console.log('[RENDER] Skipping duplicate dashboard plan (already exists):', plan.plan_id);
+      return;
+    }
 
-  const box = document.createElement('div');
-  box.className = `plan-box ${provider}`;
-  box.dataset.id = plan.plan_id;
-  box.dataset.provider = provider;
+    const box = document.createElement('div');
+    box.className = `plan-box ${provider}`;
+    box.dataset.id = plan.plan_id;
+    box.dataset.provider = provider;
 
-  const categoryUpper = plan.category ? plan.category.toUpperCase() : '';
-  if (categoryUpper === 'SPECIAL' && provider === 'mtn') {
-    box.classList.add('special-plan');
-    
-    // 🔥 ADD INLINE GRADIENT IMMEDIATELY
-    const gradientStyle = document.createElement('style');
-    gradientStyle.textContent = `
-      .plan-box.mtn.special-plan[data-id="${plan.plan_id}"]::before {
-        content: '';
-        position: absolute;
-        inset: 0;
-        border-radius: 16px;
-        padding: 2px;
-        background: conic-gradient(red, orange, yellow, cyan, red);
-        -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-        -webkit-mask-composite: xor;
-        mask-composite: exclude;
-        pointer-events: none;
-        z-index: 1;
-        opacity: 1;
-        animation: borderTrain 6s linear infinite, hueShift 10s linear infinite;
-      }
+    const categoryUpper = plan.category ? plan.category.toUpperCase() : '';
+    if (categoryUpper === 'SPECIAL' && provider === 'mtn') {
+      box.classList.add('special-plan');
       
-      @keyframes borderTrain {
-        0% { background-position: 0% 50%; }
-        100% { background-position: 400% 50%; }
-      }
-      
-      @keyframes hueShift {
-        0% { filter: hue-rotate(0deg); }
-        100% { filter: hue-rotate(360deg); }
-      }
+      const gradientStyle = document.createElement('style');
+      gradientStyle.textContent = `
+        .plan-box.mtn.special-plan[data-id="${plan.plan_id}"]::before {
+          content: '';
+          position: absolute;
+          inset: 0;
+          border-radius: 16px;
+          padding: 2px;
+          background: conic-gradient(red, orange, yellow, cyan, red);
+          -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+          -webkit-mask-composite: xor;
+          mask-composite: exclude;
+          pointer-events: none;
+          z-index: 1;
+          opacity: 1;
+          animation: borderTrain 6s linear infinite, hueShift 10s linear infinite;
+        }
+        
+        @keyframes borderTrain {
+          0% { background-position: 0% 50%; }
+          100% { background-position: 400% 50%; }
+        }
+        
+        @keyframes hueShift {
+          0% { filter: hue-rotate(0deg); }
+          100% { filter: hue-rotate(360deg); }
+        }
+      `;
+      box.appendChild(gradientStyle);
+      box.style.position = 'relative';
+      box.style.overflow = 'hidden';
+    }
+
+    const tag = (plan.category && !['STANDARD', 'NORMAL'].includes(categoryUpper))
+      ? `<span class="plan-type-tag">${categoryUpper}</span>`
+      : '';
+
+    let remainingCountHTML = '';
+
+    if (categoryUpper === 'SPECIAL' && provider === 'mtn') {
+      const remaining = Number(plan.daily_available_slots) || 0;
+      const remainingText = remaining > 0 ? `${remaining} left today` : 'Sold out today';
+      const remainingClass = remaining > 0 ? 'remaining-count' : 'remaining-count sold-out';
+
+      remainingCountHTML = `
+        <div class="${remainingClass}">
+          ${remainingText}
+        </div>
+      `;
+    }
+
+    box.innerHTML = `
+      ${remainingCountHTML}
+      <div class="plan-price plan-amount">₦${plan.price}</div>
+      <div class="plan-data plan-gb">${plan.data_amount || plan.data}</div>
+      <div class="plan-duration">${plan.duration || plan.validity}</div>
+      ${tag}
     `;
-    box.appendChild(gradientStyle);
-    box.style.position = 'relative';
-    box.style.overflow = 'hidden';
-  }
 
-  const tag = (plan.category && !['STANDARD', 'NORMAL'].includes(categoryUpper))
-    ? `<span class="plan-type-tag">${categoryUpper}</span>`
-    : '';
-
-  let remainingCountHTML = '';
-
-if (categoryUpper === 'SPECIAL' && provider === 'mtn') {
-  // Use the real daily_available_slots from DB
-  const remaining = Number(plan.daily_available_slots) || 0;
-  const remainingText = remaining > 0 ? `${remaining} left today` : 'Sold out today';
-  const remainingClass = remaining > 0 ? 'remaining-count' : 'remaining-count sold-out';
-
-  remainingCountHTML = `
-    <div class="${remainingClass}">
-      ${remainingText}
-    </div>
-  `;
-}
-
-
-box.innerHTML = `
-  ${remainingCountHTML}
-  <div class="plan-price plan-amount">₦${plan.price}</div>
-  <div class="plan-data plan-gb">${plan.data_amount || plan.data}</div>
-  <div class="plan-duration">${plan.duration || plan.validity}</div>
-  ${tag}
-`;
-
-  plansRow.insertBefore(box, seeAllBtn);
-  console.log(`[RENDER] Added plan ${i + 1}: ${plan.category || 'Standard'} ₦${plan.price}`);
-});
-
+    plansRow.insertBefore(box, seeAllBtn);
+    console.log(`[RENDER] Added plan ${i + 1}: ${plan.category || 'Standard'} ₦${plan.price}`);
+  });
 
   attachPlanListeners();
   syncSpecialPlanGradientState();
@@ -6094,9 +6125,10 @@ if (provider !== 'mtn' && existingSpecialSection) {
   syncSpecialPlanGradientState();
 
 }
+window.renderModalPlans = window.renderModalPlans || renderModalPlans;
 
 // ==========================================
-// FIXED fillPlanSection - LIMITED TAG FOR SPECIAL
+// FIXED fillPlanSection - DISABLES SOLD OUT SPECIAL PLANS IN MODAL
 // ==========================================
 function fillPlanSection(sectionEl, provider, subType, plans, title, svg) {
   sectionEl.setAttribute('data-provider', provider);
@@ -6106,82 +6138,91 @@ function fillPlanSection(sectionEl, provider, subType, plans, title, svg) {
   grid.innerHTML = '';
   
   plans.forEach((plan, index) => {
-  const box = document.createElement('div');
-  box.className = `plan-box ${provider}`;
-  box.dataset.id = plan.plan_id;
-  box.dataset.provider = provider;
+    const box = document.createElement('div');
+    box.className = `plan-box ${provider}`;
+    box.dataset.id = plan.plan_id;
+    box.dataset.provider = provider;
 
-  const categoryUpper = plan.category ? plan.category.toUpperCase() : '';
-  
-  if (categoryUpper === 'SPECIAL' && provider === 'mtn') {
-    box.classList.add('special-plan');
+    const categoryUpper = plan.category ? plan.category.toUpperCase() : '';
     
-    // 🔥 ADD INLINE GRADIENT IMMEDIATELY
-    const gradientStyle = document.createElement('style');
-    gradientStyle.textContent = `
-      .plan-box.mtn.special-plan[data-id="${plan.plan_id}"]::before {
-        content: '';
-        position: absolute;
-        inset: 0;
-        border-radius: 16px;
-        padding: 2px;
-        background: conic-gradient(red, orange, yellow, cyan, red);
-        -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-        -webkit-mask-composite: xor;
-        mask-composite: exclude;
-        pointer-events: none;
-        z-index: 1;
-        opacity: 1;
-        animation: borderTrain 6s linear infinite, hueShift 10s linear infinite;
-      }
+    // 🔥 NEW: Check if special plan is sold out
+    const isSoldOut = categoryUpper === 'SPECIAL' && 
+                      provider === 'mtn' && 
+                      (Number(plan.daily_available_slots) || 0) <= 0;
+    
+    if (categoryUpper === 'SPECIAL' && provider === 'mtn') {
+      box.classList.add('special-plan');
       
-      @keyframes borderTrain {
-        0% { background-position: 0% 50%; }
-        100% { background-position: 400% 50%; }
-      }
+      const gradientStyle = document.createElement('style');
+      gradientStyle.textContent = `
+        .plan-box.mtn.special-plan[data-id="${plan.plan_id}"]::before {
+          content: '';
+          position: absolute;
+          inset: 0;
+          border-radius: 16px;
+          padding: 2px;
+          background: conic-gradient(red, orange, yellow, cyan, red);
+          -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+          -webkit-mask-composite: xor;
+          mask-composite: exclude;
+          pointer-events: none;
+          z-index: 1;
+          opacity: 1;
+          animation: borderTrain 6s linear infinite, hueShift 10s linear infinite;
+        }
+        
+        @keyframes borderTrain {
+          0% { background-position: 0% 50%; }
+          100% { background-position: 400% 50%; }
+        }
+        
+        @keyframes hueShift {
+          0% { filter: hue-rotate(0deg); }
+          100% { filter: hue-rotate(360deg); }
+        }
+      `;
+      box.appendChild(gradientStyle);
+      box.style.position = 'relative';
+      box.style.overflow = 'hidden';
       
-      @keyframes hueShift {
-        0% { filter: hue-rotate(0deg); }
-        100% { filter: hue-rotate(360deg); }
+      // 🔥 NEW: Disable clicks if sold out
+      if (isSoldOut) {
+        box.classList.add('sold-out');
+        box.style.pointerEvents = 'none';
+        box.style.opacity = '0.6';
+        box.style.cursor = 'not-allowed';
       }
+    }
+
+    const tag = (categoryUpper && !['STANDARD', 'NORMAL'].includes(categoryUpper))
+      ? `<span class="plan-type-tag ${categoryUpper === 'SPECIAL' ? 'special-tag' : ''}">${categoryUpper}</span>`
+      : '';
+
+    let remainingCountHTML = '';
+
+    if (categoryUpper === 'SPECIAL' && provider === 'mtn') {
+      const remaining = Number(plan.daily_available_slots) || 0;
+      const remainingText = remaining > 0 ? `${remaining} left today` : 'Sold out today';
+      const remainingClass = remaining > 0 ? 'remaining-count' : 'remaining-count sold-out';
+
+      remainingCountHTML = `
+        <div class="${remainingClass}">
+          ${remainingText}
+        </div>
+      `;
+    }
+
+    box.innerHTML = `
+      ${remainingCountHTML}
+      <div class="plan-amount">₦${plan.price}</div>
+      <div class="plan-data">${plan.data_amount || plan.data}</div>
+      <div class="plan-days">${plan.duration || plan.validity}</div>
+      ${tag}
     `;
-    box.appendChild(gradientStyle);
-    box.style.position = 'relative';
-    box.style.overflow = 'hidden';
-  }
 
-  const tag = (categoryUpper && !['STANDARD', 'NORMAL'].includes(categoryUpper))
-    ? `<span class="plan-type-tag ${categoryUpper === 'SPECIAL' ? 'special-tag' : ''}">${categoryUpper}</span>`
-    : '';
-
-  let remainingCountHTML = '';
-
-if (categoryUpper === 'SPECIAL' && provider === 'mtn') {
-  // Use the real daily_available_slots from DB
-  const remaining = Number(plan.daily_available_slots) || 0;
-  const remainingText = remaining > 0 ? `${remaining} left today` : 'Sold out today';
-  const remainingClass = remaining > 0 ? 'remaining-count' : 'remaining-count sold-out';
-
-  remainingCountHTML = `
-    <div class="${remainingClass}">
-      ${remainingText}
-    </div>
-  `;
-}
-
-
-box.innerHTML = `
-  ${remainingCountHTML}
-  <div class="plan-amount">₦${plan.price}</div>
-  <div class="plan-data">${plan.data_amount || plan.data}</div>
-  <div class="plan-days">${plan.duration || plan.validity}</div>
-  ${tag}
-`;
-
-
-  grid.appendChild(box);
-  console.log(`[FILL SECTION] Added modal plan ${index + 1}: ${plan.plan_id}`);
-});
+    grid.appendChild(box);
+    console.log(`[FILL SECTION] Added modal plan ${index + 1}: ${plan.plan_id}${isSoldOut ? ' (SOLD OUT - DISABLED)' : ''}`);
+  });
 
   const header = sectionEl.querySelector('.section-header');
   if (header) {
@@ -6196,13 +6237,12 @@ box.innerHTML = `
 
 // Make functions globally available
 window.renderDashboardPlans = renderDashboardPlans;
-window.renderModalPlans = renderModalPlans;
 window.fillPlanSection = fillPlanSection;
-window.loadAllPlansOnce = loadAllPlansOnce;
 
-console.log('%c✅ FIXED FUNCTIONS LOADED', 'color:lime;font-size:16px;font-weight:bold');
-console.log('%c✅ All plans now have data-provider attribute', 'color:lime;font-weight:bold');
-console.log('%c✅ Modal clicks should now work!', 'color:lime;font-weight:bold');
+console.log('%c✅ SOLD OUT LOGIC APPLIED', 'color:lime;font-size:16px;font-weight:bold');
+console.log('%c✅ Dashboard hides sold out special plans', 'color:lime;font-weight:bold');
+console.log('%c✅ Modal disables sold out special plans', 'color:lime;font-weight:bold');
+console.log('%c✅ First plan of each category shows on dashboard', 'color:lime;font-weight:bold');
 
 
 
@@ -16148,7 +16188,7 @@ const INTERACTION_EVENTS = ['mousemove','keydown','click','scroll','touchstart',
   // ============================================
   // CONSTANTS
   // ============================================
-  const SOFT_IDLE_MS = 2 * 60 * 1000;  // 2 minutes (user inactive while visible)
+  const SOFT_IDLE_MS = 5 * 60 * 1000;  // 5 minutes (user inactive while visible)
   const HARD_IDLE_MS = 30 * 60 * 1000; // 30 minutes (tab hidden)
   const RESET_DEBOUNCE_MS = /Mobi|Android/i.test(navigator.userAgent) ? 500 : 150;
   

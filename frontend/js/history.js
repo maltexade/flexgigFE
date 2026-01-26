@@ -113,7 +113,10 @@ function generateFakeTransactions() {
     items: [],
     grouped: [],
     sort: { by: 'time', dir: 'desc' },
-    filters: {},
+    filters: {
+      category: 'all',
+      status: 'all'
+    },
     searchTerm: '',
     lastRenderIndex: 0,
     cachePages: new Map(),
@@ -170,6 +173,63 @@ function generateFakeTransactions() {
       return iso;
     }
   }
+
+  /* -------------------------- FILTER FUNCTIONS -------------------------- */
+function applyFilters(items) {
+  let filtered = items.slice();
+
+  // Category filter (currently only data)
+  if (state.filters.category === 'data') {
+    filtered = filtered.filter(tx => {
+      const desc = (tx.description || '').toLowerCase();
+      return desc.includes('data') || desc.includes('gb') || desc.includes('mb');
+    });
+  }
+
+  // Status filter
+  if (state.filters.status !== 'all') {
+    filtered = filtered.filter(tx => {
+      const status = (tx.status || 'success').toLowerCase();
+      const desc = (tx.description || '').toLowerCase();
+      const provider = (tx.provider || '').toLowerCase();
+
+      switch (state.filters.status) {
+        case 'success':
+          return status === 'success' || status === 'successful' || status === 'true';
+        
+        case 'failed':
+          return status.includes('fail');
+        
+        case 'pending':
+          return status.includes('pending') || status.includes('processing');
+        
+        case 'refunded':
+          return status.includes('refund');
+        
+        case 'credit':
+          return tx.type === 'credit';
+        
+        case 'mtn':
+          return desc.includes('mtn') || provider.includes('mtn');
+        
+        case 'airtel':
+          return desc.includes('airtel') || provider.includes('airtel');
+        
+        case 'glo':
+          return desc.includes('glo') || provider.includes('glo');
+        
+        case '9mobile':
+          return desc.includes('9mobile') || desc.includes('etisalat') || 
+                 desc.includes('nine') || provider.includes('9mobile');
+        
+        default:
+          return true;
+      }
+    });
+  }
+
+  return filtered;
+}
 
 function getTxIcon(tx) {
   const statusRaw = (tx.status || '').toLowerCase().trim();
@@ -1198,50 +1258,167 @@ if (itemsToRender.length === 0) {
   }
 
   function applyTransformsAndRender() {
-    let items = state.items.slice();
+  let items = state.items.slice();
 
-    if (state.searchTerm) {
-      const s = state.searchTerm.toLowerCase();
-      items = items.filter(tx =>
-        (tx.description || '').toLowerCase().includes(s) ||
-        (tx.id || '').toLowerCase().includes(s)
-      );
-    }
+  // Apply search
+  if (state.searchTerm) {
+    const s = state.searchTerm.toLowerCase();
+    items = items.filter(tx =>
+      (tx.description || '').toLowerCase().includes(s) ||
+      (tx.id || '').toLowerCase().includes(s)
+    );
+  }
 
-    if (selectedMonth) {
-      items = filterBySelectedMonth(items);
-    }
+  // Apply category and status filters
+  items = applyFilters(items);
 
-    const groupedMonths = groupTransactions(items);
-    setState({ grouped: groupedMonths });
-    renderChunked(groupedMonths);
-
-    computeFilteredSummary(items);
-
-    // In applyTransformsAndRender() — replace the final if/else
-if (items.length === 0) {
+  // Apply month filter
   if (selectedMonth) {
-    // User selected a month with no tx → show month header + empty message
-    const emptyMonth = {
-      monthKey: `${selectedMonth.year}-${selectedMonth.month}`,
-      prettyMonth: new Date(selectedMonth.year, selectedMonth.month).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }),
-      totalIn: 0,
-      totalOut: 0,
-      txs: []
-    };
-    renderChunked([emptyMonth]);
-  } else {
-    // Truly no transactions ever → show global empty state
-    show(emptyEl);
+    items = filterBySelectedMonth(items);
   }
-} else {
+
   const groupedMonths = groupTransactions(items);
+  setState({ grouped: groupedMonths });
   renderChunked(groupedMonths);
-  hide(emptyEl);
-}
+
+  computeFilteredSummary(items);
+
+  // Handle empty state
+  if (items.length === 0) {
+    if (selectedMonth || state.filters.category !== 'all' || state.filters.status !== 'all') {
+      // User applied filters but got no results
+      const emptyMonth = selectedMonth ? {
+        monthKey: `${selectedMonth.year}-${selectedMonth.month}`,
+        prettyMonth: new Date(selectedMonth.year, selectedMonth.month).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }),
+        totalIn: 0,
+        totalOut: 0,
+        txs: []
+      } : null;
+      
+      if (emptyMonth) {
+        renderChunked([emptyMonth]);
+      } else {
+        // Show filter-specific empty message
+        historyList.innerHTML = `
+          <div style="padding: 60px 20px; text-align: center; color: #999;">
+            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin: 0 auto 16px; opacity: 0.3;">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="M12 6v6l4 2"/>
+            </svg>
+            <div style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">No transactions found</div>
+            <div style="font-size: 14px;">Try adjusting your filters</div>
+          </div>
+        `;
+      }
+    } else {
+      // Truly no transactions ever
+      show(emptyEl);
+    }
+  } else {
+    renderChunked(groupedMonths);
+    hide(emptyEl);
   }
+}
 
   window.applyTransformsAndRender = applyTransformsAndRender;
+
+  /* -------------------------- CUSTOM DROPDOWN FUNCTIONALITY -------------------------- */
+function initCustomDropdowns() {
+  const categoryTrigger = document.getElementById('categoryTrigger');
+  const categoryDropdown = document.getElementById('categoryDropdown');
+  const statusTrigger = document.getElementById('statusTrigger');
+  const statusDropdown = document.getElementById('statusDropdown');
+
+  // Close dropdowns when clicking outside
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.custom-select-wrapper')) {
+      categoryDropdown?.classList.remove('show');
+      statusDropdown?.classList.remove('show');
+      categoryTrigger?.classList.remove('active');
+      statusTrigger?.classList.remove('active');
+    }
+  });
+
+  // Category dropdown
+  if (categoryTrigger && categoryDropdown) {
+    categoryTrigger.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isOpen = categoryDropdown.classList.contains('show');
+      
+      // Close status dropdown
+      statusDropdown?.classList.remove('show');
+      statusTrigger?.classList.remove('active');
+      
+      // Toggle category dropdown
+      categoryDropdown.classList.toggle('show');
+      categoryTrigger.classList.toggle('active');
+    });
+
+    categoryDropdown.querySelectorAll('.dropdown-option').forEach(option => {
+      option.addEventListener('click', (e) => {
+        const value = e.currentTarget.getAttribute('data-value');
+        const text = e.currentTarget.textContent.trim();
+        
+        // Update UI
+        categoryTrigger.querySelector('.selected-value').textContent = text;
+        categoryDropdown.querySelectorAll('.dropdown-option').forEach(opt => 
+          opt.classList.remove('active')
+        );
+        e.currentTarget.classList.add('active');
+        
+        // Update state and filter
+        state.filters.category = value;
+        console.log('[TransactionHistory] Category filter changed to:', value);
+        applyTransformsAndRender();
+        
+        // Close dropdown
+        categoryDropdown.classList.remove('show');
+        categoryTrigger.classList.remove('active');
+      });
+    });
+  }
+
+  // Status dropdown
+  if (statusTrigger && statusDropdown) {
+    statusTrigger.addEventListener('click', (e) => {
+      e.stopPropagation();
+      
+      // Close category dropdown
+      categoryDropdown?.classList.remove('show');
+      categoryTrigger?.classList.remove('active');
+      
+      // Toggle status dropdown
+      statusDropdown.classList.toggle('show');
+      statusTrigger.classList.toggle('active');
+    });
+
+    statusDropdown.querySelectorAll('.dropdown-option').forEach(option => {
+      option.addEventListener('click', (e) => {
+        const value = e.currentTarget.getAttribute('data-value');
+        const text = e.currentTarget.textContent.trim();
+        
+        // Update UI
+        statusTrigger.querySelector('.selected-value').textContent = text;
+        statusDropdown.querySelectorAll('.dropdown-option').forEach(opt => 
+          opt.classList.remove('active')
+        );
+        e.currentTarget.classList.add('active');
+        
+        // Update state and filter
+        state.filters.status = value;
+        console.log('[TransactionHistory] Status filter changed to:', value);
+        applyTransformsAndRender();
+        
+        // Close dropdown
+        statusDropdown.classList.remove('show');
+        statusTrigger.classList.remove('active');
+      });
+    });
+  }
+}
+
+// Call this after your modal initialization
+initCustomDropdowns();
 
   /* -------------------------- MONTH PICKER MODAL -------------------------- */
 function createMonthPickerModal() {

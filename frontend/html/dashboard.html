@@ -1659,11 +1659,62 @@
       </button>
     </header>
 
-    <!-- Filters (optional future use) -->
-    <div class="opay-filters" aria-hidden="true">
-      <select class="opay-select"><option>All Categories</option></select>
-      <select class="opay-select"><option>All Status</option></select>
+
+<!-- Filters -->
+<div class="opay-filters">
+  <div class="custom-select-wrapper">
+    <button type="button" class="custom-select-trigger" id="categoryTrigger">
+      <span class="selected-value">All Categories</span>
+      <svg class="dropdown-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M6 9l6 6 6-6"/>
+      </svg>
+    </button>
+    <div class="custom-select-dropdown" id="categoryDropdown">
+      <div class="dropdown-option active" data-value="all">All Categories</div>
+      <div class="dropdown-option" data-value="data">Data</div>
     </div>
+  </div>
+
+  <div class="custom-select-wrapper">
+    <button type="button" class="custom-select-trigger" id="statusTrigger">
+      <span class="selected-value">All Status</span>
+      <svg class="dropdown-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M6 9l6 6 6-6"/>
+      </svg>
+    </button>
+    <div class="custom-select-dropdown" id="statusDropdown">
+      <div class="dropdown-option active" data-value="all">All Status</div>
+      <div class="dropdown-option" data-value="success">
+        <span class="status-dot success"></span>Success
+      </div>
+      <div class="dropdown-option" data-value="failed">
+        <span class="status-dot failed"></span>Failed
+      </div>
+      <div class="dropdown-option" data-value="pending">
+        <span class="status-dot pending"></span>Pending
+      </div>
+      <div class="dropdown-option" data-value="refunded">
+        <span class="status-dot refund"></span>Refunded
+      </div>
+      <div class="dropdown-option" data-value="credit">
+        <span class="status-dot credit"></span>Wallet Credit
+      </div>
+      <div class="dropdown-separator"></div>
+      <div class="dropdown-option" data-value="mtn">
+        <span class="network-icon">📱</span>MTN Transactions
+      </div>
+      <div class="dropdown-option" data-value="airtel">
+        <span class="network-icon">📱</span>Airtel Transactions
+      </div>
+      <div class="dropdown-option" data-value="glo">
+        <span class="network-icon">📱</span>GLO Transactions
+      </div>
+      <div class="dropdown-option" data-value="9mobile">
+        <span class="network-icon">📱</span>9Mobile Transactions
+      </div>
+    </div>
+  </div>
+</div>
 
     <!-- Transaction List Container -->
     <div class="main-month">
