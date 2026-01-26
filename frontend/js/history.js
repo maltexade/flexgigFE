@@ -231,139 +231,189 @@ function applyFilters(items) {
   return filtered;
 }
 
-/* ------------------- INFINITE SCROLL + FALLBACK WITH BACKEND TOTALS ------------------- */
-
+/* -------------------------- INFINITE SCROLL PAGINATION (OPTIMIZED) -------------------------- */
 let isLoadingMore = false;
-let lastScrollPosition = 0;
+let currentPage = 1;
+let hasMorePages = true;
 
-async function loadTransactionsPage(page = 1, pageSize = 200) {
-  if (isLoadingMore) return;
+async function loadMoreTransactions() {
+  if (isLoadingMore || !hasMorePages || !state.open) return;
 
   isLoadingMore = true;
-  lastScrollPosition = historyList.scrollTop;
+  currentPage++;
+
+  console.log('[Tx Pagination] Loading page', currentPage);
+
+  // Show loading indicator at bottom
+  const loadingIndicator = document.createElement('div');
+  loadingIndicator.id = 'loadMoreIndicator';
+  loadingIndicator.style.cssText = `
+    padding: 20px;
+    text-align: center;
+    color: #999;
+    font-size: 14px;
+  `;
+  loadingIndicator.innerHTML = `
+    <div style="display:inline-flex;align-items:center;gap:10px;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation:spin 1s linear infinite;">
+        <circle cx="12" cy="12" r="10" stroke-opacity="0.25"/>
+        <path d="M12 2a10 10 0 0 1 10 10" stroke-opacity="0.75"/>
+      </svg>
+      Loading more transactions...
+    </div>
+    <style>
+      @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+  `;
+  historyList.appendChild(loadingIndicator);
 
   try {
-    // Fetch page + totals if page 1
-    const url = `${CONFIG.apiEndpoint}?limit=${pageSize}&page=${page}`;
-    const data = await safeFetch(url);
+    const data = await safeFetch(`${CONFIG.apiEndpoint}?limit=50&page=${currentPage}`);
     const apiItems = data.items || [];
-    const totalsFromApi = data.totals; // optional: if API returns totals
 
-    const existingIds = new Set(state.items.map(t => t.id));
-    const incoming = [];
+    console.log('[Tx Pagination] Fetched', apiItems.length, 'items from page', currentPage);
 
-    const CHUNK = 20;
-    for (let i = 0; i < apiItems.length; i += CHUNK) {
-      const slice = apiItems.slice(i, i + CHUNK);
-
-      for (const raw of slice) {
-        const id = raw.id || raw.reference;
-        if (!id || existingIds.has(id)) continue;
-
-        const normalized = {
-          id,
-          reference: raw.reference || raw.id,
-          type: raw.type || (Number(raw.amount) > 0 ? 'credit' : 'debit'),
-          amount: Math.abs(Number(raw.amount || 0)),
-          description: (raw.description || raw.narration || 'Transaction')
-            .replace(/\s*\(pending\)\s*/gi, '')
-            .trim(),
-          time: raw.time || raw.created_at || new Date().toISOString(),
-          status: (raw.status || 'SUCCESS').toUpperCase(),
-          provider: raw.provider,
-          phone: raw.phone
-        };
-
-        // Normalize refunds
-        const statusLower = normalized.status.toLowerCase();
-        if (statusLower.includes('refund') || statusLower === 'refunded') {
-          normalized.type = 'credit';
-          normalized.description = 'Refund for Failed Data';
-        }
-
-        incoming.push(normalized);
-        existingIds.add(id);
-      }
-
-      // Yield to UI
-      await new Promise(r => setTimeout(r, 0));
+    if (apiItems.length === 0) {
+      hasMorePages = false;
+      loadingIndicator.innerHTML = `
+        <div style="padding:20px;text-align:center;color:#666;font-size:14px;">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin:0 auto 12px;opacity:0.3;">
+            <circle cx="12" cy="12" r="10"/>
+            <path d="M12 6v6M12 16h.01"/>
+          </svg>
+          <div style="font-weight:600;margin-bottom:4px;">You've reached the end</div>
+          <div style="font-size:12px;color:#888;">No more transactions to load</div>
+        </div>
+      `;
+      isLoadingMore = false;
+      return;
     }
 
-    // Append to state
-    state.items = [...state.items, ...incoming];
+    const existingIds = new Set(state.items.map(tx => tx.id));
+    const newTransactions = [];
 
-    // Only fetch backend totals if page 1 (authoritative)
-    if (page === 1) {
-      if (totalsFromApi) {
-        state.totals = {
-          ...state.totals,
-          allTimeIn: totalsFromApi.all_time_in,
-          allTimeOut: totalsFromApi.all_time_out,
-          successfulDataTxCount: totalsFromApi.successful_data_tx_count
-        };
-      } else {
-        // Fallback: fetch from backend totals endpoint
-        const totals = await safeFetch(`${CONFIG.apiEndpoint}/user-totals?userId=${CURRENT_USER_UID}`);
-        state.totals = {
-          ...state.totals,
-          allTimeIn: totals.all_time_in,
-          allTimeOut: totals.all_time_out,
-          successfulDataTxCount: totals.successful_data_tx_count
-        };
-      }
+    apiItems.forEach(raw => {
+      const id = raw.id || raw.reference;
+      if (!id || existingIds.has(id)) return;
+
+      const normalized = {
+        id,
+        reference: raw.reference || raw.id,
+        type: raw.type || (Number(raw.amount) > 0 ? 'credit' : 'debit'),
+        amount: Math.abs(Number(raw.amount || 0)),
+        description: (raw.description || raw.narration || 'Transaction').trim(),
+        time: raw.created_at || raw.time || new Date().toISOString(),
+        status: (raw.status || 'SUCCESS').toUpperCase(),
+        provider: raw.provider,
+        phone: raw.phone
+      };
+
+      newTransactions.push(normalized);
+      existingIds.add(id);
+    });
+
+    if (newTransactions.length > 0) {
+      // Add to state
+      state.items.push(...newTransactions);
+      
+      // Sort only if needed (new items should already be in order)
+      state.items.sort((a, b) => new Date(b.time) - new Date(a.time));
+
+      console.log('[Tx Pagination] Added', newTransactions.length, 'new transactions');
+
+      // OPTIMIZED: Only render the new items, don't re-render everything
+      appendNewTransactions(newTransactions);
     }
 
-    // Compute monthly totals locally
-    const monthKey = state.totals.monthKey || new Date().toISOString().slice(0, 7);
-    state.totals.monthIn = state.items
-      .filter(t => t.time.slice(0, 7) === monthKey && t.type === 'credit')
-      .reduce((sum, t) => sum + t.amount, 0);
+    loadingIndicator.remove();
 
-    state.totals.monthOut = state.items
-      .filter(t => t.time.slice(0, 7) === monthKey && t.type === 'debit')
-      .reduce((sum, t) => sum + t.amount, 0);
-
-    // Re-render safely
-    applyTransformsAndRender();
-    renderDashboardRecent();
-
-    // Update pagination
-    state.pagination = state.pagination || {};
-    state.pagination.currentPage = page;
-    state.pagination.hasMore = apiItems.length === pageSize;
-    if (!state.pagination.hasMore) state.fullHistoryLoaded = true;
-
-    console.log(`[Tx Loader] Page ${page} loaded:`, incoming.length, 'new tx');
-    console.log('[Tx Totals]', state.totals);
+    // Check if we're at the end
+    if (apiItems.length < 50) {
+      hasMorePages = false;
+      
+      const endMessage = document.createElement('div');
+      endMessage.style.cssText = `
+        padding: 30px 20px;
+        text-align: center;
+        color: #666;
+        font-size: 14px;
+      `;
+      endMessage.innerHTML = `
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin:0 auto 12px;opacity:0.3;">
+          <path d="M9 11l3 3L22 4"/>
+          <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+        </svg>
+        <div style="font-weight:600;margin-bottom:4px;">All transactions loaded</div>
+        <div style="font-size:12px;color:#888;">You've seen all ${state.items.length} transactions</div>
+      `;
+      historyList.appendChild(endMessage);
+    }
 
   } catch (err) {
-    console.error('[Tx Loader] Failed to load page', page, err);
+    console.error('[Tx Pagination] Failed:', err);
+    loadingIndicator.innerHTML = '<div style="color:#ff3b30;padding:10px;cursor:pointer;">Failed to load more. Tap to retry.</div>';
+    loadingIndicator.onclick = () => {
+      loadingIndicator.remove();
+      currentPage--; // Reset page counter
+      isLoadingMore = false;
+      loadMoreTransactions();
+    };
   } finally {
     isLoadingMore = false;
-    // Restore scroll after render
-    requestAnimationFrame(() => {
-      historyList.scrollTop = lastScrollPosition;
-    });
   }
 }
 
-// Trigger next page on scroll
-historyList.addEventListener('scroll', () => {
-  if (state.fullHistoryLoaded || isLoadingMore) return;
-
-  const scrollBottom = historyList.scrollTop + historyList.clientHeight;
-  if (scrollBottom + 100 >= historyList.scrollHeight) {
-    loadTransactionsPage((state.pagination?.currentPage || 1) + 1);
+/* -------------------------- APPEND NEW TRANSACTIONS (NO FULL RE-RENDER) -------------------------- */
+function appendNewTransactions(newTxs) {
+  // Apply current filters to new transactions
+  let filtered = applyFilters(newTxs);
+  
+  if (selectedMonth) {
+    filtered = filterBySelectedMonth(filtered);
   }
-});
 
-// Initial fallback load
-// async function loadLatestHistoryAsFallback() {
-//   if (state.fullHistoryLoaded) return;
-//   await loadTransactionsPage(1);
-// }
+  if (filtered.length === 0) {
+    console.log('[Tx Pagination] No new transactions match current filters');
+    return;
+  }
 
+  // Group by month
+  const grouped = groupTransactions(filtered);
 
+  // Append to existing DOM (don't clear everything)
+  grouped.forEach(monthGroup => {
+    const monthKey = monthGroup.monthKey;
+    
+    // Find existing month header
+    let monthHeader = document.querySelector(`[data-month-key="${monthKey}"]`);
+    
+    if (!monthHeader) {
+      // Create new month section
+      monthHeader = makeMonthDivider(monthGroup);
+      historyList.appendChild(monthHeader);
+    }
+
+    // Append transactions to this month
+    monthGroup.txs.forEach(tx => {
+      const txNode = makeTxNode(tx);
+      
+      // Insert after month header
+      let insertPoint = monthHeader.nextElementSibling;
+      while (insertPoint && !insertPoint.classList.contains('month-section-header')) {
+        insertPoint = insertPoint.nextElementSibling;
+      }
+      
+      if (insertPoint) {
+        historyList.insertBefore(txNode, insertPoint);
+      } else {
+        historyList.appendChild(txNode);
+      }
+    });
+  });
+
+  // Update dashboard if visible
+  renderDashboardRecent();
+}
 
 /* -------------------------- RESET PAGINATION HELPER -------------------------- */
 function resetPagination() {
@@ -372,19 +422,24 @@ function resetPagination() {
   console.log('[Tx Pagination] Reset to page 1');
 }
 
-// Attach scroll listener to history list
+// Attach scroll listener with debouncing
 if (historyList) {
+  let scrollTimeout;
+  
   historyList.addEventListener('scroll', () => {
-    if (!state.open || !hasMorePages) return;
+    if (!state.open || !hasMorePages || isLoadingMore) return;
 
-    const scrollTop = historyList.scrollTop;
-    const scrollHeight = historyList.scrollHeight;
-    const clientHeight = historyList.clientHeight;
+    clearTimeout(scrollTimeout);
+    scrollTimeout = setTimeout(() => {
+      const scrollTop = historyList.scrollTop;
+      const scrollHeight = historyList.scrollHeight;
+      const clientHeight = historyList.clientHeight;
 
-    // Trigger when user scrolls to 80% of the list
-    if (scrollTop + clientHeight >= scrollHeight * 0.8) {
-      loadMoreTransactions();
-    }
+      // Trigger when user scrolls to 85% of the list
+      if (scrollTop + clientHeight >= scrollHeight * 0.85) {
+        loadMoreTransactions();
+      }
+    }, 150); // Debounce by 150ms
   });
 }
 
@@ -1329,53 +1384,79 @@ function renderChunked(groupedMonths) {
 /* -------------------------- FALLBACK: LOAD FROM API ONLY IF REALTIME FAILS -------------------------- */
 /* -------------------------- FALLBACK: LOAD FROM API ONLY IF REALTIME FAILS -------------------------- */
 async function loadLatestHistoryAsFallback() {
-  if (state.fullHistoryLoaded) return;
+  console.log('[Tx Fallback] Loading initial history from API (limit 200, page 1)');
 
   show(loadingEl);
   hide(emptyEl);
+
+  let allTx = state.items.slice(); // Start with whatever realtime already gave us
 
   try {
     const data = await safeFetch(`${CONFIG.apiEndpoint}?limit=200&page=1`);
     const apiItems = data.items || [];
 
-    const existingIds = new Set(state.items.map(t => t.id));
-    const incoming = apiItems.filter(t => !existingIds.has(t.id));
+    console.log('[Tx Fallback] API returned', apiItems.length, 'items');
 
-    state.items = [...state.items, ...incoming];
-    state.fullHistoryLoaded = true;
+    if (apiItems.length > 0) {
+      const existingIds = new Set(allTx.map(tx => tx.id));
+
+      apiItems.forEach(raw => {
+        const id = raw.id || raw.reference;
+        if (!id) {
+          console.warn('[Tx Fallback] Skipping row with no ID/reference:', raw);
+          return;
+        }
+
+        let normalized = {
+          id,
+          reference: raw.reference || raw.id,
+          type: raw.type || (Number(raw.amount) > 0 ? 'credit' : 'debit'),
+          amount: Math.abs(Number(raw.amount || 0)),
+          description: (raw.description || raw.narration || 'Transaction')
+            .replace(/\s*\(pending\)\s*/gi, '')
+            .trim(),
+          time: raw.time || raw.created_at || new Date().toISOString(),
+          status: (raw.status || 'SUCCESS').toUpperCase(),
+          provider: raw.provider,
+          phone: raw.phone
+        };
+
+        const statusLower = normalized.status.toLowerCase();
+
+        if (statusLower.includes('refund') || statusLower === 'refunded') {
+          normalized.type = 'credit';
+          normalized.description = 'Refund for Failed Data';
+        }
+
+        if (!existingIds.has(id)) {
+          allTx.push(normalized); // Use push instead of unshift (we'll sort after)
+          existingIds.add(id);
+        }
+      });
+    }
+
+    // Final sort: newest first
+    allTx.sort((a, b) => new Date(b.time) - new Date(a.time));
+
+    state.items = allTx;
     state.preloaded = true;
+    
+    // DON'T set fullHistoryLoaded - let infinite scroll handle it
+    // state.fullHistoryLoaded = true; // ← REMOVED
 
-    // Fetch authoritative totals
-    const totals = await safeFetch(`${CONFIG.apiEndpoint}/user-totals?userId=${CURRENT_USER_UID}`);
-    state.totals = {
-      ...state.totals,
-      allTimeIn: totals.all_time_in,
-      allTimeOut: totals.all_time_out,
-      successfulDataTxCount: totals.successful_data_tx_count
-    };
-
-    // Compute monthly totals locally
-    const monthKey = state.totals.monthKey;
-    state.totals.monthIn = state.items
-      .filter(t => t.time.slice(0, 7) === monthKey && t.type === 'credit')
-      .reduce((sum, t) => sum + t.amount, 0);
-    state.totals.monthOut = state.items
-      .filter(t => t.time.slice(0, 7) === monthKey && t.type === 'debit')
-      .reduce((sum, t) => sum + t.amount, 0);
+    // Initialize pagination
+    currentPage = 1; // Start at page 1
+    hasMorePages = apiItems.length >= 200; // If we got 200, there might be more
 
     applyTransformsAndRender();
     renderDashboardRecent();
-
-    console.log('[Tx Fallback] Loaded', incoming.length, 'new tx');
-    console.log('[Tx Totals]', state.totals);
-
+    console.log('[Tx Fallback] Success — total items:', state.items.length);
   } catch (err) {
-    console.error('[Tx Fallback] Failed:', err);
+    console.error('[Tx Fallback] API fetch failed:', err.message || err);
   } finally {
     hide(loadingEl);
   }
 }
-
 
 window.loadLatestHistoryAsFallback = loadLatestHistoryAsFallback;
 
@@ -2241,76 +2322,34 @@ subscribeToTransactions();
     updateDashboardTotals(totalIn, totalOut, totalCount);
   }
 
-  // ------------------- DASHBOARD TOTALS USING ALL-TIME -------------------
-
-function updateDashboardTotalsFromAllTime() {
-  if (!state.totals) {
-    console.warn('[Dashboard] No totals available yet');
-    return;
-  }
-
-  const { allTimeIn, allTimeOut, successfulDataTxCount } = state.totals;
-
-  const fmt = (n) =>
-    '₦' + Number(n).toLocaleString('en-NG', {
+  function updateDashboardTotals(inAmt, outAmt, count) {
+    const fmt = (n) => '₦' + Number(n).toLocaleString('en-NG', {
       minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
+      maximumFractionDigits: 2
     });
 
-  const totalFundedEl = document.getElementById('dbTotalFundedDisplay');
-  const totalSpentEl = document.getElementById('dbTotalSpentDisplay');
-  const totalTxCountEl = document.getElementById('dbTotalTxCountDisplay');
+     const totalFundedEl = document.getElementById('dbTotalFundedDisplay');   // ← CHANGED
+  const totalSpentEl = document.getElementById('dbTotalSpentDisplay');     // ← CHANGED
+  const totalTxCountEl = document.getElementById('dbTotalTxCountDisplay'); // ← CHANGED
 
-  if (totalFundedEl) totalFundedEl.textContent = fmt(allTimeIn);
-  if (totalSpentEl) totalSpentEl.textContent = fmt(allTimeOut);
-  if (totalTxCountEl) totalTxCountEl.textContent = successfulDataTxCount.toLocaleString('en-NG');
 
-  console.log('[Dashboard] Totals updated from all-time:', state.totals);
-}
-
-// ------------------- INITIALIZE DASHBOARD -------------------
-function initDashboard() {
-  const recentList = document.getElementById('dashboardRecentTxList');
-  if (!recentList) {
-    console.log('[Dashboard] Not on dashboard page - skipping');
-    return;
+    if (totalFundedEl) totalFundedEl.textContent = fmt(inAmt);
+    if (totalSpentEl) totalSpentEl.textContent = fmt(outAmt);
+    if (totalTxCountEl) totalTxCountEl.textContent = count.toLocaleString('en-NG');
   }
 
-  console.log('[Dashboard] Initializing dashboard view');
-
-  // First render recent transactions
-  renderDashboardRecent();
-
-  // Update totals from authoritative all-time
-  updateDashboardTotalsFromAllTime();
-}
-
-// ------------------- LISTENERS -------------------
-
-// Auto-update when a new transaction arrives
-document.addEventListener('transaction_update', () => {
-  if (document.getElementById('dashboardRecentTxList')) {
-    renderDashboardRecent();
-    updateDashboardTotalsFromAllTime();
+  // ✅ CRITICAL: Only call if we're on the dashboard page
+  function initDashboard() {
+    if (document.getElementById('dashboardRecentTxList')) {
+      console.log('[Dashboard] Initializing dashboard view');
+      renderDashboardRecent();
+    } else {
+      console.log('[Dashboard] Not on dashboard page - skipping initial render');
+    }
   }
-});
 
-// Update after full history load / filter change
-window.addEventListener('transactionHistoryUpdated', () => {
-  if (document.getElementById('dashboardRecentTxList')) {
-    renderDashboardRecent();
-    updateDashboardTotalsFromAllTime();
-  }
-});
-
-// Expose functions for manual calls if needed
-window.renderDashboardRecent = renderDashboardRecent;
-window.initDashboard = initDashboard;
-window.updateDashboardTotalsFromAllTime = updateDashboardTotalsFromAllTime;
-
-// ------------------- INITIAL CALL -------------------
-initDashboard();
-
+  // Run once on load (with safety check)
+  initDashboard();
 
   // Auto-update when new transaction arrives
   document.addEventListener('transaction_update', () => {
