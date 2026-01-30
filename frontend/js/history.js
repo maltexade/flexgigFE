@@ -1416,7 +1416,7 @@ async function loadInitialUserTotals() {
 
     const { data, error } = await tempClient
       .from('users')
-      .select('all_time_in, all_time_out, total_data_tx_count')
+      .select('all_time_in, all_time_out, successful_data_tx_count')
       .eq('id', uid)
       .single();
 
@@ -1425,12 +1425,12 @@ async function loadInitialUserTotals() {
     // Store in localStorage
     localStorage.setItem('allTimeIn', data.all_time_in || 0);
     localStorage.setItem('allTimeOut', data.all_time_out || 0);
-    localStorage.setItem('totalDataTxCount', data.total_data_tx_count || 0);
+    localStorage.setItem('totalDataTxCount', data.successful_data_tx_count || 0);
 
     console.log('[User Totals] ✅ Loaded:', {
       allTimeIn: data.all_time_in,
       allTimeOut: data.all_time_out,
-      totalTxCount: data.total_data_tx_count
+      totalTxCount: data.successful_data_tx_count
     });
 
     // Update dashboard immediately
@@ -2499,7 +2499,7 @@ async function subscribeToUserRealtime(force = false) {
           // 🔄 Normalize + persist
           const allTimeIn = Number(raw.all_time_in || 0);
           const allTimeOut = Number(raw.all_time_out || 0);
-          const totalTxCount = Number(raw.total_data_tx_count || 0);
+          const totalTxCount = Number(raw.successful_data_tx_count || 0);
 
           localStorage.setItem('allTimeIn', allTimeIn);
           localStorage.setItem('allTimeOut', allTimeOut);
