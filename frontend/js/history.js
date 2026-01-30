@@ -1381,6 +1381,68 @@ function renderChunked(groupedMonths) {
     else if (state.items.length === 0 && !state.fullHistoryLoaded) show(emptyEl);
   }
 
+  // ────────────────────────────────────────────────
+// LOAD INITIAL USER TOTALS FROM DATABASE
+// ────────────────────────────────────────────────
+
+async function loadInitialUserTotals() {
+  try {
+    const uid = window.__USER_UID || 
+                localStorage.getItem('userId') || 
+                JSON.parse(localStorage.getItem('userData') || '{}')?.uid;
+    
+    if (!uid || !uid.includes('-')) {
+      console.warn('[User Totals] No valid UID - skipping load');
+      return;
+    }
+
+    console.log('[User Totals] Loading initial totals for:', uid);
+
+    const token = await getSharedJWT(true);
+    if (!token) throw new Error('No JWT available');
+
+    const tempClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: { 
+        autoRefreshToken: false, 
+        persistSession: false,
+        storageKey: 'flexgig_totals_temp_jwt'
+      }
+    });
+
+    await tempClient.auth.setSession({
+      access_token: token,
+      refresh_token: token
+    });
+
+    const { data, error } = await tempClient
+      .from('users')
+      .select('all_time_in, all_time_out, total_data_tx_count')
+      .eq('id', uid)
+      .single();
+
+    if (error) throw error;
+
+    // Store in localStorage
+    localStorage.setItem('allTimeIn', data.all_time_in || 0);
+    localStorage.setItem('allTimeOut', data.all_time_out || 0);
+    localStorage.setItem('totalDataTxCount', data.total_data_tx_count || 0);
+
+    console.log('[User Totals] ✅ Loaded:', {
+      allTimeIn: data.all_time_in,
+      allTimeOut: data.all_time_out,
+      totalTxCount: data.total_data_tx_count
+    });
+
+    // Update dashboard immediately
+    updateDashboardTotals();
+
+  } catch (err) {
+    console.error('[User Totals] Failed to load initial totals:', err);
+  }
+}
+
+window.loadInitialUserTotals = loadInitialUserTotals;
+
 /* -------------------------- FALLBACK: LOAD FROM API ONLY IF REALTIME FAILS -------------------------- */
 /* -------------------------- FALLBACK: LOAD FROM API ONLY IF REALTIME FAILS -------------------------- */
 async function loadLatestHistoryAsFallback() {

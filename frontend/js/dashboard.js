@@ -3725,9 +3725,11 @@ async function onDashboardLoad() {
     console.warn('[onDashboardLoad] getSession() failed:', err);
     session = null;
   }
+
   setupBroadcastSubscription();
   subscribeToWalletBalance();
   loadLatestHistoryAsFallback();
+  await loadInitialUserTotals();
   subscribeToUserRealtime();
 
 
