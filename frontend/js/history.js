@@ -1417,7 +1417,7 @@ async function loadInitialUserTotals() {
     const { data, error } = await tempClient
       .from('users')
       .select('all_time_in, all_time_out, successful_data_tx_count')
-      .eq('id', uid)
+      .eq('uid', uid)
       .single();
 
     if (error) throw error;
