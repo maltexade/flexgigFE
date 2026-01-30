@@ -1417,7 +1417,7 @@ async function loadInitialUserTotals() {
     const { data, error } = await tempClient
       .from('users')
       .select('all_time_in, all_time_out, successful_data_tx_count')
-      .eq('uid', uid)
+      .eq('uid', uid)  // ✅ FIXED: Use 'uid' instead of 'id'
       .single();
 
     if (error) throw error;
@@ -2414,7 +2414,7 @@ async function subscribeToUserRealtime(force = false) {
   userIsSubscribing = true;
 
   try {
-    // 1️⃣ Resolve UID (same sources as tx realtime)
+    // 1️⃣ Resolve UID
     let uid =
       window.__USER_UID ||
       localStorage.getItem('userId') ||
@@ -2439,7 +2439,7 @@ async function subscribeToUserRealtime(force = false) {
       return;
     }
 
-    // 3️⃣ Temp client (no global auth bleed)
+    // 3️⃣ Temp client
     const tempClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       auth: {
         autoRefreshToken: false,
@@ -2448,7 +2448,7 @@ async function subscribeToUserRealtime(force = false) {
       }
     });
 
-    // 4️⃣ Set session (critical)
+    // 4️⃣ Set session
     const { error: sessionError } = await tempClient.auth.setSession({
       access_token: token,
       refresh_token: token
@@ -2462,11 +2462,11 @@ async function subscribeToUserRealtime(force = false) {
 
     console.log('[User Realtime] ✅ Session set');
 
-    // 5️⃣ Visibility test (RLS sanity check)
+    // 5️⃣ Visibility test - FIXED to use 'uid' column
     const { error: testErr } = await tempClient
       .from('users')
-      .select('id')
-      .eq('id', uid)
+      .select('uid')  // ✅ Changed from 'id' to 'uid'
+      .eq('uid', uid)
       .limit(1);
 
     if (testErr) {
@@ -2475,7 +2475,7 @@ async function subscribeToUserRealtime(force = false) {
       console.log('[User Realtime] SELECT TEST OK');
     }
 
-    // 6️⃣ Subscribe
+    // 6️⃣ Subscribe - CRITICAL FIX: Use 'uid' instead of 'id'
     const channelName = `user:${uid}`;
     userRealtimeChannel = tempClient.channel(channelName);
 
@@ -2488,18 +2488,19 @@ async function subscribeToUserRealtime(force = false) {
           event: 'UPDATE',
           schema: 'public',
           table: 'users',
-          filter: `id=eq.${uid}`
+          filter: `uid=eq.${uid}`  // ✅ CRITICAL FIX: Changed from 'id' to 'uid'
         },
         (payload) => {
           console.log('[User Realtime] 🔔 UPDATE RECEIVED');
+          console.log('[User Realtime] Full payload:', payload);
 
           const raw = payload.new;
           if (!raw) return;
 
-          // 🔄 Normalize + persist
+          // 🔄 Normalize + persist - using correct field names from your schema
           const allTimeIn = Number(raw.all_time_in || 0);
           const allTimeOut = Number(raw.all_time_out || 0);
-          const totalTxCount = Number(raw.successful_data_tx_count || 0);
+          const totalTxCount = Number(raw.successful_data_tx_count || 0);  // ✅ Correct field name
 
           localStorage.setItem('allTimeIn', allTimeIn);
           localStorage.setItem('allTimeOut', allTimeOut);
@@ -2539,7 +2540,9 @@ async function subscribeToUserRealtime(force = false) {
 
           if (userRealtimeFailedCount >= 3) {
             console.warn('[User Realtime] Max failures → fallback refresh');
-            refreshUserTotalsFromAPI?.();
+            if (typeof loadInitialUserTotals === 'function') {
+              loadInitialUserTotals();
+            }
           } else {
             scheduleUserRetry();
           }
