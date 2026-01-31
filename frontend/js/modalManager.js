@@ -765,18 +765,19 @@ const allPlansModalContent = allPlansModalEl ? allPlansModalEl.querySelector('.p
     modal.style.zIndex = getNextModalZIndex();
     
     // Special handling for All Plans modal — use CSS class for animation (your old way)
-if (modalId === 'allPlansModal') {
-  // Let CSS handle the starting position and animation
-  modal.style.transform = '';           // ← Remove any inline transform
-  modal.style.opacity = '';            // ← Full opacity
-  modal.classList.add('active');        // ← Trigger your CSS transition
+// Special handling for modals that use .active class for animation
+if (modalId === 'allPlansModal' || modalId === 'checkoutModal') {
+  // Let your CSS handle the starting position and animation
+  modal.style.transform = '';           // Remove any conflicting inline transform
+  modal.style.opacity = '';             // Remove conflicting inline opacity
+  modal.classList.add('active');        // This triggers YOUR CSS: translateY(0) + opacity 1
+  log('debug', `openModal: Added .active class for ${modalId} (CSS-driven animation)`);
 } else if (modalId === 'updateProfileModal') {
   modal.style.transform = 'translateX(-100%)';
   modal.style.opacity = '0';
 } else {
   modal.style.transform = 'translateY(20px)';
   modal.style.opacity = '0';
-
 }
 
 

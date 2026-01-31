@@ -197,9 +197,12 @@ window.saveSelectedPlan = saveSelectedPlan;
 // ==================== CHECKOUT MODAL FUNCTIONS ====================
 function openCheckoutModal(data) {
   console.log('[checkout] Opening modal with data:', data);
-  
+
   let checkoutInfo;
 
+  // ────────────────────────────────────────────────
+  // 1. Gather and validate checkout data
+  // ────────────────────────────────────────────────
   if (data && data.provider && data.planId && data.price && data.number) {
     checkoutInfo = {
       provider: data.provider.toUpperCase(),
@@ -224,35 +227,48 @@ function openCheckoutModal(data) {
     return;
   }
 
+  // Save reference
   checkoutData = checkoutInfo;
-  // Inside openCheckoutModal(), after checkoutData = checkoutInfo;
-localStorage.setItem('lastCheckoutPrice', checkoutInfo.price.toString());
-console.log('[PRICE DEBUG] Saved to localStorage:', {
-  price: checkoutInfo.price,
-  savedValue: localStorage.getItem('lastCheckoutPrice'),
-  isSpecial: checkoutInfo.planId.includes('special') || checkoutInfo.planName?.toLowerCase().includes('special')
-});
 
+  // Save price debug/info
+  localStorage.setItem('lastCheckoutPrice', checkoutInfo.price.toString());
+  console.log('[PRICE DEBUG] Saved to localStorage:', {
+    price: checkoutInfo.price,
+    savedValue: localStorage.getItem('lastCheckoutPrice'),
+    isSpecial: checkoutInfo.planId.includes('special') || 
+               checkoutInfo.planName?.toLowerCase().includes('special')
+  });
+
+  // ────────────────────────────────────────────────
+  // 2. Get modal element early
+  // ────────────────────────────────────────────────
   const modal = document.getElementById('checkoutModal');
-  const payBtn = document.getElementById('payBtn');
-  
   if (!modal) {
-    console.error('[checkout] Modal not found');
+    console.error('[checkout] Modal element not found');
     showToast('Checkout modal not available', 'error');
     return;
   }
 
+  const payBtn = document.getElementById('payBtn');
+
   try {
-        const priceEl = document.getElementById('checkout-price');
-    if (priceEl) priceEl.textContent = `₦${checkoutInfo.price.toLocaleString('en-NG', { minimumFractionDigits: 2 })}`;
+    // ────────────────────────────────────────────────
+    // 3. Populate content BEFORE showing (critical for perceived speed)
+    // ────────────────────────────────────────────────
+    const priceEl = document.getElementById('checkout-price');
+    if (priceEl) {
+      priceEl.textContent = `₦${checkoutInfo.price.toLocaleString('en-NG', { minimumFractionDigits: 2 })}`;
+    }
 
     const serviceEl = document.getElementById('checkout-service');
     if (serviceEl) serviceEl.textContent = 'Mobile Data';
 
     const providerEl = document.getElementById('checkout-provider');
     if (providerEl) {
-      let providerKey = checkoutInfo.provider.toLowerCase() === '9mobile' ? 'ninemobile' : checkoutInfo.provider.toLowerCase();
-      const svg = svgShapes[providerKey] || '';
+      let providerKey = checkoutInfo.provider.toLowerCase() === '9mobile' 
+        ? 'ninemobile' 
+        : checkoutInfo.provider.toLowerCase();
+      const svg = svgShapes?.[providerKey] || '';
       providerEl.innerHTML = svg + ' ' + checkoutInfo.provider;
     }
 
@@ -269,24 +285,43 @@ console.log('[PRICE DEBUG] Saved to localStorage:', {
 
     const balance = getAvailableBalance();
     const balanceEl = document.getElementById('checkout-balance');
-    if (balanceEl) balanceEl.textContent = `₦${balance.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    if (balanceEl) {
+      balanceEl.textContent = `₦${balance.toLocaleString('en-NG', { 
+        minimumFractionDigits: 2, 
+        maximumFractionDigits: 2 
+      })}`;
+    }
 
     if (payBtn) {
       payBtn.disabled = false;
       payBtn.classList.add('active');
     }
 
-    modal.style.display = 'flex';
-    modal.classList.add('active');
-    modal.setAttribute('aria-hidden', 'false');
-    document.body.classList.add('modal-open');
-    
-    history.pushState({ popup: true, modal: 'checkout' }, '', location.href);
-    
-    console.log('[checkout] Modal opened successfully');
-    
+    console.log('[checkout] Modal content populated successfully');
+
+    // ────────────────────────────────────────────────
+    // 4. Let ModalManager handle visibility, animation, stack, history, focus trap
+    // ────────────────────────────────────────────────
+    if (window.ModalManager && typeof window.ModalManager.openModal === 'function') {
+      // Optional: clean any stale state first
+      if (ModalManager.getOpenModals().includes('checkoutModal')) {
+        console.warn('[checkout] checkoutModal was already in stack — forcing clean close first');
+        ModalManager.forceCloseModal?.('checkoutModal');
+      }
+
+      ModalManager.openModal('checkoutModal');
+      console.log('[checkout] Successfully delegated open to ModalManager');
+    } else {
+      // Very safe fallback only if ModalManager is completely missing
+      console.warn('[checkout] ModalManager not found — using basic fallback open');
+      modal.classList.remove('hidden');
+      modal.style.display = 'flex';
+      modal.setAttribute('aria-hidden', 'false');
+      document.body.classList.add('modal-open');
+    }
+
   } catch (err) {
-    console.error('[checkout] Error populating modal:', err);
+    console.error('[checkout] Error preparing or opening checkout modal:', err);
     showToast('Failed to load checkout details', 'error');
   }
 }
