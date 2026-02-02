@@ -535,8 +535,7 @@ const classAnimatedModals = [];  // Add history here; others if needed
     return isVisible;
   }
 
-  // Utility: Add transition effect
-// Utility: Add transition effect – NOW WORKS PERFECTLY FOR allPlansModal TOO
+// Replacement for applyTransition function
 function applyTransition(modal, show, callback) {
   if (!modal) return callback?.();
 
@@ -545,12 +544,13 @@ function applyTransition(modal, show, callback) {
 
   // Use slightly better easing for allPlansModal (matches most bottom-sheet designs)
   modal.style.transition = isAllPlans
-    modal.style.transition = isAllPlans
-  ? 'transform 0.28s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.22s ease'
-  : 'opacity 0.26s ease, transform 0.26s ease';
+    ? 'transform 0.28s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.22s ease'
+    : 'opacity 0.26s ease, transform 0.26s ease';
 
+  let onTransitionEndCalled = false;
 
   const onTransitionEnd = () => {
+    onTransitionEndCalled = true;
     modal.removeEventListener('transitionend', onTransitionEnd);
 
     if (!show) {
@@ -591,58 +591,57 @@ function applyTransition(modal, show, callback) {
       }
     }
   });
+
+  // Failsafe timeout if transitionend missed (e.g., no style change detected)
+  setTimeout(() => {
+    if (!onTransitionEndCalled) {
+      onTransitionEndCalled = true;
+      onTransitionEnd();
+      log('warn', `applyTransition: Forced onTransitionEnd for ${modal.id} (event missed)`);
+    }
+  }, 400);  // > transition duration
 }
 
-  // Force close modal
+// Replacement for forceCloseModal function
 function forceCloseModal(modalId) {
+const allPlansModalEl = getModalElement('allPlansModal');
+const allPlansModalContent = allPlansModalEl ? allPlansModalEl.querySelector('.plan-modal-content') : null;
+
   log('debug', `forceCloseModal: Forcing close of ${modalId}`);
-
   const modalConfig = modals[modalId];
-  const modal = modalConfig?.element || document.getElementById(modalId);
-
-  if (!modal) {
-    log('error', `forceCloseModal: Modal element not found for ${modalId}`);
+  if (!modalConfig || !modalConfig.element) {
+    log('error', `forceCloseModal: Modal config or element not found for ${modalId}`);
     return;
   }
-
-  // ────────────────────────────────────────────────
-  // checkoutModal-specific balanced cleanup
-  // ────────────────────────────────────────────────
-  if (modalId === 'checkoutModal') {
-    log('debug', 'forceCloseModal: Applying balanced cleanup for checkoutModal');
-
-    // 1. Remove .active → triggers your CSS to hide .modal-content (slide down + opacity 0)
-    modal.classList.remove('active');
-
-    // 2. Clear only the animation-related inline styles ModalManager might have set
-    //    (prevents fighting when re-opening)
-    modal.style.opacity = '';
-    modal.style.transform = '';
-    modal.style.transition = '';  // let your CSS control transition if needed
-
-    // No aggressive display:none here — let applyTransition handle the smooth hide
+  const modal = modalConfig.element;
+  if (!isModalVisible(modal)) {
+    log('debug', `forceCloseModal: Modal ${modalId} already closed`);
+    const idx = openModalsStack.findIndex((item) => item.id === modalId);
+    if (idx !== -1) {
+      openModalsStack.splice(idx, 1);
+      currentDepth = openModalsStack.length;
+    }
+    return;
   }
-
-  // ────────────────────────────────────────────────
-  // Standard cleanup (runs for all modals, including checkout)
-  // ────────────────────────────────────────────────
   if (document.activeElement && modal.contains(document.activeElement)) {
+    // prefer to restore focus to a real content area
     const main = document.getElementById('mainContent') || document.querySelector('main') || document.body;
     try { main.focus(); } catch (e) { document.body.focus(); }
     log('debug', `forceCloseModal: Moved focus from ${modalId} to ${describeElement(main)}`);
   }
-
-  // Remove active state from trigger (skip for checkout since no nav trigger)
-  if (modalId !== 'allPlansModal' && modalId !== 'checkoutModal') {
+  
+  // REMOVE ACTIVE STATE from closing modal BEFORE transition (defensive)
+  if (modalId !== 'allPlansModal') {
     setTriggerActive(modalId, false);
     log('debug', `forceCloseModal: Removed active state from ${modalId}`);
   }
+    if (modalId === 'allPlansModal') {
+  allPlansModalContent.scrollTop = 0;  // Optional scroll reset when closing
+}
 
-  // Optional scroll reset (only if you had it for other modals)
-  // if (modalId === 'allPlansModal') { ... }
-
+  
   applyTransition(modal, false, () => {
-    // Cleanup focus trap if present
+    // cleanup focus trap if present
     try {
       if (modal._trapHandler) {
         modal.removeEventListener('keydown', modal._trapHandler);
@@ -651,7 +650,7 @@ function forceCloseModal(modalId) {
       }
     } catch (e) { /* ignore */ }
 
-    // Restore body scroll
+    // restore body scroll if some other code locked it
     try {
       document.body.style.overflow = '';
       document.body.classList.remove('modal-open');
@@ -661,16 +660,15 @@ function forceCloseModal(modalId) {
     modal.style.display = 'none';
     modal.setAttribute('aria-hidden', 'true');
     modal.setAttribute('inert', '');
-
-    // Remove from stack
     const idx = openModalsStack.findIndex((item) => item.id === modalId);
     if (idx !== -1) {
       openModalsStack.splice(idx, 1);
       currentDepth = openModalsStack.length;
       log('debug', `forceCloseModal: Modal ${modalId} closed, stack: ${openModalsStack.map((item) => item.id).join(', ')}, depth: ${currentDepth}`);
     }
-
-    // History cleanup for specific modals
+    
+    // For modals that were pushed onto history (fragments) - clear it so close-button doesn't leave a stale fragment
+          // For modals that were pushed onto history (fragments)
     try {
       if (modalId === 'allPlansModal') {
         history.replaceState({ isModal: false }, '', window.location.pathname);
@@ -678,7 +676,7 @@ function forceCloseModal(modalId) {
       }
     } catch (e) {}
 
-    // Check remaining modals
+    // Check if there are any remaining modals
     const previousModal = openModalsStack[openModalsStack.length - 1];
     if (previousModal) {
       // Restore active state for previous modal
@@ -695,10 +693,11 @@ function forceCloseModal(modalId) {
         log('warn', `forceCloseModal: No focusable elements in previous modal ${previousModal.id}`);
       }
     } else {
-      // No more modals → determine active tab
+      // No more modals - determine which tab should be active
       const wasNavModal = ['historyModal'].includes(modalId);
       
       if (wasNavModal) {
+        // Closing a nav modal = go to home
         setHomeActive();
         log('debug', 'forceCloseModal: Closed nav modal, set home active');
       } else {
@@ -710,17 +709,17 @@ function forceCloseModal(modalId) {
           log('debug', 'forceCloseModal: Keeping current active tab');
         }
       }
+        if (bottomSheetModals.includes(modalId)) {
+  lockBodyScroll(false);
+}
 
-      if (bottomSheetModals.includes(modalId)) {
-        lockBodyScroll(false);
-      }
+  // ADD THIS: Remove CSS animation class
+if (classAnimatedModals.includes(modalId)) {
+  modal.classList.remove('open');
+  log('debug', `closeModal: Removed .open class for ${modalId}`);
+}
 
-      // ADD THIS: Remove CSS animation class
-      if (classAnimatedModals.includes(modalId)) {
-        modal.classList.remove('open');
-        log('debug', `forceCloseModal: Removed .open class for ${modalId}`);
-      }
-
+      
       // final focus fallback
       const main = document.getElementById('mainContent') || document.querySelector('main') || document.body;
       try { main.focus(); } catch (e) { document.body.focus(); }
@@ -728,54 +727,59 @@ function forceCloseModal(modalId) {
   });
 }
 
-  // Open modal
-  function openModal(modalId, skipHistory = false) {
-const allPlansModalEl = getModalElement('allPlansModal');
-const allPlansModalContent = allPlansModalEl ? allPlansModalEl.querySelector('.plan-modal-content') : null;
-
-    
-    log('debug', `openModal: Attempting to open ${modalId}`);
-
-    const modalConfig = modals[modalId];
-    
-    if (modalConfig && !modalConfig.element) {
-      modalConfig.element = document.getElementById(modalConfig.id || modalId) || null;
-      if (modalConfig.element) {
-        log('debug', `openModal: Lazily resolved element for ${modalId}`);
-      } else {
-        log('error', `openModal: Element not found for ${modalId} on open attempt`);
-      }
-    }
-
-    if (!modalConfig || !modalConfig.element) {
-      log('error', `openModal: Modal config or element not found for ${modalId}`);
-      return;
-    }
-
-    const modal = modalConfig.element;
-    const isVisible = isModalVisible(modal);
-
-    if (isVisible) {
-      if (!openModalsStack.some((item) => item.id === modalId)) {
-        openModalsStack.push({ modal, id: modalId });
-        currentDepth++;
-      } else {
-        log('debug', `openModal: ${modalId} already open, skipping`);
-        return;
-      }
-    }
-      if (modalId === 'allPlansModal') {
-    allPlansModalContent.scrollTop = 0;  // Optional scroll reset when closing
+// Replacement for openModal function
+function openModal(modalId, skipHistory = false) {
+  if (openModalsStack.some(item => item.id === modalId)) {
+    log('warn', `openModal: ${modalId} already in stack, skipping duplicate`);
+    return;
   }
 
-    modal.classList.remove('hidden');
-    modal.style.display = modalConfig.hasPullHandle ? 'block' : 'flex';
-    modal.setAttribute('aria-hidden', 'false');
-    modal.removeAttribute('inert');
-    modal.style.visibility = 'visible';   // ← ADD THIS
-    modal.style.zIndex = getNextModalZIndex();
-    
-    // Special handling for All Plans modal — use CSS class for animation (your old way)
+  const allPlansModalEl = getModalElement('allPlansModal');
+  const allPlansModalContent = allPlansModalEl ? allPlansModalEl.querySelector('.plan-modal-content') : null;
+
+  
+  log('debug', `openModal: Attempting to open ${modalId}`);
+
+  const modalConfig = modals[modalId];
+  
+  if (modalConfig && !modalConfig.element) {
+    modalConfig.element = document.getElementById(modalConfig.id || modalId) || null;
+    if (modalConfig.element) {
+      log('debug', `openModal: Lazily resolved element for ${modalId}`);
+    } else {
+      log('error', `openModal: Element not found for ${modalId} on open attempt`);
+    }
+  }
+
+  if (!modalConfig || !modalConfig.element) {
+    log('error', `openModal: Modal config or element not found for ${modalId}`);
+    return;
+  }
+
+  const modal = modalConfig.element;
+  const isVisible = isModalVisible(modal);
+
+  if (isVisible) {
+    if (!openModalsStack.some((item) => item.id === modalId)) {
+      openModalsStack.push({ modal, id: modalId });
+      currentDepth++;
+    } else {
+      log('debug', `openModal: ${modalId} already open, skipping`);
+      return;
+    }
+  }
+    if (modalId === 'allPlansModal') {
+  allPlansModalContent.scrollTop = 0;  // Optional scroll reset when closing
+}
+
+  modal.classList.remove('hidden');
+  modal.style.display = modalConfig.hasPullHandle ? 'block' : 'flex';
+  modal.setAttribute('aria-hidden', 'false');
+  modal.removeAttribute('inert');
+  modal.style.visibility = 'visible';   // ← ADD THIS
+  modal.style.zIndex = getNextModalZIndex();
+  
+  // Special handling for All Plans modal — use CSS class for animation (your old way)
 // Special handling for modals that use .active class for animation
 if (modalId === 'allPlansModal' || modalId === 'checkoutModal') {
   // Let your CSS handle the starting position and animation
@@ -793,14 +797,14 @@ if (modalId === 'allPlansModal' || modalId === 'checkoutModal') {
 
 
 if (skipHistory && document.getElementById(modalId)) {
-    const modal = document.getElementById(modalId);
-    modal.style.opacity = '0';
-    modal.style.transform = modalId === 'allPlansModal' ? 'translateY(100%)' : 'translateY(20px)';
-    console.log('[ModalManager] Forced animation start for restored modal:', modalId);
-  }
+  const modal = document.getElementById(modalId);
+  modal.style.opacity = '0';
+  modal.style.transform = modalId === 'allPlansModal' ? 'translateY(100%)' : 'translateY(20px)';
+  console.log('[ModalManager] Forced animation start for restored modal:', modalId);
+}
 
 
-    // 1. Immediately activate the nav tab — instant feedback!
+  // 1. Immediately activate the nav tab — instant feedback!
 if (shouldManageActiveState(modalId)) {
   setTriggerActive(modalId, true);
   log('debug', `openModal: Instantly activated nav trigger for ${modalId}`);
@@ -833,14 +837,14 @@ if (focusTarget) {
   focusTarget.focus();
 }
 
-      if (modalId === 'securityPinModal') {
-        const title = modal.querySelector('#pinTitle');
-        if (title) focusTarget = title;
-        document.dispatchEvent(new CustomEvent('security:pin-modal-opened'));
-        log('debug', 'openModal: Dispatched security:pin-modal-opened for securityPinModal');
-      }
+    if (modalId === 'securityPinModal') {
+      const title = modal.querySelector('#pinTitle');
+      if (title) focusTarget = title;
+      document.dispatchEvent(new CustomEvent('security:pin-modal-opened'));
+      log('debug', 'openModal: Dispatched security:pin-modal-opened for securityPinModal');
+    }
 
-      // --- Special rule for Add Money Modal to prevent input auto-focus ---
+    // --- Special rule for Add Money Modal to prevent input auto-focus ---
 if (modalId === 'addMoneyModal') {
   const amt = document.getElementById('addMoneyAmountInput');
   const guard = document.getElementById('addMoneyFocusGuard');
@@ -855,124 +859,131 @@ if (modalId === 'addMoneyModal') {
 }
 
 
-      if (focusTarget) {
-        focusTarget.setAttribute('tabindex', '-1');
-        focusTarget.focus();
-      }
+    if (focusTarget) {
+      focusTarget.setAttribute('tabindex', '-1');
+      focusTarget.focus();
+    }
 
-      trapFocus(modal);
-      // ADD THIS: Trigger CSS animation for class-based modals
+    trapFocus(modal);
+    // ADD THIS: Trigger CSS animation for class-based modals
 if (classAnimatedModals.includes(modalId)) {
   modal.classList.add('open');
   log('debug', `openModal: Added .open class for CSS animation on ${modalId}`);
 }
 
-      document.dispatchEvent(new CustomEvent("modalOpened", { detail: modalId }));
+    document.dispatchEvent(new CustomEvent("modalOpened", { detail: modalId }));
 
-    });
+  });
+}
+
+// Replacement for closeModal function
+function closeModal(modalId) {
+  const allPlansModalEl = getModalElement('allPlansModal');
+  const allPlansModalContent = allPlansModalEl ? allPlansModalEl.querySelector('.plan-modal-content') : null;
+
+  log('debug', `closeModal: Attempting to close ${modalId}`);
+  const modalConfig = modals[modalId];
+  if (!modalConfig || !modalConfig.element) {
+    log('error', `closeModal: Modal config or element not found for ${modalId}`);
+    return;
+  }
+  
+  const modal = modalConfig.element;
+  if (!isModalVisible(modal)) {
+    log('warn', `closeModal: Modal ${modalId} is not visible`);
+    return;
   }
 
-  // Close modal
-  function closeModal(modalId) {
-const allPlansModalEl = getModalElement('allPlansModal');
-const allPlansModalContent = allPlansModalEl ? allPlansModalEl.querySelector('.plan-modal-content') : null;
+  if (document.activeElement && modal.contains(document.activeElement)) {
+    const main = document.getElementById('mainContent') || document.querySelector('main') || document.body;
+    try { main.focus(); } catch (e) { document.body.focus(); }
+    log('debug', `closeModal: Moved focus from ${modalId} to ${describeElement(main)}`);
+  }
+    if (modalId === 'allPlansModal') {
+  allPlansModalContent.scrollTop = 0;  // Optional scroll reset when closing
+}
 
-    log('debug', `closeModal: Attempting to close ${modalId}`);
-    const modalConfig = modals[modalId];
-    if (!modalConfig || !modalConfig.element) {
-      log('error', `closeModal: Modal config or element not found for ${modalId}`);
-      return;
-    }
+  applyTransition(modal, false, () => {
+    // cleanup focus trap if present
+    try {
+      if (modal._trapHandler) {
+        modal.removeEventListener('keydown', modal._trapHandler);
+        delete modal._trapHandler;
+        log('debug', `closeModal: Removed trapHandler from ${modalId}`);
+      }
+    } catch (e) { /* ignore */ }
+
+    // restore body scroll if some other code locked it
+    try {
+      document.body.style.overflow = '';
+      document.body.classList.remove('modal-open');
+    } catch (e) {}
+
+    modal.classList.add('hidden');
+    modal.style.display = 'none';
+    modal.setAttribute('aria-hidden', 'true');
+    modal.setAttribute('inert', '');
     
-    const modal = modalConfig.element;
-    if (!isModalVisible(modal)) {
-      log('warn', `closeModal: Modal ${modalId} is not visible`);
-      return;
+    const idx = openModalsStack.findIndex((item) => item.id === modalId);
+    if (idx !== -1) {
+      openModalsStack.splice(idx, 1);
+      currentDepth = openModalsStack.length;
+      log('debug', `closeModal: Modal ${modalId} closed, stack: ${openModalsStack.map((item) => item.id).join(', ')}, depth: ${currentDepth}`);
     }
 
-    if (document.activeElement && modal.contains(document.activeElement)) {
-      const main = document.getElementById('mainContent') || document.querySelector('main') || document.body;
-      try { main.focus(); } catch (e) { document.body.focus(); }
-      log('debug', `closeModal: Moved focus from ${modalId} to ${describeElement(main)}`);
-    }
-      if (modalId === 'allPlansModal') {
-    allPlansModalContent.scrollTop = 0;  // Optional scroll reset when closing
-  }
-
-    applyTransition(modal, false, () => {
-      // cleanup focus trap if present
-      try {
-        if (modal._trapHandler) {
-          modal.removeEventListener('keydown', modal._trapHandler);
-          delete modal._trapHandler;
-          log('debug', `closeModal: Removed trapHandler from ${modalId}`);
-        }
-      } catch (e) { /* ignore */ }
-
-      // restore body scroll if some other code locked it
-      try {
-        document.body.style.overflow = '';
-        document.body.classList.remove('modal-open');
-      } catch (e) {}
-
-      modal.classList.add('hidden');
-      modal.style.display = 'none';
-      modal.setAttribute('aria-hidden', 'true');
-      modal.setAttribute('inert', '');
-      
-      const idx = openModalsStack.findIndex((item) => item.id === modalId);
-      if (idx !== -1) {
-        openModalsStack.splice(idx, 1);
-        currentDepth = openModalsStack.length;
-        log('debug', `closeModal: Modal ${modalId} closed, stack: ${openModalsStack.map((item) => item.id).join(', ')}, depth: ${currentDepth}`);
-      }
-
-      // Remove active state - but NOT for allPlansModal
-      if (modalId !== 'allPlansModal') {
-        setTriggerActive(modalId, false);
-            } else {
-        // ← allPlansModal specific cleanup
-        modal.classList.remove('active'); // triggers CSS exit animation
-        history.replaceState({ isModal: false }, '', window.location.pathname);
-        log('debug', `closeModal: Removed .active + cleared URL fragment for allPlansModal`);
-      }
-
-      const previousModal = openModalsStack[openModalsStack.length - 1];
-      if (previousModal) {
-        const prevEl = previousModal.modal;
-        
-        // Restore active state for previous modal - but NOT for allPlansModal
-        if (previousModal.id !== 'allPlansModal') {
-          setTriggerActive(previousModal.id, true);
-        }
-        
-        const focusable = prevEl.querySelector(
-          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-        );
-        if (focusable) {
-          setTimeout(() => focusable.focus(), 100);
-          log('debug', `closeModal: Restored focus to ${previousModal.id}`);
-        }
-      } else {
-        // No more modals - determine which tab should be active based on where we came from
-        const wasNavModal = ['historyModal'].includes(modalId);
-        
-        if (wasNavModal) {
-          // Closing a nav modal with no stack = go to home
-          setHomeActive();
-          log('debug', 'closeModal: Closed nav modal, set home active');
-        } else {
-          const currentActive = document.querySelector('.nav-item.active, .active, [aria-current="true"]');
-          if (!currentActive) {
-            setHomeActive();
-            log('debug', 'closeModal: No active nav, set home active');
+    // Remove active state - but NOT for allPlansModal
+    if (modalId !== 'allPlansModal') {
+      setTriggerActive(modalId, false);
           } else {
-            log('debug', 'closeModal: Keeping current active tab');
-          }
+      // ← allPlansModal specific cleanup
+      modal.classList.remove('active'); // triggers CSS exit animation
+      history.replaceState({ isModal: false }, '', window.location.pathname);
+      log('debug', `closeModal: Removed .active + cleared URL fragment for allPlansModal`);
+    }
+
+    // Updated cleanup for class-animated modals
+    if (modalId === 'allPlansModal' || modalId === 'checkoutModal') {
+      modal.classList.remove('active');
+      history.replaceState({ isModal: false }, '', window.location.pathname);
+      log('debug', `closeModal: Removed .active + cleared URL fragment for ${modalId}`);
+    }
+
+    const previousModal = openModalsStack[openModalsStack.length - 1];
+    if (previousModal) {
+      const prevEl = previousModal.modal;
+      
+      // Restore active state for previous modal - but NOT for allPlansModal
+      if (previousModal.id !== 'allPlansModal') {
+        setTriggerActive(previousModal.id, true);
+      }
+      
+      const focusable = prevEl.querySelector(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      );
+      if (focusable) {
+        setTimeout(() => focusable.focus(), 100);
+        log('debug', `closeModal: Restored focus to ${previousModal.id}`);
+      }
+    } else {
+      // No more modals - determine which tab should be active based on where we came from
+      const wasNavModal = ['historyModal'].includes(modalId);
+      
+      if (wasNavModal) {
+        // Closing a nav modal with no stack = go to home
+        setHomeActive();
+        log('debug', 'closeModal: Closed nav modal, set home active');
+      } else {
+        const currentActive = document.querySelector('.nav-item.active, .active, [aria-current="true"]');
+        if (!currentActive) {
+          setHomeActive();
+          log('debug', 'closeModal: No active nav, set home active');
+        } else {
+          log('debug', 'closeModal: Keeping current active tab');
         }
-          if (bottomSheetModals.includes(modalId)) {
-    lockBodyScroll(false);
-  }
+      }
+        if (bottomSheetModals.includes(modalId)) {
+  lockBodyScroll(false);
+}
 
   // ADD THIS: Remove CSS animation class
 if (classAnimatedModals.includes(modalId)) {
@@ -980,14 +991,14 @@ if (classAnimatedModals.includes(modalId)) {
   log('debug', `closeModal: Removed .open class for ${modalId}`);
 }
 
-        
-        const main = document.getElementById('mainContent') || document.querySelector('main') || document.body;
-        try { main.focus(); } catch (e) { document.body.focus(); }
-      }
-    });
+      
+      const main = document.getElementById('mainContent') || document.querySelector('main') || document.body;
+      try { main.focus(); } catch (e) { document.body.focus(); }
+    }
+  });
 
-   
-  }
+ 
+}
 
   
 
@@ -1422,40 +1433,39 @@ if (historyModal) {
       log('warn', 'initialize: failed to attach nav mutation observer', { error: String(e) });
     }
 
-    // MutationObserver for each modal (existing behavior)
-    Object.entries(modals).forEach(([modalId, { element }]) => {
-      if (!element) return;
-      const observer = new MutationObserver((mutations) => {
-        if (isProcessingPopstate) {
-          log('debug', `MutationObserver: Skipping for ${modalId} during popstate`);
-          return;
-        }
+    // Replacement for MutationObserver setup in initialize() function
+// Replace the entire Object.entries(modals).forEach block starting around line 1420
 
-        clearTimeout(observer._debounceTimer);
-        observer._debounceTimer = setTimeout(() => {
-          const visible = isModalVisible(element);
-          const inStack = openModalsStack.some((item) => item.id === modalId);
-          
-          if (visible && !inStack && !element.dataset._mutating) {
-            element.dataset._mutating = 'true';
-            log('debug', `MutationObserver: ${modalId} became visible, opening`);
-            openModal(modalId);
-            setTimeout(() => { delete element.dataset._mutating; }, 200);
-          } else if (!visible && inStack && !element.dataset._mutating) {
-            element.dataset._mutating = 'true';
-            log('debug', `MutationObserver: ${modalId} became hidden, closing`);
-            closeModal(modalId);
-            setTimeout(() => { delete element.dataset._mutating; }, 200);
-          }
-        }, 200);
-      });
-      observer.observe(element, {
-        attributes: true,
-        attributeFilter: ['style', 'class', 'aria-hidden'],
-        subtree: false,
-      });
-      log('debug', `initialize: MutationObserver set for ${modalId}`);
-    });
+Object.entries(modals).forEach(([modalId, { element }]) => {
+  if (!element) return;
+  if (modalId === 'checkoutModal') return;  // Skip observer for checkoutModal to prevent re-open loops
+
+  const observer = new MutationObserver((mutations) => {
+    if (isProcessingPopstate || element.dataset._mutating) return;  // Existing + stronger guard
+
+    element.dataset._mutating = 'true';  // Flag to prevent recursion
+    clearTimeout(observer._debounceTimer);
+    observer._debounceTimer = setTimeout(() => {
+      const visible = isModalVisible(element);
+      const inStack = openModalsStack.some((item) => item.id === modalId);
+      
+      if (visible && !inStack) {
+        log('debug', `MutationObserver: ${modalId} became visible, opening`);
+        openModal(modalId);
+      } else if (!visible && inStack) {
+        log('debug', `MutationObserver: ${modalId} became hidden, closing`);
+        closeModal(modalId);
+      }
+      delete element.dataset._mutating;  // Clear flag after
+    }, 400);  // Increased debounce > transition time (0.26s) to avoid races
+  });
+  observer.observe(element, {
+    attributes: true,
+    attributeFilter: ['style', 'class', 'aria-hidden'],
+    subtree: false,
+  });
+  log('debug', `initialize: MutationObserver set for ${modalId}`);
+});
 
     // Monkeypatch DOMTokenList.add to capture exact stack when "active" class is added programmatically
     (function patchClassListAdd() {

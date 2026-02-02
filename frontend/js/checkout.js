@@ -428,77 +428,37 @@ if (checkoutData && checkoutData.price && !isNaN(checkoutData.price)) {
 
 
 
+// Replacement for closeCheckoutModal function in checkout.js
 function closeCheckoutModal() {
   const modalId = 'checkoutModal';
   const modal = document.getElementById(modalId);
   if (!modal) return;
 
   try {
-    // Stop biometric rewarming if the function exists (safe to call repeatedly)
-    try {
-      if (typeof window.stopModalBiometricRewarming === 'function') {
-        window.stopModalBiometricRewarming();
-        console.debug('[checkout] stopModalBiometricRewarming() called from closeCheckoutModal');
-      }
-    } catch (e) {
-      console.warn('[checkout] Error while stopping biometric rewarm', e);
+    // Stop biometric
+    if (typeof window.stopModalBiometricRewarming === 'function') {
+      window.stopModalBiometricRewarming();
     }
 
-    // If ModalManager is present, prefer to let it handle everything
-    const manager = window.ModalManager;
-    if (manager && (typeof manager.closeModal === 'function' || typeof manager.forceCloseModal === 'function')) {
-      // If manager knows it's open, call graceful close
-      let isOpen = false;
-      try {
-        if (typeof manager.getOpenModals === 'function') {
-          const open = manager.getOpenModals() || [];
-          isOpen = Array.isArray(open) && open.indexOf(modalId) !== -1;
-        }
-      } catch (e) {
-        // ignore
-      }
-
-      if (isOpen && typeof manager.closeModal === 'function') {
-        // graceful close handled by ModalManager (preferred)
-        manager.closeModal(modalId);
-        console.debug('[checkout] closeCheckoutModal: Delegated to ModalManager.closeModal');
-        return;
-      }
-
-      // If not marked open, force a cleanup via manager to ensure it removes any stray state
-      if (typeof manager.forceCloseModal === 'function') {
-        manager.forceCloseModal(modalId);
-        console.debug('[checkout] closeCheckoutModal: Delegated to ModalManager.forceCloseModal');
-        return;
-      }
+    // Let ModalManager close
+    if (window.ModalManager && typeof window.ModalManager.forceCloseModal === 'function') {
+      window.ModalManager.forceCloseModal(modalId);
+    } else {
+      // Fallback
+      modal.setAttribute('aria-hidden', 'true');
+      modal.classList.remove('active');
+      modal.style.display = 'none';
+      document.body.classList.remove('modal-open');
     }
 
-    // FALLBACK: ModalManager not available — perform a manager-friendly close
-    // Important: avoid inline display toggles; mirror what ModalManager expects:
-    //  - set aria-hidden
-    //  - remove 'active' class (CSS should control display)
-    //  - remove modal-open body flag
-    //  - clear checkout data
-    modal.setAttribute('aria-hidden', 'true');
+    // Extra force-remove active + clear data
     modal.classList.remove('active');
-    try { modal.setAttribute('inert', ''); } catch (e) {}
-    document.body.classList.remove('modal-open');
+    checkoutData = null;
+    history.replaceState({ isModal: false }, '', window.location.pathname);
 
-    // Clear modal data reference (your existing variable)
-    try { checkoutData = null; } catch (e) {}
-
-    // If this modal pushed a history state for a popup, go back safely
-    try {
-      if (history.state && history.state.popup === true && history.state.modal === 'checkout') {
-        history.back();
-      }
-    } catch (e) {
-      // ignore history errors
-    }
-
-    console.debug('[checkout] closeCheckoutModal: Fallback close performed');
+    console.log('[checkout] Close completed with extra cleanup');
   } catch (err) {
-    console.error('[checkout] Error closing modal:', err);
+    console.error('[checkout] Close error:', err);
   }
 }
 
