@@ -5,6 +5,7 @@
   const MM_MODAL_ID = 'fxgTransferModal';
   const DOM_MODAL_ID = 'fxg-transfer-modal';
   const FXG_STORAGE_KEY = 'fxgUserBalance';
+  const CONFIRM_MODAL_ID = 'fxg-transfer-confirm-modal';
 
   // helpers
   const onlyDigits = s => (s || '').toString().replace(/[^\d]/g, '');
@@ -14,7 +15,7 @@
 
   // resolve elements lazily
   function resolveEls() {
-    const modalEl = document.getElementById(DOM_MODAL_ID);
+    const modalEl = $(DOM_MODAL_ID);
     return {
       modal: modalEl,
       trigger: $('fxg-open-transfer-modal'),
@@ -31,19 +32,16 @@
     };
   }
 
-  // Local authoritative balance for this module
+  // Local authoritative balance
   let BALANCE = 0;
 
-  // Initialize BALANCE from best available source:
+  // --- Balance init & sync (unchanged logic) ---
   function initBalanceFromSources() {
-    // 1) Prefer window.currentDisplayedBalance (dashboard sets this via updateAllBalances)
     if (typeof window.currentDisplayedBalance === 'number' && !Number.isNaN(window.currentDisplayedBalance)) {
       BALANCE = Number(window.currentDisplayedBalance);
       persistFxgBalance(BALANCE);
       return;
     }
-
-    // 2) Try reading userData in localStorage (server-provided session)
     try {
       const userData = localStorage.getItem('userData');
       if (userData) {
@@ -54,18 +52,14 @@
           return;
         }
       }
-    } catch (e) { /* ignore parse errors */ }
-
-    // 3) Try previously persisted fxg key
+    } catch (e) {}
     try {
       const prev = localStorage.getItem(FXG_STORAGE_KEY);
       if (prev !== null) {
         BALANCE = Number(prev) || 0;
         return;
       }
-    } catch (e) { /* ignore */ }
-
-    // fallback to 0
+    } catch (e) {}
     BALANCE = 0;
   }
 
@@ -73,29 +67,23 @@
     try { localStorage.setItem(FXG_STORAGE_KEY, String(Number(n) || 0)); } catch (e) {}
   }
 
-  // Update our local copy and DOM element (safe, idempotent)
   function updateLocalBalance(n) {
     n = Number(n) || 0;
     BALANCE = n;
     persistFxgBalance(n);
-
-    // Update modal balance display if present
     const els = resolveEls();
     if (els.balanceEl) {
       els.balanceEl.textContent = `Balance: ₦${fmt(BALANCE)}`;
     }
   }
 
-  // Patch window.updateAllBalances to mirror inbound authoritative updates
   function patchUpdateAllBalances() {
     try {
       if (!window.updateAllBalances || window.__fxg_updateAllBalances_patched) return;
       const original = window.updateAllBalances;
       window.updateAllBalances = function (newBalance, skipAnimation) {
         try {
-          // call original first (preserves UI animation)
           const res = original.apply(this, arguments);
-          // then mirror to our BALANCE
           if (typeof newBalance !== 'undefined' && newBalance !== null) {
             updateLocalBalance(Number(newBalance) || 0);
           } else if (typeof window.currentDisplayedBalance === 'number') {
@@ -103,7 +91,6 @@
           }
           return res;
         } catch (e) {
-          // if anything breaks, fallback to calling original
           try { return original.apply(this, arguments); } catch (err) { console.warn('patched updateAllBalances error', err); }
         }
       };
@@ -114,7 +101,6 @@
     }
   }
 
-  // Listen for custom balance_update event dispatched by balance.js fallback
   function bindBalanceUpdateEvent() {
     if (bindBalanceUpdateEvent._bound) return;
     window.addEventListener('balance_update', (ev) => {
@@ -123,12 +109,11 @@
           updateLocalBalance(Number(ev.detail.balance) || 0);
           console.debug('[fxgTransfer] Received balance_update event', ev.detail.balance);
         }
-      } catch (e) { /* ignore */ }
+      } catch (e) {}
     });
     bindBalanceUpdateEvent._bound = true;
   }
 
-  // Monitor localStorage.userData changes from other tabs / scripts
   function bindStorageEvents() {
     if (bindStorageEvents._bound) return;
     window.addEventListener('storage', (ev) => {
@@ -147,14 +132,13 @@
     bindStorageEvents._bound = true;
   }
 
-  // Called when modal opens — refresh from best sources then render
   function refreshOnModalOpen() {
     initBalanceFromSources();
     const els = resolveEls();
     if (els.balanceEl) els.balanceEl.textContent = `Balance: ₦${fmt(BALANCE)}`;
   }
 
-  // Fallback open/close (same as before)
+  // --- Fallback open/close for transfer modal (unchanged) ---
   function fallbackOpen(modalEl) {
     if (!modalEl) return;
     modalEl.style.display = 'block';
@@ -170,43 +154,238 @@
     }, 260);
   }
 
-  // prefer ModalManager if present
   function openModal() {
     if (window.ModalManager && typeof window.ModalManager.openModal === 'function') {
-      try {
-        window.ModalManager.openModal(MM_MODAL_ID);
-        return;
-      } catch (e) { /* fallback */ }
+      try { window.ModalManager.openModal(MM_MODAL_ID); return; } catch (e) {}
     }
     const els = resolveEls();
     fallbackOpen(els.modal);
   }
   function closeModal() {
     if (window.ModalManager && typeof window.ModalManager.closeModal === 'function') {
-      try {
-        window.ModalManager.closeModal(MM_MODAL_ID);
-        return;
-      } catch (e) { /* fallback */ }
+      try { window.ModalManager.closeModal(MM_MODAL_ID); return; } catch (e) {}
     }
     const els = resolveEls();
     fallbackClose(els.modal);
   }
 
-  // Main UI init (keeps most of your original behavior)
-  function initUI() {
-    const els = resolveEls();
-    if (!els.modal) {
-      console.warn('[fxg] transfer: modal element not found');
-      return;
+  // --- Confirm modal creation + UI ---
+  function ensureConfirmModalExists() {
+    if ($(CONFIRM_MODAL_ID)) return;
+
+    // inject styles for confirm modal (scoped)
+    const css = `
+#${CONFIRM_MODAL_ID} { position: fixed; inset:0; display:flex; align-items:center; justify-content:center; z-index:110000; pointer-events:none; }
+#${CONFIRM_MODAL_ID} .fxg-confirm-backdrop { position:absolute; inset:0; background:rgba(0,0,0,0.65); backdrop-filter: blur(4px); pointer-events:auto; }
+#${CONFIRM_MODAL_ID} .fxg-confirm-sheet { position:relative; width:100%; max-width:520px; background:#000; border-radius:14px; color:#fff; box-shadow:0 30px 80px rgba(0,0,0,0.6); pointer-events:auto; overflow:hidden; transform:translateY(24px); opacity:0; transition:transform .28s cubic-bezier(.18,.9,.32,1), opacity .22s ease; }
+@media (max-width:720px) {
+  #${CONFIRM_MODAL_ID} .fxg-confirm-sheet { height:60vh; max-height:60vh; border-radius:12px 12px 0 0; width:100%; margin:0 8px 8px 8px; align-self:flex-end; transform:translateY(16px); }
+}
+#${CONFIRM_MODAL_ID}.show .fxg-confirm-sheet { transform:translateY(0); opacity:1; }
+.fxg-confirm-header { display:flex; align-items:center; justify-content:space-between; padding:16px; border-bottom:1px solid rgba(255,255,255,0.04); }
+.fxg-confirm-title { font-weight:800; font-size:16px; display:flex; align-items:center; gap:10px; }
+.fxg-confirm-body { padding:16px; display:flex; flex-direction:column; gap:12px; color:#c9d6e3; font-size:15px; }
+.fxg-confirm-row { display:flex; justify-content:space-between; align-items:center; gap:12px; }
+.fxg-confirm-label { color:#9fbbe8; font-weight:700; font-size:13px; }
+.fxg-confirm-value { color:#ffffff; font-weight:800; }
+.fxg-confirm-footer { padding:14px 16px; border-top:1px solid rgba(255,255,255,0.02); display:flex; gap:10px; justify-content:flex-end; }
+.fxg-confirm-btn { background:linear-gradient(90deg,#1ea0ff,#0b67ff); color:#fff; border:none; padding:10px 14px; border-radius:10px; font-weight:800; cursor:pointer; min-width:110px; }
+.fxg-confirm-btn[disabled] { opacity:.5; cursor:not-allowed; }
+.fxg-confirm-cancel { background:transparent; color:#cfe6ff; border:1px solid rgba(255,255,255,0.04); padding:9px 12px; border-radius:10px; cursor:pointer; }
+    `.trim();
+
+    const style = document.createElement('style');
+    style.setAttribute('data-fxg-confirm-style', 'true');
+    style.textContent = css;
+    document.head.appendChild(style);
+
+    // build DOM
+    const wrapper = document.createElement('div');
+    wrapper.id = CONFIRM_MODAL_ID;
+    wrapper.setAttribute('aria-hidden', 'true');
+    wrapper.innerHTML = `
+      <div class="fxg-confirm-backdrop" data-fxg-confirm-close></div>
+      <div class="fxg-confirm-sheet" role="dialog" aria-modal="true" aria-labelledby="${CONFIRM_MODAL_ID}-title" tabindex="-1">
+        <header class="fxg-confirm-header">
+          <div class="fxg-confirm-title"><span>Confirm Transfer</span></div>
+          <button class="fxg-confirm-close" aria-label="Close confirm" style="background:transparent;border:none;color:#fff;font-weight:700;cursor:pointer">✕</button>
+        </header>
+        <div class="fxg-confirm-body">
+          <div class="fxg-confirm-row"><div class="fxg-confirm-label">Product</div><div class="fxg-confirm-value">Transfer</div></div>
+          <div class="fxg-confirm-row"><div class="fxg-confirm-label">Amount</div><div class="fxg-confirm-value" id="${CONFIRM_MODAL_ID}-amount">₦0</div></div>
+          <div class="fxg-confirm-row"><div class="fxg-confirm-label">Sender</div><div class="fxg-confirm-value" id="${CONFIRM_MODAL_ID}-sender">You</div></div>
+          <div style="color:var(--fxg-muted,#9fbbe8);font-size:13px">Please confirm the details before sending. Transfers are instant.</div>
+        </div>
+        <footer class="fxg-confirm-footer">
+          <button class="fxg-confirm-cancel">Cancel</button>
+          <button class="fxg-confirm-btn" id="${CONFIRM_MODAL_ID}-send">Send</button>
+        </footer>
+      </div>
+    `;
+    document.body.appendChild(wrapper);
+
+    // event bindings
+    const backdrop = wrapper.querySelector('[data-fxg-confirm-close]');
+    const closeBtn = wrapper.querySelector('.fxg-confirm-close');
+    const cancelBtn = wrapper.querySelector('.fxg-confirm-cancel');
+    [backdrop, closeBtn, cancelBtn].forEach(el => {
+      if (!el) return;
+      el.addEventListener('click', () => closeConfirmModal());
+    });
+
+    // escape closes
+    wrapper.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeConfirmModal();
+    });
+  }
+
+  function openConfirmModal(payload) {
+    ensureConfirmModalExists();
+    const wrapper = $(CONFIRM_MODAL_ID);
+    if (!wrapper) return;
+
+    // populate details
+    const amountEl = $(`${CONFIRM_MODAL_ID}-amount`);
+    const senderEl = $(`${CONFIRM_MODAL_ID}-sender`);
+    const username = getCurrentUsername() || 'You';
+    if (amountEl) amountEl.textContent = `₦${fmt(payload.amount)}`;
+    if (senderEl) senderEl.textContent = username;
+
+    // show
+    wrapper.classList.add('show');
+    wrapper.setAttribute('aria-hidden', 'false');
+
+    // focus send button
+    const sendBtn = $(`${CONFIRM_MODAL_ID}-send`);
+    if (sendBtn) {
+      sendBtn.focus();
+      // remove any previous handlers and add new one
+      sendBtn.onclick = () => confirmSend(payload);
     }
 
-    // Wire triggers once
+    // trap focus very simply
+    setTimeout(() => {
+      const sheet = wrapper.querySelector('.fxg-confirm-sheet');
+      if (sheet) sheet.focus();
+    }, 60);
+  }
+
+  function closeConfirmModal() {
+    const wrapper = $(CONFIRM_MODAL_ID);
+    if (!wrapper) return;
+    wrapper.classList.remove('show');
+    wrapper.setAttribute('aria-hidden', 'true');
+    // tidy: remove send onclick to avoid leaks
+    const sendBtn = $(`${CONFIRM_MODAL_ID}-send`);
+    if (sendBtn) sendBtn.onclick = null;
+  }
+
+  // helper: try to read current user's username from localStorage.userData
+  function getCurrentUsername() {
+    try {
+      const userData = localStorage.getItem('userData');
+      if (!userData) return null;
+      const parsed = JSON.parse(userData);
+      return (parsed && (parsed.username || parsed.firstName || parsed.fullName)) || null;
+    } catch (e) { return null; }
+  }
+
+  // confirm send action (perform transfer here)
+  async function confirmSend(payload) {
+    const wrapper = $(CONFIRM_MODAL_ID);
+    const sendBtn = $(`${CONFIRM_MODAL_ID}-send`);
+    const cancelBtn = wrapper ? wrapper.querySelector('.fxg-confirm-cancel') : null;
+    if (sendBtn) {
+      sendBtn.disabled = true;
+      sendBtn.textContent = 'Sending...';
+    }
+    if (cancelBtn) cancelBtn.disabled = true;
+
+    try {
+      // --- Replace this simulation with your real network call ---
+      // Example:
+      // const res = await fetch('/api/transfer', { method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
+      // if (!res.ok) throw new Error('Transfer failed');
+      await new Promise(r => setTimeout(r, 700)); // simulate network
+
+      // On success: update balances and show success panel in transfer modal (do NOT auto-close transfer modal)
+      BALANCE = Math.max(0, BALANCE - payload.amount);
+      updateLocalBalance(BALANCE);
+
+      // Sync dashboard (authoritative visual)
+      if (typeof window.updateAllBalances === 'function') {
+        try { window.updateAllBalances(BALANCE); } catch (e) {}
+      }
+
+      // close confirm modal and show success in transfer modal
+      closeConfirmModal();
+
+      const els = resolveEls();
+      if (els.successEl) {
+        els.successEl.hidden = false;
+        // add/ensure manual close button in success area
+        let btn = els.successEl.querySelector('.fxg-success-close');
+        if (!btn) {
+          btn = document.createElement('button');
+          btn.textContent = 'Close';
+          btn.className = 'fxg-success-close';
+          btn.style.marginTop = '12px';
+          // style slightly
+          btn.style.background = 'linear-gradient(90deg,#1ea0ff,#0b67ff)';
+          btn.style.color = '#fff';
+          btn.style.border = 'none';
+          btn.style.padding = '8px 12px';
+          btn.style.borderRadius = '8px';
+          btn.style.fontWeight = '700';
+          els.successEl.appendChild(btn);
+        }
+        btn.onclick = () => {
+          // Prefer ModalManager close if available
+          if (window.ModalManager && typeof window.ModalManager.closeModal === 'function') {
+            try { window.ModalManager.closeModal(MM_MODAL_ID); return; } catch (e) {}
+          }
+          // fallback
+          closeModal();
+        };
+      }
+
+      // update continue button text to 'Sent' to reflect success inside transfer modal
+      if (els && els.continueBtn) {
+        const textNode = els.continueBtn.querySelector('.fxg-btn-text');
+        if (textNode) textNode.textContent = 'Sent';
+      }
+
+    } catch (err) {
+      console.error('[fxgTransfer] confirmSend failed', err);
+      // show an inline error on confirm sheet (simple)
+      if (wrapper) {
+        let errNode = wrapper.querySelector('.fxg-confirm-error');
+        if (!errNode) {
+          errNode = document.createElement('div');
+          errNode.className = 'fxg-confirm-error';
+          errNode.style.color = '#ff8a8a';
+          errNode.style.padding = '0 16px 8px 16px';
+          wrapper.querySelector('.fxg-confirm-body').appendChild(errNode);
+        }
+        errNode.textContent = `Transfer failed: ${err && err.message ? err.message : 'unknown'}`;
+      }
+      // re-enable buttons
+      if (sendBtn) { sendBtn.disabled = false; sendBtn.textContent = 'Send'; }
+      if (cancelBtn) cancelBtn.disabled = false;
+    }
+  }
+
+  // --- Main UI init (integrates confirm modal) ---
+  function initUI() {
+    const els = resolveEls();
+    if (!els.modal) { console.warn('[fxg] transfer: modal element not found'); return; }
+
+    // Trigger open
     if (els.trigger && !els.trigger._fxg_bound) {
       els.trigger.addEventListener('click', (e) => {
         e.preventDefault();
-        refreshOnModalOpen(); // refresh from global/session
+        refreshOnModalOpen();
         openModal();
-        // focus username after a short delay
         setTimeout(() => { els.usernameEl && els.usernameEl.focus(); }, 160);
       });
       els.trigger._fxg_bound = true;
@@ -218,18 +397,16 @@
       els.closeBtn._fxg_bound = true;
     }
 
-    // backdrop
+    // Backdrop
     if (els.backdrop && !els.backdrop._fxg_bound) {
       els.backdrop.addEventListener('click', closeModal);
       els.backdrop._fxg_bound = true;
     }
 
-    // Display initial balance in modal if present
-    if (els.balanceEl) {
-      refreshOnModalOpen();
-    }
+    // Initial balance
+    if (els.balanceEl) refreshOnModalOpen();
 
-    // Form/inputs/validation/submit behavior (kept mostly same)
+    // validation
     function validate() {
       if (!els.usernameEl || !els.amountEl || !els.continueBtn) return false;
       els.usernameErr && (els.usernameErr.textContent = '');
@@ -255,6 +432,7 @@
       return ok;
     }
 
+    // Inputs handlers
     if (els.amountEl && !els.amountEl._fxg_bound) {
       els.amountEl.addEventListener('input', function (e) {
         const raw = onlyDigits(e.target.value);
@@ -263,12 +441,12 @@
       });
       els.amountEl._fxg_bound = true;
     }
-
     if (els.usernameEl && !els.usernameEl._fxg_bound) {
       els.usernameEl.addEventListener('input', validate);
       els.usernameEl._fxg_bound = true;
     }
 
+    // Form submit -> open confirm modal (instead of immediate send)
     if (els.form && !els.form._fxg_bound) {
       els.form.addEventListener('submit', function (ev) {
         ev.preventDefault();
@@ -280,42 +458,17 @@
           timestamp: new Date().toISOString()
         };
 
-        // UI busy
-        els.continueBtn.classList.add('loading');
-        els.continueBtn.disabled = true;
-        const textNode = els.continueBtn.querySelector('.fxg-btn-text');
-        if (textNode) textNode.textContent = 'Sending';
-
-        // Replace with real fetch to /api/transfer
-        // For demo we simulate success:
-        setTimeout(() => {
-          els.continueBtn.classList.remove('loading');
-          if (textNode) textNode.textContent = 'Sent';
-          if (els.successEl) els.successEl.hidden = false;
-
-          // Update local lines: reduce BALANCE and persist
-          BALANCE = Math.max(0, BALANCE - payload.amount);
-          updateLocalBalance(BALANCE); // will update modal display & localStorage
-
-          // If dashboard/code listens to updateAllBalances, call it to sync global UI
-          if (typeof window.updateAllBalances === 'function') {
-            try { window.updateAllBalances(BALANCE); } catch (e) { /* ignore */ }
-          }
-
-          setTimeout(() => closeModal(), 800);
-        }, 700);
-
-        console.log('[fxg] transfer payload', payload);
+        // show confirm modal
+        openConfirmModal(payload);
       });
       els.form._fxg_bound = true;
     }
 
-    // Make sure we listen for modalOpened so we refresh when ModalManager opens it
+    // Refresh on ModalManager open
     if (!initUI._modalOpenedListener) {
       window.addEventListener('modalOpened', function (ev) {
         if (ev && ev.detail === MM_MODAL_ID) {
           refreshOnModalOpen();
-          // hide success panel
           const el = resolveEls();
           el.successEl && (el.successEl.hidden = true);
           setTimeout(() => el.usernameEl && el.usernameEl.focus(), 160);
@@ -323,30 +476,24 @@
       });
       initUI._modalOpenedListener = true;
     }
-  } // end initUI
+  }
 
   // Bootstrapping
   function bootstrap() {
-    // 1) Initialize BALANCE value from best sources
     initBalanceFromSources();
-
-    // 2) Monkey-patch and bind listeners so we keep in sync with dashboard
     patchUpdateAllBalances();
     bindBalanceUpdateEvent();
     bindStorageEvents();
 
-    // 3) Init UI wiring soon after DOM ready
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', () => setTimeout(initUI, 60));
     } else {
       setTimeout(initUI, 60);
     }
 
-    // 4) Try again after a short delay in case dashboard initialized later
     setTimeout(() => {
       patchUpdateAllBalances();
       initBalanceFromSources();
-      // update modal display if present
       const be = document.getElementById('fxg-balance');
       if (be) be.textContent = `Balance: ₦${fmt(BALANCE)}`;
     }, 400);
@@ -357,10 +504,12 @@
   // Debug helpers
   window.fxgTransfer = window.fxgTransfer || {};
   window.fxgTransfer.getBalance = () => BALANCE;
-  window.fxgTransfer.setBalance = (v) => { updateLocalBalance(Number(v) || 0); if (typeof window.updateAllBalances === 'function') try { window.updateAllBalances(BALANCE); } catch (e) {} };
+  window.fxgTransfer.setBalance = (v) => {
+    updateLocalBalance(Number(v) || 0);
+    if (typeof window.updateAllBalances === 'function') try { window.updateAllBalances(BALANCE); } catch (e) {}
+  };
 
 })();
-
 
 
 
