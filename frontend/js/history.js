@@ -2370,7 +2370,7 @@ async function subscribeToUserRealtime(force = false) {
   userIsSubscribing = true;
 
   try {
-    // 1️⃣ Resolve UID
+    // 1. Resolve UID
     let uid =
       window.__USER_UID ||
       localStorage.getItem('userId') ||
@@ -2385,46 +2385,20 @@ async function subscribeToUserRealtime(force = false) {
       return;
     }
 
-    // 2️⃣ Get shared JWT
-    console.log('[User Realtime] Fetching JWT...');
-    const token = await getSharedJWT(force);
-
-    if (!token) {
-      console.error('[User Realtime] Failed to get JWT');
+    // 2. Get shared authenticated client
+    const authClient = await getSharedAuthClient(force);
+    if (!authClient) {
+      console.error('[User Realtime] No authenticated client');
       scheduleUserRetry();
       return;
     }
 
-    // 3️⃣ Temp client
-// Replace the entire tempClient creation block with:
-const authClient = await getSharedAuthClient(force);
-if (!authClient) {
-  console.error('[Tx Realtime] No authenticated client');
-  scheduleTxRetry();
-  return;
-}
+    console.log('[User Realtime] Using shared authenticated client');
 
-// Then use authClient instead of tempClient for the channel
-txRealtimeChannel = authClient.channel(channelName);
-
-    // 4️⃣ Set session
-    const { error: sessionError } = await authClient.auth.setSession({
-      access_token: token,
-      refresh_token: token
-    });
-
-    if (sessionError) {
-      console.error('[User Realtime] setSession FAILED:', sessionError.message);
-      scheduleUserRetry();
-      return;
-    }
-
-    console.log('[User Realtime] ✅ Session set');
-
-    // 5️⃣ Visibility test - FIXED to use 'uid' column
+    // 3. Visibility test
     const { error: testErr } = await authClient
       .from('users')
-      .select('uid')  // ✅ Changed from 'id' to 'uid'
+      .select('uid')
       .eq('uid', uid)
       .limit(1);
 
@@ -2434,10 +2408,9 @@ txRealtimeChannel = authClient.channel(channelName);
       console.log('[User Realtime] SELECT TEST OK');
     }
 
-    // 6️⃣ Subscribe - CRITICAL FIX: Use 'uid' instead of 'id'
+    // 4. Create & subscribe channel
     const channelName = `user:${uid}`;
     userRealtimeChannel = authClient.channel(channelName);
-
     console.log('[User Realtime] Channel created:', channelName);
 
     userRealtimeChannel
@@ -2447,7 +2420,7 @@ txRealtimeChannel = authClient.channel(channelName);
           event: 'UPDATE',
           schema: 'public',
           table: 'users',
-          filter: `uid=eq.${uid}`  // ✅ CRITICAL FIX: Changed from 'id' to 'uid'
+          filter: `uid=eq.${uid}`
         },
         (payload) => {
           console.log('[User Realtime] 🔔 UPDATE RECEIVED');
@@ -2456,37 +2429,26 @@ txRealtimeChannel = authClient.channel(channelName);
           const raw = payload.new;
           if (!raw) return;
 
-          // 🔄 Normalize + persist - using correct field names from your schema
           const allTimeIn = Number(raw.all_time_in || 0);
           const allTimeOut = Number(raw.all_time_out || 0);
-          const totalTxCount = Number(raw.successful_data_tx_count || 0);  // ✅ Correct field name
+          const totalTxCount = Number(raw.successful_data_tx_count || 0);
 
           localStorage.setItem('allTimeIn', allTimeIn);
           localStorage.setItem('allTimeOut', allTimeOut);
           localStorage.setItem('totalDataTxCount', totalTxCount);
 
-          console.log('[User Realtime] Storage updated:', {
-            allTimeIn,
-            allTimeOut,
-            totalTxCount
-          });
+          console.log('[User Realtime] Storage updated:', { allTimeIn, allTimeOut, totalTxCount });
 
-          // 🖥️ Update dashboard instantly
           updateDashboardTotals();
 
-          window.dispatchEvent(
-            new CustomEvent('user_totals_update', {
-              detail: { allTimeIn, allTimeOut, totalTxCount }
-            })
-          );
+          window.dispatchEvent(new CustomEvent('user_totals_update', {
+            detail: { allTimeIn, allTimeOut, totalTxCount }
+          }));
         }
       )
       .subscribe((status, err) => {
         console.log('[User Realtime] SUBSCRIBE STATUS:', status);
-
-        if (err) {
-          console.error('[User Realtime] SUBSCRIBE ERROR:', err.message || err);
-        }
+        if (err) console.error('[User Realtime] SUBSCRIBE ERROR:', err.message || err);
 
         if (status === 'SUBSCRIBED') {
           console.log('[User Realtime] ✅ SUBSCRIBED & LISTENING');
@@ -2498,10 +2460,8 @@ txRealtimeChannel = authClient.channel(channelName);
           console.warn('[User Realtime] Channel failed:', userRealtimeFailedCount);
 
           if (userRealtimeFailedCount >= 3) {
-            console.warn('[User Realtime] Max failures → fallback refresh');
-            if (typeof loadInitialUserTotals === 'function') {
-              loadInitialUserTotals();
-            }
+            console.warn('[User Realtime] Max failures → fallback');
+            loadInitialUserTotals();
           } else {
             scheduleUserRetry();
           }
