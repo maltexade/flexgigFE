@@ -126,6 +126,8 @@ function generateFakeTransactions() {
     preloadingInProgress: false
   };
 
+  window.monthlyHistory = []; 
+
   if (modal) {
   const modalObserver = new MutationObserver((mutations) => {
     mutations.forEach((mutation) => {
@@ -1226,8 +1228,6 @@ function shareReceipt(modalEl, ref, amount, desc, date, time, statusText, networ
     });
   });
 
-  /* -------------------------- STICKY MONTH DIVIDERS (matching HTML structure) -------------------------- */
-/* -------------------------- STICKY MONTH DIVIDERS (Opay-style with full header) -------------------------- */
 function makeMonthDivider(month) {
   const container = document.createElement('div');
   container.className = 'month-section-header';
@@ -1247,34 +1247,35 @@ function makeMonthDivider(month) {
     overflow: hidden;
   `;
   
-  // Create the full Opay-style header with month selector and totals
   container.innerHTML = `
-  <div class="opay-month-header" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 12px; background: #1e1e1e; gap: 12px;">
-    <div class="opay-month-selector" style="display: inline-flex; align-items: center; gap: 6px; font-size: 16px; font-weight: 600; color: white; cursor: pointer; flex: 1;">
-      <span>${month.prettyMonth}</span>
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M6 9l6 6 6-6"/>
-      </svg>
+    <div class="opay-month-header" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 12px; background: #1e1e1e; gap: 12px;">
+      <div class="opay-month-selector" style="display: inline-flex; align-items: center; gap: 6px; font-size: 16px; font-weight: 600; color: white; cursor: pointer; flex: 1;">
+        <span>${month.prettyMonth}</span>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M6 9l6 6 6-6"/>
+        </svg>
+      </div>
     </div>
-  </div>
     
     <div class="opay-summary" style="display: flex; justify-content: space-between; padding: 12px 12px; background: #1e1e1e; font-size: 14px; color: #999; gap: 16px; border-bottom: none;">
-      <div>In: <strong style="color: white; font-weight: 600; margin-left: 4px;">${formatCurrency(month.totalIn)}</strong></div>
-      <div>Out: <strong style="color: white; font-weight: 600; margin-left: 4px;">${formatCurrency(month.totalOut)}</strong></div>
+      <div>In: <strong style="color: white; font-weight: 600; margin-left: 4px;">
+        ${getMonthlyIn(month.monthKey)}
+      </strong></div>
+      <div>Out: <strong style="color: white; font-weight: 600; margin-left: 4px;">
+        ${getMonthlyOut(month.monthKey)}
+      </strong></div>
     </div>
   `;
   
-  // Make the month selector clickable to open month picker
+  // Make month selector clickable
   const monthSelector = container.querySelector('.opay-month-selector');
   if (monthSelector) {
     monthSelector.addEventListener('click', (e) => {
       e.stopPropagation();
-      // Extract year and month from the month object
       const [year, monthNum] = month.monthKey.split('-');
       selectedMonth = { year: parseInt(year), month: parseInt(monthNum) };
       window.currentMonthPickerYear = parseInt(year);
       
-      // Open month picker modal
       createMonthPickerModal();
       const modalEl = document.getElementById('monthFilterModal');
       modalEl.classList.remove('hidden');
@@ -1291,6 +1292,38 @@ function makeMonthDivider(month) {
   }
   
   return container;
+}
+
+// Get In total for a month from server data (fallback to 0)
+function getMonthlyIn(monthKey) {
+  const entry = window.monthlyHistory.find(e => e.month === monthKey);
+  return formatCurrency(entry ? (entry.in || entry.totalIn || 0) : 0);
+}
+
+// Get Out total for a month from server data (fallback to 0)
+function getMonthlyOut(monthKey) {
+  const entry = window.monthlyHistory.find(e => e.month === monthKey);
+  return formatCurrency(entry ? (entry.out || entry.totalOut || 0) : 0);
+}
+
+
+// Refresh visible month headers with latest server totals (called from realtime)
+function refreshMonthHeaders() {
+  const headers = document.querySelectorAll('.month-section-header');
+  
+  headers.forEach(header => {
+    const monthKey = header.dataset.monthKey;
+    if (!monthKey) return;
+
+    const inEl = header.querySelector('.opay-summary div:first-child strong');
+    const outEl = header.querySelector('.opay-summary div:last-child strong');
+
+    if (inEl && outEl) {
+      inEl.textContent = getMonthlyIn(monthKey);
+      outEl.textContent = getMonthlyOut(monthKey);
+      console.log(`[Month Refresh] Updated ${monthKey} from server`);
+    }
+  });
 }
 
 /* -------------------------- RENDER WITH MONTH DIVIDERS -------------------------- */
@@ -1868,6 +1901,20 @@ function createMonthPickerModal() {
 
   applyTransformsAndRender();
   console.log('[TransactionHistory] Modal opened → rendered current state (items:', state.items.length, ')');
+  // Optional: Ensure we have the latest monthly_history on modal open
+const authClient = await getSharedAuthClient();
+if (authClient) {
+  const { data } = await authClient
+    .from('users')
+    .select('monthly_history')
+    .eq('uid', uid)
+    .single();
+  
+  if (data?.monthly_history) {
+    window.monthlyHistory = data.monthly_history;
+    refreshMonthHeaders();
+  }
+}
 }
 const container = document.getElementById('historyList');
 
@@ -2343,7 +2390,7 @@ subscribeToTransactions();
 
   // REAL-TIME DASHBOARD SUBSCRIPTION (SEPARATE FROM HISTORY)
   
-
+// Global cache for server-provided monthly history (updated in realtime)
   let userRealtimeChannel = null;
 let userIsSubscribing = false;
 let userRetryTimer = null;
@@ -2429,6 +2476,7 @@ async function subscribeToUserRealtime(force = false) {
           const raw = payload.new;
           if (!raw) return;
 
+          // Existing all-time totals
           const allTimeIn = Number(raw.all_time_in || 0);
           const allTimeOut = Number(raw.all_time_out || 0);
           const totalTxCount = Number(raw.successful_data_tx_count || 0);
@@ -2439,7 +2487,19 @@ async function subscribeToUserRealtime(force = false) {
 
           console.log('[User Realtime] Storage updated:', { allTimeIn, allTimeOut, totalTxCount });
 
+          // NEW: Capture monthly_history from server
+          const serverMonthly = raw.monthly_history || [];
+          window.monthlyHistory = Array.isArray(serverMonthly) ? serverMonthly : [];
+
+          console.log('[User Realtime] Monthly history updated:', window.monthlyHistory.length, 'entries');
+
+          // Refresh dashboard totals
           updateDashboardTotals();
+
+          // If history modal is open → refresh the month headers with fresh server totals
+          if (state.open) {
+            refreshMonthHeaders();
+          }
 
           window.dispatchEvent(new CustomEvent('user_totals_update', {
             detail: { allTimeIn, allTimeOut, totalTxCount }
@@ -2477,6 +2537,17 @@ async function subscribeToUserRealtime(force = false) {
     userIsSubscribing = false;
   }
 }
+
+function scheduleUserRetry() {
+  if (userRetryTimer) return;
+
+  userRetryTimer = setTimeout(() => {
+    userRetryTimer = null;
+    subscribeToUserRealtime(true);
+  }, USER_RETRY_MS);
+}
+
+window.subscribeToUserRealtime = subscribeToUserRealtime;
 
 function scheduleUserRetry() {
   if (userRetryTimer) return;
