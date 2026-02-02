@@ -471,6 +471,8 @@ function getModalElement(modalId) {
     checkoutModal: { id: 'checkoutModal', element: null, hasPullHandle: false },
     historyModal: { id: 'historyModal', element: null, hasPullHandle: false },
     addMoneyModal: {id: 'addMoneyModal', element: null, hasPullHandle: true},
+    fxgTransferModal: { id: 'fxg-transfer-modal', element: null, hasPullHandle: false },
+
   };
 
   // ─────────────────────────────────────────────────────────────
@@ -480,7 +482,7 @@ const bottomSheetModals = [
   'addMoneyModal',
   'historyModal',
   'allPlansModal',
-  // add any future bottom sheets here
+  'fxgTransferModal',
 ];
 
 function lockBodyScroll(lock = true) {
@@ -1289,6 +1291,7 @@ log('debug', 'handlePopstate: openModalsStack snapshot', { stack: openModalsStac
       continueBtn: 'checkoutModal',
       historyNavLink: 'historyModal',
       addMoneyBtn: 'addMoneyModal',
+      'fxg-open-transfer-modal': 'fxgTransferModal',
     };
 
     // Bind triggers to open modals

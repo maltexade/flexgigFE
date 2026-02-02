@@ -5846,3 +5846,262 @@ p:has(.balance-real, .balance-masked) {
   background: rgba(255, 0, 0, 0.8);
   color: white;
 }
+
+
+/* ---------- TRANSFER MODAL LAYOUT ---------- */
+.fxg-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  display: none;
+  overflow: hidden;           /* prevent unwanted scrolling */
+}
+
+.fxg-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.32);   /* light & modern tint */
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  z-index: 1;
+  pointer-events: auto;              /* allows closing by clicking backdrop */
+  opacity: 0;
+  transition: opacity 360ms ease;
+}
+
+.fxg-modal.show .fxg-backdrop {
+  opacity: 1;
+}
+
+.fxg-sheet {
+  position: fixed;
+  z-index: 10;                       /* clearly above backdrop */
+  left: 50%;
+  width: 100%;
+  max-width: 520px;
+  background: #000000;
+  color: #ffffff;
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  max-height: 92vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
+  transition: transform 360ms cubic-bezier(0.18, 0.9, 0.32, 1), opacity 360ms ease;
+  opacity: 0;
+}
+
+/* Desktop: centered modal with fade & scale entrance (no push-down) */
+.fxg-sheet {
+  top: 50%;
+  transform: translate(-50%, -50%) scale(0.92);   /* starts centered, slightly small */
+}
+
+.fxg-modal.show .fxg-sheet {
+  transform: translate(-50%, -50%) scale(1);      /* full size, centered */
+  opacity: 1;
+}
+
+/* Mobile: top sheet with slide-down */
+@media (max-width: 720px) {
+  .fxg-sheet {
+    left: 0;
+    right: 0;
+    bottom: 0;
+    top: 0;
+    transform: translateY(-100%);
+    opacity: 1;   /* no fade on mobile for snappier feel */
+    max-height: 100vh;
+    border-radius: 0 0 14px 14px;
+  }
+  
+  .fxg-modal.show .fxg-sheet {
+    transform: translateY(0);
+  }
+}
+
+/* ---------- HEADER ---------- */
+.fxg-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  gap: 12px;
+}
+
+.fxg-close {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 6px 8px;
+}
+
+.fxg-close svg {
+  display: block;
+  width: 20px;
+  height: 20px;
+}
+
+.fxg-balance {
+  font-weight: 700;
+  color: #1ea0ff;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+/* ---------- MAIN ---------- */
+.fxg-main {
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.fxg-instructions {
+  margin: 0;
+  color: #bbbbbb;
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+/* Form and inputs */
+.fxg-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.fxg-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fxg-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.fxg-input {
+  background: #111111;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 12px 14px;
+  border-radius: 10px;
+  color: #ffffff;
+  font-size: 15px;
+  outline: none;
+  width: 100%;
+  box-sizing: border-box;
+  caret-color: #1ea0ff;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+
+.fxg-input:focus {
+  border-color: #1ea0ff;
+  box-shadow: 0 0 10px rgba(30,160,255,0.3);
+}
+
+/* Amount input with currency */
+.fxg-amount-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.fxg-currency {
+  position: absolute;
+  left: 12px;
+  font-weight: 800;
+  color: #1ea0ff;
+  pointer-events: none;
+}
+
+.fxg-amount {
+  padding-left: 34px;
+}
+
+/* ---------- ACTIONS ---------- */
+.fxg-actions {
+  display: flex;
+  justify-content: center;
+  padding-top: 6px;
+}
+
+.fxg-btn {
+  background: linear-gradient(90deg, #1ea0ff, #0b67ff);
+  color: #ffffff;
+  border: none;
+  padding: 12px 18px;
+  border-radius: 10px;
+  font-weight: 800;
+  cursor: pointer;
+  min-width: 130px;
+  display: inline-flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.12s, opacity 0.12s;
+}
+
+.fxg-btn:active {
+  transform: translateY(1px) scale(0.998);
+}
+
+.fxg-btn[disabled] {
+  opacity: 0.48;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+/* ---------- ERROR & SUCCESS ---------- */
+.fxg-error {
+  min-height: 18px;
+  font-size: 13px;
+  color: #ff8a8a;
+}
+
+.fxg-success {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: center;
+  padding: 18px 0;
+  color: #1ea0ff;
+}
+
+.fxg-check {
+  width: 28px;
+  height: 28px;
+  stroke: #1ea0ff;
+  stroke-width: 2.2;
+  fill: none;
+}
+
+.fxg-success-text {
+  font-weight: 800;
+  color: #1ea0ff;
+}
+
+/* ---------- FOOTER ---------- */
+.fxg-footer {
+  padding: 12px 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.02);
+  text-align: center;
+  font-size: 12px;
+  color: #bbbbbb;
+}
+
+/* Prevent body scroll when modal is open (add this to your global CSS or via JS) */
+body:has(.fxg-modal.show) {
+  overflow: hidden;
+}
