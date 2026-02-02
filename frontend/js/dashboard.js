@@ -3386,59 +3386,7 @@ applyBalanceVisibility();
 
 
 
-// Helper: Update localStorage with user data
-function updateLocalStorageFromUser(user) {
-  try {
-    const userData = {
-      uid: user.uid || user.id || '',
-      email: user.email || '',
-      username: user.username || '',
-      fullName: user.fullName || '',
-      firstName: user.firstName || user.fullName?.split(' ')[0] || 'User',
-      phoneNumber: user.phoneNumber || '',
-      address: user.address || '',
-      profilePicture: user.profilePicture || '',
-      hasPin: user.hasPin || false,
-      hasBiometrics: user.hasBiometrics || false,
-      profileCompleted: user.profileCompleted || false,
-      fullNameEdited: user.fullNameEdited || false,
-      lastUsernameUpdate: user.lastUsernameUpdate || '',
-      monthlyHistory: user.monthlyHistory || [],
-      allTimeIn: user.allTimeIn || 0,
-      allTimeOut: user.allTimeOut || 0,
-      totalDataTxCount: user.totalDataTxCount || 0,
-
-      cachedAt: Date.now()
-    };
-
-    localStorage.setItem('userData', JSON.stringify(userData));
-    localStorage.setItem('userEmail', user.email || '');
-    localStorage.setItem('userId', user.uid || user.id || '');
-    localStorage.setItem('firstName', userData.firstName);
-    localStorage.setItem('username', user.username || '');
-    localStorage.setItem('fullName', user.fullName || '');
-    localStorage.setItem('phoneNumber', user.phoneNumber || '');
-    localStorage.setItem('address', user.address || '');
-    localStorage.setItem('profilePicture', user.profilePicture || '');
-    localStorage.setItem('hasPin', user.hasPin ? 'true' : 'false');
-    localStorage.setItem('biometricsEnabled', user.hasBiometrics ? 'true' : 'false');
-    localStorage.setItem('profileCompleted', user.profileCompleted ? 'true' : 'false');
-    localStorage.setItem('fullNameEdited', user.fullNameEdited ? 'true' : 'false');
-    localStorage.setItem('lastUsernameUpdate', user.lastUsernameUpdate || '');
-    localStorage.setItem('monthlyHistory', JSON.stringify(user.monthlyHistory || []));
-    localStorage.setItem('allTimeIn', user.allTimeIn || 0);
-    localStorage.setItem('allTimeOut', user.allTimeOut || 0);
-    localStorage.setItem('totalDataTxCount', user.totalDataTxCount || 0);
-
-    console.log('[DEBUG] updateLocalStorageFromUser: Updated', {
-      hasPin: user.hasPin,
-      hasBiometrics: user.hasBiometrics,
-      profileCompleted: user.profileCompleted
-    });
-  } catch (err) {
-    console.warn('[WARN] updateLocalStorageFromUser: Failed', err);
-  }
-}
+c
 
 
 

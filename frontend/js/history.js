@@ -1294,16 +1294,31 @@ function makeMonthDivider(month) {
   return container;
 }
 
-// Get In total for a month from server data (fallback to 0)
-function getMonthlyIn(monthKey) {
-  const entry = window.monthlyHistory.find(e => e.month === monthKey);
-  return formatCurrency(entry ? (entry.in || entry.totalIn || 0) : 0);
+// Convert your internal "2026-0" → server-friendly "2026-01" (1-based, zero-padded)
+function normalizeMonthKey(monthKey) {
+  if (!monthKey) return '';
+  const [year, monthStr] = monthKey.split('-');
+  const monthNum = parseInt(monthStr, 10); // 0-11
+  const serverMonth = String(monthNum + 1).padStart(2, '0'); // 1 → "01", 11 → "12"
+  return `${year}-${serverMonth}`;
 }
 
-// Get Out total for a month from server data (fallback to 0)
+function getMonthlyIn(monthKey) {
+  const serverKey = normalizeMonthKey(monthKey);
+  const entry = window.monthlyHistory.find(e => e.month === serverKey);
+  
+  const value = entry ? (entry.money_in || 0) : 0;
+  console.debug(`[getMonthlyIn] ${monthKey} → serverKey: ${serverKey}, found: ${!!entry}, value: ${value}`);
+  return formatCurrency(value);
+}
+
 function getMonthlyOut(monthKey) {
-  const entry = window.monthlyHistory.find(e => e.month === monthKey);
-  return formatCurrency(entry ? (entry.out || entry.totalOut || 0) : 0);
+  const serverKey = normalizeMonthKey(monthKey);
+  const entry = window.monthlyHistory.find(e => e.month === serverKey);
+  
+  const value = entry ? (entry.money_out || 0) : 0;
+  console.debug(`[getMonthlyOut] ${monthKey} → serverKey: ${serverKey}, found: ${!!entry}, value: ${value}`);
+  return formatCurrency(value);
 }
 
 
