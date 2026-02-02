@@ -1398,26 +1398,17 @@ async function loadInitialUserTotals() {
 
     console.log('[User Totals] Loading initial totals for:', uid);
 
-    const token = await getSharedJWT(true);
-    if (!token) throw new Error('No JWT available');
+    // Use shared authenticated client (force refresh for fresh data)
+    const authClient = await getSharedAuthClient(true);
+    if (!authClient) {
+      console.error('[User Totals] No authenticated client');
+      return;
+    }
 
-    const tempClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      auth: { 
-        autoRefreshToken: false, 
-        persistSession: false,
-        storageKey: 'flexgig_totals_temp_jwt'
-      }
-    });
-
-    await tempClient.auth.setSession({
-      access_token: token,
-      refresh_token: token
-    });
-
-    const { data, error } = await tempClient
+    const { data, error } = await authClient
       .from('users')
       .select('all_time_in, all_time_out, successful_data_tx_count')
-      .eq('uid', uid)  // ✅ FIXED: Use 'uid' instead of 'id'
+      .eq('uid', uid)
       .single();
 
     if (error) throw error;
@@ -2050,7 +2041,7 @@ async function subscribeToTransactions(force = false) {
   txIsSubscribing = true;
 
   try {
-    // 1. Get UID (same sources as wallet)
+    // 1. Get UID
     let uid =
       window.__USER_UID ||
       localStorage.getItem('userId') ||
@@ -2073,51 +2064,19 @@ async function subscribeToTransactions(force = false) {
 
     console.log('[Tx Realtime] Using UID:', uid);
 
-
-
-    // REPLACE JWT FETCH SECTION WITH:
-    console.log('[Tx Realtime] Fetching JWT...');
-    const token = await getSharedJWT(force); // force refresh if force=true
-
-    if (!token) {
-      console.error('[Tx Realtime] Failed to get JWT');
+    // 2. Get shared authenticated client (replaces tempClient entirely)
+    const authClient = await getSharedAuthClient(force);
+    if (!authClient) {
+      console.error('[Tx Realtime] No authenticated client');
       scheduleTxRetry();
       return;
     }
 
-    console.log('[Tx Realtime] JWT acquired (length):', token.length);
+    console.log('[Tx Realtime] Using shared authenticated client');
 
-
-
-    // 3. Create temp client (same as wallet – no global headers)
-    const tempClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      auth: { 
-        autoRefreshToken: false, 
-        persistSession: false, 
-        storageKey: 'flexgig_tx_private_jwt_v1'
-      }
-    });
-    console.log('[Tx Realtime] Temp client created');
-
-    // 4. Set session with fresh JWT (THIS FIXES THE RACE CONDITION)
-    console.log('[Tx Realtime] Setting session with JWT...');
-    const { data: sessionData, error: sessionError } = await tempClient.auth.setSession({
-      access_token: token,
-      refresh_token: token
-    });
-
-    if (sessionError) {
-      console.error('[Tx Realtime] setSession FAILED:', sessionError.message);
-      scheduleTxRetry();
-      return;
-    }
-
-    console.log('[Tx Realtime] ✅ Session set successfully');
-    console.log('[Tx Realtime] Session user ID:', sessionData.user?.id);
-
-    // 5. Quick visibility test (like wallet)
+    // 3. Quick visibility test
     console.log('[Tx Realtime] Testing SELECT visibility...');
-    const { data: testRow, error: testErr } = await tempClient
+    const { data: testRow, error: testErr } = await authClient
       .from('transactions')
       .select('id, user_id, reference')
       .eq('user_id', uid)
@@ -2129,9 +2088,9 @@ async function subscribeToTransactions(force = false) {
       console.log('[Tx Realtime] SELECT TEST OK — can see rows');
     }
 
-    // 6. Create & subscribe channel
+    // 4. Create & subscribe channel
     const channelName = `tx:${uid}`;
-    txRealtimeChannel = tempClient.channel(channelName);
+    txRealtimeChannel = authClient.channel(channelName);
     console.log('[Tx Realtime] Channel created:', channelName);
 
     txRealtimeChannel
@@ -2141,98 +2100,95 @@ async function subscribeToTransactions(force = false) {
           event: '*',
           schema: 'public',
           table: 'transactions',
-          filter: `user_id=eq.${uid}`   // ← using user_id as confirmed
+          filter: `user_id=eq.${uid}`
         },
         (payload) => {
-  console.log('[Tx Realtime] 🔔 EVENT RECEIVED:', payload.eventType);
+          console.log('[Tx Realtime] 🔔 EVENT RECEIVED:', payload.eventType);
 
-  if (payload.eventType !== 'INSERT' && payload.eventType !== 'UPDATE') return;
+          if (payload.eventType !== 'INSERT' && payload.eventType !== 'UPDATE') return;
 
-  const raw = payload.new;
+          const raw = payload.new;
 
-  let normalized = {
-    id: raw.id || raw.reference || `rt-${Date.now()}`,
-    reference: raw.reference || raw.id,
-    type: raw.type || (Number(raw.amount || 0) > 0 ? 'credit' : 'debit'),
-    amount: Math.abs(Number(raw.amount || 0)),
-    description: (raw.description || raw.narration || 'Transaction').trim(),
-    time: raw.created_at || raw.date || new Date().toISOString(),
-    status: (raw.status || 'SUCCESS').toUpperCase(),
-    provider: raw.provider?.toUpperCase() || '',
-    phone: raw.phone
-  };
+          let normalized = {
+            id: raw.id || raw.reference || `rt-${Date.now()}`,
+            reference: raw.reference || raw.id,
+            type: raw.type || (Number(raw.amount || 0) > 0 ? 'credit' : 'debit'),
+            amount: Math.abs(Number(raw.amount || 0)),
+            description: (raw.description || raw.narration || 'Transaction').trim(),
+            time: raw.created_at || raw.date || new Date().toISOString(),
+            status: (raw.status || 'SUCCESS').toUpperCase(),
+            provider: raw.provider?.toUpperCase() || '',
+            phone: raw.phone
+          };
 
-  const txId = normalized.id;
+          const txId = normalized.id;
 
-  // Special refund handling (force credit + fixed description)
-  if (normalized.status.toLowerCase().includes('refund') || normalized.status.toLowerCase() === 'refunded') {
-    normalized.type = 'credit';
-    normalized.description = 'Refund for Failed Data';
-    console.log('[Tx Realtime] Refund → forced credit + fixed desc');
-  }
+          // Special refund handling
+          if (normalized.status.toLowerCase().includes('refund') || normalized.status.toLowerCase() === 'refunded') {
+            normalized.type = 'credit';
+            normalized.description = 'Refund for Failed Data';
+            console.log('[Tx Realtime] Refund → forced credit + fixed desc');
+          }
 
-  const existingIndex = state.items.findIndex(t => t.id === txId);
+          const existingIndex = state.items.findIndex(t => t.id === txId);
 
-  if (existingIndex !== -1) {
-    // UPDATE: keep most fields, but upgrade description on final status
-    const existingTx = state.items[existingIndex];
-    console.log('[Tx Realtime] Updating tx:', txId, 'new status:', normalized.status);
+          if (existingIndex !== -1) {
+            const existingTx = state.items[existingIndex];
+            console.log('[Tx Realtime] Updating tx:', txId, 'new status:', normalized.status);
 
-    let finalDescription = existingTx.description;
+            let finalDescription = existingTx.description;
 
-    // Upgrade description only when moving from pending to final (success/failed)
-    const oldStatus = existingTx.status.toLowerCase();
-    const newStatus = normalized.status.toLowerCase();
+            const oldStatus = existingTx.status.toLowerCase();
+            const newStatus = normalized.status.toLowerCase();
 
-    if ((oldStatus.includes('pending') || oldStatus.includes('processing')) &&
-        (newStatus === 'success' || newStatus === 'failed')) {
+            if ((oldStatus.includes('pending') || oldStatus.includes('processing')) &&
+                (newStatus === 'success' || newStatus === 'failed')) {
 
-      // Reconstruct clean final description
-      const bundleMatch = existingTx.description.match(/\d+\.?\d* ?(?:GB|MB|Days?|hrs?)/gi);
-      const bundle = bundleMatch ? bundleMatch[0] : '';
-      const network = existingTx.provider?.toUpperCase() || 
-                      existingTx.description.match(/mtn|airtel|glo|9mobile/i)?.[0]?.toUpperCase() || '';
+              const bundleMatch = existingTx.description.match(/\d+\.?\d* ?(?:GB|MB|Days?|hrs?)/gi);
+              const bundle = bundleMatch ? bundleMatch[0] : '';
+              const network = existingTx.provider?.toUpperCase() || 
+                              existingTx.description.match(/mtn|airtel|glo|9mobile/i)?.[0]?.toUpperCase() || '';
 
-      if (bundle) {
-        finalDescription = network 
-          ? `${network} ${bundle} Data Purchase`
-          : `${bundle} Data Purchase`;
-        console.log('[Tx Realtime] Upgraded description to final:', finalDescription);
-      }
-    }
+              if (bundle) {
+                finalDescription = network 
+                  ? `${network} ${bundle} Data Purchase`
+                  : `${bundle} Data Purchase`;
+                console.log('[Tx Realtime] Upgraded description to final:', finalDescription);
+              }
+            }
 
-    state.items[existingIndex] = {
-      ...existingTx,
-      status: normalized.status,
-      description: finalDescription,     // controlled upgrade
-      type: normalized.type,             // allow refund to force credit
-    };
+            state.items[existingIndex] = {
+              ...existingTx,
+              status: normalized.status,
+              description: finalDescription,
+              type: normalized.type,
+            };
 
-    if (state.open) {
-      applyTransformsAndRender();
-    }
-    renderDashboardRecent();
-  } else if (payload.eventType === 'INSERT') {
-    console.log('[Tx Realtime] Adding new tx:', normalized.reference);
-    state.items.unshift(normalized);
+            if (state.open) {
+              applyTransformsAndRender();
+            }
+            renderDashboardRecent();
+          } else if (payload.eventType === 'INSERT') {
+            console.log('[Tx Realtime] Adding new tx:', normalized.reference);
+            state.items.unshift(normalized);
 
-    if (state.open) {
-      applyTransformsAndRender();
-      historyList.scrollTop = 0;
-    }
-  }
+            if (state.open) {
+              applyTransformsAndRender();
+              historyList.scrollTop = 0;
+            }
+          }
 
-  window.dispatchEvent(new CustomEvent('transaction_update', { detail: normalized }));
-}
+          window.dispatchEvent(new CustomEvent('transaction_update', { detail: normalized }));
+        }
       )
-            .subscribe((status, err) => {
+      .subscribe((status, err) => {
         console.log('[Tx Realtime] SUBSCRIBE STATUS:', status);
         if (err) console.error('[Tx Realtime] SUBSCRIBE ERROR:', err?.message || err);
 
         if (status === 'SUBSCRIBED') {
           console.log('[Tx Realtime] ✅ SUBSCRIBED & LISTENING');
           lastTxHealthy = Date.now();
-          realtimeFailedCount = 0;          // Reset failure count on success
+          realtimeFailedCount = 0;
           if (txRetryTimer) clearTimeout(txRetryTimer);
         } 
         else if (['CLOSED', 'CHANNEL_ERROR', 'TIMED_OUT'].includes(status)) {
@@ -2241,7 +2197,7 @@ async function subscribeToTransactions(force = false) {
 
           if (realtimeFailedCount >= 3 && state.open) {
             console.warn('[Tx Realtime] Max failures reached → falling back to API');
-            loadLatestHistoryAsFallback();   // ← This is where you add the fallback
+            loadLatestHistoryAsFallback();
           } else {
             scheduleTxRetry();
           }
@@ -2440,16 +2396,19 @@ async function subscribeToUserRealtime(force = false) {
     }
 
     // 3️⃣ Temp client
-    const tempClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-        storageKey: 'flexgig_user_private_jwt_v1'
-      }
-    });
+// Replace the entire tempClient creation block with:
+const authClient = await getSharedAuthClient(force);
+if (!authClient) {
+  console.error('[Tx Realtime] No authenticated client');
+  scheduleTxRetry();
+  return;
+}
+
+// Then use authClient instead of tempClient for the channel
+txRealtimeChannel = authClient.channel(channelName);
 
     // 4️⃣ Set session
-    const { error: sessionError } = await tempClient.auth.setSession({
+    const { error: sessionError } = await authClient.auth.setSession({
       access_token: token,
       refresh_token: token
     });
@@ -2463,7 +2422,7 @@ async function subscribeToUserRealtime(force = false) {
     console.log('[User Realtime] ✅ Session set');
 
     // 5️⃣ Visibility test - FIXED to use 'uid' column
-    const { error: testErr } = await tempClient
+    const { error: testErr } = await authClient
       .from('users')
       .select('uid')  // ✅ Changed from 'id' to 'uid'
       .eq('uid', uid)
@@ -2477,7 +2436,7 @@ async function subscribeToUserRealtime(force = false) {
 
     // 6️⃣ Subscribe - CRITICAL FIX: Use 'uid' instead of 'id'
     const channelName = `user:${uid}`;
-    userRealtimeChannel = tempClient.channel(channelName);
+    userRealtimeChannel = authClient.channel(channelName);
 
     console.log('[User Realtime] Channel created:', channelName);
 

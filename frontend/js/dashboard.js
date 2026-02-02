@@ -314,6 +314,52 @@ function clearJWTCache() {
 window.getSharedJWT = getSharedJWT;
 window.clearJWTCache = clearJWTCache;
 
+// ────────────────────────────────────────────────
+// SHARED AUTHENTICATED SUPABASE CLIENT (singleton)
+// Eliminates multiple GoTrueClient warning
+// ────────────────────────────────────────────────
+let sharedAuthClient = null;
+let sharedAuthClientReady = false;
+
+async function getSharedAuthClient(forceRefresh = false) {
+  if (sharedAuthClient && sharedAuthClientReady && !forceRefresh) {
+    return sharedAuthClient;
+  }
+
+  console.log('[Shared Auth Client] Creating / refreshing authenticated client...');
+
+  const token = await getSharedJWT(forceRefresh);
+  if (!token) {
+    console.error('[Shared Auth Client] No JWT - cannot create auth client');
+    return null;
+  }
+
+  sharedAuthClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+      storageKey: 'flexgig_shared_auth_jwt_v1',  // Unique key, no conflict with main client
+    }
+  });
+
+  const { error } = await sharedAuthClient.auth.setSession({
+    access_token: token,
+    refresh_token: token
+  });
+
+  if (error) {
+    console.error('[Shared Auth Client] setSession failed:', error);
+    sharedAuthClient = null;
+    return null;
+  }
+
+  sharedAuthClientReady = true;
+  console.log('[Shared Auth Client] ✅ Ready and authenticated');
+  return sharedAuthClient;
+}
+
+window.getSharedAuthClient = getSharedAuthClient;
+
 
 // ────────────────────────────────────────────────
 // DIRECT SUPABASE REAUTH LOCK HELPERS
@@ -583,80 +629,23 @@ async function subscribeToWalletBalance(force = false) {
 
     console.log('[Wallet Realtime] Using UID:', uid);
 
-    // 2. Fetch JWT (shared + cached)
-    console.log('[Wallet Realtime] Fetching JWT...');
-    const token = await getSharedJWT(force); // force refresh if needed
-
-    if (!token) {
-      console.error('[Wallet Realtime] Failed to get JWT');
+    // 2. Get shared authenticated client (replaces direct createClient + setSession)
+    const authClient = await getSharedAuthClient(force);
+    if (!authClient) {
+      console.error('[Wallet Realtime] No authenticated client');
       scheduleRetry();
       return;
     }
 
-    console.log('[Wallet Realtime] JWT acquired (length):', token.length);
+    console.log('[Wallet Realtime] Using shared authenticated client');
 
+    // 3. Decode & log JWT (optional debug — you can keep this if you want)
+    // (Skip if you don't need it — it's safe to remove)
 
-    // 3. Decode & log JWT fully
-    try {
-      const payload = JSON.parse(atob(token.split('.')[1]));
-      console.log('[Wallet Realtime JWT FULL PAYLOAD]:', JSON.stringify(payload, null, 2));
-      console.log('[Wallet Realtime JWT KEYS]:', {
-        sub: payload.sub,
-        role: payload.role,
-        aud: payload.aud,
-        iss: payload.iss,
-        iat: payload.iat ? new Date(payload.iat * 1000).toISOString() : null,
-        exp: payload.exp ? new Date(payload.exp * 1000).toISOString() : null,
-        email: payload.email
-      });
-
-      if (payload.sub !== uid) {
-        console.error('[Wallet Realtime CRITICAL] JWT sub mismatch!', {
-          expected: uid,
-          actual: payload.sub
-        });
-      }
-    } catch (e) {
-      console.error('[Wallet Realtime] JWT decode failed:', e);
-    }
-
-    // 4. Create temp client WITHOUT Authorization header
-    const tempClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      auth: { 
-        autoRefreshToken: false, 
-        persistSession: false, 
-        storageKey: 'flexgig_wallet_private_jwt_v1' 
-      }
-      // REMOVED: global: { headers: { Authorization: `Bearer ${token}` } }
-    });
-    console.log('[Wallet Realtime] Temp client created');
-
-    // 5. Set session with JWT (THIS IS THE KEY CHANGE!)
-    console.log('[Wallet Realtime] Setting session with JWT...');
-    try {
-      const { data: sessionData, error: sessionError } = await tempClient.auth.setSession({
-        access_token: token,
-        refresh_token: token
-      });
-
-      if (sessionError) {
-        console.error('[Wallet Realtime] setSession FAILED:', sessionError.message);
-        scheduleRetry();
-        return;
-      }
-
-      console.log('[Wallet Realtime] ✅ Session set successfully');
-      console.log('[Wallet Realtime] Session user ID:', sessionData.user?.id);
-    } catch (sessionErr) {
-      console.error('[Wallet Realtime] setSession crashed:', sessionErr);
-      scheduleRetry();
-      return;
-    }
-
-    // 6. Test RLS visibility with a direct query
+    // 4. Test RLS visibility with a direct query
     console.log('[Wallet Realtime] Testing direct SELECT visibility...');
     try {
-      const { data: testRow, error: testErr } = await tempClient
+      const { data: testRow, error: testErr } = await authClient
         .from('user_wallets')
         .select('balance, user_uid')
         .eq('user_uid', uid)
@@ -676,101 +665,86 @@ async function subscribeToWalletBalance(force = false) {
       console.error('[Wallet Realtime] SELECT test crashed:', testEx);
     }
 
-    // 7. Create channel
+    // 5. Create channel
     const channelName = `wallet:${uid}`;
-    balanceRealtimeChannel = tempClient.channel(channelName);
+    balanceRealtimeChannel = authClient.channel(channelName);
     console.log('[Wallet Realtime] Channel created:', channelName);
 
-    // 8. Subscribe with FULL logging
-    // 7. Subscribe with FULL logging
-balanceRealtimeChannel
-  .on(
-    'postgres_changes',
-    {
-      event: '*',
-      schema: 'public',
-      table: 'user_wallets',
-      filter: `user_uid=eq.${uid}`
-    },
-    (payload) => {
-      console.log('[Wallet Realtime] 🔔 FULL PAYLOAD RECEIVED:', JSON.stringify(payload, null, 2));
-      console.log('[Wallet Realtime] Event type:', payload.eventType);
-      console.log('[Wallet Realtime] Old:', payload.old);
-      console.log('[Wallet Realtime] New:', payload.new);
+    // 6. Subscribe with FULL logging
+    balanceRealtimeChannel
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'user_wallets',
+          filter: `user_uid=eq.${uid}`
+        },
+        (payload) => {
+          console.log('[Wallet Realtime] 🔔 FULL PAYLOAD RECEIVED:', JSON.stringify(payload, null, 2));
+          console.log('[Wallet Realtime] Event type:', payload.eventType);
+          console.log('[Wallet Realtime] Old:', payload.old);
+          console.log('[Wallet Realtime] New:', payload.new);
 
-      if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
-        const newBalance = Number(payload.new?.balance);
-        const oldBalance = Number(payload.old?.balance) || window.currentDisplayedBalance || 0;
-        
-        if (!isNaN(newBalance)) {
-          console.log('[Wallet Realtime] VALID BALANCE UPDATE:', newBalance);
-          console.log('[Wallet Realtime] Old balance:', oldBalance);
-          console.log('[Wallet Realtime] New balance:', newBalance);
-          
-          // Calculate the amount that was added/removed
-          const amount = newBalance - oldBalance;
-          console.log('[Wallet Realtime] Calculated amount change:', amount);
-          
-          // 🔥 ONLY trigger success flow if balance INCREASED
-          if (amount > 0) {
-            console.log('[Wallet Realtime] ✅ BALANCE INCREASED by', amount);
-            console.log('[Wallet Realtime] Checking for __handleBalanceUpdate...');
-            console.log('[Wallet Realtime] __handleBalanceUpdate exists?', typeof window.__handleBalanceUpdate);
+          if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
+            const newBalance = Number(payload.new?.balance);
+            const oldBalance = Number(payload.old?.balance) || window.currentDisplayedBalance || 0;
             
-            const updateData = {
-              type: 'balance_update',
-              balance: newBalance,
-              amount: amount,
-              source: 'postgres_changes',
-              timestamp: Date.now()
-            };
-            
-            console.log('[Wallet Realtime] Calling __handleBalanceUpdate with:', updateData);
-            
-            // Call handleBalanceUpdate (closes modal, shows toast, plays sound)
-            if (typeof window.__handleBalanceUpdate === 'function') {
-              try {
-                window.__handleBalanceUpdate(updateData);
-                console.log('[Wallet Realtime] ✅ Successfully called __handleBalanceUpdate');
-              } catch (err) {
-                console.error('[Wallet Realtime] ❌ Error calling __handleBalanceUpdate:', err);
+            if (!isNaN(newBalance)) {
+              console.log('[Wallet Realtime] VALID BALANCE UPDATE:', newBalance);
+              console.log('[Wallet Realtime] Old balance:', oldBalance);
+              console.log('[Wallet Realtime] New balance:', newBalance);
+              
+              const amount = newBalance - oldBalance;
+              console.log('[Wallet Realtime] Calculated amount change:', amount);
+              
+              if (amount > 0) {
+                console.log('[Wallet Realtime] ✅ BALANCE INCREASED by', amount);
+                
+                const updateData = {
+                  type: 'balance_update',
+                  balance: newBalance,
+                  amount: amount,
+                  source: 'postgres_changes',
+                  timestamp: Date.now()
+                };
+                
+                if (typeof window.__handleBalanceUpdate === 'function') {
+                  try {
+                    window.__handleBalanceUpdate(updateData);
+                    console.log('[Wallet Realtime] ✅ Successfully called __handleBalanceUpdate');
+                  } catch (err) {
+                    console.error('[Wallet Realtime] ❌ Error calling __handleBalanceUpdate:', err);
+                  }
+                } else {
+                  console.warn('[Wallet Realtime] ⚠️ __handleBalanceUpdate not found on window');
+                }
+                
+                window.dispatchEvent(new CustomEvent('balance_update', {
+                  detail: updateData
+                }));
+                console.log('[Wallet Realtime] ✅ Event dispatched');
+              } else if (amount < 0) {
+                console.log('[Wallet Realtime] ℹ️ BALANCE DECREASED by', Math.abs(amount), '- skipping success flow');
+              } else {
+                console.log('[Wallet Realtime] ℹ️ Balance unchanged - skipping');
+              }
+              
+              if (typeof window.updateAllBalances === 'function') {
+                window.updateAllBalances(newBalance);
+                console.log('[Wallet Realtime] Called updateAllBalances');
+              }
+              
+              if (typeof window.handleNewBalance === 'function') {
+                window.handleNewBalance(newBalance, 'supabase-postgres');
+                console.log('[Wallet Realtime] Called handleNewBalance');
               }
             } else {
-              console.warn('[Wallet Realtime] ⚠️ __handleBalanceUpdate not found on window');
-              console.log('[Wallet Realtime] Available window properties:', Object.keys(window).filter(k => k.includes('handle')));
+              console.warn('[Wallet Realtime] Invalid balance value in payload');
             }
-            
-            // Also try the event-based approach
-            console.log('[Wallet Realtime] Dispatching balance_update event...');
-            window.dispatchEvent(new CustomEvent('balance_update', {
-              detail: updateData
-            }));
-            console.log('[Wallet Realtime] ✅ Event dispatched');
-            
-          } else if (amount < 0) {
-            console.log('[Wallet Realtime] ℹ️ BALANCE DECREASED by', Math.abs(amount), '- skipping success flow');
-          } else {
-            console.log('[Wallet Realtime] ℹ️ Balance unchanged (amount = 0) - skipping');
           }
-          
-          // Always update all balance displays (regardless of increase/decrease)
-          if (typeof window.updateAllBalances === 'function') {
-            window.updateAllBalances(newBalance);
-            console.log('[Wallet Realtime] Called updateAllBalances');
-          }
-          
-          // Legacy handler (if it exists)
-          if (typeof window.handleNewBalance === 'function') {
-            window.handleNewBalance(newBalance, 'supabase-postgres');
-            console.log('[Wallet Realtime] Called handleNewBalance');
-          }
-        } else {
-          console.warn('[Wallet Realtime] Invalid balance value in payload');
         }
-      }
-    }
-  )
-
+      )
       .subscribe((status, err) => {
         console.log('[Wallet Realtime] SUBSCRIBE STATUS:', status);
         if (err) {
@@ -786,7 +760,6 @@ balanceRealtimeChannel
             activeRetryTimer = null;
           }
 
-          // Heartbeat: log every 30s to confirm channel alive
           setInterval(() => {
             if (balanceRealtimeChannel?.state === 'SUBSCRIBED') {
               console.debug('[Wallet Realtime HEARTBEAT] Channel still alive');
@@ -843,6 +816,12 @@ if (typeof onDashboardLoad === 'function') {
 }
 
 
+
+// Auto-refresh shared authenticated client every 30 minutes to keep JWT fresh
+setInterval(async () => {
+  console.log('[Shared Auth Client] Auto-refreshing JWT and client...');
+  await getSharedAuthClient(true);
+}, 30 * 60 * 1000);
 
 
     function saveCurrentAppState() {
