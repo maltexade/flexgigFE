@@ -1,27 +1,25 @@
 // frontend/js/transferBalance.js
-
 (function () {
   'use strict';
 
-const BALANCE_INITIAL = Number(localStorage.getItem('fxgUserBalance')) || 0;
-  // ModalManager modal id (this is the key you added to modals)
-  const MM_MODAL_ID = 'fxgTransferModal'; // internal manager key
-  const DOM_MODAL_ID = 'fxg-transfer-modal'; // actual DOM id of the modal element
+  const MM_MODAL_ID = 'fxgTransferModal';
+  const DOM_MODAL_ID = 'fxg-transfer-modal';
+  const FXG_STORAGE_KEY = 'fxgUserBalance';
 
-  // Utility helpers
+  // helpers
   const onlyDigits = s => (s || '').toString().replace(/[^\d]/g, '');
   const fmt = n => (Number(n) || 0).toLocaleString();
 
-  // Elements (will resolve lazily)
   function $(id) { return document.getElementById(id); }
 
-  // Resolve elements - safe if DOM not yet ready
+  // resolve elements lazily
   function resolveEls() {
+    const modalEl = document.getElementById(DOM_MODAL_ID);
     return {
-      modal: $(DOM_MODAL_ID),
+      modal: modalEl,
       trigger: $('fxg-open-transfer-modal'),
       closeBtn: $('fxg-close-btn'),
-      backdrop: (document.getElementById(DOM_MODAL_ID) || {}).querySelector ? document.getElementById(DOM_MODAL_ID).querySelector('.fxg-backdrop') : null,
+      backdrop: modalEl ? modalEl.querySelector('.fxg-backdrop') : null,
       balanceEl: $('fxg-balance'),
       form: $('fxg-form'),
       usernameEl: $('fxg-username'),
@@ -33,14 +31,133 @@ const BALANCE_INITIAL = Number(localStorage.getItem('fxgUserBalance')) || 0;
     };
   }
 
-  // Local state
-  let BALANCE = BALANCE_INITIAL;
+  // Local authoritative balance for this module
+  let BALANCE = 0;
 
-  // Fallback open/close if ModalManager not present / not configured
+  // Initialize BALANCE from best available source:
+  function initBalanceFromSources() {
+    // 1) Prefer window.currentDisplayedBalance (dashboard sets this via updateAllBalances)
+    if (typeof window.currentDisplayedBalance === 'number' && !Number.isNaN(window.currentDisplayedBalance)) {
+      BALANCE = Number(window.currentDisplayedBalance);
+      persistFxgBalance(BALANCE);
+      return;
+    }
+
+    // 2) Try reading userData in localStorage (server-provided session)
+    try {
+      const userData = localStorage.getItem('userData');
+      if (userData) {
+        const parsed = JSON.parse(userData);
+        if (parsed && typeof parsed.wallet_balance !== 'undefined') {
+          BALANCE = Number(parsed.wallet_balance) || 0;
+          persistFxgBalance(BALANCE);
+          return;
+        }
+      }
+    } catch (e) { /* ignore parse errors */ }
+
+    // 3) Try previously persisted fxg key
+    try {
+      const prev = localStorage.getItem(FXG_STORAGE_KEY);
+      if (prev !== null) {
+        BALANCE = Number(prev) || 0;
+        return;
+      }
+    } catch (e) { /* ignore */ }
+
+    // fallback to 0
+    BALANCE = 0;
+  }
+
+  function persistFxgBalance(n) {
+    try { localStorage.setItem(FXG_STORAGE_KEY, String(Number(n) || 0)); } catch (e) {}
+  }
+
+  // Update our local copy and DOM element (safe, idempotent)
+  function updateLocalBalance(n) {
+    n = Number(n) || 0;
+    BALANCE = n;
+    persistFxgBalance(n);
+
+    // Update modal balance display if present
+    const els = resolveEls();
+    if (els.balanceEl) {
+      els.balanceEl.textContent = `Balance: ₦${fmt(BALANCE)}`;
+    }
+  }
+
+  // Patch window.updateAllBalances to mirror inbound authoritative updates
+  function patchUpdateAllBalances() {
+    try {
+      if (!window.updateAllBalances || window.__fxg_updateAllBalances_patched) return;
+      const original = window.updateAllBalances;
+      window.updateAllBalances = function (newBalance, skipAnimation) {
+        try {
+          // call original first (preserves UI animation)
+          const res = original.apply(this, arguments);
+          // then mirror to our BALANCE
+          if (typeof newBalance !== 'undefined' && newBalance !== null) {
+            updateLocalBalance(Number(newBalance) || 0);
+          } else if (typeof window.currentDisplayedBalance === 'number') {
+            updateLocalBalance(window.currentDisplayedBalance);
+          }
+          return res;
+        } catch (e) {
+          // if anything breaks, fallback to calling original
+          try { return original.apply(this, arguments); } catch (err) { console.warn('patched updateAllBalances error', err); }
+        }
+      };
+      window.__fxg_updateAllBalances_patched = true;
+      console.debug('[fxgTransfer] Patched window.updateAllBalances to sync local BALANCE');
+    } catch (e) {
+      console.warn('[fxgTransfer] Failed to patch updateAllBalances', e);
+    }
+  }
+
+  // Listen for custom balance_update event dispatched by balance.js fallback
+  function bindBalanceUpdateEvent() {
+    if (bindBalanceUpdateEvent._bound) return;
+    window.addEventListener('balance_update', (ev) => {
+      try {
+        if (ev && ev.detail && typeof ev.detail.balance !== 'undefined') {
+          updateLocalBalance(Number(ev.detail.balance) || 0);
+          console.debug('[fxgTransfer] Received balance_update event', ev.detail.balance);
+        }
+      } catch (e) { /* ignore */ }
+    });
+    bindBalanceUpdateEvent._bound = true;
+  }
+
+  // Monitor localStorage.userData changes from other tabs / scripts
+  function bindStorageEvents() {
+    if (bindStorageEvents._bound) return;
+    window.addEventListener('storage', (ev) => {
+      try {
+        if (!ev) return;
+        if (ev.key === 'userData' && ev.newValue) {
+          try {
+            const parsed = JSON.parse(ev.newValue);
+            if (parsed && typeof parsed.wallet_balance !== 'undefined') {
+              updateLocalBalance(Number(parsed.wallet_balance) || 0);
+            }
+          } catch (e) {}
+        }
+      } catch (e) {}
+    });
+    bindStorageEvents._bound = true;
+  }
+
+  // Called when modal opens — refresh from best sources then render
+  function refreshOnModalOpen() {
+    initBalanceFromSources();
+    const els = resolveEls();
+    if (els.balanceEl) els.balanceEl.textContent = `Balance: ₦${fmt(BALANCE)}`;
+  }
+
+  // Fallback open/close (same as before)
   function fallbackOpen(modalEl) {
     if (!modalEl) return;
     modalEl.style.display = 'block';
-    // animate in by adding show class like previous behavior
     requestAnimationFrame(() => modalEl.classList.add('show'));
     document.body.style.overflow = 'hidden';
   }
@@ -53,34 +170,29 @@ const BALANCE_INITIAL = Number(localStorage.getItem('fxgUserBalance')) || 0;
     }, 260);
   }
 
-  // Open via manager if possible, else fallback
+  // prefer ModalManager if present
   function openModal() {
     if (window.ModalManager && typeof window.ModalManager.openModal === 'function') {
       try {
         window.ModalManager.openModal(MM_MODAL_ID);
         return;
-      } catch (e) { /* fallback below */ }
+      } catch (e) { /* fallback */ }
     }
-    // fallback: show our modal directly
     const els = resolveEls();
     fallbackOpen(els.modal);
-    // ensure focus
-    setTimeout(() => { els.usernameEl && els.usernameEl.focus(); }, 160);
   }
-
   function closeModal() {
     if (window.ModalManager && typeof window.ModalManager.closeModal === 'function') {
       try {
         window.ModalManager.closeModal(MM_MODAL_ID);
         return;
-      } catch (e) { /* fallback below */ }
+      } catch (e) { /* fallback */ }
     }
-    // fallback close
     const els = resolveEls();
     fallbackClose(els.modal);
   }
 
-  // Initialize UI wiring (idempotent)
+  // Main UI init (keeps most of your original behavior)
   function initUI() {
     const els = resolveEls();
     if (!els.modal) {
@@ -88,38 +200,36 @@ const BALANCE_INITIAL = Number(localStorage.getItem('fxgUserBalance')) || 0;
       return;
     }
 
-    // Ensure balance shown
-if (els.balanceEl) {
-  // Re-load from storage in case it changed elsewhere
-  BALANCE = Number(localStorage.getItem('fxgUserBalance')) || BALANCE;
-  els.balanceEl.textContent = `Balance: ₦${fmt(BALANCE)}`;
-}
-
-    // Prevent double binding
+    // Wire triggers once
     if (els.trigger && !els.trigger._fxg_bound) {
       els.trigger.addEventListener('click', (e) => {
         e.preventDefault();
+        refreshOnModalOpen(); // refresh from global/session
         openModal();
+        // focus username after a short delay
+        setTimeout(() => { els.usernameEl && els.usernameEl.focus(); }, 160);
       });
       els.trigger._fxg_bound = true;
     }
 
-    // close button: always call manager close if available, else fallback
+    // Close button
     if (els.closeBtn && !els.closeBtn._fxg_bound) {
-      els.closeBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        closeModal();
-      });
+      els.closeBtn.addEventListener('click', (e) => { e.preventDefault(); closeModal(); });
       els.closeBtn._fxg_bound = true;
     }
 
-    // backdrop click (if exists)
+    // backdrop
     if (els.backdrop && !els.backdrop._fxg_bound) {
-      els.backdrop.addEventListener('click', () => closeModal());
+      els.backdrop.addEventListener('click', closeModal);
       els.backdrop._fxg_bound = true;
     }
 
-    // Input formatting & validation
+    // Display initial balance in modal if present
+    if (els.balanceEl) {
+      refreshOnModalOpen();
+    }
+
+    // Form/inputs/validation/submit behavior (kept mostly same)
     function validate() {
       if (!els.usernameEl || !els.amountEl || !els.continueBtn) return false;
       els.usernameErr && (els.usernameErr.textContent = '');
@@ -145,7 +255,6 @@ if (els.balanceEl) {
       return ok;
     }
 
-    // Input handlers
     if (els.amountEl && !els.amountEl._fxg_bound) {
       els.amountEl.addEventListener('input', function (e) {
         const raw = onlyDigits(e.target.value);
@@ -160,7 +269,6 @@ if (els.balanceEl) {
       els.usernameEl._fxg_bound = true;
     }
 
-    // Form submit
     if (els.form && !els.form._fxg_bound) {
       els.form.addEventListener('submit', function (ev) {
         ev.preventDefault();
@@ -172,28 +280,29 @@ if (els.balanceEl) {
           timestamp: new Date().toISOString()
         };
 
-        // UI busy state
+        // UI busy
         els.continueBtn.classList.add('loading');
         els.continueBtn.disabled = true;
         const textNode = els.continueBtn.querySelector('.fxg-btn-text');
         if (textNode) textNode.textContent = 'Sending';
 
-        // TODO: replace with real network call (fetch/axios). For now simulate:
+        // Replace with real fetch to /api/transfer
+        // For demo we simulate success:
         setTimeout(() => {
-          // success UX
           els.continueBtn.classList.remove('loading');
           if (textNode) textNode.textContent = 'Sent';
           if (els.successEl) els.successEl.hidden = false;
 
-          // update balance client-side
+          // Update local lines: reduce BALANCE and persist
           BALANCE = Math.max(0, BALANCE - payload.amount);
-          if (els.balanceEl) els.balanceEl.textContent = `Balance: ₦${fmt(BALANCE)}`;
-          localStorage.setItem('fxgUserBalance', BALANCE.toString());
+          updateLocalBalance(BALANCE); // will update modal display & localStorage
 
-          // close after short delay
-          setTimeout(() => {
-            closeModal();
-          }, 800);
+          // If dashboard/code listens to updateAllBalances, call it to sync global UI
+          if (typeof window.updateAllBalances === 'function') {
+            try { window.updateAllBalances(BALANCE); } catch (e) { /* ignore */ }
+          }
+
+          setTimeout(() => closeModal(), 800);
         }, 700);
 
         console.log('[fxg] transfer payload', payload);
@@ -201,68 +310,57 @@ if (els.balanceEl) {
       els.form._fxg_bound = true;
     }
 
-    // Re-focus first input when manager opens modal (listen for manager's event)
-    // ModalManager dispatches "modalOpened" with detail = modalId
-    if (window.ModalManager && !initUI._modalOpenedListener) {
+    // Make sure we listen for modalOpened so we refresh when ModalManager opens it
+    if (!initUI._modalOpenedListener) {
       window.addEventListener('modalOpened', function (ev) {
-        try {
-          if (ev && ev.detail === MM_MODAL_ID) {
-            // small delay for animation
-            setTimeout(() => {
-              const el = resolveEls();
-              el.usernameEl && el.usernameEl.focus();
-              // ensure success panel hidden
-              el.successEl && (el.successEl.hidden = true);
-            }, 150);
-          }
-        } catch (e) { /* ignore */ }
+        if (ev && ev.detail === MM_MODAL_ID) {
+          refreshOnModalOpen();
+          // hide success panel
+          const el = resolveEls();
+          el.successEl && (el.successEl.hidden = true);
+          setTimeout(() => el.usernameEl && el.usernameEl.focus(), 160);
+        }
       });
       initUI._modalOpenedListener = true;
     }
-
-    // If ModalManager is not present, also watch for manual show (class 'show' applied)
-    if (!window.ModalManager && !initUI._mutationObserver) {
-      const el = els.modal;
-      if (el) {
-        const mo = new MutationObserver((mutations) => {
-          for (const m of mutations) {
-            if (m.attributeName === 'class') {
-              if (el.classList.contains('show')) {
-                // opened
-                setTimeout(() => els.usernameEl && els.usernameEl.focus(), 140);
-                if (els.successEl) els.successEl.hidden = true;
-              }
-            }
-          }
-        });
-        mo.observe(el, { attributes: true, attributeFilter: ['class'] });
-        initUI._mutationObserver = mo;
-      }
-    }
   } // end initUI
 
-  // Auto-init on DOM ready
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => setTimeout(initUI, 80));
-  } else {
-    setTimeout(initUI, 80);
+  // Bootstrapping
+  function bootstrap() {
+    // 1) Initialize BALANCE value from best sources
+    initBalanceFromSources();
+
+    // 2) Monkey-patch and bind listeners so we keep in sync with dashboard
+    patchUpdateAllBalances();
+    bindBalanceUpdateEvent();
+    bindStorageEvents();
+
+    // 3) Init UI wiring soon after DOM ready
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => setTimeout(initUI, 60));
+    } else {
+      setTimeout(initUI, 60);
+    }
+
+    // 4) Try again after a short delay in case dashboard initialized later
+    setTimeout(() => {
+      patchUpdateAllBalances();
+      initBalanceFromSources();
+      // update modal display if present
+      const be = document.getElementById('fxg-balance');
+      if (be) be.textContent = `Balance: ₦${fmt(BALANCE)}`;
+    }, 400);
   }
 
-  // Also try to init again once ModalManager is ready (in case it resolves element lazily)
-  if (window.ModalManager && typeof window.ModalManager.getOpenModals === 'function') {
-    // small delay so manager.initialize() can run first
-    setTimeout(initUI, 300);
-  }
+  bootstrap();
 
-  // Expose helpers to global for debugging if needed
-  window.fxgTransfer = {
-    open: openModal,
-    close: closeModal,
-    getBalance: () => BALANCE,
-    setBalance: (v) => { BALANCE = Number(v) || 0; const be = $('fxg-balance'); if (be) be.textContent = `Balance: ₦${fmt(BALANCE)}`; }
-  };
+  // Debug helpers
+  window.fxgTransfer = window.fxgTransfer || {};
+  window.fxgTransfer.getBalance = () => BALANCE;
+  window.fxgTransfer.setBalance = (v) => { updateLocalBalance(Number(v) || 0); if (typeof window.updateAllBalances === 'function') try { window.updateAllBalances(BALANCE); } catch (e) {} };
 
 })();
+
 
 
 
