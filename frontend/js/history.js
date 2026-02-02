@@ -1892,29 +1892,47 @@ function createMonthPickerModal() {
   // Fast open: no loading spinner, show empty or "connecting" state
   hide(loadingEl);
   if (state.items.length === 0) {
-    show(emptyEl); // or show a custom "Connecting realtime..." element if you add one
+    show(emptyEl);
   }
 
   // Force realtime retry (in case it failed earlier)
   subscribeToTransactions(true);
-  // NO loadLatestHistory() call here anymore
 
+  // Apply current state immediately
   applyTransformsAndRender();
   console.log('[TransactionHistory] Modal opened → rendered current state (items:', state.items.length, ')');
-  // Optional: Ensure we have the latest monthly_history on modal open
-const authClient = await getSharedAuthClient();
-if (authClient) {
-  const { data } = await authClient
-    .from('users')
-    .select('monthly_history')
-    .eq('uid', uid)
-    .single();
-  
-  if (data?.monthly_history) {
-    window.monthlyHistory = data.monthly_history;
-    refreshMonthHeaders();
+
+  // NEW: Safe UID resolution + one-time fetch of monthly_history
+  const uid =
+    window.__USER_UID ||
+    localStorage.getItem('userId') ||
+    JSON.parse(localStorage.getItem('userData') || '{}')?.uid ||
+    null;
+
+  if (uid && uid.includes('-')) {
+    try {
+      const authClient = await getSharedAuthClient();
+      if (authClient) {
+        const { data, error } = await authClient
+          .from('users')
+          .select('monthly_history')
+          .eq('uid', uid)
+          .single();
+
+        if (error) {
+          console.error('[Modal Open] Failed to fetch monthly_history:', error);
+        } else if (data?.monthly_history) {
+          window.monthlyHistory = Array.isArray(data.monthly_history) ? data.monthly_history : [];
+          console.log('[Modal Open] Loaded monthly_history:', window.monthlyHistory.length, 'entries');
+          refreshMonthHeaders(); // Refresh headers with fresh server data
+        }
+      }
+    } catch (err) {
+      console.error('[Modal Open] monthly_history fetch crashed:', err);
+    }
+  } else {
+    console.warn('[Modal Open] No valid UID for monthly_history fetch');
   }
-}
 }
 const container = document.getElementById('historyList');
 
