@@ -322,26 +322,35 @@ let sharedAuthClient = null;
 let sharedAuthClientReady = false;
 
 async function getSharedAuthClient(forceRefresh = false) {
+  // If client exists and no force refresh, return it
   if (sharedAuthClient && sharedAuthClientReady && !forceRefresh) {
+    console.log('[Shared Auth Client] Reusing existing client');
     return sharedAuthClient;
   }
 
-  console.log('[Shared Auth Client] Creating / refreshing authenticated client...');
-
+  // Fetch (or refresh) token
+  console.log('[Shared Auth Client] Fetching/refreshing token...');
   const token = await getSharedJWT(forceRefresh);
   if (!token) {
-    console.error('[Shared Auth Client] No JWT - cannot create auth client');
+    console.error('[Shared Auth Client] No JWT available');
     return null;
   }
 
-  sharedAuthClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-      storageKey: 'flexgig_shared_auth_jwt_v1',  // Unique key, no conflict with main client
-    }
-  });
+  // If client doesn't exist, create it once
+  if (!sharedAuthClient) {
+    console.log('[Shared Auth Client] Creating new authenticated client (singleton)...');
+    sharedAuthClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+        storageKey: 'flexgig_shared_auth_jwt_v1',
+      }
+    });
+  } else {
+    console.log('[Shared Auth Client] Reusing existing client, just refreshing session...');
+  }
 
+  // Set/refresh session on the existing client
   const { error } = await sharedAuthClient.auth.setSession({
     access_token: token,
     refresh_token: token
@@ -349,12 +358,12 @@ async function getSharedAuthClient(forceRefresh = false) {
 
   if (error) {
     console.error('[Shared Auth Client] setSession failed:', error);
-    sharedAuthClient = null;
+    sharedAuthClientReady = false;
     return null;
   }
 
   sharedAuthClientReady = true;
-  console.log('[Shared Auth Client] ✅ Ready and authenticated');
+  console.log('[Shared Auth Client] ✅ Client ready (session refreshed if needed)');
   return sharedAuthClient;
 }
 
@@ -368,50 +377,57 @@ window.getSharedAuthClient = getSharedAuthClient;
 
 const REAUTH_TTL_MINUTES = 60;
 
-// Shared authenticated client - reused across reauth operations
-let _reauthClient = null;
-let _reauthClientExpiry = 0;
 
-// Get or create authenticated client (cached for 50 min)
-async function getReauthClient() {
+// ────────────────────────────────────────────────
+// REAUTH CLIENT (now reuses shared auth client logic)
+// ────────────────────────────────────────────────
+let reauthClient = null;
+let reauthClientExpiry = 0;
+
+async function getReauthClient(forceRefresh = false) {
   const now = Date.now();
 
-  if (_reauthClient && now < _reauthClientExpiry) {
-    return _reauthClient;
+  // Reuse if valid and no force
+  if (reauthClient && now < reauthClientExpiry && !forceRefresh) {
+    console.log('[REAUTH] Reusing existing client');
+    return reauthClient;
   }
 
-  console.log('[REAUTH] Creating new authenticated client...');
+  console.log('[REAUTH] Fetching/refreshing token...');
+  const token = await getSharedJWT(forceRefresh);
+  if (!token) {
+    console.error('[REAUTH] No JWT available');
+    return null;
+  }
 
-  try {
-    // USE SHARED JWT CACHE
-    const token = await getSharedJWT();
-    
-    if (!token) {
-      console.error('[REAUTH] Failed to get JWT');
-      return null;
-    }
-
-    _reauthClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  // Create only if not exists
+  if (!reauthClient) {
+    console.log('[REAUTH] Creating new client (singleton)...');
+    reauthClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       auth: {
         autoRefreshToken: false,
         persistSession: false,
         storageKey: 'flexgig_reauth_jwt_v1'
       }
     });
+  } else {
+    console.log('[REAUTH] Reusing client, refreshing session...');
+  }
 
-    await _reauthClient.auth.setSession({
-      access_token: token,
-      refresh_token: token
-    });
+  // Set/refresh session
+  const { error } = await reauthClient.auth.setSession({
+    access_token: token,
+    refresh_token: token
+  });
 
-    _reauthClientExpiry = now + (50 * 60 * 1000);
-    console.log('[REAUTH] Authenticated client created and cached');
-
-    return _reauthClient;
-  } catch (err) {
-    console.error('[REAUTH] Failed to create authenticated client:', err);
+  if (error) {
+    console.error('[REAUTH] setSession failed:', error);
     return null;
   }
+
+  reauthClientExpiry = now + (50 * 60 * 1000);
+  console.log('[REAUTH] ✅ Client ready and cached');
+  return reauthClient;
 }
 
 
