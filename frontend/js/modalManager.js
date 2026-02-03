@@ -225,7 +225,8 @@ const modalTriggerMap = {
   updateProfileModal: 'dashboardUpdateProfileCard',
   changePwdModal: 'changePWD',
   checkoutModal: 'continueBtn',
-  addMoneyModal: 'addMoneyBtn'
+  addMoneyModal: 'addMoneyBtn',
+  'fxg-transfer-modal': 'fxg-open-transfer-modal',
   // Add new triggers here as needed
 };
 
@@ -482,7 +483,7 @@ const bottomSheetModals = [
   'addMoneyModal',
   'historyModal',
   'allPlansModal',
-  'fxgTransferModal',
+  'fxg-transfer-modal',
 ];
 
 function lockBodyScroll(lock = true) {
@@ -510,7 +511,7 @@ function lockBodyScroll(lock = true) {
 }
 
 // Modals that use CSS class-based animation (.open for slide-in)
-const classAnimatedModals = [];  // Add history here; others if needed
+const classAnimatedModals = ['fxg-transfer-modal'];  // transfer uses .show class animation
 
   // Utility: Check if modal is visible
   function isModalVisible(modal) {
@@ -543,9 +544,12 @@ function applyTransition(modal, show, callback) {
 
   const isAllPlans = modal.id === 'allPlansModal';
   const isProfile = modal.id === 'updateProfileModal';
+  const isTransfer = modal.id === 'fxg-transfer-modal';  // ADD THIS LINE
+
+
 
   // Use slightly better easing for allPlansModal (matches most bottom-sheet designs)
-  modal.style.transition = isAllPlans
+  modal.style.transition = isAllPlans || isTransfer
     ? 'transform 0.28s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.22s ease'
     : 'opacity 0.26s ease, transform 0.26s ease';
 
@@ -558,6 +562,8 @@ function applyTransition(modal, show, callback) {
     if (!show) {
       // Only remove .active AFTER the exit animation finishes
       if (isAllPlans) modal.classList.remove('active');
+      if (isTransfer) modal.classList.remove('show');  // ADD THIS LINE
+
       modal.classList.add('hidden');
       modal.style.display = 'none';
       modal.setAttribute('aria-hidden', 'true');
@@ -565,6 +571,7 @@ function applyTransition(modal, show, callback) {
     } else {
       modal.removeAttribute('inert');
       if (isAllPlans) modal.classList.add('active'); // ensure it's present
+      if (isTransfer) modal.classList.add('show');  // ADD THIS LINE
     }
 
     if (!isProcessingPopstate) {
@@ -730,58 +737,54 @@ if (classAnimatedModals.includes(modalId)) {
 }
 
 // Replacement for openModal function
-function openModal(modalId, skipHistory = false) {
-  if (openModalsStack.some(item => item.id === modalId)) {
-    log('warn', `openModal: ${modalId} already in stack, skipping duplicate`);
-    return;
-  }
+  // Open modal
+  function openModal(modalId, skipHistory = false) {
+const allPlansModalEl = getModalElement('allPlansModal');
+const allPlansModalContent = allPlansModalEl ? allPlansModalEl.querySelector('.plan-modal-content') : null;
 
-  const allPlansModalEl = getModalElement('allPlansModal');
-  const allPlansModalContent = allPlansModalEl ? allPlansModalEl.querySelector('.plan-modal-content') : null;
+    
+    log('debug', `openModal: Attempting to open ${modalId}`);
 
-  
-  log('debug', `openModal: Attempting to open ${modalId}`);
-
-  const modalConfig = modals[modalId];
-  
-  if (modalConfig && !modalConfig.element) {
-    modalConfig.element = document.getElementById(modalConfig.id || modalId) || null;
-    if (modalConfig.element) {
-      log('debug', `openModal: Lazily resolved element for ${modalId}`);
-    } else {
-      log('error', `openModal: Element not found for ${modalId} on open attempt`);
+    const modalConfig = modals[modalId];
+    
+    if (modalConfig && !modalConfig.element) {
+      modalConfig.element = document.getElementById(modalConfig.id || modalId) || null;
+      if (modalConfig.element) {
+        log('debug', `openModal: Lazily resolved element for ${modalId}`);
+      } else {
+        log('error', `openModal: Element not found for ${modalId} on open attempt`);
+      }
     }
-  }
 
-  if (!modalConfig || !modalConfig.element) {
-    log('error', `openModal: Modal config or element not found for ${modalId}`);
-    return;
-  }
-
-  const modal = modalConfig.element;
-  const isVisible = isModalVisible(modal);
-
-  if (isVisible) {
-    if (!openModalsStack.some((item) => item.id === modalId)) {
-      openModalsStack.push({ modal, id: modalId });
-      currentDepth++;
-    } else {
-      log('debug', `openModal: ${modalId} already open, skipping`);
+    if (!modalConfig || !modalConfig.element) {
+      log('error', `openModal: Modal config or element not found for ${modalId}`);
       return;
     }
-  }
-    if (modalId === 'allPlansModal') {
-  allPlansModalContent.scrollTop = 0;  // Optional scroll reset when closing
-}
 
-  modal.classList.remove('hidden');
-  modal.style.display = modalConfig.hasPullHandle ? 'block' : 'flex';
-  modal.setAttribute('aria-hidden', 'false');
-  modal.removeAttribute('inert');
-  modal.style.visibility = 'visible';   // ← ADD THIS
-  modal.style.zIndex = getNextModalZIndex();
-  
-  // Special handling for All Plans modal — use CSS class for animation (your old way)
+    const modal = modalConfig.element;
+    const isVisible = isModalVisible(modal);
+
+    if (isVisible) {
+      if (!openModalsStack.some((item) => item.id === modalId)) {
+        openModalsStack.push({ modal, id: modalId });
+        currentDepth++;
+      } else {
+        log('debug', `openModal: ${modalId} already open, skipping`);
+        return;
+      }
+    }
+      if (modalId === 'allPlansModal') {
+    allPlansModalContent.scrollTop = 0;  // Optional scroll reset when closing
+  }
+
+    modal.classList.remove('hidden');
+    modal.style.display = modalConfig.hasPullHandle ? 'block' : 'flex';
+    modal.setAttribute('aria-hidden', 'false');
+    modal.removeAttribute('inert');
+    modal.style.visibility = 'visible';   // ← ADD THIS
+    modal.style.zIndex = getNextModalZIndex();
+    
+    // Special handling for All Plans modal — use CSS class for animation (your old way)
 // Special handling for modals that use .active class for animation
 if (modalId === 'allPlansModal' || modalId === 'checkoutModal') {
   // Let your CSS handle the starting position and animation
@@ -799,14 +802,14 @@ if (modalId === 'allPlansModal' || modalId === 'checkoutModal') {
 
 
 if (skipHistory && document.getElementById(modalId)) {
-  const modal = document.getElementById(modalId);
-  modal.style.opacity = '0';
-  modal.style.transform = modalId === 'allPlansModal' ? 'translateY(100%)' : 'translateY(20px)';
-  console.log('[ModalManager] Forced animation start for restored modal:', modalId);
-}
+    const modal = document.getElementById(modalId);
+    modal.style.opacity = '0';
+    modal.style.transform = modalId === 'allPlansModal' ? 'translateY(100%)' : 'translateY(20px)';
+    console.log('[ModalManager] Forced animation start for restored modal:', modalId);
+  }
 
 
-  // 1. Immediately activate the nav tab — instant feedback!
+    // 1. Immediately activate the nav tab — instant feedback!
 if (shouldManageActiveState(modalId)) {
   setTriggerActive(modalId, true);
   log('debug', `openModal: Instantly activated nav trigger for ${modalId}`);
@@ -839,14 +842,14 @@ if (focusTarget) {
   focusTarget.focus();
 }
 
-    if (modalId === 'securityPinModal') {
-      const title = modal.querySelector('#pinTitle');
-      if (title) focusTarget = title;
-      document.dispatchEvent(new CustomEvent('security:pin-modal-opened'));
-      log('debug', 'openModal: Dispatched security:pin-modal-opened for securityPinModal');
-    }
+      if (modalId === 'securityPinModal') {
+        const title = modal.querySelector('#pinTitle');
+        if (title) focusTarget = title;
+        document.dispatchEvent(new CustomEvent('security:pin-modal-opened'));
+        log('debug', 'openModal: Dispatched security:pin-modal-opened for securityPinModal');
+      }
 
-    // --- Special rule for Add Money Modal to prevent input auto-focus ---
+      // --- Special rule for Add Money Modal to prevent input auto-focus ---
 if (modalId === 'addMoneyModal') {
   const amt = document.getElementById('addMoneyAmountInput');
   const guard = document.getElementById('addMoneyFocusGuard');
@@ -861,22 +864,22 @@ if (modalId === 'addMoneyModal') {
 }
 
 
-    if (focusTarget) {
-      focusTarget.setAttribute('tabindex', '-1');
-      focusTarget.focus();
-    }
+      if (focusTarget) {
+        focusTarget.setAttribute('tabindex', '-1');
+        focusTarget.focus();
+      }
 
-    trapFocus(modal);
-    // ADD THIS: Trigger CSS animation for class-based modals
+      trapFocus(modal);
+      // ADD THIS: Trigger CSS animation for class-based modals
 if (classAnimatedModals.includes(modalId)) {
   modal.classList.add('open');
   log('debug', `openModal: Added .open class for CSS animation on ${modalId}`);
 }
 
-    document.dispatchEvent(new CustomEvent("modalOpened", { detail: modalId }));
+      document.dispatchEvent(new CustomEvent("modalOpened", { detail: modalId }));
 
-  });
-}
+    });
+  }
 
 // Replacement for closeModal function
 function closeModal(modalId) {
