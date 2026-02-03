@@ -227,6 +227,7 @@ const modalTriggerMap = {
   checkoutModal: 'continueBtn',
   addMoneyModal: 'addMoneyBtn',
   'fxg-transfer-modal': 'fxg-open-transfer-modal',
+  'fxg-transfer-confirm-modal': 'fxg-continue',
   // Add new triggers here as needed
 };
 
@@ -473,7 +474,11 @@ function getModalElement(modalId) {
     historyModal: { id: 'historyModal', element: null, hasPullHandle: false },
     addMoneyModal: {id: 'addMoneyModal', element: null, hasPullHandle: true},
     fxgTransferModal: { id: 'fxg-transfer-modal', element: null, hasPullHandle: false },
-
+    'fxg-transfer-confirm-modal': {
+      id: 'fxg-transfer-confirm-modal',
+      element: null,
+      hasPullHandle: false
+    },
   };
 
   // ─────────────────────────────────────────────────────────────
@@ -484,6 +489,7 @@ const bottomSheetModals = [
   'historyModal',
   'allPlansModal',
   'fxg-transfer-modal',
+  'fxg-transfer-confirm-modal'   // ← add this line
 ];
 
 function lockBodyScroll(lock = true) {
@@ -511,7 +517,7 @@ function lockBodyScroll(lock = true) {
 }
 
 // Modals that use CSS class-based animation (.open for slide-in)
-const classAnimatedModals = ['fxg-transfer-modal'];  // transfer uses .show class animation
+const classAnimatedModals = ['fxg-transfer-modal', 'fxg-transfer-confirm-modal'];
 
   // Utility: Check if modal is visible
   function isModalVisible(modal) {
@@ -545,13 +551,13 @@ function applyTransition(modal, show, callback) {
   const isAllPlans = modal.id === 'allPlansModal';
   const isProfile = modal.id === 'updateProfileModal';
   const isTransfer = modal.id === 'fxg-transfer-modal';  // ADD THIS LINE
+  const isConfirm = modal.id === 'fxg-transfer-confirm-modal';
 
 
 
-  // Use slightly better easing for allPlansModal (matches most bottom-sheet designs)
-  modal.style.transition = isAllPlans || isTransfer
-    ? 'transform 0.28s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.22s ease'
-    : 'opacity 0.26s ease, transform 0.26s ease';
+  modal.style.transition = isAllPlans || isTransfer || isConfirm
+  ? 'transform 0.28s cubic-bezier(0.18, 0.9, 0.32, 1), opacity 0.22s ease'
+  : 'opacity 0.26s ease, transform 0.26s ease';
 
   let onTransitionEndCalled = false;
 
@@ -562,7 +568,7 @@ function applyTransition(modal, show, callback) {
     if (!show) {
       // Only remove .active AFTER the exit animation finishes
       if (isAllPlans) modal.classList.remove('active');
-      if (isTransfer) modal.classList.remove('show');  // ADD THIS LINE
+      if (isTransfer || isConfirm) modal.classList.remove('show');  // ADD THIS LINE
 
       modal.classList.add('hidden');
       modal.style.display = 'none';
@@ -571,7 +577,7 @@ function applyTransition(modal, show, callback) {
     } else {
       modal.removeAttribute('inert');
       if (isAllPlans) modal.classList.add('active'); // ensure it's present
-      if (isTransfer) modal.classList.add('show');  // ADD THIS LINE
+      if (isTransfer || isConfirm) modal.classList.add('show');  // ADD THIS LINE
     }
 
     if (!isProcessingPopstate) {

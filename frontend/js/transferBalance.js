@@ -296,6 +296,7 @@ function closeModal() {
       }
 
       closeConfirmModal();
+      ModalManager.closeModal('fxgTransferModal');
 
       const els = resolveEls();
       if (els.successEl) {
