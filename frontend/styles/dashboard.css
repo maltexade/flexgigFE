@@ -6105,3 +6105,323 @@ p:has(.balance-real, .balance-masked) {
 body:has(.fxg-modal.show) {
   overflow: hidden;
 }
+
+/* fxg-transfer-confirm-modal styles */
+#fxg-transfer-confirm-modal {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 110000;
+  pointer-events: none;
+}
+
+#fxg-transfer-confirm-modal .fxg-confirm-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+  pointer-events: auto;
+}
+
+#fxg-transfer-confirm-modal .fxg-confirm-sheet {
+  position: relative;
+  width: 100%;
+  max-width: 520px;
+  background: #000;
+  border-radius: 14px;
+  color: #fff;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+  pointer-events: auto;
+  overflow: hidden;
+  transform: translateY(24px);
+  opacity: 0;
+  transition: transform 0.28s cubic-bezier(0.18, 0.9, 0.32, 1), opacity 0.22s ease;
+}
+
+.fxg-confirm-close {
+  text-decoration: none;
+  background: inherit;
+  border: none;
+  color: #fff;
+  font-weight: 700;
+  font-size: 26px;
+}
+
+@media (max-width: 720px) {
+  #fxg-transfer-confirm-modal .fxg-confirm-sheet {
+    height: 60vh;
+    max-height: 60vh;
+    border-radius: 12px 12px 0 0;
+    width: 100%;
+    margin: 0 8px 8px 8px;
+    align-self: flex-end;
+    transform: translateY(16px);
+  }
+}
+
+/* Show state - used by ModalManager */
+#fxg-transfer-confirm-modal.show .fxg-confirm-sheet {
+  transform: translateY(0);
+  opacity: 1;
+}
+
+/* Inner layout */
+.fxg-confirm-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.fxg-confirm-title {
+  font-weight: 800;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.fxg-confirm-body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  color: #c9d6e3;
+  font-size: 15px;
+}
+
+.fxg-confirm-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.fxg-confirm-label {
+  color: #9fbbe8;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.fxg-confirm-value {
+  color: #ffffff;
+  font-weight: 800;
+}
+
+.fxg-confirm-footer {
+  padding: 14px 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.02);
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.fxg-confirm-btn {
+  background: linear-gradient(90deg, #1ea0ff, #0b67ff);
+  color: #fff;
+  border: none;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-weight: 800;
+  cursor: pointer;
+  min-width: 110px;
+}
+
+.fxg-confirm-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.fxg-confirm-cancel {
+  background: transparent;
+  color: #cfe6ff;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  padding: 9px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.fxg-confirm-error {
+  color: #ff8a8a;
+  padding: 8px 0;
+  font-size: 14px;
+  text-align: center;
+}
+
+
+
+
+
+
+/* Wallet Transfer Receipt Modal */
+.fxg-receipt-modal {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 120000;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.fxg-receipt-modal.show {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.fxg-receipt-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(6px);
+  pointer-events: auto;
+}
+
+.fxg-receipt-sheet {
+  position: relative;
+  width: 100%;
+  max-width: 480px;
+  background: #000;
+  border-radius: 20px;
+  color: white;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.7);
+  overflow: hidden;
+  pointer-events: auto;
+  transform: scale(0.85);
+  opacity: 0;
+  transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.3s ease;
+}
+
+.fxg-receipt-modal.show .fxg-receipt-sheet {
+  transform: scale(1);
+  opacity: 1;
+}
+
+.fxg-receipt-content {
+  padding: 32px 24px;
+  text-align: center;
+}
+
+.fxg-receipt-icon {
+  width: 80px;
+  height: 80px;
+  margin: 0 auto 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+}
+
+.fxg-receipt-icon.success {
+  background: rgba(30, 160, 255, 0.12);
+}
+
+.fxg-receipt-icon.failed {
+  background: rgba(255, 77, 79, 0.12);
+}
+
+.fxg-receipt-icon svg {
+  width: 60px;
+  height: 60px;
+}
+
+.fxg-receipt-title {
+  font-size: 24px;
+  font-weight: 800;
+  margin-bottom: 16px;
+  color: white;
+}
+
+.fxg-receipt-details {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 12px;
+  padding: 20px;
+  margin: 24px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.fxg-receipt-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.fxg-receipt-row .label {
+  color: #9fbbe8;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.fxg-receipt-row .value {
+  font-size: 17px;
+  font-weight: 800;
+  color: white;
+}
+
+.fxg-receipt-row .amount {
+  color: #1ea0ff;
+  font-size: 22px;
+}
+
+.fxg-receipt-note,
+.fxg-receipt-error {
+  font-size: 14px;
+  color: #c9d6e3;
+  margin: 16px 0 24px;
+  line-height: 1.5;
+}
+
+.fxg-receipt-error {
+  color: #ff8a8a;
+  font-weight: 500;
+}
+
+.fxg-receipt-btn {
+  width: 100%;
+  padding: 16px;
+  border-radius: 12px;
+  font-size: 17px;
+  font-weight: 800;
+  cursor: pointer;
+  border: none;
+  transition: all 0.2s ease;
+}
+
+.fxg-receipt-btn.primary {
+  background: linear-gradient(90deg, #1ea0ff, #0b67ff);
+  color: white;
+}
+
+.fxg-receipt-btn.secondary {
+  background: rgba(255, 255, 255, 0.08);
+  color: #cfe6ff;
+  margin-top: 12px;
+}
+
+.fxg-receipt-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+}
+
+.fxg-receipt-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+/* Mobile adjustments */
+@media (max-width: 480px) {
+  .fxg-receipt-sheet {
+    margin: 0 12px;
+    border-radius: 16px 16px 0 0;
+    align-self: flex-end;
+  }
+}

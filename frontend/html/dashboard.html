@@ -269,11 +269,7 @@
         </div>
       </form>
 
-      <div id="fxg-success" class="fxg-success" hidden>
-        <svg viewBox="0 0 24 24" class="fxg-check" aria-hidden="true">
-          <path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-        </svg>
-      </div>
+
     </main>
 
     <footer class="fxg-footer">
@@ -283,6 +279,113 @@
 
   <!-- backdrop last -->
   <div class="fxg-backdrop" data-fxg-close></div>
+</div>
+
+<!-- Confirmation Modal (static) -->
+<div id="fxg-transfer-confirm-modal" aria-hidden="true">
+  <div class="fxg-confirm-backdrop" data-fxg-confirm-close></div>
+  
+  <div class="fxg-confirm-sheet" role="dialog" aria-modal="true" aria-labelledby="fxg-transfer-confirm-modal-title" tabindex="-1">
+    <header class="fxg-confirm-header">
+      <div class="fxg-confirm-title">Confirm Transfer</div>
+      <button class="fxg-confirm-close" data-close aria-label="Close">×</button>
+    </header>
+    
+    <div class="fxg-confirm-body">
+      <div class="fxg-confirm-row">
+        <div class="fxg-confirm-label">Product</div>
+        <div class="fxg-confirm-value">Wallet Transfer</div>
+      </div>
+      <div class="fxg-confirm-row">
+        <div class="fxg-confirm-label">Amount</div>
+        <div class="fxg-confirm-value" id="fxg-transfer-confirm-modal-amount">₦0</div>
+      </div>
+      <div class="fxg-confirm-row">
+        <div class="fxg-confirm-label">To</div>
+        <div class="fxg-confirm-value" id="fxg-transfer-confirm-modal-recipient">@username</div>
+      </div>
+      <div style="color:#9fbbe8; font-size:13px; margin-top:8px;">
+        Transfers are instant and cannot be reversed.
+      </div>
+    </div>
+    
+    <footer class="fxg-confirm-footer">
+      <button class="fxg-confirm-cancel">Cancel</button>
+      <button class="fxg-confirm-btn" id="fxg-transfer-confirm-modal-send">Confirm Send</button>
+    </footer>
+  </div>
+</div>
+
+<!-- Wallet Transfer Receipt Modal -->
+<div id="fxg-transfer-receipt-modal" class="fxg-receipt-modal" aria-hidden="true">
+  <div class="fxg-receipt-backdrop" data-receipt-close></div>
+  
+  <div class="fxg-receipt-sheet" role="dialog" aria-modal="true" aria-labelledby="fxg-receipt-title" tabindex="-1">
+    <!-- Success State -->
+    <div id="fxg-receipt-success" class="fxg-receipt-content">
+      <div class="fxg-receipt-icon success">
+        <svg viewBox="0 0 52 52" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="26" cy="26" r="25" stroke="#1EA0FF" stroke-width="2"/>
+          <path d="M14 27L22 35L38 19" stroke="#1EA0FF" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      
+      <h2 id="fxg-receipt-title" class="fxg-receipt-title">Transfer Successful!</h2>
+      
+      <div class="fxg-receipt-details">
+        <div class="fxg-receipt-row">
+          <span class="label">Sent to</span>
+          <span class="value" id="receipt-recipient">@username</span>
+        </div>
+        <div class="fxg-receipt-row">
+          <span class="label">Amount</span>
+          <span class="value amount" id="receipt-amount">₦0</span>
+        </div>
+        <div class="fxg-receipt-row">
+          <span class="label">New Balance</span>
+          <span class="value" id="receipt-new-balance">₦0</span>
+        </div>
+        <div class="fxg-receipt-row">
+          <span class="label">Date</span>
+          <span class="value" id="receipt-date">Just now</span>
+        </div>
+      </div>
+      
+      <p class="fxg-receipt-note">The transfer is instant and cannot be reversed.</p>
+      
+      <button id="receipt-done-btn" class="fxg-receipt-btn primary">Done</button>
+    </div>
+
+    <!-- Failed State (hidden by default) -->
+    <div id="fxg-receipt-failed" class="fxg-receipt-content" style="display: none;">
+      <div class="fxg-receipt-icon failed">
+        <svg viewBox="0 0 52 52" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="26" cy="26" r="25" stroke="#FF4D4F" stroke-width="2"/>
+          <path d="M16 16L36 36M36 16L16 36" stroke="#FF4D4F" stroke-width="4" stroke-linecap="round"/>
+        </svg>
+      </div>
+      
+      <h2 class="fxg-receipt-title">Transfer Failed</h2>
+      
+      <p id="receipt-error-message" class="fxg-receipt-error">Something went wrong. Your funds are safe.</p>
+      
+      <div class="fxg-receipt-details">
+        <div class="fxg-receipt-row">
+          <span class="label">To</span>
+          <span class="value" id="receipt-failed-recipient">@username</span>
+        </div>
+        <div class="fxg-receipt-row">
+          <span class="label">Amount</span>
+          <span class="value amount" id="receipt-failed-amount">₦0</span>
+        </div>
+      </div>
+      
+      <div class="fxg-receipt-actions">
+        <button id="receipt-try-again-btn" class="fxg-receipt-btn primary">Try Again</button>
+        <button id="receipt-close-btn" class="fxg-receipt-btn secondary">Close</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- Add Money Modal -->
