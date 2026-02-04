@@ -266,15 +266,17 @@ async function confirmSend(payload) {
   const sendBtn = document.getElementById('fxg-transfer-confirm-modal-send');
   const cancelBtn = wrapper?.querySelector('.fxg-confirm-cancel');
 
-  if (sendBtn) sendBtn.disabled = true;
-  if (sendBtn) sendBtn.textContent = 'Verifying...';
+  if (sendBtn) {
+    sendBtn.disabled = true;
+    sendBtn.textContent = 'Verifying...';
+  }
   if (cancelBtn) cancelBtn.disabled = true;
 
   try {
-    // 1. Close confirm modal first
+    // 1. Close confirm modal first (smooth transition to processing)
     closeConfirmModal();
 
-    // 2. Require PIN/biometric verification
+    // 2. Require PIN/biometric verification (reuses checkout's dedicated PIN modal)
     const authSuccess = await verifyPinOrBiometric();
     if (!authSuccess) {
       console.log('[fxgTransfer] PIN verification failed or cancelled');
@@ -285,30 +287,27 @@ async function confirmSend(payload) {
     // 3. Show processing receipt immediately after successful PIN
     showProcessingReceipt(payload);
 
-    // 4. Get auth token — use the same method as checkout.js
-    const token = localStorage.getItem('token') || '';
-    if (!token) {
-      throw new Error('No authentication token found. Please log in again.');
-    }
-
-    // 5. Call API
+    // 4. Call the transfer API using cookie-based auth (no manual token needed)
     const res = await fetch(`${API_BASE}/api/wallet/transfer`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
+        'Content-Type': 'application/json'
+        // No Authorization header — backend uses session cookie
       },
       body: JSON.stringify({
         recipient: payload.recipient,
         amount: payload.amount
       }),
-      credentials: 'include'   // ← keep this if your backend uses cookies/sessions too
+      credentials: 'include'   // Critical: sends authentication cookie
     });
 
     const data = await res.json();
 
     if (!res.ok) {
-      if (data.error?.includes('insufficient') || data.code === 'INSUFFICIENT_BALANCE') {
+      // Handle specific error cases
+      if (data.error?.toLowerCase().includes('insufficient') || 
+          data.code === 'INSUFFICIENT_BALANCE' || 
+          data.message?.toLowerCase().includes('insufficient')) {
         updateReceiptToInsufficient('Insufficient balance for this transfer.', BALANCE);
       } else {
         throw new Error(data.error || data.message || 'Transfer failed');
@@ -316,23 +315,27 @@ async function confirmSend(payload) {
       return;
     }
 
-    // 6. Success: update balance
-    const newBalance = data.newBalance || data.balance || data.wallet_balance;
+    // 5. Success: update local balance and UI
+    const newBalance = data.newBalance || data.balance || data.wallet_balance || data.new_balance;
     if (typeof newBalance === 'number' && !isNaN(newBalance)) {
       updateLocalBalance(newBalance);
       if (typeof window.updateAllBalances === 'function') {
-        try { window.updateAllBalances(newBalance); } catch {}
+        try {
+          window.updateAllBalances(newBalance);
+        } catch (e) {
+          console.warn('[fxgTransfer] updateAllBalances failed', e);
+        }
       }
     }
 
-    // 7. Update receipt to success
-    updateReceiptToSuccess(payload, newBalance, data.reference || data.transaction_id);
+    // 6. Show success receipt
+    updateReceiptToSuccess(payload, newBalance, data.reference || data.transaction_id || 'N/A');
 
   } catch (err) {
     console.error('[fxgTransfer] Transfer failed', err);
     updateReceiptToFailed(payload, err.message || 'Transfer failed. Please try again.');
   } finally {
-    // Re-enable buttons in case of early exit
+    // Always restore button states (even on error)
     if (sendBtn) {
       sendBtn.disabled = false;
       sendBtn.textContent = 'Send';
