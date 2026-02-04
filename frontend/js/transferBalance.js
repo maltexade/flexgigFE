@@ -261,76 +261,85 @@
   }
 
   // --- Real transfer logic ---
-  async function confirmSend(payload) {
-    const wrapper = document.getElementById('fxg-transfer-confirm-modal');
-    const sendBtn = document.getElementById('fxg-transfer-confirm-modal-send');
-    const cancelBtn = wrapper?.querySelector('.fxg-confirm-cancel');
+async function confirmSend(payload) {
+  const wrapper = document.getElementById('fxg-transfer-confirm-modal');
+  const sendBtn = document.getElementById('fxg-transfer-confirm-modal-send');
+  const cancelBtn = wrapper?.querySelector('.fxg-confirm-cancel');
 
-    if (sendBtn) sendBtn.disabled = true;
-    if (sendBtn) sendBtn.textContent = 'Verifying...';
-    if (cancelBtn) cancelBtn.disabled = true;
+  if (sendBtn) sendBtn.disabled = true;
+  if (sendBtn) sendBtn.textContent = 'Verifying...';
+  if (cancelBtn) cancelBtn.disabled = true;
 
-    try {
-      // 1. Close confirm modal first
-      closeConfirmModal();
+  try {
+    // 1. Close confirm modal first
+    closeConfirmModal();
 
-      // 2. Require PIN/biometric verification
-      const authSuccess = await verifyPinOrBiometric();
-      if (!authSuccess) {
-        // User cancelled or failed PIN
-        console.log('[fxgTransfer] PIN verification failed or cancelled');
-        showTransferReceipt(false, payload, 'Transfer cancelled during verification');
-        return;
+    // 2. Require PIN/biometric verification
+    const authSuccess = await verifyPinOrBiometric();
+    if (!authSuccess) {
+      console.log('[fxgTransfer] PIN verification failed or cancelled');
+      showTransferReceipt(false, payload, 'Transfer cancelled during verification');
+      return;
+    }
+
+    // 3. Show processing receipt immediately after successful PIN
+    showProcessingReceipt(payload);
+
+    // 4. Get auth token — use the same method as checkout.js
+    const token = localStorage.getItem('token') || '';
+    if (!token) {
+      throw new Error('No authentication token found. Please log in again.');
+    }
+
+    // 5. Call API
+    const res = await fetch(`${API_BASE}/api/wallet/transfer`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        recipient: payload.recipient,
+        amount: payload.amount
+      }),
+      credentials: 'include'   // ← keep this if your backend uses cookies/sessions too
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      if (data.error?.includes('insufficient') || data.code === 'INSUFFICIENT_BALANCE') {
+        updateReceiptToInsufficient('Insufficient balance for this transfer.', BALANCE);
+      } else {
+        throw new Error(data.error || data.message || 'Transfer failed');
       }
+      return;
+    }
 
-      // 3. Show processing receipt immediately after PIN success
-      showProcessingReceipt(payload);
-
-      // 4. Get auth token
-      const { data: { session } } = await window.supabaseClient.auth.getSession();
-      const token = session?.access_token;
-      if (!token) throw new Error('No authentication token');
-
-      // 5. Call API
-      const res = await fetch(`${API_BASE}/api/wallet/transfer`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          recipient: payload.recipient,
-          amount: payload.amount
-        })
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        if (data.error && data.error.includes('insufficient')) {
-          updateReceiptToInsufficient('Insufficient balance for this transfer.', BALANCE);
-        } else {
-          throw new Error(data.error || 'Transfer failed');
-        }
-        return;
-      }
-
-      // 6. Success: update balance
-      const newBalance = data.newBalance;
+    // 6. Success: update balance
+    const newBalance = data.newBalance || data.balance || data.wallet_balance;
+    if (typeof newBalance === 'number' && !isNaN(newBalance)) {
       updateLocalBalance(newBalance);
-
       if (typeof window.updateAllBalances === 'function') {
         try { window.updateAllBalances(newBalance); } catch {}
       }
-
-      // 7. Update receipt to success
-      updateReceiptToSuccess(payload, newBalance, data.reference);
-
-    } catch (err) {
-      console.error('[fxgTransfer] Transfer failed', err);
-      updateReceiptToFailed(payload, err.message || 'Transfer failed. Please try again.');
     }
+
+    // 7. Update receipt to success
+    updateReceiptToSuccess(payload, newBalance, data.reference || data.transaction_id);
+
+  } catch (err) {
+    console.error('[fxgTransfer] Transfer failed', err);
+    updateReceiptToFailed(payload, err.message || 'Transfer failed. Please try again.');
+  } finally {
+    // Re-enable buttons in case of early exit
+    if (sendBtn) {
+      sendBtn.disabled = false;
+      sendBtn.textContent = 'Send';
+    }
+    if (cancelBtn) cancelBtn.disabled = false;
   }
+}
 
   // ────────────────────────────────────────────────
   // Receipt modal functions (enhanced for smooth flow)
