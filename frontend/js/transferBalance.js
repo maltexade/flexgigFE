@@ -25,46 +25,97 @@ const fmt = n => (Number(n) || 0).toLocaleString('en-US');
 const $ = id => document.getElementById(id);
 
 // ==================== BALANCE MANAGEMENT ====================
-function initBalanceFromSources() {
-  // 1. Try window.currentDisplayedBalance first
-  if (typeof window.currentDisplayedBalance === 'number' && !Number.isNaN(window.currentDisplayedBalance)) {
-    BALANCE = Number(window.currentDisplayedBalance);
-    persistFxgBalance(BALANCE);
-    console.log('[transfer] Balance loaded from window:', BALANCE);
-    return;
+function getAvailableBalance() {
+  // Try multiple sources in priority order
+  
+  // 1. Check dashboard balance element (most reliable)
+  const balanceReal = document.querySelector('.balance-real');
+  if (balanceReal && balanceReal.textContent) {
+    const bal = parseFloat(balanceReal.textContent.replace(/[₦,\s]/g, ''));
+    if (!isNaN(bal) && bal >= 0) {
+      console.log('[transfer] Balance from .balance-real:', bal);
+      return bal;
+    }
   }
 
-  // 2. Try userData from localStorage
+  // 2. Check window.currentDisplayedBalance
+  if (typeof window.currentDisplayedBalance === 'number' && !isNaN(window.currentDisplayedBalance)) {
+    console.log('[transfer] Balance from window.currentDisplayedBalance:', window.currentDisplayedBalance);
+    return window.currentDisplayedBalance;
+  }
+
+  // 3. Check getUserState function
+  if (typeof window.getUserState === 'function') {
+    try {
+      const state = window.getUserState();
+      if (state && typeof state.balance !== 'undefined') {
+        const bal = parseFloat(state.balance);
+        if (!isNaN(bal) && bal >= 0) {
+          console.log('[transfer] Balance from getUserState:', bal);
+          return bal;
+        }
+      }
+    } catch (e) {
+      console.warn('[transfer] getUserState error:', e);
+    }
+  }
+
+  // 4. Check localStorage userState
+  try {
+    const userState = localStorage.getItem('userState');
+    if (userState) {
+      const parsed = JSON.parse(userState);
+      if (parsed && typeof parsed.balance !== 'undefined') {
+        const bal = parseFloat(parsed.balance);
+        if (!isNaN(bal) && bal >= 0) {
+          console.log('[transfer] Balance from localStorage userState:', bal);
+          return bal;
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[transfer] localStorage userState error:', e);
+  }
+
+  // 5. Check localStorage userData
   try {
     const userData = localStorage.getItem('userData');
     if (userData) {
       const parsed = JSON.parse(userData);
       if (parsed && typeof parsed.wallet_balance !== 'undefined') {
-        BALANCE = Number(parsed.wallet_balance) || 0;
-        persistFxgBalance(BALANCE);
-        console.log('[transfer] Balance loaded from userData:', BALANCE);
-        return;
+        const bal = parseFloat(parsed.wallet_balance);
+        if (!isNaN(bal) && bal >= 0) {
+          console.log('[transfer] Balance from localStorage userData:', bal);
+          return bal;
+        }
       }
     }
   } catch (e) {
-    console.warn('[transfer] Failed to parse userData:', e);
+    console.warn('[transfer] localStorage userData error:', e);
   }
 
-  // 3. Fallback to FXG storage key
+  // 6. Fallback to stored FXG balance
   try {
-    const prev = localStorage.getItem(FXG_STORAGE_KEY);
-    if (prev !== null) {
-      BALANCE = Number(prev) || 0;
-      console.log('[transfer] Balance loaded from FXG storage:', BALANCE);
-      return;
+    const stored = localStorage.getItem(FXG_STORAGE_KEY);
+    if (stored !== null) {
+      const bal = parseFloat(stored);
+      if (!isNaN(bal) && bal >= 0) {
+        console.log('[transfer] Balance from FXG storage:', bal);
+        return bal;
+      }
     }
   } catch (e) {
-    console.warn('[transfer] Failed to read FXG storage:', e);
+    console.warn('[transfer] FXG storage error:', e);
   }
 
-  // 4. Default to 0
-  BALANCE = 0;
-  console.log('[transfer] Balance defaulted to 0');
+  console.warn('[transfer] No balance found, defaulting to 0');
+  return 0;
+}
+
+function initBalanceFromSources() {
+  BALANCE = getAvailableBalance();
+  persistFxgBalance(BALANCE);
+  console.log('[transfer] ✓ Balance initialized:', BALANCE);
 }
 
 function persistFxgBalance(n) {
@@ -89,10 +140,19 @@ function updateLocalBalance(n) {
 }
 
 function refreshBalanceOnModalOpen() {
-  initBalanceFromSources();
+  console.log('[transfer] Refreshing balance on modal open');
+  
+  // Get fresh balance from all sources
+  BALANCE = getAvailableBalance();
+  persistFxgBalance(BALANCE);
+
+  // Update display
   const balanceEl = $('fxg-balance');
   if (balanceEl) {
     balanceEl.textContent = `Balance: ₦${fmt(BALANCE)}`;
+    console.log('[transfer] ✓ Balance display updated:', balanceEl.textContent);
+  } else {
+    console.warn('[transfer] Balance element not found');
   }
 }
 
@@ -106,7 +166,9 @@ function patchUpdateAllBalances() {
       try {
         const res = original.apply(this, arguments);
         if (typeof newBalance !== 'undefined' && newBalance !== null) {
-          updateLocalBalance(Number(newBalance) || 0);
+          const bal = Number(newBalance) || 0;
+          updateLocalBalance(bal);
+          console.log('[transfer] Balance synced via updateAllBalances:', bal);
         } else if (typeof window.currentDisplayedBalance === 'number') {
           updateLocalBalance(window.currentDisplayedBalance);
         }
@@ -134,7 +196,9 @@ function bindBalanceUpdateEvent() {
   window.addEventListener('balance_update', (ev) => {
     try {
       if (ev?.detail?.balance !== undefined) {
-        updateLocalBalance(Number(ev.detail.balance) || 0);
+        const bal = Number(ev.detail.balance) || 0;
+        updateLocalBalance(bal);
+        console.log('[transfer] Balance synced via event:', bal);
       }
     } catch (e) {
       console.warn('[transfer] balance_update event error:', e);
@@ -149,11 +213,23 @@ function bindStorageEvents() {
   if (bindStorageEvents._bound) return;
 
   window.addEventListener('storage', (ev) => {
-    if (!ev || ev.key !== 'userData' || !ev.newValue) return;
+    if (!ev || !ev.newValue) return;
+    
     try {
-      const parsed = JSON.parse(ev.newValue);
-      if (parsed?.wallet_balance !== undefined) {
-        updateLocalBalance(Number(parsed.wallet_balance) || 0);
+      if (ev.key === 'userData') {
+        const parsed = JSON.parse(ev.newValue);
+        if (parsed?.wallet_balance !== undefined) {
+          const bal = Number(parsed.wallet_balance) || 0;
+          updateLocalBalance(bal);
+          console.log('[transfer] Balance synced via storage (userData):', bal);
+        }
+      } else if (ev.key === 'userState') {
+        const parsed = JSON.parse(ev.newValue);
+        if (parsed?.balance !== undefined) {
+          const bal = Number(parsed.balance) || 0;
+          updateLocalBalance(bal);
+          console.log('[transfer] Balance synced via storage (userState):', bal);
+        }
       }
     } catch (e) {
       console.warn('[transfer] storage event error:', e);
@@ -168,6 +244,7 @@ function bindStorageEvents() {
 function openTransferModal() {
   console.log('[transfer] Opening main modal');
 
+  // CRITICAL: Refresh balance before opening
   refreshBalanceOnModalOpen();
 
   if (window.ModalManager?.openModal) {
@@ -222,6 +299,16 @@ function validateTransferForm() {
   const username = (usernameEl.value || '').trim();
   const raw = onlyDigits(amountEl.value);
   const amt = Number(raw);
+
+  // Refresh balance from live sources during validation
+  const currentBalance = getAvailableBalance();
+  if (currentBalance !== BALANCE) {
+    BALANCE = currentBalance;
+    const balanceEl = $('fxg-balance');
+    if (balanceEl) {
+      balanceEl.textContent = `Balance: ₦${fmt(BALANCE)}`;
+    }
+  }
 
   // Username validation
   const usernameOk = username.length >= 2;
@@ -777,6 +864,15 @@ function initUI() {
   bindReceiptModalEvents();
   bindModalManagerEvents();
 
+  // Initial balance display
+  setTimeout(() => {
+    const balanceEl = $('fxg-balance');
+    if (balanceEl) {
+      balanceEl.textContent = `Balance: ₦${fmt(BALANCE)}`;
+      console.log('[transfer] ✓ Initial balance display set:', balanceEl.textContent);
+    }
+  }, 100);
+
   // Initial validation state
   validateTransferForm();
 
@@ -805,13 +901,25 @@ function bootstrap() {
     setTimeout(initUI, 80);
   }
 
-  // Update balance display after a short delay
+  // Update balance display after delays to catch late updates
   setTimeout(() => {
+    BALANCE = getAvailableBalance();
     const balanceEl = $('fxg-balance');
     if (balanceEl) {
       balanceEl.textContent = `Balance: ₦${fmt(BALANCE)}`;
+      console.log('[transfer] ✓ Bootstrap balance update:', balanceEl.textContent);
     }
   }, 600);
+
+  // Additional check after 1 second
+  setTimeout(() => {
+    BALANCE = getAvailableBalance();
+    const balanceEl = $('fxg-balance');
+    if (balanceEl) {
+      balanceEl.textContent = `Balance: ₦${fmt(BALANCE)}`;
+      console.log('[transfer] ✓ Delayed balance update:', balanceEl.textContent);
+    }
+  }, 1000);
 
   console.log('[transfer] ✓ Bootstrap complete');
 }
@@ -821,6 +929,14 @@ window.fxgTransfer = {
   openModal: openTransferModal,
   closeModal: closeTransferModal,
   getBalance: () => BALANCE,
+  refreshBalance: () => {
+    BALANCE = getAvailableBalance();
+    const balanceEl = $('fxg-balance');
+    if (balanceEl) {
+      balanceEl.textContent = `Balance: ₦${fmt(BALANCE)}`;
+    }
+    return BALANCE;
+  },
   setBalance: (v) => {
     updateLocalBalance(Number(v) || 0);
     if (typeof window.updateAllBalances === 'function') {
