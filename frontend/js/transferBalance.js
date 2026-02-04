@@ -276,7 +276,7 @@ async function confirmSend(payload) {
     // 1. Close confirm modal
     closeConfirmModal();
 
-    // 2. PIN / biometric verification
+    // 2. Require PIN/biometric verification
     const authSuccess = await verifyPinOrBiometric();
     if (!authSuccess) {
       console.log('[fxgTransfer] PIN verification failed or cancelled');
@@ -287,35 +287,43 @@ async function confirmSend(payload) {
     // 3. Show processing receipt
     showProcessingReceipt(payload);
 
-    // 4. Make API call — NO Bearer token, just cookie auth
+    // 4. Fetch the JWT (this is the one that works — proven by your console test)
+    const token = await getSharedJWT();
+    if (!token) {
+      console.error('[fxgTransfer] Failed to obtain authentication token');
+      throw new Error('Authentication token unavailable. Please log in again.');
+    }
+
+    console.log('[fxgTransfer] JWT fetched successfully (length: ' + token.length + ')');
+
+    // 5. Make the transfer API call WITH the Bearer token
     const res = await fetch(`${API_BASE}/api/wallet/transfer`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
-        // IMPORTANT: NO Authorization header here
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`   // ← This is REQUIRED for this endpoint
       },
       body: JSON.stringify({
         recipient: payload.recipient,
         amount: payload.amount
       }),
-      credentials: 'include'   // ← This sends the session cookie
+      credentials: 'include'   // Keep this — it sends session cookie too
     });
 
-    // 5. Handle non-JSON responses safely
+    // 6. Safe response handling
     let data = null;
     let rawText = null;
     try {
       rawText = await res.text();
       data = rawText ? JSON.parse(rawText) : null;
     } catch (parseErr) {
-      console.warn('[fxgTransfer] Response not JSON:', rawText || '(empty body)');
+      console.warn('[fxgTransfer] Response not valid JSON:', rawText || '(empty)');
     }
 
     if (!res.ok) {
-      // Try to extract meaningful error message
       const errorMsg = data?.error || 
                        data?.message || 
-                       (rawText && rawText.length < 200 ? rawText : `Server error (${res.status})`);
+                       (rawText && rawText.length < 300 ? rawText : `Server error (${res.status})`);
 
       console.error('[fxgTransfer] API failed:', res.status, errorMsg);
 
@@ -332,7 +340,7 @@ async function confirmSend(payload) {
       return;
     }
 
-    // 6. Success
+    // 7. Success path
     const newBalance = data?.newBalance || 
                       data?.balance || 
                       data?.wallet_balance || 
@@ -341,7 +349,9 @@ async function confirmSend(payload) {
 
     if (typeof newBalance === 'number' && !isNaN(newBalance)) {
       updateLocalBalance(newBalance);
-      window.updateAllBalances?.(newBalance);
+      if (typeof window.updateAllBalances === 'function') {
+        try { window.updateAllBalances(newBalance); } catch (e) {}
+      }
     }
 
     updateReceiptToSuccess(payload, newBalance, data?.reference || data?.transaction_id || 'N/A');
