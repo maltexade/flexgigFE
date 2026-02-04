@@ -318,64 +318,67 @@
     }
   }
 
-  // --- Receipt modal functions ---
   function showTransferReceipt(isSuccess, payload, balanceOrError, reference) {
-    const modal = document.getElementById(RECEIPT_MODAL_ID);
-    if (!modal) return console.warn('[fxgTransfer] Receipt modal not found');
+  const modal = document.getElementById(RECEIPT_MODAL_ID);
+  if (!modal) return console.warn('[fxgTransfer] Receipt modal not found');
 
-    const successDiv = document.getElementById('fxg-receipt-success');
-    const failedDiv = document.getElementById('fxg-receipt-failed');
+  const successDiv = document.getElementById('fxg-receipt-success');
+  const failedDiv = document.getElementById('fxg-receipt-failed');
 
-    if (isSuccess) {
-      failedDiv.style.display = 'none';
-      successDiv.style.display = 'block';
+  if (isSuccess) {
+    failedDiv.style.display = 'none';
+    successDiv.style.display = 'block';
 
-      document.getElementById('receipt-recipient').textContent = `@${payload.recipient}`;
-      document.getElementById('receipt-amount').textContent = `₦${fmt(payload.amount)}`;
-      document.getElementById('receipt-new-balance').textContent = `₦${fmt(balanceOrError)}`;
-      document.getElementById('receipt-date').textContent = new Date().toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
+    document.getElementById('receipt-recipient').textContent = `@${payload.recipient}`;
+    document.getElementById('receipt-amount').textContent = `₦${fmt(payload.amount)}`;
+    document.getElementById('receipt-new-balance').textContent = `₦${fmt(balanceOrError)}`;
+    document.getElementById('receipt-date').textContent =
+      new Date().toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
 
-      // Done button closes modal + resets form
-      const doneBtn = document.getElementById('receipt-done-btn');
-      doneBtn.onclick = () => {
-        closeReceiptModal();
-        resetTransferForm();
-      };
-    } else {
-      successDiv.style.display = 'none';
-      failedDiv.style.display = 'block';
+    const doneBtn = document.getElementById('receipt-done-btn');
+    doneBtn.onclick = () => {
+      closeReceiptModal();
+      resetTransferForm();
+    };
+  } else {
+    successDiv.style.display = 'none';
+    failedDiv.style.display = 'block';
 
-      document.getElementById('receipt-error-message').textContent = balanceOrError || 'Transfer failed. Please try again.';
-      document.getElementById('receipt-failed-recipient').textContent = `@${payload.recipient}`;
-      document.getElementById('receipt-failed-amount').textContent = `₦${fmt(payload.amount)}`;
+    document.getElementById('receipt-error-message').textContent =
+      balanceOrError || 'Transfer failed. Please try again.';
+    document.getElementById('receipt-failed-recipient').textContent = `@${payload.recipient}`;
+    document.getElementById('receipt-failed-amount').textContent = `₦${fmt(payload.amount)}`;
 
-      // Try Again button closes receipt + re-opens confirm
-      const tryAgainBtn = document.getElementById('receipt-try-again-btn');
-      tryAgainBtn.onclick = () => {
-        closeReceiptModal();
-        openConfirmModal(payload);  // Retry with same payload
-      };
+    const tryAgainBtn = document.getElementById('receipt-try-again-btn');
+    tryAgainBtn.onclick = () => {
+      closeReceiptModal();
+      openConfirmModal(payload);
+    };
 
-      // Close button closes receipt + resets form
-      const closeBtn = document.getElementById('receipt-close-btn');
-      closeBtn.onclick = () => {
-        closeReceiptModal();
-        resetTransferForm();
-      };
-    }
-
-    // Show the modal
-    modal.classList.add('show');
-    modal.setAttribute('aria-hidden', 'false');
+    const closeBtn = document.getElementById('receipt-close-btn');
+    closeBtn.onclick = () => {
+      closeReceiptModal();
+      resetTransferForm();
+    };
   }
 
-  function closeReceiptModal() {
-    const modal = document.getElementById(RECEIPT_MODAL_ID);
-    if (modal) {
-      modal.classList.remove('show');
-      modal.setAttribute('aria-hidden', 'true');
-    }
+  // 🔥 Let ModalManager handle lifecycle, stacking, scroll lock, focus
+  if (window.ModalManager?.openModal) {
+    window.ModalManager.openModal('fxgReceiptModal');
+  } else {
+    console.warn('[fxgTransfer] ModalManager not available for receipt');
   }
+}
+
+
+function closeReceiptModal() {
+  if (window.ModalManager?.closeModal) {
+    window.ModalManager.closeModal('fxgReceiptModal');
+  } else {
+    console.warn('[fxgTransfer] ModalManager.closeModal not available for receipt');
+  }
+}
+
 
   function resetTransferForm() {
     const els = resolveEls();
@@ -507,23 +510,29 @@
     bindReceiptModalEvents();
   }
 
-  // Bind receipt events
-  function bindReceiptModalEvents() {
-    const wrapper = document.getElementById(RECEIPT_MODAL_ID);
-    if (!wrapper || wrapper.dataset.eventsBound) return;
+function bindReceiptModalEvents() {
+  const wrapper = document.getElementById(RECEIPT_MODAL_ID);
+  if (!wrapper || wrapper.dataset.eventsBound) return;
 
-    const backdrop = wrapper.querySelector('.fxg-receipt-backdrop');
-    const handler = (e) => {
-      if (e.target === backdrop) closeReceiptModal();
-    };
-    backdrop.addEventListener('click', handler);
+  const backdrop = wrapper.querySelector('.fxg-receipt-backdrop');
 
-    wrapper.addEventListener('keydown', e => {
-      if (e.key === 'Escape') closeReceiptModal();
+  if (backdrop) {
+    backdrop.addEventListener('click', (e) => {
+      if (e.target === backdrop) {
+        closeReceiptModal();
+      }
     });
-
-    wrapper.dataset.eventsBound = 'true';
   }
+
+  wrapper.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      closeReceiptModal();
+    }
+  });
+
+  wrapper.dataset.eventsBound = 'true';
+}
+
 
   // Bootstrap
   function bootstrap() {

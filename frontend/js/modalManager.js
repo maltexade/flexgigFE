@@ -479,6 +479,7 @@ function getModalElement(modalId) {
       element: null,
       hasPullHandle: false
     },
+    fxgReceiptModal: { id: 'fxg-transfer-receipt-modal', element: null, hasPullHandle: false },
   };
 
   // ─────────────────────────────────────────────────────────────
@@ -489,7 +490,8 @@ const bottomSheetModals = [
   'historyModal',
   'allPlansModal',
   'fxg-transfer-modal',
-  'fxg-transfer-confirm-modal'   // ← add this line
+  'fxg-transfer-confirm-modal',
+  'fxgReceiptModal',
 ];
 
 function lockBodyScroll(lock = true) {
