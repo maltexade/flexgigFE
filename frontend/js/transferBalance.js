@@ -22,7 +22,8 @@ let BALANCE = 0;
 // ==================== HELPERS ====================
 const onlyDigits = s => (s || '').toString().replace(/[^\d]/g, '');
 const fmt = n => (Number(n) || 0).toLocaleString('en-US');
-const $ = id => document.getElementById(id);
+
+function $(id) { return document.getElementById(id); }
 
 // Resolve elements lazily
 function resolveEls() {
@@ -47,7 +48,7 @@ function resolveEls() {
 function initBalanceFromSources() {
   console.log('[transfer] Initializing balance from sources');
   
-  // 1. Try window.currentDisplayedBalance first
+  // 1. Try window.currentDisplayedBalance first (THIS IS THE ONE THAT WORKS!)
   if (typeof window.currentDisplayedBalance === 'number' && !Number.isNaN(window.currentDisplayedBalance)) {
     BALANCE = Number(window.currentDisplayedBalance);
     persistFxgBalance(BALANCE);
