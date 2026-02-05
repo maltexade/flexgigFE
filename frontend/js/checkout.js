@@ -619,10 +619,11 @@ function resetCheckoutUI() {
 // ==================== AUTHENTICATION WITH DEDICATED PIN MODAL ====================
 async function triggerCheckoutAuthWithDedicatedModal() {
   return new Promise((resolve) => {
-    window._checkoutPinResolve = (success) => {
-      delete window._checkoutPinResolve;
-      resolve(success);
-    };
+    window._checkoutPinResolve = (authResult) => {
+  delete window._checkoutPinResolve;
+  resolve(authResult);
+};
+
 
     if (typeof window.showCheckoutPinModal === 'function') {
       window.showCheckoutPinModal();
@@ -832,7 +833,11 @@ try {
   console.log('[checkout-pin] Biometric success');
 
   hideCheckoutPinModal();
-  window._checkoutPinResolve?.(true);
+  window._checkoutPinResolve?.({
+  success: true,
+  biometricToken: result.token // issued by backend
+});
+
   return;
 }
 
@@ -1000,11 +1005,15 @@ async function verifyPin(pin) {
       });
 
       // ✅ Success path
-      if (res.ok) {
-        hideCheckoutPinModal();
-        window._checkoutPinResolve?.(true);
-        return;
-      }
+      if (res.ok && data.pinToken) {
+  hideCheckoutPinModal();
+  window._checkoutPinResolve?.({
+    success: true,
+    pinToken: data.pinToken
+  });
+  return;
+}
+
 
       // ❌ Error handling based on real server code/message
       switch (data.code) {
