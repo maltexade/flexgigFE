@@ -243,133 +243,224 @@
     wrapper.dataset.eventsBound = 'true';
   }
 
-  // --- PIN verification using checkout modal ---
-  async function verifyPinOrBiometric() {
+  // --- GET shared JWT (session token) ---
+  async function getSharedJWT() {
+    // Attempts to fetch session token from /api/session (based on your console test).
+    // Returns token string or null.
+    try {
+      const sessionRes = await fetch(`${API_BASE}/api/session`, {
+        method: 'GET',
+        credentials: 'include',
+        headers: { 'Cache-Control': 'no-cache' }
+      });
+
+      if (!sessionRes.ok) {
+        console.error('[fxgTransfer] Failed to fetch session:', sessionRes.status);
+        return null;
+      }
+      const sessionData = await sessionRes.json().catch(() => null);
+      const token = sessionData?.token || sessionData?.accessToken || null;
+      if (token) {
+        console.debug('[fxgTransfer] Obtained token (len:', token.length, ')');
+        return token;
+      } else {
+        console.warn('[fxgTransfer] No token present in session response', sessionData);
+        return null;
+      }
+    } catch (err) {
+      console.error('[fxgTransfer] getSharedJWT error', err);
+      return null;
+    }
+  }
+
+  // --- PIN verification using checkout modal (wired to your /api/verify-pin) ---
+  // Behaviour:
+  // - opens checkout UI (window.showCheckoutPinModal) and awaits window._checkoutPinResolve
+  // - expects the modal to return either { pin: '1234' } or { biometricToken: '...' } or boolean (true) for biometric flows
+  // - calls POST /api/verify-pin with { pin } (or biometric payload) and Authorization: Bearer <session-token>
+  // - expects response { success: true, token } where token is the signed JWT returned by your server
+  async function verifyPinOrBiometric({ sessionToken, payload }) {
+    // sessionToken is required to authenticate verify-pin call
     return new Promise((resolve) => {
-      window._checkoutPinResolve = (success) => {
-        delete window._checkoutPinResolve;
-        resolve(success);
+      // place resolver so your modal can call window._checkoutPinResolve(result)
+      window._checkoutPinResolve = (result) => {
+        try { delete window._checkoutPinResolve; } catch (e) {}
+        resolve(result);
       };
 
       if (typeof window.showCheckoutPinModal === 'function') {
-        window.showCheckoutPinModal();
+        try {
+          window.showCheckoutPinModal();
+        } catch (e) {
+          console.error('[fxgTransfer] showCheckoutPinModal threw:', e);
+          resolve(null);
+        }
       } else {
         console.error('[fxgTransfer] showCheckoutPinModal not available');
-        resolve(false);
+        resolve(null);
+      }
+    })
+    .then(async (modalResult) => {
+      if (!modalResult) return { success: false, reason: 'cancelled' };
+
+      // If the modal returned plain true (biometric-ok) we call verify endpoint in biometric mode
+      const pin = (modalResult && modalResult.pin) ? String(modalResult.pin) : null;
+      const biometricToken = (modalResult && modalResult.biometricToken) ? String(modalResult.biometricToken) : null;
+
+      const body = pin ? { pin } : (biometricToken ? { biometricToken, method: 'biometric' } : { method: 'biometric', action: 'transfer', recipient: payload.recipient, amount: payload.amount });
+
+      try {
+        const res = await fetch(`${API_BASE}/api/verify-pin`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${sessionToken}`
+          },
+          body: JSON.stringify(body)
+        });
+
+        let parsed = null;
+        let raw = null;
+        try {
+          raw = await res.text();
+          parsed = raw ? JSON.parse(raw) : null;
+        } catch (e) {
+          parsed = null;
+        }
+
+        if (!res.ok) {
+          return { success: false, reason: parsed?.error || parsed?.message || `verify-pin failed (${res.status})`, raw };
+        }
+
+        // Your /api/verify-pin currently returns { success: true, message, code, token }
+        if (parsed && parsed.token) {
+          return { success: true, token: parsed.token, raw: parsed };
+        } else {
+          return { success: false, reason: 'no_token_returned', raw: parsed || raw };
+        }
+      } catch (err) {
+        return { success: false, reason: err.message || 'network' };
       }
     });
   }
 
   // --- Real transfer logic ---
-async function confirmSend(payload) {
-  const wrapper = document.getElementById('fxg-transfer-confirm-modal');
-  const sendBtn = document.getElementById('fxg-transfer-confirm-modal-send');
-  const cancelBtn = wrapper?.querySelector('.fxg-confirm-cancel');
+  async function confirmSend(payload) {
+    const wrapper = document.getElementById('fxg-transfer-confirm-modal');
+    const sendBtn = document.getElementById('fxg-transfer-confirm-modal-send');
+    const cancelBtn = wrapper?.querySelector('.fxg-confirm-cancel');
 
-  if (sendBtn) {
-    sendBtn.disabled = true;
-    sendBtn.textContent = 'Verifying...';
-  }
-  if (cancelBtn) cancelBtn.disabled = true;
-
-  try {
-    // 1. Close confirm modal
-    closeConfirmModal();
-
-    // 2. Require PIN/biometric verification
-    const authSuccess = await verifyPinOrBiometric();
-    if (!authSuccess) {
-      console.log('[fxgTransfer] PIN verification failed or cancelled');
-      showTransferReceipt(false, payload, 'Transfer cancelled during verification');
-      return;
-    }
-
-    // 3. Show processing receipt
-    showProcessingReceipt(payload);
-
-    // 4. Fetch the JWT (this is the one that works — proven by your console test)
-    const token = await getSharedJWT();
-    if (!token) {
-      console.error('[fxgTransfer] Failed to obtain authentication token');
-      throw new Error('Authentication token unavailable. Please log in again.');
-    }
-
-    console.log('[fxgTransfer] JWT fetched successfully (length: ' + token.length + ')');
-
-    // 5. Make the transfer API call WITH the Bearer token
-    const res = await fetch(`${API_BASE}/api/wallet/transfer`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`   // ← This is REQUIRED for this endpoint
-      },
-      body: JSON.stringify({
-        recipient: payload.recipient,
-        amount: payload.amount
-      }),
-      credentials: 'include'   // Keep this — it sends session cookie too
-    });
-
-    // 6. Safe response handling
-    let data = null;
-    let rawText = null;
-    try {
-      rawText = await res.text();
-      data = rawText ? JSON.parse(rawText) : null;
-    } catch (parseErr) {
-      console.warn('[fxgTransfer] Response not valid JSON:', rawText || '(empty)');
-    }
-
-    if (!res.ok) {
-      const errorMsg = data?.error || 
-                       data?.message || 
-                       (rawText && rawText.length < 300 ? rawText : `Server error (${res.status})`);
-
-      console.error('[fxgTransfer] API failed:', res.status, errorMsg);
-
-      if (res.status === 401) {
-        throw new Error('Session expired or unauthorized. Please log in again.');
-      }
-
-      if (errorMsg?.toLowerCase().includes('insufficient') || 
-          data?.code === 'INSUFFICIENT_BALANCE') {
-        updateReceiptToInsufficient('Insufficient balance for this transfer.', BALANCE);
-      } else {
-        throw new Error(errorMsg || 'Transfer failed');
-      }
-      return;
-    }
-
-    // 7. Success path
-    const newBalance = data?.newBalance || 
-                      data?.balance || 
-                      data?.wallet_balance || 
-                      data?.new_balance || 
-                      BALANCE;
-
-    if (typeof newBalance === 'number' && !isNaN(newBalance)) {
-      updateLocalBalance(newBalance);
-      if (typeof window.updateAllBalances === 'function') {
-        try { window.updateAllBalances(newBalance); } catch (e) {}
-      }
-    }
-
-    updateReceiptToSuccess(payload, newBalance, data?.reference || data?.transaction_id || 'N/A');
-
-  } catch (err) {
-    console.error('[fxgTransfer] Transfer failed:', err);
-    updateReceiptToFailed(payload, err.message || 'Transfer failed. Please try again.');
-  } finally {
     if (sendBtn) {
-      sendBtn.disabled = false;
-      sendBtn.textContent = 'Send';
+      sendBtn.disabled = true;
+      sendBtn.textContent = 'Verifying...';
     }
-    if (cancelBtn) cancelBtn.disabled = false;
+    if (cancelBtn) cancelBtn.disabled = true;
+
+    try {
+      // 1. Close confirm modal (UI)
+      closeConfirmModal();
+
+      // 2. Fetch session JWT first (authenticate verify-pin call)
+      const sessionToken = await getSharedJWT();
+      if (!sessionToken) {
+        console.error('[fxgTransfer] Failed to obtain session token');
+        throw new Error('Authentication token unavailable. Please log in again.');
+      }
+
+      // 3. Prompt for PIN/biometric and verify server-side
+      const verification = await verifyPinOrBiometric({ sessionToken, payload });
+      if (!verification || !verification.success) {
+        console.log('[fxgTransfer] PIN verification failed or cancelled:', verification?.reason || verification);
+        showTransferReceipt(false, payload, 'Transfer cancelled during verification');
+        return;
+      }
+
+      const pinVerifiedToken = verification.token;
+      if (!pinVerifiedToken) {
+        console.error('[fxgTransfer] verify-pin returned no token');
+        showTransferReceipt(false, payload, 'Verification failed (no token)');
+        return;
+      }
+
+      // 4. Show processing receipt
+      showProcessingReceipt(payload);
+
+      // 5. Make the transfer API call WITH the pin-verified JWT as Authorization
+      //    Note: your current transfer handler decodes Authorization token and derives sender UID
+      const res = await fetch(`${API_BASE}/api/wallet/transfer`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${pinVerifiedToken}`
+        },
+        body: JSON.stringify({
+          recipient: payload.recipient,
+          amount: payload.amount
+        }),
+        credentials: 'include'
+      });
+
+      // 6. Safe response handling
+      let data = null;
+      let rawText = null;
+      try {
+        rawText = await res.text();
+        data = rawText ? JSON.parse(rawText) : null;
+      } catch (parseErr) {
+        console.warn('[fxgTransfer] Response not valid JSON:', rawText || '(empty)');
+      }
+
+      if (!res.ok) {
+        const errorMsg = data?.error ||
+                         data?.message ||
+                         (rawText && rawText.length < 300 ? rawText : `Server error (${res.status})`);
+
+        console.error('[fxgTransfer] API failed:', res.status, errorMsg);
+
+        if (res.status === 401) {
+          throw new Error('Session expired or unauthorized. Please log in again.');
+        }
+
+        if (errorMsg?.toLowerCase().includes('insufficient') ||
+            data?.code === 'INSUFFICIENT_BALANCE') {
+          updateReceiptToInsufficient('Insufficient balance for this transfer.', BALANCE);
+        } else {
+          throw new Error(errorMsg || 'Transfer failed');
+        }
+        return;
+      }
+
+      // 7. Success path
+      const newBalance = data?.newBalance ||
+                        data?.balance ||
+                        data?.wallet_balance ||
+                        data?.new_balance ||
+                        BALANCE;
+
+      if (typeof newBalance === 'number' && !isNaN(newBalance)) {
+        updateLocalBalance(newBalance);
+        if (typeof window.updateAllBalances === 'function') {
+          try { window.updateAllBalances(newBalance); } catch (e) {}
+        }
+      }
+
+      updateReceiptToSuccess(payload, newBalance, data?.reference || data?.transaction_id || 'N/A');
+
+    } catch (err) {
+      console.error('[fxgTransfer] Transfer failed:', err);
+      updateReceiptToFailed(payload, err.message || 'Transfer failed. Please try again.');
+    } finally {
+      if (sendBtn) {
+        sendBtn.disabled = false;
+        sendBtn.textContent = 'Send';
+      }
+      if (cancelBtn) cancelBtn.disabled = false;
+    }
   }
-}
 
   // ────────────────────────────────────────────────
-  // Receipt modal functions (enhanced for smooth flow)
+  // Receipt modal functions (unchanged)
   // ────────────────────────────────────────────────
   function showProcessingReceipt(payload) {
     const backdrop = document.getElementById(RECEIPT_MODAL_ID);
@@ -742,13 +833,82 @@ async function confirmSend(payload) {
 
   bootstrap();
 
-  // Debug helpers
+  // Debug helpers (preserves your console IIFE as a callable function)
   window.fxgTransfer = window.fxgTransfer || {};
   window.fxgTransfer.getBalance = () => BALANCE;
   window.fxgTransfer.setBalance = v => {
     updateLocalBalance(Number(v) || 0);
     if (typeof window.updateAllBalances === 'function') {
       try { window.updateAllBalances(BALANCE); } catch {}
+    }
+  };
+
+  // original console tester now available as a helper:
+  window.fxgTransfer.runConsoleTest = async function runConsoleTest({ recipient = 'Enitan', amount = 200000 } = {}) {
+    try {
+      console.log('%c=== Starting Transfer Test ===', 'color: cyan; font-weight: bold; font-size: 16px;');
+
+      // Step 1: Get fresh session + token
+      console.log('Fetching session token...');
+      const sessionToken = await getSharedJWT();
+      if (!sessionToken) {
+        console.error('No session token found');
+        return;
+      }
+      console.log('✅ Got fresh session token (length:', sessionToken.length, ')');
+
+      // Step 2: Prepare transfer payload
+      const payload = { recipient, amount };
+      console.log('Sending transfer with payload:', payload);
+
+      // Step 3: Trigger PIN modal and verify on server
+      const verification = await verifyPinOrBiometric({ sessionToken, payload });
+      if (!verification?.success) {
+        console.error('Verification failed:', verification?.reason || verification);
+        return;
+      }
+      console.log('Received pin-verified token (len):', (verification.token || '').length);
+
+      // Step 4: Call the transfer endpoint with the pin-verified JWT
+      const transferRes = await fetch(`${API_BASE}/api/wallet/transfer`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${verification.token}`
+        },
+        body: JSON.stringify(payload)
+      });
+
+      console.log('Transfer response status:', transferRes.status);
+
+      let transferText = await transferRes.text();
+      console.log('Raw response body:', transferText);
+
+      let transferData = null;
+      try {
+        transferData = JSON.parse(transferText);
+        console.log('Parsed response:', transferData);
+      } catch (e) {
+        console.warn('Response was not valid JSON');
+      }
+
+      if (transferRes.ok) {
+        console.log('%cTRANSFER SUCCESS!', 'color: lime; font-size: 18px; font-weight: bold');
+        console.log('Result:', transferData);
+        if (transferData?.newBalance && typeof window.updateAllBalances === 'function') {
+          window.updateAllBalances(transferData.newBalance);
+          console.log('Balance UI refreshed');
+        }
+      } else {
+        console.error('%cTRANSFER FAILED', 'color: red; font-size: 18px; font-weight: bold');
+        console.error('Error message:', transferData?.error || transferText || 'Unknown');
+      }
+
+    } catch (err) {
+      console.error('%cTest crashed:', 'color: orange; font-weight: bold', err);
+    } finally {
+      console.log('%c=== Test Finished ===', 'color: cyan; font-weight: bold;');
     }
   };
 
