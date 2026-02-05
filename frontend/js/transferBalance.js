@@ -298,10 +298,7 @@ async function verifyPinOrBiometric() {
 
     // Show the PIN modal
     if (typeof window.showCheckoutPinModal === 'function') {
-      // Small delay to ensure smooth transition from confirm modal to PIN modal
-      requestAnimationFrame(() => {
-        window.showCheckoutPinModal();
-      });
+      window.showCheckoutPinModal();
     } else {
       console.error('[fxgTransfer] showCheckoutPinModal not available');
       resolve({ success: false, reason: 'modal_unavailable' });
@@ -344,14 +341,11 @@ async function verifyPinOrBiometric() {
     // 1. Close confirm modal FIRST (before any async operations)
     closeConfirmModal();
     
-    // Small delay to let confirm modal close animation finish
-    await new Promise(resolve => setTimeout(resolve, 100));
-
     // 2. Fetch session JWT
     const sessionToken = await getSharedJWT();
     if (!sessionToken) {
       console.error('[fxgTransfer] Failed to obtain session token');
-      showTransferReceipt(false, payload, 'Authentication token unavailable. Please log in again.');
+      showFailedReceipt(payload, 'Authentication token unavailable. Please log in again.');
       return;
     }
 
@@ -361,14 +355,14 @@ async function verifyPinOrBiometric() {
     
     if (!verification || !verification.success) {
       console.log('[fxgTransfer] PIN verification failed or cancelled:', verification?.reason || verification);
-      showTransferReceipt(false, payload, 'Transfer cancelled during verification');
+      showFailedReceipt(payload, 'Transfer cancelled during verification');
       return;
     }
 
     const pinVerifiedToken = verification.token;
     if (!pinVerifiedToken) {
       console.error('[fxgTransfer] verify-pin returned no token');
-      showTransferReceipt(false, payload, 'Verification failed (no token)');
+      showFailedReceipt(payload, 'Verification failed (no token)');
       return;
     }
 
@@ -437,6 +431,7 @@ async function verifyPinOrBiometric() {
       }
 
       updateReceiptToSuccess(payload, newBalance, data?.reference || data?.transaction_id || 'N/A');
+      resetTransferForm();
 
     } catch (err) {
       console.error('[fxgTransfer] Transfer failed:', err);
@@ -449,123 +444,6 @@ async function verifyPinOrBiometric() {
       if (cancelBtn) cancelBtn.disabled = false;
     }
   }
-
-  function showTransferReceipt(isSuccess, payload, balanceOrError, reference) {
-  const modal = document.getElementById(RECEIPT_MODAL_ID);
-  if (!modal) {
-    console.error('[fxgTransfer] Receipt modal not found in DOM');
-    return;
-  }
-
-  const successDiv = document.getElementById('fxg-receipt-success');
-  const failedDiv = document.getElementById('fxg-receipt-failed');
-
-  if (!successDiv || !failedDiv) {
-    console.error('[fxgTransfer] Receipt content divs not found');
-    return;
-  }
-
-  if (isSuccess) {
-    // Hide failed, show success
-    failedDiv.style.display = 'none';
-    successDiv.style.display = 'block';
-
-    // Populate success content
-    const recipientEl = document.getElementById('receipt-recipient');
-    if (recipientEl) recipientEl.textContent = `@${payload.recipient}`;
-
-    const amountEl = document.getElementById('receipt-amount');
-    if (amountEl) amountEl.textContent = `₦${fmt(payload.amount)}`;
-
-    const balanceEl = document.getElementById('receipt-new-balance');
-    if (balanceEl) balanceEl.textContent = `₦${fmt(balanceOrError)}`;
-
-    const dateEl = document.getElementById('receipt-date');
-    if (dateEl) {
-      dateEl.textContent = new Date().toLocaleString('en-NG', { 
-        dateStyle: 'medium', 
-        timeStyle: 'short' 
-      });
-    }
-
-    const refEl = document.getElementById('receipt-transaction-id');
-    if (refEl) refEl.textContent = reference || 'N/A';
-
-    // Setup done button
-    const doneBtn = document.getElementById('receipt-done-btn');
-    if (doneBtn) {
-      doneBtn.onclick = () => {
-        closeReceiptModal();
-        resetTransferForm();
-      };
-    }
-  } else {
-    // Hide success, show failed
-    successDiv.style.display = 'none';
-    failedDiv.style.display = 'block';
-
-    // Populate failed content
-    const errorMsgEl = document.getElementById('receipt-error-message');
-    if (errorMsgEl) {
-      errorMsgEl.textContent = balanceOrError || 'Transfer failed. Please try again.';
-    }
-
-    const failedRecipientEl = document.getElementById('receipt-failed-recipient');
-    if (failedRecipientEl) failedRecipientEl.textContent = `@${payload.recipient}`;
-
-    const failedAmountEl = document.getElementById('receipt-failed-amount');
-    if (failedAmountEl) failedAmountEl.textContent = `₦${fmt(payload.amount)}`;
-
-    // Setup try again button
-    const tryAgainBtn = document.getElementById('receipt-try-again-btn');
-    if (tryAgainBtn) {
-      tryAgainBtn.onclick = () => {
-        closeReceiptModal();
-        openConfirmModal(payload);
-      };
-    }
-
-    // Setup close button
-    const closeBtn = document.getElementById('receipt-close-btn');
-    if (closeBtn) {
-      closeBtn.onclick = () => {
-        closeReceiptModal();
-        resetTransferForm();
-      };
-    }
-  }
-
-  // Use ModalManager to ensure proper display
-  if (window.ModalManager?.openModal) {
-    // Close any other modals first (except receipt)
-    const openModals = window.ModalManager.getOpenModals();
-    openModals.forEach(id => {
-      if (id !== 'fxgReceiptModal') {
-        window.ModalManager.closeModal(id);
-      }
-    });
-    
-    // Open receipt modal
-    window.ModalManager.openModal('fxgReceiptModal');
-  } else {
-    console.warn('[fxgTransfer] ModalManager not available for receipt');
-    // Fallback direct manipulation
-    modal.classList.remove('hidden');
-    modal.style.display = 'flex';
-    modal.setAttribute('aria-hidden', 'false');
-    document.body.classList.add('modal-open');
-  }
-}
-
-
-function closeReceiptModal() {
-  if (window.ModalManager?.closeModal) {
-    window.ModalManager.closeModal('fxgReceiptModal');
-  } else {
-    console.warn('[fxgTransfer] ModalManager.closeModal not available for receipt');
-  }
-}
-
 
   function resetTransferForm() {
     const els = resolveEls();
@@ -637,6 +515,13 @@ function closeReceiptModal() {
   });
 }
 
+  function showFailedReceipt(payload, errorMessage) {
+    showProcessingReceipt(payload);
+    requestAnimationFrame(() => {
+      updateReceiptToFailed(payload, errorMessage);
+    });
+  }
+
   function updateReceiptToSuccess(payload, newBalance, reference) {
     const icon = document.getElementById('receipt-icon');
     if (icon) {
@@ -684,7 +569,6 @@ function closeReceiptModal() {
       `;
       document.getElementById('receipt-done')?.addEventListener('click', () => {
         closeReceiptModal();
-        resetTransferForm();
       });
     }
   }
@@ -728,7 +612,6 @@ function closeReceiptModal() {
       });
       document.getElementById('receipt-done')?.addEventListener('click', () => {
         closeReceiptModal();
-        resetTransferForm();
       });
     }
   }
@@ -780,7 +663,6 @@ function closeReceiptModal() {
       });
       document.getElementById('receipt-done')?.addEventListener('click', () => {
         closeReceiptModal();
-        resetTransferForm();
       });
     }
   }
@@ -820,19 +702,6 @@ function closeReceiptModal() {
     });
 
     wrapper.dataset.eventsBound = 'true';
-  }
-
-  function resetTransferForm() {
-    const els = resolveEls();
-    if (els.usernameEl) els.usernameEl.value = '';
-    if (els.amountEl) els.amountEl.value = '';
-    if (els.continueBtn) {
-      const text = els.continueBtn.querySelector('.fxg-btn-text') || els.continueBtn;
-      text.textContent = 'Continue';
-      els.continueBtn.disabled = true;
-    }
-    if (els.successEl) els.successEl.hidden = true;
-    closeModal();  // Close main transfer modal
   }
 
   // --- Main UI init ---
