@@ -280,70 +280,92 @@
   // - calls POST /api/verify-pin with { pin } (or biometric payload) and Authorization: Bearer <session-token>
   // - expects response { success: true, token } where token is the signed JWT returned by your server
   async function verifyPinOrBiometric({ sessionToken, payload }) {
-    // sessionToken is required to authenticate verify-pin call
-    return new Promise((resolve) => {
-      // place resolver so your modal can call window._checkoutPinResolve(result)
-      window._checkoutPinResolve = (result) => {
-        try { delete window._checkoutPinResolve; } catch (e) {}
-        resolve(result);
+  return new Promise((resolve) => {
+    // Expose resolver for checkout modal
+    window._checkoutPinResolve = (result) => {
+      try { delete window._checkoutPinResolve; } catch {}
+      resolve(result);
+    };
+
+    if (typeof window.showCheckoutPinModal === 'function') {
+      window.showCheckoutPinModal();
+    } else {
+      console.error('[fxgTransfer] showCheckoutPinModal not available');
+      resolve(null);
+    }
+  })
+  .then(async (modalResult) => {
+    if (!modalResult) {
+      return { success: false, reason: 'cancelled' };
+    }
+
+    // Extract PIN or biometric token ONCE
+    const pin =
+      typeof modalResult === 'object' && modalResult.pin
+        ? String(modalResult.pin)
+        : null;
+
+    const biometricToken =
+      typeof modalResult === 'object' && modalResult.biometricToken
+        ? String(modalResult.biometricToken)
+        : null;
+
+    // 🚨 HARD GUARD: prevent empty / invalid calls
+    if (!pin && !biometricToken) {
+      return { success: false, reason: 'no_pin_or_biometric' };
+    }
+
+    const body = pin
+      ? { pin }
+      : { biometricToken, method: 'biometric' };
+
+    try {
+      const res = await fetch(`${API_BASE}/api/verify-pin`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${sessionToken}`
+        },
+        body: JSON.stringify(body)
+      });
+
+      const rawText = await res.text();
+      let parsed = null;
+      try { parsed = rawText ? JSON.parse(rawText) : null; } catch {}
+
+      if (!res.ok) {
+        return {
+          success: false,
+          reason: parsed?.error || parsed?.message || `verify-pin failed (${res.status})`,
+          raw: parsed || rawText
+        };
+      }
+
+      // Expecting { success: true, token }
+      if (!parsed?.token) {
+        return {
+          success: false,
+          reason: 'no_token_returned',
+          raw: parsed
+        };
+      }
+
+      // ✅ PIN VERIFIED — RETURN TOKEN
+      return {
+        success: true,
+        token: parsed.token
       };
 
-      if (typeof window.showCheckoutPinModal === 'function') {
-        try {
-          window.showCheckoutPinModal();
-        } catch (e) {
-          console.error('[fxgTransfer] showCheckoutPinModal threw:', e);
-          resolve(null);
-        }
-      } else {
-        console.error('[fxgTransfer] showCheckoutPinModal not available');
-        resolve(null);
-      }
-    })
-    .then(async (modalResult) => {
-      if (!modalResult) return { success: false, reason: 'cancelled' };
+    } catch (err) {
+      return {
+        success: false,
+        reason: err.message || 'network_error'
+      };
+    }
+  });
+}
 
-      // If the modal returned plain true (biometric-ok) we call verify endpoint in biometric mode
-      const pin = (modalResult && modalResult.pin) ? String(modalResult.pin) : null;
-      const biometricToken = (modalResult && modalResult.biometricToken) ? String(modalResult.biometricToken) : null;
-
-      const body = pin ? { pin } : (biometricToken ? { biometricToken, method: 'biometric' } : { method: 'biometric', action: 'transfer', recipient: payload.recipient, amount: payload.amount });
-
-      try {
-        const res = await fetch(`${API_BASE}/api/verify-pin`, {
-          method: 'POST',
-          credentials: 'include',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${sessionToken}`
-          },
-          body: JSON.stringify(body)
-        });
-
-        let parsed = null;
-        let raw = null;
-        try {
-          raw = await res.text();
-          parsed = raw ? JSON.parse(raw) : null;
-        } catch (e) {
-          parsed = null;
-        }
-
-        if (!res.ok) {
-          return { success: false, reason: parsed?.error || parsed?.message || `verify-pin failed (${res.status})`, raw };
-        }
-
-        // Your /api/verify-pin currently returns { success: true, message, code, token }
-        if (parsed && parsed.token) {
-          return { success: true, token: parsed.token, raw: parsed };
-        } else {
-          return { success: false, reason: 'no_token_returned', raw: parsed || raw };
-        }
-      } catch (err) {
-        return { success: false, reason: err.message || 'network' };
-      }
-    });
-  }
 
   // --- Real transfer logic ---
   async function confirmSend(payload) {
