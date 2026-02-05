@@ -360,8 +360,9 @@
       const res = await fetch(`${API_BASE}/api/wallet/transfer`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${pinVerifiedToken}`
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${sessionToken}`,      // ✅ Session token for authentication
+            'X-PIN-TOKEN': pinVerifiedToken                 // ✅ PIN token for authorization
         },
         body: JSON.stringify({
           recipient: payload.recipient,
