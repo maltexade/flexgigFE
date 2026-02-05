@@ -431,53 +431,108 @@
 
   function showTransferReceipt(isSuccess, payload, balanceOrError, reference) {
   const modal = document.getElementById(RECEIPT_MODAL_ID);
-  if (!modal) return console.warn('[fxgTransfer] Receipt modal not found');
+  if (!modal) {
+    console.error('[fxgTransfer] Receipt modal not found in DOM');
+    return;
+  }
 
   const successDiv = document.getElementById('fxg-receipt-success');
   const failedDiv = document.getElementById('fxg-receipt-failed');
 
+  if (!successDiv || !failedDiv) {
+    console.error('[fxgTransfer] Receipt content divs not found');
+    return;
+  }
+
   if (isSuccess) {
+    // Hide failed, show success
     failedDiv.style.display = 'none';
     successDiv.style.display = 'block';
 
-    document.getElementById('receipt-recipient').textContent = `@${payload.recipient}`;
-    document.getElementById('receipt-amount').textContent = `₦${fmt(payload.amount)}`;
-    document.getElementById('receipt-new-balance').textContent = `₦${fmt(balanceOrError)}`;
-    document.getElementById('receipt-date').textContent =
-      new Date().toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
+    // Populate success content
+    const recipientEl = document.getElementById('receipt-recipient');
+    if (recipientEl) recipientEl.textContent = `@${payload.recipient}`;
 
+    const amountEl = document.getElementById('receipt-amount');
+    if (amountEl) amountEl.textContent = `₦${fmt(payload.amount)}`;
+
+    const balanceEl = document.getElementById('receipt-new-balance');
+    if (balanceEl) balanceEl.textContent = `₦${fmt(balanceOrError)}`;
+
+    const dateEl = document.getElementById('receipt-date');
+    if (dateEl) {
+      dateEl.textContent = new Date().toLocaleString('en-NG', { 
+        dateStyle: 'medium', 
+        timeStyle: 'short' 
+      });
+    }
+
+    const refEl = document.getElementById('receipt-transaction-id');
+    if (refEl) refEl.textContent = reference || 'N/A';
+
+    // Setup done button
     const doneBtn = document.getElementById('receipt-done-btn');
-    doneBtn.onclick = () => {
-      closeReceiptModal();
-      resetTransferForm();
-    };
+    if (doneBtn) {
+      doneBtn.onclick = () => {
+        closeReceiptModal();
+        resetTransferForm();
+      };
+    }
   } else {
+    // Hide success, show failed
     successDiv.style.display = 'none';
     failedDiv.style.display = 'block';
 
-    document.getElementById('receipt-error-message').textContent =
-      balanceOrError || 'Transfer failed. Please try again.';
-    document.getElementById('receipt-failed-recipient').textContent = `@${payload.recipient}`;
-    document.getElementById('receipt-failed-amount').textContent = `₦${fmt(payload.amount)}`;
+    // Populate failed content
+    const errorMsgEl = document.getElementById('receipt-error-message');
+    if (errorMsgEl) {
+      errorMsgEl.textContent = balanceOrError || 'Transfer failed. Please try again.';
+    }
 
+    const failedRecipientEl = document.getElementById('receipt-failed-recipient');
+    if (failedRecipientEl) failedRecipientEl.textContent = `@${payload.recipient}`;
+
+    const failedAmountEl = document.getElementById('receipt-failed-amount');
+    if (failedAmountEl) failedAmountEl.textContent = `₦${fmt(payload.amount)}`;
+
+    // Setup try again button
     const tryAgainBtn = document.getElementById('receipt-try-again-btn');
-    tryAgainBtn.onclick = () => {
-      closeReceiptModal();
-      openConfirmModal(payload);
-    };
+    if (tryAgainBtn) {
+      tryAgainBtn.onclick = () => {
+        closeReceiptModal();
+        openConfirmModal(payload);
+      };
+    }
 
+    // Setup close button
     const closeBtn = document.getElementById('receipt-close-btn');
-    closeBtn.onclick = () => {
-      closeReceiptModal();
-      resetTransferForm();
-    };
+    if (closeBtn) {
+      closeBtn.onclick = () => {
+        closeReceiptModal();
+        resetTransferForm();
+      };
+    }
   }
 
-  // 🔥 Let ModalManager handle lifecycle, stacking, scroll lock, focus
+  // Use ModalManager to ensure proper display
   if (window.ModalManager?.openModal) {
+    // Close any other modals first (except receipt)
+    const openModals = window.ModalManager.getOpenModals();
+    openModals.forEach(id => {
+      if (id !== 'fxgReceiptModal') {
+        window.ModalManager.closeModal(id);
+      }
+    });
+    
+    // Open receipt modal
     window.ModalManager.openModal('fxgReceiptModal');
   } else {
     console.warn('[fxgTransfer] ModalManager not available for receipt');
+    // Fallback direct manipulation
+    modal.classList.remove('hidden');
+    modal.style.display = 'flex';
+    modal.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('modal-open');
   }
 }
 
@@ -508,19 +563,25 @@ function closeReceiptModal() {
   // Receipt modal functions (unchanged)
   // ────────────────────────────────────────────────
   function showProcessingReceipt(payload) {
-    const backdrop = document.getElementById(RECEIPT_MODAL_ID);
-    if (!backdrop) return console.error('[fxgTransfer] Receipt modal not found');
+  const modal = document.getElementById(RECEIPT_MODAL_ID);
+  if (!modal) return console.error('[fxgTransfer] Receipt modal not found');
 
-    // Use ModalManager for opening
-    if (window.ModalManager && typeof window.ModalManager.openModal === 'function') {
-      ModalManager.openModal('fxgReceiptModal');
-    } else {
-      backdrop.classList.remove('hidden');
-      backdrop.setAttribute('aria-hidden', 'false');
-      document.body.classList.add('modal-open');
-    }
+  // Store payload
+  window._currentTransferPayload = payload;
 
-    // Reset to processing
+  // Use ModalManager for opening (it will handle display, aria, etc.)
+  if (window.ModalManager && typeof window.ModalManager.openModal === 'function') {
+    ModalManager.openModal('fxgReceiptModal');
+  } else {
+    // Fallback if ModalManager unavailable
+    modal.classList.remove('hidden');
+    modal.style.display = 'flex';
+    modal.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('modal-open');
+  }
+
+  // Reset to processing state AFTER opening
+  requestAnimationFrame(() => {
     const icon = document.getElementById('receipt-icon');
     if (icon) {
       icon.className = 'receipt-icon processing';
@@ -538,10 +599,8 @@ function closeReceiptModal() {
 
     const actionsEl = document.getElementById('receipt-actions');
     if (actionsEl) actionsEl.style.display = 'none';
-
-    // Store payload
-    window._currentTransferPayload = payload;
-  }
+  });
+}
 
   function updateReceiptToSuccess(payload, newBalance, reference) {
     const icon = document.getElementById('receipt-icon');
