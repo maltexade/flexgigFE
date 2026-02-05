@@ -343,7 +343,9 @@
       const sessionToken = await fxgTransfer_getSharedJWT();
       if (!sessionToken) {
         console.error('[fxgTransfer] Failed to obtain session token');
-        fxgTransfer_showTransferReceipt(false, payload, 'Authentication token unavailable. Please log in again.');
+        fxgTransfer_showProcessingReceipt(payload);
+        await new Promise(resolve => setTimeout(resolve, 200));
+        fxgTransfer_updateReceiptToFailed(payload, 'Authentication token unavailable. Please log in again.');
         return;
       }
 
@@ -353,19 +355,30 @@
       
       if (!verification || !verification.success) {
         console.log('[fxgTransfer] PIN verification failed or cancelled:', verification?.reason || verification);
-        fxgTransfer_showTransferReceipt(false, payload, 'Transfer cancelled during verification');
+        // Don't show receipt for user cancellation
+        if (verification?.reason === 'cancelled') {
+          return;
+        }
+        fxgTransfer_showProcessingReceipt(payload);
+        await new Promise(resolve => setTimeout(resolve, 200));
+        fxgTransfer_updateReceiptToFailed(payload, 'Transfer cancelled during verification');
         return;
       }
 
       const pinVerifiedToken = verification.token;
       if (!pinVerifiedToken) {
         console.error('[fxgTransfer] verify-pin returned no token');
-        fxgTransfer_showTransferReceipt(false, payload, 'Verification failed (no token)');
+        fxgTransfer_showProcessingReceipt(payload);
+        await new Promise(resolve => setTimeout(resolve, 200));
+        fxgTransfer_updateReceiptToFailed(payload, 'Verification failed (no token)');
         return;
       }
 
-      // 4. Show processing receipt (PIN modal is already closed at this point)
+      // 4. Show processing receipt IMMEDIATELY after PIN verification (before API call)
       fxgTransfer_showProcessingReceipt(payload);
+      
+      // Small delay to ensure processing state is visible
+      await new Promise(resolve => setTimeout(resolve, 300));
 
       // 5. Make the transfer API call
       const res = await fetch(`${API_BASE}/api/wallet/transfer`, {
@@ -440,113 +453,6 @@
     }
   }
 
-  function fxgTransfer_showTransferReceipt(isSuccess, payload, balanceOrError, reference) {
-    const modal = document.getElementById(RECEIPT_MODAL_ID);
-    if (!modal) {
-      console.error('[fxgTransfer] Receipt modal not found in DOM');
-      return;
-    }
-
-    const successDiv = document.getElementById('fxg-receipt-success');
-    const failedDiv = document.getElementById('fxg-receipt-failed');
-
-    if (!successDiv || !failedDiv) {
-      console.error('[fxgTransfer] Receipt content divs not found');
-      return;
-    }
-
-    if (isSuccess) {
-      // Hide failed, show success
-      failedDiv.style.display = 'none';
-      successDiv.style.display = 'block';
-
-      // Populate success content
-      const recipientEl = document.getElementById('receipt-recipient');
-      if (recipientEl) recipientEl.textContent = `@${payload.recipient}`;
-
-      const amountEl = document.getElementById('receipt-amount');
-      if (amountEl) amountEl.textContent = `₦${fmt(payload.amount)}`;
-
-      const balanceEl = document.getElementById('receipt-new-balance');
-      if (balanceEl) balanceEl.textContent = `₦${fmt(balanceOrError)}`;
-
-      const dateEl = document.getElementById('receipt-date');
-      if (dateEl) {
-        dateEl.textContent = new Date().toLocaleString('en-NG', { 
-          dateStyle: 'medium', 
-          timeStyle: 'short' 
-        });
-      }
-
-      const refEl = document.getElementById('receipt-transaction-id');
-      if (refEl) refEl.textContent = reference || 'N/A';
-
-      // Setup done button
-      const doneBtn = document.getElementById('receipt-done-btn');
-      if (doneBtn) {
-        doneBtn.onclick = () => {
-          fxgTransfer_closeReceiptModal();
-          fxgTransfer_resetTransferForm();
-        };
-      }
-    } else {
-      // Hide success, show failed
-      successDiv.style.display = 'none';
-      failedDiv.style.display = 'block';
-
-      // Populate failed content
-      const errorMsgEl = document.getElementById('receipt-error-message');
-      if (errorMsgEl) {
-        errorMsgEl.textContent = balanceOrError || 'Transfer failed. Please try again.';
-      }
-
-      const failedRecipientEl = document.getElementById('receipt-failed-recipient');
-      if (failedRecipientEl) failedRecipientEl.textContent = `@${payload.recipient}`;
-
-      const failedAmountEl = document.getElementById('receipt-failed-amount');
-      if (failedAmountEl) failedAmountEl.textContent = `₦${fmt(payload.amount)}`;
-
-      // Setup try again button
-      const tryAgainBtn = document.getElementById('receipt-try-again-btn');
-      if (tryAgainBtn) {
-        tryAgainBtn.onclick = () => {
-          fxgTransfer_closeReceiptModal();
-          fxgTransfer_openConfirmModal(payload);
-        };
-      }
-
-      // Setup close button
-      const closeBtn = document.getElementById('receipt-close-btn');
-      if (closeBtn) {
-        closeBtn.onclick = () => {
-          fxgTransfer_closeReceiptModal();
-          fxgTransfer_resetTransferForm();
-        };
-      }
-    }
-
-    // Use ModalManager to ensure proper display
-    if (window.ModalManager?.openModal) {
-      // Close any other modals first (except receipt)
-      const openModals = window.ModalManager.getOpenModals();
-      openModals.forEach(id => {
-        if (id !== 'fxgReceiptModal') {
-          window.ModalManager.closeModal(id);
-        }
-      });
-      
-      // Open receipt modal
-      window.ModalManager.openModal('fxgReceiptModal');
-    } else {
-      console.warn('[fxgTransfer] ModalManager not available for receipt');
-      // Fallback direct manipulation
-      modal.classList.remove('hidden');
-      modal.style.display = 'flex';
-      modal.setAttribute('aria-hidden', 'false');
-      document.body.classList.add('modal-open');
-    }
-  }
-
   function fxgTransfer_closeReceiptModal() {
     if (window.ModalManager?.closeModal) {
       window.ModalManager.closeModal('fxgReceiptModal');
@@ -581,47 +487,51 @@
     // Store payload
     window._currentTransferPayload = payload;
 
-    // FIRST: Set the processing state content
+    // Open the modal FIRST using ModalManager
+    if (window.ModalManager && typeof window.ModalManager.openModal === 'function') {
+      // Close any other modals first (except receipt)
+      const openModals = window.ModalManager.getOpenModals();
+      openModals.forEach(id => {
+        if (id !== 'fxgReceiptModal' && id !== 'fxg-transfer-receipt-modal') {
+          window.ModalManager.closeModal(id);
+        }
+      });
+      
+      window.ModalManager.openModal('fxgReceiptModal');
+    } else {
+      // Fallback if ModalManager unavailable
+      modal.classList.remove('hidden');
+      modal.style.display = 'flex';
+      modal.setAttribute('aria-hidden', 'false');
+      document.body.classList.add('modal-open');
+    }
+
+    // THEN: Set the processing state content (after modal is open)
     requestAnimationFrame(() => {
       const icon = document.getElementById('receipt-icon');
       if (icon) {
         icon.className = 'receipt-icon processing';
         icon.innerHTML = '<div class="spinner"></div>';
       }
+      
       modal.classList.add('show');
 
       const statusEl = document.getElementById('receipt-status');
       if (statusEl) statusEl.textContent = 'Processing Transfer';
 
       const messageEl = document.getElementById('receipt-message');
-      if (messageEl) messageEl.textContent = 'Please hold on while we process your transfer...';
+      if (messageEl) {
+        messageEl.innerHTML = `
+          Transferring <strong>₦${fmt(payload.amount)}</strong> to <strong>@${payload.recipient}</strong>...<br><br>
+          Please hold on while we process your transfer.
+        `;
+      }
 
       const detailsEl = document.getElementById('receipt-details');
       if (detailsEl) detailsEl.style.display = 'none';
 
       const actionsEl = document.getElementById('receipt-actions');
       if (actionsEl) actionsEl.style.display = 'none';
-
-      // THEN: Open the modal (after content is ready)
-      requestAnimationFrame(() => {
-        if (window.ModalManager && typeof window.ModalManager.openModal === 'function') {
-          // Close any other modals first (except receipt)
-          const openModals = window.ModalManager.getOpenModals();
-          openModals.forEach(id => {
-            if (id !== 'fxgReceiptModal' && id !== 'fxg-transfer-receipt-modal') {
-              window.ModalManager.closeModal(id);
-            }
-          });
-          
-          window.ModalManager.openModal('fxgReceiptModal');
-        } else {
-          // Fallback if ModalManager unavailable
-          modal.classList.remove('hidden');
-          modal.style.display = 'flex';
-          modal.setAttribute('aria-hidden', 'false');
-          document.body.classList.add('modal-open');
-        }
-      });
     });
   }
 
