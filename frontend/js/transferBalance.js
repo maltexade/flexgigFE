@@ -459,6 +459,81 @@
     }
   }
 
+  function showTransferReceipt(isSuccess, payload, balanceOrError, reference) {
+  const modal = document.getElementById(RECEIPT_MODAL_ID);
+  if (!modal) return console.warn('[fxgTransfer] Receipt modal not found');
+
+  const successDiv = document.getElementById('fxg-receipt-success');
+  const failedDiv = document.getElementById('fxg-receipt-failed');
+
+  if (isSuccess) {
+    failedDiv.style.display = 'none';
+    successDiv.style.display = 'block';
+
+    document.getElementById('receipt-recipient').textContent = `@${payload.recipient}`;
+    document.getElementById('receipt-amount').textContent = `₦${fmt(payload.amount)}`;
+    document.getElementById('receipt-new-balance').textContent = `₦${fmt(balanceOrError)}`;
+    document.getElementById('receipt-date').textContent =
+      new Date().toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
+
+    const doneBtn = document.getElementById('receipt-done-btn');
+    doneBtn.onclick = () => {
+      closeReceiptModal();
+      resetTransferForm();
+    };
+  } else {
+    successDiv.style.display = 'none';
+    failedDiv.style.display = 'block';
+
+    document.getElementById('receipt-error-message').textContent =
+      balanceOrError || 'Transfer failed. Please try again.';
+    document.getElementById('receipt-failed-recipient').textContent = `@${payload.recipient}`;
+    document.getElementById('receipt-failed-amount').textContent = `₦${fmt(payload.amount)}`;
+
+    const tryAgainBtn = document.getElementById('receipt-try-again-btn');
+    tryAgainBtn.onclick = () => {
+      closeReceiptModal();
+      openConfirmModal(payload);
+    };
+
+    const closeBtn = document.getElementById('receipt-close-btn');
+    closeBtn.onclick = () => {
+      closeReceiptModal();
+      resetTransferForm();
+    };
+  }
+
+  // 🔥 Let ModalManager handle lifecycle, stacking, scroll lock, focus
+  if (window.ModalManager?.openModal) {
+    window.ModalManager.openModal('fxgReceiptModal');
+  } else {
+    console.warn('[fxgTransfer] ModalManager not available for receipt');
+  }
+}
+
+
+function closeReceiptModal() {
+  if (window.ModalManager?.closeModal) {
+    window.ModalManager.closeModal('fxgReceiptModal');
+  } else {
+    console.warn('[fxgTransfer] ModalManager.closeModal not available for receipt');
+  }
+}
+
+
+  function resetTransferForm() {
+    const els = resolveEls();
+    if (els.usernameEl) els.usernameEl.value = '';
+    if (els.amountEl) els.amountEl.value = '';
+    if (els.continueBtn) {
+      const text = els.continueBtn.querySelector('.fxg-btn-text') || els.continueBtn;
+      text.textContent = 'Continue';
+      els.continueBtn.disabled = true;
+    }
+    if (els.successEl) els.successEl.hidden = true;
+    closeModal();  // Close main transfer modal
+  }
+
   // ────────────────────────────────────────────────
   // Receipt modal functions (unchanged)
   // ────────────────────────────────────────────────
