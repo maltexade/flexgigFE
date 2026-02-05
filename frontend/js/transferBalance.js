@@ -279,97 +279,118 @@
   // - expects the modal to return either { pin: '1234' } or { biometricToken: '...' } or boolean (true) for biometric flows
   // - calls POST /api/verify-pin with { pin } (or biometric payload) and Authorization: Bearer <session-token>
   // - expects response { success: true, token } where token is the signed JWT returned by your server
-  async function verifyPinOrBiometric() {
+  // --- PIN verification using checkout modal (wired to your /api/verify-pin) ---
+async function verifyPinOrBiometric() {
   return new Promise((resolve) => {
+    // Set up the callback that the PIN modal will call
     window._checkoutPinResolve = (result) => {
-      try { delete window._checkoutPinResolve; } catch {}
+      try { 
+        delete window._checkoutPinResolve; 
+      } catch {}
+      
+      // Immediately hide the PIN modal
+      if (typeof window.hideCheckoutPinModal === 'function') {
+        window.hideCheckoutPinModal();
+      }
+      
       resolve(result);
     };
 
+    // Show the PIN modal
     if (typeof window.showCheckoutPinModal === 'function') {
-      window.showCheckoutPinModal();
+      // Small delay to ensure smooth transition from confirm modal to PIN modal
+      requestAnimationFrame(() => {
+        window.showCheckoutPinModal();
+      });
     } else {
       console.error('[fxgTransfer] showCheckoutPinModal not available');
-      resolve(null);
+      resolve({ success: false, reason: 'modal_unavailable' });
     }
   }).then((modalResult) => {
+    // modalResult should be { success: true, pinToken: '...' } or { success: true, biometricToken: '...' }
     if (!modalResult || modalResult.success !== true) {
-      return { success: false, reason: 'cancelled' };
+      return { success: false, reason: modalResult?.reason || 'cancelled' };
     }
 
-    // ✅ EXPECT TOKEN DIRECTLY FROM CHECKOUT
-    const pinToken =
-      modalResult.pinToken || modalResult.biometricToken || null;
+    // Extract token from modal result
+    const token = modalResult.pinToken || modalResult.biometricToken || null;
 
-    if (!pinToken) {
-      return { success: false, reason: 'no_pin_token' };
+    if (!token) {
+      console.error('[fxgTransfer] Modal returned success but no token');
+      return { success: false, reason: 'no_token' };
     }
 
     return {
       success: true,
-      token: pinToken
+      token: token
     };
   });
 }
 
 
 
-  // --- Real transfer logic ---
   async function confirmSend(payload) {
-    const wrapper = document.getElementById('fxg-transfer-confirm-modal');
-    const sendBtn = document.getElementById('fxg-transfer-confirm-modal-send');
-    const cancelBtn = wrapper?.querySelector('.fxg-confirm-cancel');
+  const wrapper = document.getElementById('fxg-transfer-confirm-modal');
+  const sendBtn = document.getElementById('fxg-transfer-confirm-modal-send');
+  const cancelBtn = wrapper?.querySelector('.fxg-confirm-cancel');
 
-    if (sendBtn) {
-      sendBtn.disabled = true;
-      sendBtn.textContent = 'Verifying...';
+  if (sendBtn) {
+    sendBtn.disabled = true;
+    sendBtn.textContent = 'Verifying...';
+  }
+  if (cancelBtn) cancelBtn.disabled = true;
+
+  try {
+    // 1. Close confirm modal FIRST (before any async operations)
+    closeConfirmModal();
+    
+    // Small delay to let confirm modal close animation finish
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    // 2. Fetch session JWT
+    const sessionToken = await getSharedJWT();
+    if (!sessionToken) {
+      console.error('[fxgTransfer] Failed to obtain session token');
+      showTransferReceipt(false, payload, 'Authentication token unavailable. Please log in again.');
+      return;
     }
-    if (cancelBtn) cancelBtn.disabled = true;
 
-    try {
-      // 1. Close confirm modal (UI)
-      closeConfirmModal();
+    // 3. Prompt for PIN/biometric and verify server-side
+    // This will show the PIN modal immediately
+    const verification = await verifyPinOrBiometric();
+    
+    if (!verification || !verification.success) {
+      console.log('[fxgTransfer] PIN verification failed or cancelled:', verification?.reason || verification);
+      showTransferReceipt(false, payload, 'Transfer cancelled during verification');
+      return;
+    }
 
-      // 2. Fetch session JWT first (authenticate verify-pin call)
-      const sessionToken = await getSharedJWT();
-      if (!sessionToken) {
-        console.error('[fxgTransfer] Failed to obtain session token');
-        throw new Error('Authentication token unavailable. Please log in again.');
-      }
+    const pinVerifiedToken = verification.token;
+    if (!pinVerifiedToken) {
+      console.error('[fxgTransfer] verify-pin returned no token');
+      showTransferReceipt(false, payload, 'Verification failed (no token)');
+      return;
+    }
 
-      // 3. Prompt for PIN/biometric and verify server-side
-      const verification = await verifyPinOrBiometric();
-      if (!verification || !verification.success) {
-        console.log('[fxgTransfer] PIN verification failed or cancelled:', verification?.reason || verification);
-        showTransferReceipt(false, payload, 'Transfer cancelled during verification');
-        return;
-      }
+    // 4. Show processing receipt (PIN modal is already closed at this point)
+    showProcessingReceipt(payload);
 
-      const pinVerifiedToken = verification.token;
-      if (!pinVerifiedToken) {
-        console.error('[fxgTransfer] verify-pin returned no token');
-        showTransferReceipt(false, payload, 'Verification failed (no token)');
-        return;
-      }
+    // 5. Make the transfer API call WITH the pin-verified JWT as Authorization
+    const res = await fetch(`${API_BASE}/api/wallet/transfer`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${sessionToken}`,
+        'X-PIN-TOKEN': pinVerifiedToken
+      },
+      body: JSON.stringify({
+        recipient: payload.recipient,
+        amount: payload.amount
+      }),
+      credentials: 'include'
+    });
 
-      // 4. Show processing receipt
-      showProcessingReceipt(payload);
 
-      // 5. Make the transfer API call WITH the pin-verified JWT as Authorization
-      //    Note: your current transfer handler decodes Authorization token and derives sender UID
-      const res = await fetch(`${API_BASE}/api/wallet/transfer`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${sessionToken}`,      // ✅ Session token for authentication
-            'X-PIN-TOKEN': pinVerifiedToken                 // ✅ PIN token for authorization
-        },
-        body: JSON.stringify({
-          recipient: payload.recipient,
-          amount: payload.amount
-        }),
-        credentials: 'include'
-      });
 
       // 6. Safe response handling
       let data = null;
@@ -564,23 +585,15 @@ function closeReceiptModal() {
   // ────────────────────────────────────────────────
   function showProcessingReceipt(payload) {
   const modal = document.getElementById(RECEIPT_MODAL_ID);
-  if (!modal) return console.error('[fxgTransfer] Receipt modal not found');
+  if (!modal) {
+    console.error('[fxgTransfer] Receipt modal not found in DOM');
+    return;
+  }
 
   // Store payload
   window._currentTransferPayload = payload;
 
-  // Use ModalManager for opening (it will handle display, aria, etc.)
-  if (window.ModalManager && typeof window.ModalManager.openModal === 'function') {
-    ModalManager.openModal('fxgReceiptModal');
-  } else {
-    // Fallback if ModalManager unavailable
-    modal.classList.remove('hidden');
-    modal.style.display = 'flex';
-    modal.setAttribute('aria-hidden', 'false');
-    document.body.classList.add('modal-open');
-  }
-
-  // Reset to processing state AFTER opening
+  // FIRST: Set the processing state content
   requestAnimationFrame(() => {
     const icon = document.getElementById('receipt-icon');
     if (icon) {
@@ -599,6 +612,27 @@ function closeReceiptModal() {
 
     const actionsEl = document.getElementById('receipt-actions');
     if (actionsEl) actionsEl.style.display = 'none';
+
+    // THEN: Open the modal (after content is ready)
+    requestAnimationFrame(() => {
+      if (window.ModalManager && typeof window.ModalManager.openModal === 'function') {
+        // Close any other modals first (except receipt)
+        const openModals = window.ModalManager.getOpenModals();
+        openModals.forEach(id => {
+          if (id !== 'fxgReceiptModal' && id !== 'fxg-transfer-receipt-modal') {
+            window.ModalManager.closeModal(id);
+          }
+        });
+        
+        window.ModalManager.openModal('fxgReceiptModal');
+      } else {
+        // Fallback if ModalManager unavailable
+        modal.classList.remove('hidden');
+        modal.style.display = 'flex';
+        modal.setAttribute('aria-hidden', 'false');
+        document.body.classList.add('modal-open');
+      }
+    });
   });
 }
 
