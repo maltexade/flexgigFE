@@ -535,6 +535,11 @@
     });
   }
 
+  window.fxgTransfer_updateReceiptToSuccess = fxgTransfer_updateReceiptToSuccess;
+  window.fxgTransfer_updateReceiptToFailed = fxgTransfer_updateReceiptToFailed;
+  window.fxgTransfer_updateReceiptToInsufficient = fxgTransfer_updateReceiptToInsufficient;
+  window.fxgTransfer_showProcessingReceipt = fxgTransfer_showProcessingReceipt;
+
   function fxgTransfer_updateReceiptToSuccess(payload, newBalance, reference) {
     const icon = document.getElementById('receipt-icon');
     if (icon) {
