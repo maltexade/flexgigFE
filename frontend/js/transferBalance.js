@@ -600,6 +600,7 @@ function closeReceiptModal() {
       icon.className = 'receipt-icon processing';
       icon.innerHTML = '<div class="spinner"></div>';
     }
+    modal.classList.add('show');
 
     const statusEl = document.getElementById('receipt-status');
     if (statusEl) statusEl.textContent = 'Processing Transfer';
