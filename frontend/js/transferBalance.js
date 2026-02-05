@@ -16,7 +16,7 @@
   function $(id) { return document.getElementById(id); }
 
   // resolve elements lazily
-  function resolveEls() {
+  function fxgTransfer_resolveElements() {
     const modalEl = $(DOM_MODAL_ID);
     return {
       modal: modalEl,
@@ -38,10 +38,10 @@
   let BALANCE = 0;
 
   // --- Balance init & sync ---
-  function initBalanceFromSources() {
+  function fxgTransfer_initBalanceFromSources() {
     if (typeof window.currentDisplayedBalance === 'number' && !Number.isNaN(window.currentDisplayedBalance)) {
       BALANCE = Number(window.currentDisplayedBalance);
-      persistFxgBalance(BALANCE);
+      fxgTransfer_persistBalance(BALANCE);
       return;
     }
     try {
@@ -50,7 +50,7 @@
         const parsed = JSON.parse(userData);
         if (parsed && typeof parsed.wallet_balance !== 'undefined') {
           BALANCE = Number(parsed.wallet_balance) || 0;
-          persistFxgBalance(BALANCE);
+          fxgTransfer_persistBalance(BALANCE);
           return;
         }
       }
@@ -65,21 +65,21 @@
     BALANCE = 0;
   }
 
-  function persistFxgBalance(n) {
+  function fxgTransfer_persistBalance(n) {
     try { localStorage.setItem(FXG_STORAGE_KEY, String(Number(n) || 0)); } catch (e) {}
   }
 
-  function updateLocalBalance(n) {
+  function fxgTransfer_updateLocalBalance(n) {
     n = Number(n) || 0;
     BALANCE = n;
-    persistFxgBalance(n);
-    const els = resolveEls();
+    fxgTransfer_persistBalance(n);
+    const els = fxgTransfer_resolveElements();
     if (els.balanceEl) {
       els.balanceEl.textContent = `Balance: ₦${fmt(BALANCE)}`;
     }
   }
 
-  function patchUpdateAllBalances() {
+  function fxgTransfer_patchUpdateAllBalances() {
     try {
       if (!window.updateAllBalances || window.__fxg_updateAllBalances_patched) return;
       const original = window.updateAllBalances;
@@ -87,9 +87,9 @@
         try {
           const res = original.apply(this, arguments);
           if (typeof newBalance !== 'undefined' && newBalance !== null) {
-            updateLocalBalance(Number(newBalance) || 0);
+            fxgTransfer_updateLocalBalance(Number(newBalance) || 0);
           } else if (typeof window.currentDisplayedBalance === 'number') {
-            updateLocalBalance(window.currentDisplayedBalance);
+            fxgTransfer_updateLocalBalance(window.currentDisplayedBalance);
           }
           return res;
         } catch (e) {
@@ -103,41 +103,41 @@
     }
   }
 
-  function bindBalanceUpdateEvent() {
-    if (bindBalanceUpdateEvent._bound) return;
+  function fxgTransfer_bindBalanceUpdateEvent() {
+    if (fxgTransfer_bindBalanceUpdateEvent._bound) return;
     window.addEventListener('balance_update', (ev) => {
       try {
         if (ev?.detail?.balance !== undefined) {
-          updateLocalBalance(Number(ev.detail.balance) || 0);
+          fxgTransfer_updateLocalBalance(Number(ev.detail.balance) || 0);
         }
       } catch (e) {}
     });
-    bindBalanceUpdateEvent._bound = true;
+    fxgTransfer_bindBalanceUpdateEvent._bound = true;
   }
 
-  function bindStorageEvents() {
-    if (bindStorageEvents._bound) return;
+  function fxgTransfer_bindStorageEvents() {
+    if (fxgTransfer_bindStorageEvents._bound) return;
     window.addEventListener('storage', (ev) => {
       if (!ev || ev.key !== 'userData' || !ev.newValue) return;
       try {
         const parsed = JSON.parse(ev.newValue);
         if (parsed?.wallet_balance !== undefined) {
-          updateLocalBalance(Number(parsed.wallet_balance) || 0);
+          fxgTransfer_updateLocalBalance(Number(parsed.wallet_balance) || 0);
         }
       } catch (e) {}
     });
-    bindStorageEvents._bound = true;
+    fxgTransfer_bindStorageEvents._bound = true;
   }
 
-  function refreshOnModalOpen() {
-    initBalanceFromSources();
-    const els = resolveEls();
+  function fxgTransfer_refreshOnModalOpen() {
+    fxgTransfer_initBalanceFromSources();
+    const els = fxgTransfer_resolveElements();
     if (els.balanceEl) els.balanceEl.textContent = `Balance: ₦${fmt(BALANCE)}`;
   }
 
   // --- Modal open/close using ModalManager ---
-  function openModal() {
-    refreshOnModalOpen();
+  function fxgTransfer_openModal() {
+    fxgTransfer_refreshOnModalOpen();
     if (window.ModalManager && typeof window.ModalManager.openModal === 'function') {
       // Clean any stale state first
       if (ModalManager.getOpenModals().includes(MM_MODAL_ID)) {
@@ -149,7 +149,7 @@
     } else {
       // Fallback
       console.warn('[fxgTransfer] ModalManager not found — using basic fallback open');
-      const els = resolveEls();
+      const els = fxgTransfer_resolveElements();
       if (els.modal) {
         els.modal.classList.remove('hidden');
         els.modal.style.display = 'flex';
@@ -159,13 +159,13 @@
     }
   }
 
-  function closeModal() {
+  function fxgTransfer_closeModal() {
     if (window.ModalManager && typeof window.ModalManager.forceCloseModal === 'function') {
       window.ModalManager.forceCloseModal(MM_MODAL_ID);
     } else {
       // Fallback
       console.warn('[fxgTransfer] ModalManager not found — using basic fallback close');
-      const els = resolveEls();
+      const els = fxgTransfer_resolveElements();
       if (els.modal) {
         els.modal.setAttribute('aria-hidden', 'true');
         els.modal.classList.remove('active');
@@ -178,7 +178,7 @@
   // ────────────────────────────────────────────────
   // Confirm modal functions
   // ────────────────────────────────────────────────
-  function openConfirmModal(payload) {
+  function fxgTransfer_openConfirmModal(payload) {
     const amountEl = document.getElementById('fxg-transfer-confirm-modal-amount');
     const recipientEl = document.getElementById('fxg-transfer-confirm-modal-recipient');
     if (amountEl) amountEl.textContent = `₦${fmt(payload.amount)}`;
@@ -198,12 +198,12 @@
     // Bind send button
     const sendBtn = document.getElementById('fxg-transfer-confirm-modal-send');
     if (sendBtn && !sendBtn._fxg_confirm_bound) {
-      sendBtn.addEventListener('click', () => confirmSend(payload));
+      sendBtn.addEventListener('click', () => fxgTransfer_confirmSend(payload));
       sendBtn._fxg_confirm_bound = true;
     }
   }
 
-  function closeConfirmModal() {
+  function fxgTransfer_closeConfirmModal() {
     if (window.ModalManager && typeof window.ModalManager.forceCloseModal === 'function') {
       window.ModalManager.forceCloseModal('fxg-transfer-confirm-modal');
     } else {
@@ -217,7 +217,7 @@
   }
 
   // Bind close events for confirm modal
-  function bindConfirmModalEvents() {
+  function fxgTransfer_bindConfirmModalEvents() {
     const wrapper = document.getElementById('fxg-transfer-confirm-modal');
     if (!wrapper || wrapper.dataset.eventsBound) return;
 
@@ -227,7 +227,7 @@
 
     const handler = (e) => {
       e.preventDefault();
-      closeConfirmModal();
+      fxgTransfer_closeConfirmModal();
     };
 
     [backdrop, closeBtn, cancelBtn].forEach(el => {
@@ -236,7 +236,7 @@
 
     wrapper.addEventListener('keydown', e => {
       if (e.key === 'Escape') {
-        closeConfirmModal();
+        fxgTransfer_closeConfirmModal();
       }
     });
 
@@ -244,7 +244,7 @@
   }
 
   // --- GET shared JWT (session token) ---
-  async function getSharedJWT() {
+  async function fxgTransfer_getSharedJWT() {
     // Attempts to fetch session token from /api/session (based on your console test).
     // Returns token string or null.
     try {
@@ -274,117 +274,113 @@
   }
 
   // --- PIN verification using checkout modal (wired to your /api/verify-pin) ---
-  // Behaviour:
-  // - opens checkout UI (window.showCheckoutPinModal) and awaits window._checkoutPinResolve
-  // - expects the modal to return either { pin: '1234' } or { biometricToken: '...' } or boolean (true) for biometric flows
-  // - calls POST /api/verify-pin with { pin } (or biometric payload) and Authorization: Bearer <session-token>
-  // - expects response { success: true, token } where token is the signed JWT returned by your server
-  // --- PIN verification using checkout modal (wired to your /api/verify-pin) ---
-async function verifyPinOrBiometric() {
-  return new Promise((resolve) => {
-    // Set up the callback that the PIN modal will call
-    window._checkoutPinResolve = (result) => {
-      try { 
-        delete window._checkoutPinResolve; 
-      } catch {}
-      
-      // Immediately hide the PIN modal
-      if (typeof window.hideCheckoutPinModal === 'function') {
-        window.hideCheckoutPinModal();
+  async function fxgTransfer_verifyPinOrBiometric() {
+    return new Promise((resolve) => {
+      // Set up the callback that the PIN modal will call
+      window._checkoutPinResolve = (result) => {
+        try { 
+          delete window._checkoutPinResolve; 
+        } catch {}
+        
+        // Immediately hide the PIN modal
+        if (typeof window.hideCheckoutPinModal === 'function') {
+          window.hideCheckoutPinModal();
+        }
+        
+        resolve(result);
+      };
+
+      // Show the PIN modal
+      if (typeof window.showCheckoutPinModal === 'function') {
+        // Small delay to ensure smooth transition from confirm modal to PIN modal
+        requestAnimationFrame(() => {
+          window.showCheckoutPinModal();
+        });
+      } else {
+        console.error('[fxgTransfer] showCheckoutPinModal not available');
+        resolve({ success: false, reason: 'modal_unavailable' });
       }
-      
-      resolve(result);
-    };
+    }).then((modalResult) => {
+      // modalResult should be { success: true, pinToken: '...' } or { success: true, biometricToken: '...' }
+      if (!modalResult || modalResult.success !== true) {
+        return { success: false, reason: modalResult?.reason || 'cancelled' };
+      }
 
-    // Show the PIN modal
-    if (typeof window.showCheckoutPinModal === 'function') {
-      window.showCheckoutPinModal();
-    } else {
-      console.error('[fxgTransfer] showCheckoutPinModal not available');
-      resolve({ success: false, reason: 'modal_unavailable' });
-    }
-  }).then((modalResult) => {
-    // modalResult should be { success: true, pinToken: '...' } or { success: true, biometricToken: '...' }
-    if (!modalResult || modalResult.success !== true) {
-      return { success: false, reason: modalResult?.reason || 'cancelled' };
-    }
+      // Extract token from modal result
+      const token = modalResult.pinToken || modalResult.biometricToken || null;
 
-    // Extract token from modal result
-    const token = modalResult.pinToken || modalResult.biometricToken || null;
+      if (!token) {
+        console.error('[fxgTransfer] Modal returned success but no token');
+        return { success: false, reason: 'no_token' };
+      }
 
-    if (!token) {
-      console.error('[fxgTransfer] Modal returned success but no token');
-      return { success: false, reason: 'no_token' };
-    }
-
-    return {
-      success: true,
-      token: token
-    };
-  });
-}
-
-
-
-  async function confirmSend(payload) {
-  const wrapper = document.getElementById('fxg-transfer-confirm-modal');
-  const sendBtn = document.getElementById('fxg-transfer-confirm-modal-send');
-  const cancelBtn = wrapper?.querySelector('.fxg-confirm-cancel');
-
-  if (sendBtn) {
-    sendBtn.disabled = true;
-    sendBtn.textContent = 'Verifying...';
-  }
-  if (cancelBtn) cancelBtn.disabled = true;
-
-  try {
-    // 1. Close confirm modal FIRST (before any async operations)
-    closeConfirmModal();
-    
-    // 2. Fetch session JWT
-    const sessionToken = await getSharedJWT();
-    if (!sessionToken) {
-      console.error('[fxgTransfer] Failed to obtain session token');
-      showFailedReceipt(payload, 'Authentication token unavailable. Please log in again.');
-      return;
-    }
-
-    // 3. Prompt for PIN/biometric and verify server-side
-    // This will show the PIN modal immediately
-    const verification = await verifyPinOrBiometric();
-    
-    if (!verification || !verification.success) {
-      console.log('[fxgTransfer] PIN verification failed or cancelled:', verification?.reason || verification);
-      showFailedReceipt(payload, 'Transfer cancelled during verification');
-      return;
-    }
-
-    const pinVerifiedToken = verification.token;
-    if (!pinVerifiedToken) {
-      console.error('[fxgTransfer] verify-pin returned no token');
-      showFailedReceipt(payload, 'Verification failed (no token)');
-      return;
-    }
-
-    // 4. Show processing receipt (PIN modal is already closed at this point)
-    showProcessingReceipt(payload);
-
-    // 5. Make the transfer API call WITH the pin-verified JWT as Authorization
-    const res = await fetch(`${API_BASE}/api/wallet/transfer`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${sessionToken}`,
-        'X-PIN-TOKEN': pinVerifiedToken
-      },
-      body: JSON.stringify({
-        recipient: payload.recipient,
-        amount: payload.amount
-      }),
-      credentials: 'include'
+      return {
+        success: true,
+        token: token
+      };
     });
+  }
 
+  async function fxgTransfer_confirmSend(payload) {
+    const wrapper = document.getElementById('fxg-transfer-confirm-modal');
+    const sendBtn = document.getElementById('fxg-transfer-confirm-modal-send');
+    const cancelBtn = wrapper?.querySelector('.fxg-confirm-cancel');
 
+    if (sendBtn) {
+      sendBtn.disabled = true;
+      sendBtn.textContent = 'Verifying...';
+    }
+    if (cancelBtn) cancelBtn.disabled = true;
+
+    try {
+      // 1. Close confirm modal FIRST (before any async operations)
+      fxgTransfer_closeConfirmModal();
+      
+      // Small delay to let confirm modal close animation finish
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // 2. Fetch session JWT
+      const sessionToken = await fxgTransfer_getSharedJWT();
+      if (!sessionToken) {
+        console.error('[fxgTransfer] Failed to obtain session token');
+        fxgTransfer_showTransferReceipt(false, payload, 'Authentication token unavailable. Please log in again.');
+        return;
+      }
+
+      // 3. Prompt for PIN/biometric and verify server-side
+      // This will show the PIN modal immediately
+      const verification = await fxgTransfer_verifyPinOrBiometric();
+      
+      if (!verification || !verification.success) {
+        console.log('[fxgTransfer] PIN verification failed or cancelled:', verification?.reason || verification);
+        fxgTransfer_showTransferReceipt(false, payload, 'Transfer cancelled during verification');
+        return;
+      }
+
+      const pinVerifiedToken = verification.token;
+      if (!pinVerifiedToken) {
+        console.error('[fxgTransfer] verify-pin returned no token');
+        fxgTransfer_showTransferReceipt(false, payload, 'Verification failed (no token)');
+        return;
+      }
+
+      // 4. Show processing receipt (PIN modal is already closed at this point)
+      fxgTransfer_showProcessingReceipt(payload);
+
+      // 5. Make the transfer API call
+      const res = await fetch(`${API_BASE}/api/wallet/transfer`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${sessionToken}`,
+          'X-PIN-TOKEN': pinVerifiedToken
+        },
+        body: JSON.stringify({
+          recipient: payload.recipient,
+          amount: payload.amount
+        }),
+        credentials: 'include'
+      });
 
       // 6. Safe response handling
       let data = null;
@@ -409,7 +405,7 @@ async function verifyPinOrBiometric() {
 
         if (errorMsg?.toLowerCase().includes('insufficient') ||
             data?.code === 'INSUFFICIENT_BALANCE') {
-          updateReceiptToInsufficient('Insufficient balance for this transfer.', BALANCE);
+          fxgTransfer_updateReceiptToInsufficient('Insufficient balance for this transfer.', BALANCE);
         } else {
           throw new Error(errorMsg || 'Transfer failed');
         }
@@ -424,18 +420,17 @@ async function verifyPinOrBiometric() {
                         BALANCE;
 
       if (typeof newBalance === 'number' && !isNaN(newBalance)) {
-        updateLocalBalance(newBalance);
+        fxgTransfer_updateLocalBalance(newBalance);
         if (typeof window.updateAllBalances === 'function') {
           try { window.updateAllBalances(newBalance); } catch (e) {}
         }
       }
 
-      updateReceiptToSuccess(payload, newBalance, data?.reference || data?.transaction_id || 'N/A');
-      resetTransferForm();
+      fxgTransfer_updateReceiptToSuccess(payload, newBalance, data?.reference || data?.transaction_id || 'N/A');
 
     } catch (err) {
       console.error('[fxgTransfer] Transfer failed:', err);
-      updateReceiptToFailed(payload, err.message || 'Transfer failed. Please try again.');
+      fxgTransfer_updateReceiptToFailed(payload, err.message || 'Transfer failed. Please try again.');
     } finally {
       if (sendBtn) {
         sendBtn.disabled = false;
@@ -445,8 +440,123 @@ async function verifyPinOrBiometric() {
     }
   }
 
-  function resetTransferForm() {
-    const els = resolveEls();
+  function fxgTransfer_showTransferReceipt(isSuccess, payload, balanceOrError, reference) {
+    const modal = document.getElementById(RECEIPT_MODAL_ID);
+    if (!modal) {
+      console.error('[fxgTransfer] Receipt modal not found in DOM');
+      return;
+    }
+
+    const successDiv = document.getElementById('fxg-receipt-success');
+    const failedDiv = document.getElementById('fxg-receipt-failed');
+
+    if (!successDiv || !failedDiv) {
+      console.error('[fxgTransfer] Receipt content divs not found');
+      return;
+    }
+
+    if (isSuccess) {
+      // Hide failed, show success
+      failedDiv.style.display = 'none';
+      successDiv.style.display = 'block';
+
+      // Populate success content
+      const recipientEl = document.getElementById('receipt-recipient');
+      if (recipientEl) recipientEl.textContent = `@${payload.recipient}`;
+
+      const amountEl = document.getElementById('receipt-amount');
+      if (amountEl) amountEl.textContent = `₦${fmt(payload.amount)}`;
+
+      const balanceEl = document.getElementById('receipt-new-balance');
+      if (balanceEl) balanceEl.textContent = `₦${fmt(balanceOrError)}`;
+
+      const dateEl = document.getElementById('receipt-date');
+      if (dateEl) {
+        dateEl.textContent = new Date().toLocaleString('en-NG', { 
+          dateStyle: 'medium', 
+          timeStyle: 'short' 
+        });
+      }
+
+      const refEl = document.getElementById('receipt-transaction-id');
+      if (refEl) refEl.textContent = reference || 'N/A';
+
+      // Setup done button
+      const doneBtn = document.getElementById('receipt-done-btn');
+      if (doneBtn) {
+        doneBtn.onclick = () => {
+          fxgTransfer_closeReceiptModal();
+          fxgTransfer_resetTransferForm();
+        };
+      }
+    } else {
+      // Hide success, show failed
+      successDiv.style.display = 'none';
+      failedDiv.style.display = 'block';
+
+      // Populate failed content
+      const errorMsgEl = document.getElementById('receipt-error-message');
+      if (errorMsgEl) {
+        errorMsgEl.textContent = balanceOrError || 'Transfer failed. Please try again.';
+      }
+
+      const failedRecipientEl = document.getElementById('receipt-failed-recipient');
+      if (failedRecipientEl) failedRecipientEl.textContent = `@${payload.recipient}`;
+
+      const failedAmountEl = document.getElementById('receipt-failed-amount');
+      if (failedAmountEl) failedAmountEl.textContent = `₦${fmt(payload.amount)}`;
+
+      // Setup try again button
+      const tryAgainBtn = document.getElementById('receipt-try-again-btn');
+      if (tryAgainBtn) {
+        tryAgainBtn.onclick = () => {
+          fxgTransfer_closeReceiptModal();
+          fxgTransfer_openConfirmModal(payload);
+        };
+      }
+
+      // Setup close button
+      const closeBtn = document.getElementById('receipt-close-btn');
+      if (closeBtn) {
+        closeBtn.onclick = () => {
+          fxgTransfer_closeReceiptModal();
+          fxgTransfer_resetTransferForm();
+        };
+      }
+    }
+
+    // Use ModalManager to ensure proper display
+    if (window.ModalManager?.openModal) {
+      // Close any other modals first (except receipt)
+      const openModals = window.ModalManager.getOpenModals();
+      openModals.forEach(id => {
+        if (id !== 'fxgReceiptModal') {
+          window.ModalManager.closeModal(id);
+        }
+      });
+      
+      // Open receipt modal
+      window.ModalManager.openModal('fxgReceiptModal');
+    } else {
+      console.warn('[fxgTransfer] ModalManager not available for receipt');
+      // Fallback direct manipulation
+      modal.classList.remove('hidden');
+      modal.style.display = 'flex';
+      modal.setAttribute('aria-hidden', 'false');
+      document.body.classList.add('modal-open');
+    }
+  }
+
+  function fxgTransfer_closeReceiptModal() {
+    if (window.ModalManager?.closeModal) {
+      window.ModalManager.closeModal('fxgReceiptModal');
+    } else {
+      console.warn('[fxgTransfer] ModalManager.closeModal not available for receipt');
+    }
+  }
+
+  function fxgTransfer_resetTransferForm() {
+    const els = fxgTransfer_resolveElements();
     if (els.usernameEl) els.usernameEl.value = '';
     if (els.amountEl) els.amountEl.value = '';
     if (els.continueBtn) {
@@ -455,74 +565,67 @@ async function verifyPinOrBiometric() {
       els.continueBtn.disabled = true;
     }
     if (els.successEl) els.successEl.hidden = true;
-    closeModal();  // Close main transfer modal
+    fxgTransfer_closeModal();  // Close main transfer modal
   }
 
   // ────────────────────────────────────────────────
-  // Receipt modal functions (unchanged)
+  // Receipt modal functions
   // ────────────────────────────────────────────────
-  function showProcessingReceipt(payload) {
-  const modal = document.getElementById(RECEIPT_MODAL_ID);
-  if (!modal) {
-    console.error('[fxgTransfer] Receipt modal not found in DOM');
-    return;
-  }
-
-  // Store payload
-  window._currentTransferPayload = payload;
-
-  // FIRST: Set the processing state content
-  requestAnimationFrame(() => {
-    const icon = document.getElementById('receipt-icon');
-    if (icon) {
-      icon.className = 'receipt-icon processing';
-      icon.innerHTML = '<div class="spinner"></div>';
+  function fxgTransfer_showProcessingReceipt(payload) {
+    const modal = document.getElementById(RECEIPT_MODAL_ID);
+    if (!modal) {
+      console.error('[fxgTransfer] Receipt modal not found in DOM');
+      return;
     }
-    modal.classList.add('show');
 
-    const statusEl = document.getElementById('receipt-status');
-    if (statusEl) statusEl.textContent = 'Processing Transfer';
+    // Store payload
+    window._currentTransferPayload = payload;
 
-    const messageEl = document.getElementById('receipt-message');
-    if (messageEl) messageEl.textContent = 'Please hold on while we process your transfer...';
-
-    const detailsEl = document.getElementById('receipt-details');
-    if (detailsEl) detailsEl.style.display = 'none';
-
-    const actionsEl = document.getElementById('receipt-actions');
-    if (actionsEl) actionsEl.style.display = 'none';
-
-    // THEN: Open the modal (after content is ready)
+    // FIRST: Set the processing state content
     requestAnimationFrame(() => {
-      if (window.ModalManager && typeof window.ModalManager.openModal === 'function') {
-        // Close any other modals first (except receipt)
-        const openModals = window.ModalManager.getOpenModals();
-        openModals.forEach(id => {
-          if (id !== 'fxgReceiptModal' && id !== 'fxg-transfer-receipt-modal') {
-            window.ModalManager.closeModal(id);
-          }
-        });
-        
-        window.ModalManager.openModal('fxgReceiptModal');
-      } else {
-        // Fallback if ModalManager unavailable
-        modal.classList.remove('hidden');
-        modal.style.display = 'flex';
-        modal.setAttribute('aria-hidden', 'false');
-        document.body.classList.add('modal-open');
+      const icon = document.getElementById('receipt-icon');
+      if (icon) {
+        icon.className = 'receipt-icon processing';
+        icon.innerHTML = '<div class="spinner"></div>';
       }
-    });
-  });
-}
+      modal.classList.add('show');
 
-  function showFailedReceipt(payload, errorMessage) {
-    showProcessingReceipt(payload);
-    requestAnimationFrame(() => {
-      updateReceiptToFailed(payload, errorMessage);
+      const statusEl = document.getElementById('receipt-status');
+      if (statusEl) statusEl.textContent = 'Processing Transfer';
+
+      const messageEl = document.getElementById('receipt-message');
+      if (messageEl) messageEl.textContent = 'Please hold on while we process your transfer...';
+
+      const detailsEl = document.getElementById('receipt-details');
+      if (detailsEl) detailsEl.style.display = 'none';
+
+      const actionsEl = document.getElementById('receipt-actions');
+      if (actionsEl) actionsEl.style.display = 'none';
+
+      // THEN: Open the modal (after content is ready)
+      requestAnimationFrame(() => {
+        if (window.ModalManager && typeof window.ModalManager.openModal === 'function') {
+          // Close any other modals first (except receipt)
+          const openModals = window.ModalManager.getOpenModals();
+          openModals.forEach(id => {
+            if (id !== 'fxgReceiptModal' && id !== 'fxg-transfer-receipt-modal') {
+              window.ModalManager.closeModal(id);
+            }
+          });
+          
+          window.ModalManager.openModal('fxgReceiptModal');
+        } else {
+          // Fallback if ModalManager unavailable
+          modal.classList.remove('hidden');
+          modal.style.display = 'flex';
+          modal.setAttribute('aria-hidden', 'false');
+          document.body.classList.add('modal-open');
+        }
+      });
     });
   }
 
-  function updateReceiptToSuccess(payload, newBalance, reference) {
+  function fxgTransfer_updateReceiptToSuccess(payload, newBalance, reference) {
     const icon = document.getElementById('receipt-icon');
     if (icon) {
       icon.className = 'receipt-icon success';
@@ -568,12 +671,13 @@ async function verifyPinOrBiometric() {
         </button>
       `;
       document.getElementById('receipt-done')?.addEventListener('click', () => {
-        closeReceiptModal();
+        fxgTransfer_closeReceiptModal();
+        fxgTransfer_resetTransferForm();
       });
     }
   }
 
-  function updateReceiptToFailed(payload, errorMessage) {
+  function fxgTransfer_updateReceiptToFailed(payload, errorMessage) {
     const icon = document.getElementById('receipt-icon');
     if (icon) {
       icon.className = 'receipt-icon failed';
@@ -607,16 +711,17 @@ async function verifyPinOrBiometric() {
         </button>
       `;
       document.getElementById('receipt-try-again')?.addEventListener('click', () => {
-        closeReceiptModal();
-        openConfirmModal(payload);
+        fxgTransfer_closeReceiptModal();
+        fxgTransfer_openConfirmModal(payload);
       });
       document.getElementById('receipt-done')?.addEventListener('click', () => {
-        closeReceiptModal();
+        fxgTransfer_closeReceiptModal();
+        fxgTransfer_resetTransferForm();
       });
     }
   }
 
-  function updateReceiptToInsufficient(message, currentBalance) {
+  function fxgTransfer_updateReceiptToInsufficient(message, currentBalance) {
     const icon = document.getElementById('receipt-icon');
     if (icon) {
       icon.className = 'receipt-icon failed';
@@ -656,32 +761,20 @@ async function verifyPinOrBiometric() {
         </button>
       `;
       document.getElementById('receipt-fund-wallet')?.addEventListener('click', () => {
-        closeReceiptModal();
+        fxgTransfer_closeReceiptModal();
         if (window.ModalManager?.openModal) {
           window.ModalManager.openModal('addMoneyModal');
         }
       });
       document.getElementById('receipt-done')?.addEventListener('click', () => {
-        closeReceiptModal();
+        fxgTransfer_closeReceiptModal();
+        fxgTransfer_resetTransferForm();
       });
     }
   }
 
-  function closeReceiptModal() {
-    if (window.ModalManager && typeof window.ModalManager.forceCloseModal === 'function') {
-      window.ModalManager.forceCloseModal('fxgReceiptModal');
-    } else {
-      const backdrop = document.getElementById(RECEIPT_MODAL_ID);
-      if (backdrop) {
-        backdrop.classList.add('hidden');
-        backdrop.setAttribute('aria-hidden', 'true');
-        document.body.classList.remove('modal-open');
-      }
-    }
-  }
-
   // Bind close events for receipt modal
-  function bindReceiptModalEvents() {
+  function fxgTransfer_bindReceiptModalEvents() {
     const wrapper = document.getElementById(RECEIPT_MODAL_ID);
     if (!wrapper || wrapper.dataset.eventsBound) return;
 
@@ -690,14 +783,14 @@ async function verifyPinOrBiometric() {
     if (backdrop) {
       backdrop.addEventListener('click', (e) => {
         if (e.target === backdrop) {
-          closeReceiptModal();
+          fxgTransfer_closeReceiptModal();
         }
       });
     }
 
     wrapper.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
-        closeReceiptModal();
+        fxgTransfer_closeReceiptModal();
       }
     });
 
@@ -705,8 +798,8 @@ async function verifyPinOrBiometric() {
   }
 
   // --- Main UI init ---
-  function initUI() {
-    const els = resolveEls();
+  function fxgTransfer_initUI() {
+    const els = fxgTransfer_resolveElements();
     if (!els.modal) {
       console.warn('[fxgTransfer] Transfer modal element not found');
       return;
@@ -716,7 +809,7 @@ async function verifyPinOrBiometric() {
     if (els.trigger && !els.trigger._fxg_bound) {
       els.trigger.addEventListener('click', e => {
         e.preventDefault();
-        openModal();
+        fxgTransfer_openModal();
       });
       els.trigger._fxg_bound = true;
     }
@@ -725,20 +818,20 @@ async function verifyPinOrBiometric() {
     if (els.closeBtn && !els.closeBtn._fxg_bound) {
       els.closeBtn.addEventListener('click', e => {
         e.preventDefault();
-        closeModal();
+        fxgTransfer_closeModal();
       });
       els.closeBtn._fxg_bound = true;
     }
 
     if (els.backdrop && !els.backdrop._fxg_bound) {
       els.backdrop.addEventListener('click', e => {
-        if (e.target === els.backdrop) closeModal();
+        if (e.target === els.backdrop) fxgTransfer_closeModal();
       });
       els.backdrop._fxg_bound = true;
     }
 
     // Validation
-    function validate() {
+    function fxgTransfer_validate() {
       if (!els.usernameEl || !els.amountEl || !els.continueBtn) return false;
 
       const username = (els.usernameEl.value || '').trim();
@@ -778,13 +871,13 @@ async function verifyPinOrBiometric() {
           const newPos = cursor + added;
           e.target.setSelectionRange(newPos, newPos);
         }
-        validate();
+        fxgTransfer_validate();
       });
       els.amountEl._fxg_bound = true;
     }
 
     if (els.usernameEl && !els.usernameEl._fxg_bound) {
-      els.usernameEl.addEventListener('input', validate);
+      els.usernameEl.addEventListener('input', fxgTransfer_validate);
       els.usernameEl._fxg_bound = true;
     }
 
@@ -792,7 +885,7 @@ async function verifyPinOrBiometric() {
     if (els.form && !els.form._fxg_bound) {
       els.form.addEventListener('submit', ev => {
         ev.preventDefault();
-        if (!validate()) return;
+        if (!fxgTransfer_validate()) return;
 
         const payload = {
           recipient: (els.usernameEl.value || '').trim(),
@@ -800,7 +893,7 @@ async function verifyPinOrBiometric() {
           timestamp: new Date().toISOString()
         };
 
-        openConfirmModal(payload);
+        fxgTransfer_openConfirmModal(payload);
       });
       els.form._fxg_bound = true;
     }
@@ -808,29 +901,29 @@ async function verifyPinOrBiometric() {
     // Reset on modal open
     window.addEventListener('modalOpened', ev => {
       if (ev?.detail === 'fxgTransferModal') {
-        refreshOnModalOpen();
-        const els = resolveEls();
+        fxgTransfer_refreshOnModalOpen();
+        const els = fxgTransfer_resolveElements();
         if (els.successEl) els.successEl.hidden = true;
-        validate();
+        fxgTransfer_validate();
       }
     });
 
     // Bind events
-    bindConfirmModalEvents();
-    bindReceiptModalEvents();
+    fxgTransfer_bindConfirmModalEvents();
+    fxgTransfer_bindReceiptModalEvents();
   }
 
   // Bootstrap
-  function bootstrap() {
-    initBalanceFromSources();
-    patchUpdateAllBalances();
-    bindBalanceUpdateEvent();
-    bindStorageEvents();
+  function fxgTransfer_bootstrap() {
+    fxgTransfer_initBalanceFromSources();
+    fxgTransfer_patchUpdateAllBalances();
+    fxgTransfer_bindBalanceUpdateEvent();
+    fxgTransfer_bindStorageEvents();
 
     if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', () => setTimeout(initUI, 80));
+      document.addEventListener('DOMContentLoaded', () => setTimeout(fxgTransfer_initUI, 80));
     } else {
-      setTimeout(initUI, 80);
+      setTimeout(fxgTransfer_initUI, 80);
     }
 
     setTimeout(() => {
@@ -839,13 +932,13 @@ async function verifyPinOrBiometric() {
     }, 600);
   }
 
-  bootstrap();
+  fxgTransfer_bootstrap();
 
   // Debug helpers (preserves your console IIFE as a callable function)
   window.fxgTransfer = window.fxgTransfer || {};
   window.fxgTransfer.getBalance = () => BALANCE;
   window.fxgTransfer.setBalance = v => {
-    updateLocalBalance(Number(v) || 0);
+    fxgTransfer_updateLocalBalance(Number(v) || 0);
     if (typeof window.updateAllBalances === 'function') {
       try { window.updateAllBalances(BALANCE); } catch {}
     }
@@ -858,7 +951,7 @@ async function verifyPinOrBiometric() {
 
       // Step 1: Get fresh session + token
       console.log('Fetching session token...');
-      const sessionToken = await getSharedJWT();
+      const sessionToken = await fxgTransfer_getSharedJWT();
       if (!sessionToken) {
         console.error('No session token found');
         return;
@@ -870,7 +963,7 @@ async function verifyPinOrBiometric() {
       console.log('Sending transfer with payload:', payload);
 
       // Step 3: Trigger PIN modal and verify on server
-      const verification = await verifyPinOrBiometric({ sessionToken, payload });
+      const verification = await fxgTransfer_verifyPinOrBiometric({ sessionToken, payload });
       if (!verification?.success) {
         console.error('Verification failed:', verification?.reason || verification);
         return;
