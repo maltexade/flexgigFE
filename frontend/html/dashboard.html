@@ -317,22 +317,22 @@
 </div>
 
 <!-- Wallet Transfer Receipt Modal -->
+<!-- Wallet Transfer Receipt Modal -->
 <div id="fxg-transfer-receipt-modal" class="fxg-receipt-modal" aria-hidden="true">
   <div class="fxg-receipt-backdrop" data-receipt-close></div>
   
   <div class="fxg-receipt-sheet" role="dialog" aria-modal="true" aria-labelledby="fxg-receipt-title" tabindex="-1">
-    <!-- Success State -->
-    <div id="fxg-receipt-success" class="fxg-receipt-content">
-      <div class="fxg-receipt-icon success">
-        <svg viewBox="0 0 52 52" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <circle cx="26" cy="26" r="25" stroke="#1EA0FF" stroke-width="2"/>
-          <path d="M14 27L22 35L38 19" stroke="#1EA0FF" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
+    <!-- Single Dynamic Content State -->
+    <div class="fxg-receipt-content">
+      <div id="receipt-icon" class="fxg-receipt-icon">
+        <!-- JS will insert SVG or spinner here -->
       </div>
       
-      <h2 id="fxg-receipt-title" class="fxg-receipt-title">Transfer Successful!</h2>
+      <h2 id="receipt-status" class="fxg-receipt-title">Transfer Status</h2> <!-- Neutral default -->
       
-      <div class="fxg-receipt-details">
+      <p id="receipt-message" class="fxg-receipt-note">Please wait...</p> <!-- Neutral default; can be error in failed -->
+      
+      <div id="receipt-details" class="fxg-receipt-details">
         <div class="fxg-receipt-row">
           <span class="label">Sent to</span>
           <span class="value" id="receipt-recipient">@username</span>
@@ -351,38 +351,8 @@
         </div>
       </div>
       
-      
-      
-      <button id="receipt-done-btn" class="fxg-receipt-btn primary" data-close>Done</button>
-    </div>
-
-    <!-- Failed State (hidden by default) -->
-    <div id="fxg-receipt-failed" class="fxg-receipt-content" style="display: none;">
-      <div class="fxg-receipt-icon failed">
-        <svg viewBox="0 0 52 52" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <circle cx="26" cy="26" r="25" stroke="#FF4D4F" stroke-width="2"/>
-          <path d="M16 16L36 36M36 16L16 36" stroke="#FF4D4F" stroke-width="4" stroke-linecap="round"/>
-        </svg>
-      </div>
-      
-      <h2 class="fxg-receipt-title">Transfer Failed</h2>
-      
-      <p id="receipt-error-message" class="fxg-receipt-error">Something went wrong. Your funds are safe.</p>
-      
-      <div class="fxg-receipt-details">
-        <div class="fxg-receipt-row">
-          <span class="label">To</span>
-          <span class="value" id="receipt-failed-recipient">@username</span>
-        </div>
-        <div class="fxg-receipt-row">
-          <span class="label">Amount</span>
-          <span class="value amount" id="receipt-failed-amount">₦0</span>
-        </div>
-      </div>
-      
-      <div class="fxg-receipt-actions">
-        <button id="receipt-try-again-btn" class="fxg-receipt-btn primary">Try Again</button>
-        <button id="receipt-close-btn" class="fxg-receipt-btn secondary" data-close>Close</button>
+      <div id="receipt-actions" class="fxg-receipt-actions">
+        <!-- JS will insert buttons here -->
       </div>
     </div>
   </div>
