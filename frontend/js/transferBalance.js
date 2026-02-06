@@ -314,123 +314,139 @@
   }
 
   async function fxgTransfer_confirmSend(payload) {
-    const wrapper = document.getElementById('fxg-transfer-confirm-modal');
-    const sendBtn = document.getElementById('fxg-transfer-confirm-modal-send');
-    const cancelBtn = wrapper?.querySelector('.fxg-confirm-cancel');
+  const wrapper = document.getElementById('fxg-transfer-confirm-modal');
+  const sendBtn = document.getElementById('fxg-transfer-confirm-modal-send');
+  const cancelBtn = wrapper?.querySelector('.fxg-confirm-cancel');
 
-    if (sendBtn) {
-      sendBtn.disabled = true;
-      sendBtn.textContent = 'Verifying...';
-    }
-    if (cancelBtn) cancelBtn.disabled = true;
-
-    try {
-      fxgTransfer_closeConfirmModal();
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      const sessionToken = await fxgTransfer_getSharedJWT();
-      if (!sessionToken) {
-        console.error('[fxgTransfer] Failed to obtain session token');
-        fxgTransfer_showProcessingReceipt(payload);
-        await new Promise(resolve => setTimeout(resolve, 200));
-        fxgTransfer_updateReceiptToFailed(payload, 'Authentication token unavailable. Please log in again.');
-        return;
-      }
-
-      const verification = await fxgTransfer_verifyPinOrBiometric();
-      
-      if (!verification || !verification.success) {
-        console.log('[fxgTransfer] PIN verification failed or cancelled:', verification?.reason || verification);
-        if (verification?.reason === 'cancelled') {
-          return;
-        }
-        fxgTransfer_showProcessingReceipt(payload);
-        await new Promise(resolve => setTimeout(resolve, 200));
-        fxgTransfer_updateReceiptToFailed(payload, 'Transfer cancelled during verification');
-        return;
-      }
-
-      const pinVerifiedToken = verification.token;
-      if (!pinVerifiedToken) {
-        console.error('[fxgTransfer] verify-pin returned no token');
-        fxgTransfer_showProcessingReceipt(payload);
-        await new Promise(resolve => setTimeout(resolve, 200));
-        fxgTransfer_updateReceiptToFailed(payload, 'Verification failed (no token)');
-        return;
-      }
-
-      fxgTransfer_showProcessingReceipt(payload);
-      await new Promise(resolve => setTimeout(resolve, 300));
-
-      const res = await fetch(`${API_BASE}/api/wallet/transfer`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${sessionToken}`,
-          'X-PIN-TOKEN': pinVerifiedToken
-        },
-        body: JSON.stringify({
-          recipient: payload.recipient,
-          amount: payload.amount
-        }),
-        credentials: 'include'
-      });
-
-      let data = null;
-      let rawText = null;
-      try {
-        rawText = await res.text();
-        data = rawText ? JSON.parse(rawText) : null;
-      } catch (parseErr) {
-        console.warn('[fxgTransfer] Response not valid JSON:', rawText || '(empty)');
-      }
-
-      if (!res.ok) {
-        const errorMsg = data?.error ||
-                         data?.message ||
-                         (rawText && rawText.length < 300 ? rawText : `Server error (${res.status})`);
-
-        console.error('[fxgTransfer] API failed:', res.status, errorMsg);
-
-        if (res.status === 401) {
-          throw new Error('Session expired or unauthorized. Please log in again.');
-        }
-
-        if (errorMsg?.toLowerCase().includes('insufficient') ||
-            data?.code === 'INSUFFICIENT_BALANCE') {
-          fxgTransfer_updateReceiptToInsufficient('Insufficient balance for this transfer.', BALANCE);
-        } else {
-          throw new Error(errorMsg || 'Transfer failed');
-        }
-        return;
-      }
-
-      const newBalance = data?.newBalance ||
-                        data?.balance ||
-                        data?.wallet_balance ||
-                        data?.new_balance ||
-                        BALANCE;
-
-      if (typeof newBalance === 'number' && !isNaN(newBalance)) {
-        fxgTransfer_updateLocalBalance(newBalance);
-        if (typeof window.updateAllBalances === 'function') {
-          try { window.updateAllBalances(newBalance); } catch (e) {}
-        }
-      }
-
-      fxgTransfer_updateReceiptToSuccess(payload, newBalance, data?.reference || data?.transaction_id || 'N/A');
-
-    } catch (err) {
-      console.error('[fxgTransfer] Transfer failed:', err);
-      fxgTransfer_updateReceiptToFailed(payload, err.message || 'Transfer failed. Please try again.');
-    } finally {
-      if (sendBtn) {
-        sendBtn.disabled = false;
-        sendBtn.textContent = 'Send';
-      }
-      if (cancelBtn) cancelBtn.disabled = false;
-    }
+  if (sendBtn) {
+    sendBtn.disabled = true;
+    sendBtn.textContent = 'Verifying...';
   }
+  if (cancelBtn) cancelBtn.disabled = true;
+
+  try {
+    // 1. Close confirm modal FIRST (before any async operations)
+    fxgTransfer_closeConfirmModal();
+    
+    // Small delay to let confirm modal close animation finish
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    // 2. Start fetching session JWT in the background (parallel)
+    const sessionPromise = fxgTransfer_getSharedJWT();
+
+    // 3. Prompt for PIN/biometric and verify server-side IMMEDIATELY
+    // This shows the PIN modal without waiting for the session fetch
+    const verification = await fxgTransfer_verifyPinOrBiometric();
+    
+    if (!verification || !verification.success) {
+      console.log('[fxgTransfer] PIN verification failed or cancelled:', verification?.reason || verification);
+      // Don't show receipt for user cancellation
+      if (verification?.reason === 'cancelled') {
+        return;
+      }
+      fxgTransfer_showProcessingReceipt(payload);
+      await new Promise(resolve => setTimeout(resolve, 200));
+      fxgTransfer_updateReceiptToFailed(payload, 'Transfer cancelled during verification');
+      return;
+    }
+
+    const pinVerifiedToken = verification.token;
+    if (!pinVerifiedToken) {
+      console.error('[fxgTransfer] verify-pin returned no token');
+      fxgTransfer_showProcessingReceipt(payload);
+      await new Promise(resolve => setTimeout(resolve, 200));
+      fxgTransfer_updateReceiptToFailed(payload, 'Verification failed (no token)');
+      return;
+    }
+
+    // 4. Now await the session token (it should be ready by now, as fetch ran in parallel)
+    const sessionToken = await sessionPromise;
+    if (!sessionToken) {
+      console.error('[fxgTransfer] Failed to obtain session token');
+      fxgTransfer_showProcessingReceipt(payload);
+      await new Promise(resolve => setTimeout(resolve, 200));
+      fxgTransfer_updateReceiptToFailed(payload, 'Authentication token unavailable. Please log in again.');
+      return;
+    }
+
+    // 5. Show processing receipt after both tokens are obtained (before API call)
+    fxgTransfer_showProcessingReceipt(payload);
+    
+    // Small delay to ensure processing state is visible
+    await new Promise(resolve => setTimeout(resolve, 300));
+
+    // 6. Make the transfer API call
+    const res = await fetch(`${API_BASE}/api/wallet/transfer`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${sessionToken}`,
+        'X-PIN-TOKEN': pinVerifiedToken
+      },
+      body: JSON.stringify({
+        recipient: payload.recipient,
+        amount: payload.amount
+      }),
+      credentials: 'include'
+    });
+
+    // 7. Safe response handling
+    let data = null;
+    let rawText = null;
+    try {
+      rawText = await res.text();
+      data = rawText ? JSON.parse(rawText) : null;
+    } catch (parseErr) {
+      console.warn('[fxgTransfer] Response not valid JSON:', rawText || '(empty)');
+    }
+
+    if (!res.ok) {
+      const errorMsg = data?.error ||
+                       data?.message ||
+                       (rawText && rawText.length < 300 ? rawText : `Server error (${res.status})`);
+
+      console.error('[fxgTransfer] API failed:', res.status, errorMsg);
+
+      if (res.status === 401) {
+        throw new Error('Session expired or unauthorized. Please log in again.');
+      }
+
+      if (errorMsg?.toLowerCase().includes('insufficient') ||
+          data?.code === 'INSUFFICIENT_BALANCE') {
+        fxgTransfer_updateReceiptToInsufficient('Insufficient balance for this transfer.', BALANCE);
+      } else {
+        throw new Error(errorMsg || 'Transfer failed');
+      }
+      return;
+    }
+
+    // 8. Success path
+    const newBalance = data?.newBalance ||
+                      data?.balance ||
+                      data?.wallet_balance ||
+                      data?.new_balance ||
+                      BALANCE;
+
+    if (typeof newBalance === 'number' && !isNaN(newBalance)) {
+      fxgTransfer_updateLocalBalance(newBalance);
+      if (typeof window.updateAllBalances === 'function') {
+        try { window.updateAllBalances(newBalance); } catch (e) {}
+      }
+    }
+
+    fxgTransfer_updateReceiptToSuccess(payload, newBalance, data?.reference || data?.transaction_id || 'N/A');
+
+  } catch (err) {
+    console.error('[fxgTransfer] Transfer failed:', err);
+    fxgTransfer_updateReceiptToFailed(payload, err.message || 'Transfer failed. Please try again.');
+  } finally {
+    if (sendBtn) {
+      sendBtn.disabled = false;
+      sendBtn.textContent = 'Send';
+    }
+    if (cancelBtn) cancelBtn.disabled = false;
+  }
+}
 
   function fxgTransfer_closeReceiptModal() {
     if (window.ModalManager?.closeModal) {
