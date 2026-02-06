@@ -7405,7 +7405,6 @@ allPlansModalContent.addEventListener('touchend', handleTouchEnd);
 
 
 
-
 (async () => {
   const recentTransactionsList = document.querySelector('.recent-transactions-list');
   const recentTransactionsSection = document.querySelector('.recent-transactions');
@@ -7458,19 +7457,19 @@ allPlansModalContent.addEventListener('touchend', handleTouchEnd);
           : 'Unknown';
 
       // Use the clean column from transactions table (already in response!)
-let dataAmount = tx.data_amount || '';  // ← This is the new reliable source
+      let dataAmount = tx.data_amount || '';  // ← This is the new reliable source
 
-// Optional fallback only if still missing (should be rare now)
-if (!dataAmount && tx.description) {
-  const match = tx.description.match(/(\d+\.?\d*)\s*(GB|MB|TB|gb|mb|tb)/i);
-  if (match) {
-    dataAmount = match[0].toUpperCase();
-  } else if (tx.description.toLowerCase().includes('data')) {
-    dataAmount = 'Data Bundle';
-  }
-}
+      // Optional fallback only if still missing (should be rare now)
+      if (!dataAmount && tx.description) {
+        const match = tx.description.match(/(\d+\.?\d*)\s*(GB|MB|TB|gb|mb|tb)/i);
+        if (match) {
+          dataAmount = match[0].toUpperCase();
+        } else if (tx.description.toLowerCase().includes('data')) {
+          dataAmount = 'Data Bundle';
+        }
+      }
 
-if (!dataAmount) dataAmount = 'Data Purchase'; // Ultimate fallback
+      if (!dataAmount) dataAmount = 'Data Purchase'; // Ultimate fallback
 
       // Correct key mapping + force from global svgShapes
       const providerKey = tx.provider?.toLowerCase() === '9mobile' ? 'ninemobile' : tx.provider?.toLowerCase();

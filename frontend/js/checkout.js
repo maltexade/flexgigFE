@@ -1173,90 +1173,42 @@ async function updateReceiptToSuccess(result) {
   document.getElementById('receipt-message').textContent = 'Your data has been delivered successfully!';
 
   const data = window._currentCheckoutData;
-  if (!data) {
-    console.warn('[updateReceiptToSuccess] No checkout data available');
-    return;
-  }
+  let transactionRef = 'TX-' + Date.now().toString(36);  // Local placeholder - no fetch needed
 
-  let transactionRef = 'Unavailable';
-
-  // === FETCH LATEST TRANSACTION & GET REFERENCE ===
-  try {
-    const res = await fetch('https://api.flexgig.com.ng/api/transactions?limit=20', {
-      credentials: 'include',
-      cache: 'no-store'  // ← Prevent stale cache
-    });
-
-    if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
-
-    const json = await res.json();
-    const txs = json.items || json || [];
-
-    // More robust matching: use phone + amount + recent time window
-    const recentTime = Date.now() - 5 * 60 * 1000; // last 5 minutes
-    const match = txs.find(tx => 
-      tx.phone === data.number &&
-      Math.abs(Number(tx.amount) - data.price) <= 20 && // slight tolerance
-      new Date(tx.created_at || tx.timestamp || 0).getTime() > recentTime &&
-      tx.status?.toLowerCase() === 'success'
-    );
-
-    if (match?.reference) {
-      transactionRef = match.reference;
-    } else {
-      // Fallback: most recent data tx
-      const fallback = txs.find(tx => 
-        tx.reference?.startsWith('data_') && 
-        tx.status?.toLowerCase() === 'success'
-      );
-      transactionRef = fallback?.reference || 'Unavailable';
-    }
-  } catch (e) {
-    console.warn('Failed to fetch latest transaction:', e);
-  }
-
-  const displayAmount = Number(result?.amount ?? data?.price ?? 0);
+  const displayAmount = result?.amount ?? data?.price ?? 0;
 
   // === FILL RECEIPT DETAILS ===
-  const providerKey = data.provider?.toLowerCase() === '9mobile' ? 'ninemobile' : data.provider?.toLowerCase() || '';
-  const svg = window.svgShapes?.[providerKey] || '';
+  if (data) {
+    const providerKey = data.provider.toLowerCase() === '9mobile' ? 'ninemobile' : data.provider.toLowerCase();
+    const svg = svgShapes[providerKey] || '';
+    document.getElementById('receipt-provider').innerHTML = `${svg} ${data.provider.toUpperCase()}`;
+    
+    document.getElementById('receipt-phone').textContent = data.number;
+    document.getElementById('receipt-plan').textContent = `${data.dataAmount} / ${data.validity}`;
+    document.getElementById('receipt-amount').textContent = 
+      `₦${Number(displayAmount).toLocaleString()}`;
+    document.getElementById('receipt-transaction-id').textContent = transactionRef;
+    document.getElementById('receipt-balance').textContent = 
+      `₦${Number(result?.new_balance ?? data?.new_balance ?? 0).toLocaleString()}`;
+    document.getElementById('receipt-time').textContent = new Date().toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
+  }
 
-  document.getElementById('receipt-provider').innerHTML = `${svg} ${data.provider?.toUpperCase() || 'Unknown'}`;
-  document.getElementById('receipt-phone').textContent = data.number || '—';
-  
-  // Use data.dataAmount directly (from checkout) — no need to re-fetch
-  document.getElementById('receipt-plan').textContent = 
-    data.dataAmount ? `${data.dataAmount} / ${data.validity || '—'}` : 'Data Bundle';
-
-  document.getElementById('receipt-amount').textContent = 
-    `₦${displayAmount.toLocaleString('en-NG')}`;
-
-  document.getElementById('receipt-transaction-id').textContent = transactionRef;
-  
-  document.getElementById('receipt-balance').textContent = 
-    `₦${Number(result?.new_balance ?? data?.new_balance ?? 0).toLocaleString('en-NG')}`;
-
-  document.getElementById('receipt-time').textContent = 
-    new Date().toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
-
-  // Show details & actions
   document.getElementById('receipt-details').style.display = 'block';
   document.getElementById('receipt-actions').style.display = 'flex';
 
   // === AUTO-UPDATE RECENT TRANSACTIONS LIST INSTANTLY ===
   if (typeof window.renderRecentTransactions === 'function') {
     try {
-      // Create clean new tx object for immediate display
+      // Manually add the new data tx (consistent instant update)
       const newTx = {
-        id: transactionRef !== 'Unavailable' ? transactionRef : `local-${Date.now()}`,
+        id: transactionRef, // Use placeholder as ID
         phone: data.number,
         provider: data.provider,
-        data_amount: data.dataAmount || 'Data Bundle', // ← Use checkout data (clean)
-        description: `${data.dataAmount || 'Data'} Data Purchase`,
+        data_amount: data.dataAmount, // Explicit GB from checkout (for transactions table consistency)
+        description: ` ${data.dataAmount} Data Purchase`, // Ensure regex fallback if needed
         status: 'success',
-        created_at: new Date().toISOString(),
-        amount: data.price,
-        // Optional: add more fields if your render function uses them
+        timestamp: new Date().toISOString(),
+        amount: data.price
       };
 
       let currentRecent = [];
@@ -1265,25 +1217,20 @@ async function updateReceiptToSuccess(result) {
         if (stored) currentRecent = JSON.parse(stored);
       } catch (e) {}
 
-      // Dedupe: remove any exact match by phone + amount
+      // Dedupe and add new
       currentRecent = currentRecent.filter(tx => 
-        !(tx.phone === newTx.phone && tx.amount === newTx.amount)
+        tx.phone !== newTx.phone || tx.amount !== newTx.amount
       );
-
-      // Add new one at the top
       currentRecent.unshift(newTx);
-
-      // Keep only top 5
       currentRecent = currentRecent.slice(0, 5);
 
-      // Save immediately
       localStorage.setItem('recentTransactions', JSON.stringify(currentRecent));
 
-      // Render right away
+      // Render immediately
       window.renderRecentTransactions(currentRecent);
-      console.log('[checkout] Recent transactions auto-updated with new data tx');
+      console.log('[checkout] Recent transactions auto-updated after success (manual add)');
     } catch (err) {
-      console.warn('[checkout] Failed to auto-update recent transactions:', err);
+      console.warn('[checkout] Failed to auto-refresh recent transactions:', err);
     }
   }
 }
