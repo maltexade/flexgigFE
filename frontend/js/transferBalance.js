@@ -651,7 +651,7 @@ function fxgTransfer_updateReceiptToFailed(payload, errorMessage) {
 
   document.getElementById('receipt-try-again').onclick = () => {
     fxgTransfer_closeReceiptModal();
-    fxgTransfer_openConfirmModal(payload);
+    ModalManager.openModal('fxgTransferModal');
   };
 
   document.getElementById('receipt-close').onclick = () => {
@@ -774,48 +774,70 @@ function fxgTransfer_bindReceiptModalEvents() {
     }
 
     function fxgTransfer_validate() {
-      if (!els.usernameEl || !els.amountEl || !els.continueBtn) return false;
+  if (!els.usernameEl || !els.amountEl || !els.continueBtn) return false;
 
-      const username = (els.usernameEl.value || '').trim();
-      const raw = onlyDigits(els.amountEl.value);
-      const amt = Number(raw);
+  const username = (els.usernameEl.value || '').trim();
+  const rawAmount = onlyDigits(els.amountEl.value);
+  const amount = Number(rawAmount);
 
-      const usernameOk = username.length >= 2;
-      const amountOk = raw.length > 0 && amt > 0 && amt <= BALANCE;
+  // ---------------------------
+  // Username validation
+  // ---------------------------
+  let usernameErrMsg = '';
 
-      if (els.usernameErr) els.usernameErr.textContent = usernameOk || !username ? '' : 'Username too short';
+  if (username.length < 3) {
+    usernameErrMsg = 'Username must be at least 3 characters';
+  } else if (/^\d/.test(username)) {
+    usernameErrMsg = 'Username cannot start with a number';
+  } else if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(username)) {
+    usernameErrMsg = 'Invalid username format';
+  } else if (/__/.test(username)) {
+    usernameErrMsg = 'Underscore cannot be consecutive';
+  }
 
-      if (els.amountErr) {
-        if (!raw) els.amountErr.textContent = '';
-        else if (amt <= 0) els.amountErr.textContent = 'Invalid amount';
-        else if (amt > BALANCE) els.amountErr.textContent = `Max ₦${fmt(BALANCE)}`;
-        else els.amountErr.textContent = '';
-      }
+  if (els.usernameErr) els.usernameErr.textContent = usernameErrMsg;
 
-      const valid = usernameOk && amountOk;
-      els.continueBtn.disabled = !valid;
-      return valid;
-    }
+  // ---------------------------
+  // Amount validation
+  // ---------------------------
+  let amountErrMsg = '';
+  if (!rawAmount) {
+    amountErrMsg = '';
+  } else if (isNaN(amount) || amount <= 0) {
+    amountErrMsg = 'Invalid amount';
+  } else if (amount > BALANCE) {
+    amountErrMsg = `Max ₦${fmt(BALANCE)}`;
+  }
+
+  if (els.amountErr) els.amountErr.textContent = amountErrMsg;
+
+  const valid = !usernameErrMsg && !amountErrMsg;
+  els.continueBtn.disabled = !valid;
+
+  return valid;
+}
+
 
     if (els.amountEl && !els.amountEl._fxg_bound) {
-      let prevFormatted = '';
-      els.amountEl.addEventListener('input', e => {
-        const cursor = e.target.selectionStart;
-        let raw = onlyDigits(e.target.value);
-        if (raw.length > 1 && raw.startsWith('0')) raw = raw.replace(/^0+/, '') || '0';
+  let prevFormatted = '';
+  els.amountEl.addEventListener('input', e => {
+    const cursor = e.target.selectionStart;
+    let raw = onlyDigits(e.target.value); // strips everything except digits
+    if (raw.length > 1 && raw.startsWith('0')) raw = raw.replace(/^0+/, '') || '0';
 
-        const formatted = raw ? Number(raw).toLocaleString('en-NG') : '';
-        if (formatted !== prevFormatted) {
-          prevFormatted = formatted;
-          e.target.value = formatted;
-          const added = formatted.length - raw.length;
-          const newPos = cursor + added;
-          e.target.setSelectionRange(newPos, newPos);
-        }
-        fxgTransfer_validate();
-      });
-      els.amountEl._fxg_bound = true;
+    const formatted = raw ? Number(raw).toLocaleString('en-NG') : '';
+    if (formatted !== prevFormatted) {
+      prevFormatted = formatted;
+      e.target.value = formatted;
+      const added = formatted.length - raw.length;
+      const newPos = cursor + added;
+      e.target.setSelectionRange(newPos, newPos);
     }
+    fxgTransfer_validate();
+  });
+  els.amountEl._fxg_bound = true;
+}
+
 
     if (els.usernameEl && !els.usernameEl._fxg_bound) {
       els.usernameEl.addEventListener('input', fxgTransfer_validate);
