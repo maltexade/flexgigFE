@@ -818,24 +818,51 @@ function fxgTransfer_bindReceiptModalEvents() {
 }
 
 
-    if (els.amountEl && !els.amountEl._fxg_bound) {
-  let prevFormatted = '';
-  els.amountEl.addEventListener('input', e => {
-    const cursor = e.target.selectionStart;
-    let raw = onlyDigits(e.target.value); // strips everything except digits
-    if (raw.length > 1 && raw.startsWith('0')) raw = raw.replace(/^0+/, '') || '0';
+    if (els.amountEl && !els.amountEl._bound) {
+  const amountEl = els.amountEl;
 
-    const formatted = raw ? Number(raw).toLocaleString('en-NG') : '';
-    if (formatted !== prevFormatted) {
-      prevFormatted = formatted;
-      e.target.value = formatted;
-      const added = formatted.length - raw.length;
-      const newPos = cursor + added;
-      e.target.setSelectionRange(newPos, newPos);
+  // --- Beforeinput: prevent letters/symbols entirely ---
+  const amountBeforeInput = (e) => {
+    if (e.data && !/^\d$/.test(e.data)) e.preventDefault();
+  };
+
+  // --- Keydown: block non-digit keys except control/navigation ---
+  const amountKeydown = (e) => {
+    const allowed = ['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab', 'Enter'];
+    if ((e.ctrlKey || e.metaKey) && ['a','c','v','x'].includes(e.key.toLowerCase())) return;
+    if (!allowed.includes(e.key) && !/^\d$/.test(e.key)) e.preventDefault();
+  };
+
+  // --- Input: sanitize and format ---
+  const amountInputHandler = (e) => {
+    const raw = amountEl.value || '';
+    let digitsOnly = raw.replace(/\D/g, '');
+    if (!digitsOnly) digitsOnly = '';
+    const formatted = digitsOnly ? Number(digitsOnly).toLocaleString('en-NG') : '';
+    if (formatted !== amountEl.value) {
+      const cursor = amountEl.selectionStart || 0;
+      amountEl.value = formatted;
+      amountEl.setSelectionRange(formatted.length, formatted.length); // keep cursor at end
     }
+    fxgTransfer_validate(); // your existing validation
+  };
+
+  // --- Paste: sanitize pasted content ---
+  const amountPasteHandler = (e) => {
+    e.preventDefault();
+    const pasted = (e.clipboardData || window.clipboardData).getData('text') || '';
+    const digitsOnly = pasted.replace(/\D/g, '');
+    amountEl.value = digitsOnly ? Number(digitsOnly).toLocaleString('en-NG') : '';
     fxgTransfer_validate();
-  });
-  els.amountEl._fxg_bound = true;
+  };
+
+  // Wire handlers
+  amountEl.addEventListener('beforeinput', amountBeforeInput);
+  amountEl.addEventListener('keydown', amountKeydown);
+  amountEl.addEventListener('input', amountInputHandler);
+  amountEl.addEventListener('paste', amountPasteHandler);
+
+  amountEl._bound = true;
 }
 
 
