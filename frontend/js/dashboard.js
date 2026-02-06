@@ -7405,185 +7405,193 @@ allPlansModalContent.addEventListener('touchend', handleTouchEnd);
 
 
 
-(async () => {
-  const recentTransactionsList = document.querySelector('.recent-transactions-list');
-  const recentTransactionsSection = document.querySelector('.recent-transactions');
+// Prevent double execution on reload / duplicate includes
+if (window.__recentTxInitialized) {
+  console.log('[recent-tx] Already initialized — skipping');
+} else {
+  window.__recentTxInitialized = true;
 
-  if (!recentTransactionsList || !recentTransactionsSection) {
-    console.warn('[recent-tx] Required elements not found');
-    return;
-  }
+  (async () => {
+    const recentTransactionsList = document.querySelector('.recent-transactions-list');
+    const recentTransactionsSection = document.querySelector('.recent-transactions');
 
-  // === FORCE YOUR 28px svgShapes GLOBALLY (overrides any other version) ===
-  window.svgShapes = {
-    mtn: `<svg class="yellow-circle-icon" width="28" height="28" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="#FFD700"/></svg>`,
-    airtel: `<svg class="airtel-rect-icon" width="28" height="28" viewBox="0 0 24 24" fill="none"><rect x="4" y="6" width="20" height="12" rx="4" fill="#e4012b"/></svg>`,
-    glo: `<svg class="glo-diamond-icon" width="28" height="28" viewBox="0 0 24 24" fill="none"><polygon points="12,2 22,12 12,22 2,12" fill="#00B13C"/></svg>`,
-    ninemobile: `<svg class="ninemobile-triangle-icon" width="28" height="28" viewBox="0 0 24 24" fill="none"><polygon points="12,3 21,21 3,21" fill="#7DB700"/></svg>`,
-    receive: `<svg class="bank-icon" width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M4 9v9h16V9l-8-5-8 5zm4 4h8v2H8v-2zm0 4h4v2H8v-2z" fill="#00cc00" stroke="#fff" stroke-width="1"/></svg>`
-  };
-
-  // --- PERMANENT RENDER FUNCTION (uses forced svgShapes) ---
-  function renderRecentTransactions(transactions = []) {
-    recentTransactionsList.innerHTML = '';
-
-    if (!transactions.length) {
-      recentTransactionsSection.classList.remove('active');
+    if (!recentTransactionsList || !recentTransactionsSection) {
+      console.warn('[recent-tx] Required elements not found');
       return;
     }
 
-    // Filter to data purchases + successes only
-    const dataSuccessTxs = transactions.filter(tx => {
-      const desc = (tx.description || '').toLowerCase();
-      return desc.includes('data') && // Data-specific filter
-             tx?.status?.toLowerCase() === 'success';
-    });
+    // === FORCE YOUR 28px svgShapes GLOBALLY ===
+    window.svgShapes = {
+      mtn: `<svg class="yellow-circle-icon" width="28" height="28" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="#FFD700"/></svg>`,
+      airtel: `<svg class="airtel-rect-icon" width="28" height="28" viewBox="0 0 24 24" fill="none"><rect x="4" y="6" width="20" height="12" rx="4" fill="#e4012b"/></svg>`,
+      glo: `<svg class="glo-diamond-icon" width="28" height="28" viewBox="0 0 24 24" fill="none"><polygon points="12,2 22,12 12,22 2,12" fill="#00B13C"/></svg>`,
+      ninemobile: `<svg class="ninemobile-triangle-icon" width="28" height="28" viewBox="0 0 24 24" fill="none"><polygon points="12,3 21,21 3,21" fill="#7DB700"/></svg>`,
+      receive: `<svg class="bank-icon" width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M4 9v9h16V9l-8-5-8 5zm4 4h8v2H8v-2zm0 4h4v2H8v-2z" fill="#00cc00" stroke="#fff" stroke-width="1"/></svg>`
+    };
 
-    if (!dataSuccessTxs.length) {
-      recentTransactionsSection.classList.remove('active');
-      return;
+    // Helper to normalize phone numbers (for dedupe)
+    function normalizePhone(phone) {
+      return phone?.replace(/\s+/g, '').replace(/^0/, '+234') || '';
     }
 
-    recentTransactionsSection.classList.add('active');
+    // --- PERMANENT RENDER FUNCTION ---
+    function renderRecentTransactions(transactions = []) {
+      recentTransactionsList.innerHTML = '';
 
-    dataSuccessTxs.forEach(tx => {
-      const txDiv = document.createElement('div');
-      txDiv.className = 'recent-transaction-item';
-
-      const displayName = tx.provider === 'ninemobile'
-        ? '9mobile'
-        : tx.provider
-          ? tx.provider.charAt(0).toUpperCase() + tx.provider.slice(1).toLowerCase()
-          : 'Unknown';
-
-      // Use the clean column from transactions table (already in response!)
-      let dataAmount = tx.data_amount || '';  // ← This is the new reliable source
-
-      // Optional fallback only if still missing (should be rare now)
-      if (!dataAmount && tx.description) {
-        const match = tx.description.match(/(\d+\.?\d*)\s*(GB|MB|TB|gb|mb|tb)/i);
-        if (match) {
-          dataAmount = match[0].toUpperCase();
-        } else if (tx.description.toLowerCase().includes('data')) {
-          dataAmount = 'Data Bundle';
-        }
+      if (!transactions.length) {
+        recentTransactionsSection.classList.remove('active');
+        return;
       }
 
-      if (!dataAmount) dataAmount = 'Data Purchase'; // Ultimate fallback
-
-      // Correct key mapping + force from global svgShapes
-      const providerKey = tx.provider?.toLowerCase() === '9mobile' ? 'ninemobile' : tx.provider?.toLowerCase();
-      const svg = window.svgShapes[providerKey] || '';
-
-      // Phone + Data LEFT, SVG + Provider RIGHT
-      txDiv.innerHTML = `
-        <span class="tx-desc">${tx.phone} - ${dataAmount}</span>
-        <span class="tx-provider">${svg} ${displayName}</span>
-      `;
-
-      txDiv.setAttribute('role', 'button');
-      txDiv.setAttribute('aria-label', `Reuse transaction for ${tx.phone} on ${displayName}`);
-
-      txDiv.addEventListener('click', () => {
-        const phoneInput = document.getElementById('phone-input');
-        if (!phoneInput) {
-          alert('Phone input field not found.');
-          return;
-        }
-
-        // 1. Format number
-        const result = window.formatNigeriaNumber(tx.phone);
-        phoneInput.value = result.value; // e.g., "0808 336 3636"
-
-        // 2. Normalize and detect provider
-        const normalizedPhone = tx.phone.replace(/^\+234/, '0');
-        const provider = detectProvider(normalizedPhone);
-
-        if (provider) {
-          const providerClass = provider.toLowerCase() === '9mobile' ? 'ninemobile' : provider.toLowerCase();
-          debounce(() => {
-            selectProvider(providerClass);
-            console.log('[DEBUG] Provider auto-selected:', providerClass);
-          }, 100)();
-        }
-
-        // 3. Update UI states
-        if (window.updateContactOrCancel) window.updateContactOrCancel();
-        if (window.updateContinueState) window.updateContinueState();
-        if (window.saveUserState) window.saveUserState();
-        if (window.saveCurrentAppState) window.saveCurrentAppState();
-
-        phoneInput.blur();
+      // Filter to data purchases + successes only
+      const dataSuccessTxs = transactions.filter(tx => {
+        const desc = (tx.description || '').toLowerCase();
+        return desc.includes('data') && tx?.status?.toLowerCase() === 'success';
       });
 
-      recentTransactionsList.appendChild(txDiv);
-    });
+      if (!dataSuccessTxs.length) {
+        recentTransactionsSection.classList.remove('active');
+        return;
+      }
 
-    console.log('[recent-tx] Rendered', dataSuccessTxs.length, 'successful data transactions with correct SVGs');
-  }
+      recentTransactionsSection.classList.add('active');
 
-  // === LOAD, MERGE, DEDUPLICATE, LIMIT TO 5 ===
-  let recentTransactions = [];
+      dataSuccessTxs.forEach(tx => {
+        const txDiv = document.createElement('div');
+        txDiv.className = 'recent-transaction-item';
 
-  try {
-    const stored = localStorage.getItem('recentTransactions');
-    if (stored) {
-      recentTransactions = JSON.parse(stored);
-      if (!Array.isArray(recentTransactions)) recentTransactions = [];
-    }
-  } catch (e) {
-    console.warn('[recent-tx] localStorage parse error', e);
-  }
+        const displayName = tx.provider === 'ninemobile'
+          ? '9mobile'
+          : tx.provider
+            ? tx.provider.charAt(0).toUpperCase() + tx.provider.slice(1).toLowerCase()
+            : 'Unknown';
 
-  recentTransactions = recentTransactions.filter(tx => tx && tx.phone && tx.phone.trim() !== '');
+        // Priority 1: Use clean column from transactions table
+        let dataAmount = tx.data_amount || '';
 
-  try {
-    const res = await fetch(`${window.__SEC_API_BASE}/api/transactions?limit=100`, {
-      credentials: 'include',
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-      const serverTxs = (data.items || []).filter(tx => tx && tx.phone && tx.phone.trim() !== '');
-
-      serverTxs.forEach(serverTx => {
-        const exists = recentTransactions.some(localTx =>
-          (localTx.id && serverTx.id && localTx.id === serverTx.id) ||
-          (localTx.phone === serverTx.phone && localTx.amount === serverTx.amount)
-        );
-
-        if (!exists) {
-          recentTransactions.push(serverTx);
+        // Priority 2: Fallback regex (catches GB and MB reliably)
+        if (!dataAmount && tx.description) {
+          const match = tx.description.match(/(\d+\.?\d*)\s*(GB|MB|TB|gb|mb|tb)/i);
+          if (match) {
+            dataAmount = match[0].toUpperCase(); // e.g. "5GB", "200MB", "1.5 GB"
+          } else if (tx.description.toLowerCase().includes('data')) {
+            dataAmount = 'Data Bundle';
+          }
         }
+
+        // Ultimate fallback
+        if (!dataAmount) dataAmount = 'Data Purchase';
+
+        const providerKey = tx.provider?.toLowerCase() === '9mobile' ? 'ninemobile' : tx.provider?.toLowerCase();
+        const svg = window.svgShapes[providerKey] || '';
+
+        txDiv.innerHTML = `
+          <span class="tx-desc">${tx.phone} - ${dataAmount}</span>
+          <span class="tx-provider">${svg} ${displayName}</span>
+        `;
+
+        txDiv.setAttribute('role', 'button');
+        txDiv.setAttribute('aria-label', `Reuse transaction for ${tx.phone} on ${displayName}`);
+
+        txDiv.addEventListener('click', () => {
+          const phoneInput = document.getElementById('phone-input');
+          if (!phoneInput) {
+            alert('Phone input field not found.');
+            return;
+          }
+
+          const result = window.formatNigeriaNumber(tx.phone);
+          phoneInput.value = result.value;
+
+          const normalizedPhone = tx.phone.replace(/^\+234/, '0');
+          const provider = detectProvider(normalizedPhone);
+
+          if (provider) {
+            const providerClass = provider.toLowerCase() === '9mobile' ? 'ninemobile' : provider.toLowerCase();
+            debounce(() => {
+              selectProvider(providerClass);
+              console.log('[DEBUG] Provider auto-selected:', providerClass);
+            }, 100)();
+          }
+
+          if (window.updateContactOrCancel) window.updateContactOrCancel();
+          if (window.updateContinueState) window.updateContinueState();
+          if (window.saveUserState) window.saveUserState();
+          if (window.saveCurrentAppState) window.saveCurrentAppState();
+
+          phoneInput.blur();
+        });
+
+        recentTransactionsList.appendChild(txDiv);
       });
-    } else {
-      console.warn('[recent-tx] Server fetch not OK:', res.status);
+
+      console.log('[recent-tx] Rendered', dataSuccessTxs.length, 'successful data transactions');
     }
-  } catch (err) {
-    console.error('[recent-tx] Server fetch failed', err);
-  }
 
-  recentTransactions.sort((a, b) => {
-    const timeA = new Date(a.timestamp || a.created_at || 0).getTime();
-    const timeB = new Date(b.timestamp || b.created_at || 0).getTime();
-    return timeB - timeA;
-  });
+    // === LOAD, MERGE, DEDUPLICATE, LIMIT TO 5 ===
+    let recentTransactions = [];
 
-  recentTransactions = recentTransactions.slice(0, 5);
+    try {
+      const stored = localStorage.getItem('recentTransactions');
+      if (stored) {
+        recentTransactions = JSON.parse(stored);
+        if (!Array.isArray(recentTransactions)) recentTransactions = [];
+      }
+    } catch (e) {
+      console.warn('[recent-tx] localStorage parse error', e);
+    }
 
-  try {
-    localStorage.setItem('recentTransactions', JSON.stringify(recentTransactions));
-    window.recentTransactions = recentTransactions;
-  } catch (e) {
-    console.warn('[recent-tx] Save failed', e);
-  }
+    recentTransactions = recentTransactions.filter(tx => tx && tx.phone && tx.phone.trim() !== '');
 
-  renderRecentTransactions(recentTransactions);
+    try {
+      const res = await fetch(`${window.__SEC_API_BASE}/api/transactions?limit=100`, {
+        credentials: 'include',
+      });
 
-  window.renderRecentTransactions = renderRecentTransactions;
+      if (res.ok) {
+        const data = await res.json();
+        const serverTxs = (data.items || []).filter(tx => tx && tx.phone && tx.phone.trim() !== '');
 
-  console.log('%c[recent-tx] FINAL PERMANENT SETUP — Correct 28px SVGs, max 5, no duplicates ✅', 'color:lime;font-weight:bold');
-})();
+        serverTxs.forEach(serverTx => {
+          const exists = recentTransactions.some(localTx =>
+            (localTx.id && serverTx.id && localTx.id === serverTx.id) ||
+            (normalizePhone(localTx.phone) === normalizePhone(serverTx.phone) && 
+             localTx.amount === serverTx.amount)
+          );
+
+          if (!exists) {
+            recentTransactions.push(serverTx);
+          }
+        });
+      } else {
+        console.warn('[recent-tx] Server fetch not OK:', res.status);
+      }
+    } catch (err) {
+      console.error('[recent-tx] Server fetch failed', err);
+    }
+
+    recentTransactions.sort((a, b) => {
+      const timeA = new Date(a.timestamp || a.created_at || 0).getTime();
+      const timeB = new Date(b.timestamp || b.created_at || 0).getTime();
+      return timeB - timeA;
+    });
+
+    recentTransactions = recentTransactions.slice(0, 5);
+
+    try {
+      localStorage.setItem('recentTransactions', JSON.stringify(recentTransactions));
+      window.recentTransactions = recentTransactions;
+    } catch (e) {
+      console.warn('[recent-tx] Save failed', e);
+    }
+
+    renderRecentTransactions(recentTransactions);
+
+    window.renderRecentTransactions = renderRecentTransactions;
+
+    console.log('%c[recent-tx] INITIALIZED — single run guaranteed', 'color:lime;font-weight:bold');
+  })();
+}
 
 /* ===========================================================
    PIN modal — unified keypad + keyboard input + toast system
