@@ -490,11 +490,9 @@ if (sendBtn) {
   }
 
   // ────────────────────────────────────────────────
-  // Receipt modal functions
-  // ────────────────────────────────────────────────
-  // ────────────────────────────────────────────────
-// Receipt modal functions
+// Receipt modal functions (updated with custom subtext)
 // ────────────────────────────────────────────────
+
 function fxgTransfer_showProcessingReceipt(payload) {
   const modal = document.getElementById(RECEIPT_MODAL_ID);
   if (!modal) {
@@ -502,10 +500,11 @@ function fxgTransfer_showProcessingReceipt(payload) {
     return;
   }
 
+  const subtext = `Your transfer to @${payload.recipient} is being processed…`; // <-- Custom subtext
+
   // Persist payload for later states
   window._currentTransferPayload = payload;
 
-  // IMPORTANT: Do NOT close other modals (transfer stays open)
   if (window.ModalManager?.openModal) {
     window.ModalManager.openModal('fxgReceiptModal');
   } else {
@@ -533,9 +532,12 @@ function fxgTransfer_showProcessingReceipt(payload) {
       messageEl.innerHTML = `
         Transferring <strong>₦${fmt(payload.amount)}</strong>
         to <strong>@${payload.recipient}</strong>…<br><br>
-        Please hold on while we process your transfer.
+        ${subtext}
       `;
     }
+
+    const headerAmtEl = document.getElementById('receipt-amount-display');
+    if (headerAmtEl) headerAmtEl.textContent = `₦${fmt(payload.amount)}`;
 
     const detailsEl = document.getElementById('receipt-details');
     if (detailsEl) detailsEl.style.display = 'none';
@@ -563,6 +565,10 @@ function fxgTransfer_updateReceiptToSuccess(payload, newBalance, reference) {
 
   document.getElementById('receipt-recipient').textContent = `@${payload.recipient}`;
   document.getElementById('receipt-amount').textContent = `₦${fmt(payload.amount)}`;
+  // ✅ Update header amount
+  const headerAmtEl = document.getElementById('receipt-amount-display');
+  if (headerAmtEl) headerAmtEl.textContent = `₦${fmt(payload.amount)}`;
+
   document.getElementById('receipt-new-balance').textContent = `₦${fmt(newBalance)}`;
   document.getElementById('receipt-date').textContent =
     new Date().toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
@@ -616,11 +622,13 @@ function fxgTransfer_updateReceiptToFailed(payload, errorMessage) {
     `;
   }
 
+  const subtext = `Your transfer to @${payload.recipient} could not be completed.`; // <-- Custom subtext
+
   document.getElementById('receipt-status').textContent = 'Transfer Failed';
 
   const msg = document.getElementById('receipt-message');
   msg.className = 'fxg-receipt-error';
-  msg.textContent = errorMessage;
+  msg.innerHTML = `${errorMessage}<br><br>${subtext}`;
 
   document.getElementById('receipt-recipient').textContent = `@${payload.recipient}`;
   document.getElementById('receipt-amount').textContent = `₦${fmt(payload.amount)}`;
@@ -649,13 +657,13 @@ function fxgTransfer_updateReceiptToFailed(payload, errorMessage) {
   };
 
   document.getElementById('receipt-close').onclick = () => {
-    // NOTE: payload + inputs intentionally preserved
     fxgTransfer_closeReceiptModal();
   };
 }
 
 function fxgTransfer_updateReceiptToInsufficient(message, currentBalance) {
   const payload = window._currentTransferPayload || {};
+  const subtext = `You do not have enough funds to complete this transfer.`; // <-- Custom subtext
 
   document.getElementById('receipt-status').textContent = 'Insufficient Balance';
 
@@ -663,6 +671,7 @@ function fxgTransfer_updateReceiptToInsufficient(message, currentBalance) {
   msg.className = 'fxg-receipt-error';
   msg.innerHTML = `
     ${message}<br><br>
+    ${subtext}<br>
     <strong>Current balance: ₦${fmt(currentBalance)}</strong><br><br>
     Please fund your wallet to continue.
   `;
