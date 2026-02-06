@@ -7457,13 +7457,20 @@ allPlansModalContent.addEventListener('touchend', handleTouchEnd);
           ? tx.provider.charAt(0).toUpperCase() + tx.provider.slice(1).toLowerCase()
           : 'Unknown';
 
-      // Improved data amount extraction (more robust regex)
-      let dataAmount = tx.data || '';
-      if (!dataAmount && tx.description) {
-        const match = tx.description.match(/(\d+\.?\d*)\s*(GB|MB|TB|gb|mb|tb)/i);
-        if (match) dataAmount = match[0].toUpperCase(); // e.g., "2GB" or "2.5 GB"
-      }
-      if (!dataAmount) dataAmount = 'Data Purchase'; // Fallback if no match
+      // Use the clean column from transactions table (already in response!)
+let dataAmount = tx.data_amount || '';  // ← This is the new reliable source
+
+// Optional fallback only if still missing (should be rare now)
+if (!dataAmount && tx.description) {
+  const match = tx.description.match(/(\d+\.?\d*)\s*(GB|MB|TB|gb|mb|tb)/i);
+  if (match) {
+    dataAmount = match[0].toUpperCase();
+  } else if (tx.description.toLowerCase().includes('data')) {
+    dataAmount = 'Data Bundle';
+  }
+}
+
+if (!dataAmount) dataAmount = 'Data Purchase'; // Ultimate fallback
 
       // Correct key mapping + force from global svgShapes
       const providerKey = tx.provider?.toLowerCase() === '9mobile' ? 'ninemobile' : tx.provider?.toLowerCase();
@@ -7532,7 +7539,7 @@ allPlansModalContent.addEventListener('touchend', handleTouchEnd);
   recentTransactions = recentTransactions.filter(tx => tx && tx.phone && tx.phone.trim() !== '');
 
   try {
-    const res = await fetch(`${window.__SEC_API_BASE}/api/transactions?limit=20`, {
+    const res = await fetch(`${window.__SEC_API_BASE}/api/transactions?limit=100`, {
       credentials: 'include',
     });
 
