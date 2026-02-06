@@ -245,8 +245,6 @@
 
   // --- GET shared JWT (session token) ---
   async function fxgTransfer_getSharedJWT() {
-    // Attempts to fetch session token from /api/session (based on your console test).
-    // Returns token string or null.
     try {
       const sessionRes = await fetch(`${API_BASE}/api/session`, {
         method: 'GET',
@@ -273,16 +271,14 @@
     }
   }
 
-  // --- PIN verification using checkout modal (wired to your /api/verify-pin) ---
+  // --- PIN verification using checkout modal ---
   async function fxgTransfer_verifyPinOrBiometric() {
     return new Promise((resolve) => {
-      // Set up the callback that the PIN modal will call
       window._checkoutPinResolve = (result) => {
         try { 
           delete window._checkoutPinResolve; 
         } catch {}
         
-        // Immediately hide the PIN modal
         if (typeof window.hideCheckoutPinModal === 'function') {
           window.hideCheckoutPinModal();
         }
@@ -290,9 +286,7 @@
         resolve(result);
       };
 
-      // Show the PIN modal
       if (typeof window.showCheckoutPinModal === 'function') {
-        // Small delay to ensure smooth transition from confirm modal to PIN modal
         requestAnimationFrame(() => {
           window.showCheckoutPinModal();
         });
@@ -301,12 +295,10 @@
         resolve({ success: false, reason: 'modal_unavailable' });
       }
     }).then((modalResult) => {
-      // modalResult should be { success: true, pinToken: '...' } or { success: true, biometricToken: '...' }
       if (!modalResult || modalResult.success !== true) {
         return { success: false, reason: modalResult?.reason || 'cancelled' };
       }
 
-      // Extract token from modal result
       const token = modalResult.pinToken || modalResult.biometricToken || null;
 
       if (!token) {
@@ -333,13 +325,9 @@
     if (cancelBtn) cancelBtn.disabled = true;
 
     try {
-      // 1. Close confirm modal FIRST (before any async operations)
       fxgTransfer_closeConfirmModal();
-      
-      // Small delay to let confirm modal close animation finish
       await new Promise(resolve => setTimeout(resolve, 100));
 
-      // 2. Fetch session JWT
       const sessionToken = await fxgTransfer_getSharedJWT();
       if (!sessionToken) {
         console.error('[fxgTransfer] Failed to obtain session token');
@@ -349,13 +337,10 @@
         return;
       }
 
-      // 3. Prompt for PIN/biometric and verify server-side
-      // This will show the PIN modal immediately
       const verification = await fxgTransfer_verifyPinOrBiometric();
       
       if (!verification || !verification.success) {
         console.log('[fxgTransfer] PIN verification failed or cancelled:', verification?.reason || verification);
-        // Don't show receipt for user cancellation
         if (verification?.reason === 'cancelled') {
           return;
         }
@@ -374,13 +359,9 @@
         return;
       }
 
-      // 4. Show processing receipt IMMEDIATELY after PIN verification (before API call)
       fxgTransfer_showProcessingReceipt(payload);
-      
-      // Small delay to ensure processing state is visible
       await new Promise(resolve => setTimeout(resolve, 300));
 
-      // 5. Make the transfer API call
       const res = await fetch(`${API_BASE}/api/wallet/transfer`, {
         method: 'POST',
         headers: {
@@ -395,7 +376,6 @@
         credentials: 'include'
       });
 
-      // 6. Safe response handling
       let data = null;
       let rawText = null;
       try {
@@ -425,7 +405,6 @@
         return;
       }
 
-      // 7. Success path
       const newBalance = data?.newBalance ||
                         data?.balance ||
                         data?.wallet_balance ||
@@ -471,299 +450,70 @@
       els.continueBtn.disabled = true;
     }
     if (els.successEl) els.successEl.hidden = true;
-    fxgTransfer_closeModal();  // Close main transfer modal
+    fxgTransfer_closeModal();
   }
 
   // ────────────────────────────────────────────────
   // Receipt modal functions
   // ────────────────────────────────────────────────
- function fxgTransfer_showProcessingReceipt(payload) {
-  const modal = document.getElementById(RECEIPT_MODAL_ID);
-  if (!modal) {
-    console.error('[fxgTransfer] Receipt modal not found in DOM');
-    return;
-  }
+  function fxgTransfer_showProcessingReceipt(payload) {
+    const modal = document.getElementById(RECEIPT_MODAL_ID);
+    if (!modal) {
+      console.error('[fxgTransfer] Receipt modal not found in DOM');
+      return;
+    }
 
-  // Store payload
-  window._currentTransferPayload = payload;
+    window._currentTransferPayload = payload;
 
-  // Open the modal FIRST using ModalManager
-  if (window.ModalManager && typeof window.ModalManager.openModal === 'function') {
-    // Close any other modals first (except receipt)
-    const openModals = window.ModalManager.getOpenModals();
-    openModals.forEach(id => {
-      if (id !== 'fxgReceiptModal' && id !== 'fxg-transfer-receipt-modal') {
-        window.ModalManager.closeModal(id);
-      }
-    });
-    
-    window.ModalManager.openModal('fxgReceiptModal');
-  } else {
-    // Fallback if ModalManager unavailable
-    modal.classList.remove('hidden');
-    modal.style.display = 'flex';
-    modal.setAttribute('aria-hidden', 'false');
-    document.body.classList.add('modal-open');
-  }
-
-  // THEN: Set the processing state content (after modal is open)
-  requestAnimationFrame(() => {
-    const icon = document.getElementById('receipt-icon');
-    if (icon) {
-      icon.className = 'fxg-receipt-icon processing'; // Note: Add CSS for .processing if needed (e.g., animation)
-      icon.innerHTML = '<div class="spinner"></div>'; // Add CSS for .spinner (e.g., rotating loader)
+    if (window.ModalManager && typeof window.ModalManager.openModal === 'function') {
+      const openModals = window.ModalManager.getOpenModals();
+      openModals.forEach(id => {
+        if (id !== 'fxgReceiptModal' && id !== 'fxg-transfer-receipt-modal') {
+          window.ModalManager.closeModal(id);
+        }
+      });
+      
+      window.ModalManager.openModal('fxgReceiptModal');
     } else {
-      console.warn('[fxgTransfer] Missing receipt-icon element');
+      modal.classList.remove('hidden');
+      modal.style.display = 'flex';
+      modal.setAttribute('aria-hidden', 'false');
+      document.body.classList.add('modal-open');
     }
-    
-    modal.classList.add('show');
 
-    const statusEl = document.getElementById('receipt-status');
-    if (statusEl) statusEl.textContent = 'Processing Transfer';
-    else console.warn('[fxgTransfer] Missing receipt-status element');
-
-    const messageEl = document.getElementById('receipt-message');
-    if (messageEl) {
-      messageEl.className = 'fxg-receipt-note'; // Neutral class
-      messageEl.innerHTML = `
-        Transferring <strong>₦${fmt(payload.amount)}</strong> to <strong>@${payload.recipient}</strong>...<br><br>
-        Please hold on while we process your transfer.
-      `;
-    } else console.warn('[fxgTransfer] Missing receipt-message element');
-
-    const detailsEl = document.getElementById('receipt-details');
-    if (detailsEl) detailsEl.style.display = 'none';
-    else console.warn('[fxgTransfer] Missing receipt-details element');
-
-    const actionsEl = document.getElementById('receipt-actions');
-    if (actionsEl) actionsEl.style.display = 'none';
-    else console.warn('[fxgTransfer] Missing receipt-actions element');
-  });
-}
-
-window.fxgTransfer_updateReceiptToSuccess = fxgTransfer_updateReceiptToSuccess;
-window.fxgTransfer_updateReceiptToFailed = fxgTransfer_updateReceiptToFailed;
-window.fxgTransfer_updateReceiptToInsufficient = fxgTransfer_updateReceiptToInsufficient;
-window.fxgTransfer_showProcessingReceipt = fxgTransfer_showProcessingReceipt;
-
-function fxgTransfer_updateReceiptToSuccess(payload, newBalance, reference) {
-  const icon = document.getElementById('receipt-icon');
-  if (icon) {
-    icon.className = 'fxg-receipt-icon success';
-    icon.innerHTML = `
-      <svg class="checkmark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 52">
-        <circle class="checkmark__circle" cx="26" cy="26" r="25" fill="none"/>
-        <path class="checkmark__check" fill="none" d="M14.1 27.2l7.1 7.2 16.7-16.8"/>
-      </svg>
-    `;
-  } else console.warn('[fxgTransfer] Missing receipt-icon element');
-
-  const statusEl = document.getElementById('receipt-status');
-  if (statusEl) statusEl.textContent = 'Transfer Successful';
-  else console.warn('[fxgTransfer] Missing receipt-status element');
-
-  const messageEl = document.getElementById('receipt-message');
-  if (messageEl) {
-    messageEl.className = 'fxg-receipt-note'; // Neutral class for success
-    messageEl.textContent = 'Your balance has been transferred successfully!';
-  } else console.warn('[fxgTransfer] Missing receipt-message element');
-
-  // Fill details
-  const recipientEl = document.getElementById('receipt-recipient');
-  if (recipientEl) recipientEl.textContent = `@${payload.recipient}`;
-
-  const amountEl = document.getElementById('receipt-amount');
-  if (amountEl) amountEl.textContent = `₦${fmt(payload.amount)}`;
-
-  const balanceEl = document.getElementById('receipt-new-balance');
-  if (balanceEl) balanceEl.textContent = `₦${fmt(newBalance)}`;
-
-  const dateEl = document.getElementById('receipt-date');
-  if (dateEl) dateEl.textContent = new Date().toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
-
-  // Removed refEl since no #receipt-transaction-id; add row to HTML if needed: <div class="fxg-receipt-row"><span class="label">Transaction ID</span><span class="value" id="receipt-transaction-id">N/A</span></div>
-
-  const detailsEl = document.getElementById('receipt-details');
-  if (detailsEl) detailsEl.style.display = 'block';
-  else console.warn('[fxgTransfer] Missing receipt-details element');
-
-  const actionsEl = document.getElementById('receipt-actions');
-if (actionsEl) {
-  actionsEl.style.display = 'flex';
-  actionsEl.innerHTML = `
-    <button id="receipt-done" data-close style="flex:1; background:#333; color:white; border:none; border-radius:50px; padding:14px; font-weight:600;">
-      Done
-    </button>
-  `;
-  document.getElementById('receipt-done')?.addEventListener('click', () => {
-    // Close receipt modal
-    fxgTransfer_closeReceiptModal();
-    
-    // Full reset of the form
-    const els = fxgTransfer_resolveElements();
-    
-    // Clear username input
-    if (els.usernameEl) {
-      els.usernameEl.value = '';
-      els.usernameEl.classList.remove('invalid', 'valid');
-    }
-    
-    // Clear amount input
-    if (els.amountEl) {
-      els.amountEl.value = '';
-      els.amountEl.classList.remove('invalid', 'valid');
-    }
-    
-    // Clear error messages
-    if (els.usernameErr) els.usernameErr.textContent = '';
-    if (els.amountErr) els.amountErr.textContent = '';
-    
-    // Reset continue button
-    if (els.continueBtn) {
-      const text = els.continueBtn.querySelector('.fxg-btn-text') || els.continueBtn;
-      text.textContent = 'Continue';
-      els.continueBtn.disabled = true;
-      els.continueBtn.classList.remove('active');
-    }
-    
-    // Hide success message if any
-    if (els.successEl) els.successEl.hidden = true;
-    
-    // Close main transfer modal
-    fxgTransfer_closeModal();
-    
-    console.log('[fxgTransfer] ✅ Full form reset completed');
-  });
-}
-}
-
-function fxgTransfer_updateReceiptToFailed(payload, errorMessage) {
-  const icon = document.getElementById('receipt-icon');
-  if (icon) {
-    icon.className = 'fxg-receipt-icon failed';
-    icon.innerHTML = `
-      <svg class="cross" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 52">
-        <circle class="cross__circle" cx="26" cy="26" r="25" fill="none"/>
-        <path class="cross__path" fill="none" d="M16 16 36 36"/>
-        <path class="cross__path" fill="none" d="M16 36 36 16"/>
-      </svg>
-    `;
-  } else console.warn('[fxgTransfer] Missing receipt-icon element');
-
-  const statusEl = document.getElementById('receipt-status');
-  if (statusEl) statusEl.textContent = 'Transfer Failed';
-  else console.warn('[fxgTransfer] Missing receipt-status element');
-
-  const messageEl = document.getElementById('receipt-message');
-  if (messageEl) {
-    messageEl.className = 'fxg-receipt-error'; // Error class for failed
-    messageEl.textContent = errorMessage;
-  } else console.warn('[fxgTransfer] Missing receipt-message element');
-
-  // Optionally fill shared details for context in failed
-  const recipientEl = document.getElementById('receipt-recipient');
-  if (recipientEl) recipientEl.textContent = `@${payload.recipient}`;
-
-  const amountEl = document.getElementById('receipt-amount');
-  if (amountEl) amountEl.textContent = `₦${fmt(payload.amount)}`;
-
-  const detailsEl = document.getElementById('receipt-details');
-  if (detailsEl) detailsEl.style.display = 'none'; // Hide details in failed (or set to 'block' if you want partial details)
-  else console.warn('[fxgTransfer] Missing receipt-details element');
-
-  const actionsEl = document.getElementById('receipt-actions');
-  if (actionsEl) {
-    actionsEl.style.display = 'flex';
-    actionsEl.innerHTML = `
-      <button id="receipt-try-again" style="flex:1; background:linear-gradient(90deg,#00d4aa,#00bfa5); color:white; border:none; border-radius:50px; padding:14px; font-weight:600; margin-right:8px;">
-        Try Again
-      </button>
-      <button id="receipt-done" style="flex:1; background:#333; color:white; border:none; border-radius:50px; padding:14px; font-weight:600;">
-        Close
-      </button>
-    `;
-    document.getElementById('receipt-try-again')?.addEventListener('click', () => {
-      fxgTransfer_closeReceiptModal();
-      fxgTransfer_openConfirmModal(payload);
-    });
-    document.getElementById('receipt-done')?.addEventListener('click', () => {
-      fxgTransfer_closeReceiptModal();
-      fxgTransfer_resetTransferForm();
-    });
-  } else console.warn('[fxgTransfer] Missing receipt-actions element');
-}
-
-function fxgTransfer_updateReceiptToInsufficient(message, currentBalance) {
-  const icon = document.getElementById('receipt-icon');
-  if (icon) {
-    icon.className = 'fxg-receipt-icon failed';
-    icon.innerHTML = `
-      <svg class="cross" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 52">
-        <circle class="cross__circle" cx="26" cy="26" r="25" fill="none"/>
-        <path class="cross__path" fill="none" d="M16 16 36 36"/>
-        <path class="cross__path" fill="none" d="M16 36 36 16"/>
-      </svg>
-    `;
-  } else console.warn('[fxgTransfer] Missing receipt-icon element');
-
-  const statusEl = document.getElementById('receipt-status');
-  if (statusEl) statusEl.textContent = 'Insufficient Balance';
-  else console.warn('[fxgTransfer] Missing receipt-status element');
-
-  const messageEl = document.getElementById('receipt-message');
-  if (messageEl) {
-    messageEl.className = 'fxg-receipt-error'; // Error class
-    messageEl.innerHTML = `
-      ${message}<br><br>
-      <strong>Current balance: ₦${fmt(currentBalance)}</strong><br><br>
-      Please fund your wallet to complete this transfer.
-    `;
-  } else console.warn('[fxgTransfer] Missing receipt-message element');
-
-  // Optionally fill shared details
-  const recipientEl = document.getElementById('receipt-recipient');
-  if (recipientEl) recipientEl.textContent = `@${payload.recipient}`; // Assuming payload is available; adjust if needed
-
-  const amountEl = document.getElementById('receipt-amount');
-  if (amountEl) amountEl.textContent = `₦${fmt(payload.amount)}`; // Assuming payload
-
-  const detailsEl = document.getElementById('receipt-details');
-  if (detailsEl) detailsEl.style.display = 'none';
-  else console.warn('[fxgTransfer] Missing receipt-details element');
-
-  const actionsEl = document.getElementById('receipt-actions');
-  if (actionsEl) {
-    actionsEl.style.display = 'flex';
-    actionsEl.innerHTML = `
-      <button id="receipt-fund-wallet" style="flex:1; background:linear-gradient(90deg,#00d4aa,#00bfa5); color:white; border:none; border-radius:50px; padding:14px; font-weight:600; margin-right:8px;">
-        Fund Wallet
-      </button>
-      <button id="receipt-done" style="flex:1; background:#333; color:white; border:none; border-radius:50px; padding:14px; font-weight:600;">
-        Close
-      </button>
-    `;
-    document.getElementById('receipt-fund-wallet')?.addEventListener('click', () => {
-      fxgTransfer_closeReceiptModal();
-      if (window.ModalManager?.openModal) {
-        window.ModalManager.openModal('addMoneyModal');
+    requestAnimationFrame(() => {
+      const icon = document.getElementById('receipt-icon');
+      if (icon) {
+        icon.className = 'fxg-receipt-icon processing';
+        icon.innerHTML = '<div class="spinner"></div>';
       }
-    });
-    document.getElementById('receipt-done')?.addEventListener('click', () => {
-      fxgTransfer_closeReceiptModal();
-      fxgTransfer_resetTransferForm();
-    });
-  } else console.warn('[fxgTransfer] Missing receipt-actions element');
-}
+      
+      modal.classList.add('show');
 
-  window.fxgTransfer_updateReceiptToSuccess = fxgTransfer_updateReceiptToSuccess;
-  window.fxgTransfer_updateReceiptToFailed = fxgTransfer_updateReceiptToFailed;
-  window.fxgTransfer_updateReceiptToInsufficient = fxgTransfer_updateReceiptToInsufficient;
-  window.fxgTransfer_showProcessingReceipt = fxgTransfer_showProcessingReceipt;
+      const statusEl = document.getElementById('receipt-status');
+      if (statusEl) statusEl.textContent = 'Processing Transfer';
+
+      const messageEl = document.getElementById('receipt-message');
+      if (messageEl) {
+        messageEl.className = 'fxg-receipt-note';
+        messageEl.innerHTML = `
+          Transferring <strong>₦${fmt(payload.amount)}</strong> to <strong>@${payload.recipient}</strong>...<br><br>
+          Please hold on while we process your transfer.
+        `;
+      }
+
+      const detailsEl = document.getElementById('receipt-details');
+      if (detailsEl) detailsEl.style.display = 'none';
+
+      const actionsEl = document.getElementById('receipt-actions');
+      if (actionsEl) actionsEl.style.display = 'none';
+    });
+  }
 
   function fxgTransfer_updateReceiptToSuccess(payload, newBalance, reference) {
     const icon = document.getElementById('receipt-icon');
     if (icon) {
-      icon.className = 'receipt-icon success';
+      icon.className = 'fxg-receipt-icon success';
       icon.innerHTML = `
         <svg class="checkmark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 52">
           <circle class="checkmark__circle" cx="26" cy="26" r="25" fill="none"/>
@@ -776,9 +526,11 @@ function fxgTransfer_updateReceiptToInsufficient(message, currentBalance) {
     if (statusEl) statusEl.textContent = 'Transfer Successful';
 
     const messageEl = document.getElementById('receipt-message');
-    if (messageEl) messageEl.textContent = 'Your balance has been transferred successfully!';
+    if (messageEl) {
+      messageEl.className = 'fxg-receipt-note';
+      messageEl.textContent = 'Your balance has been transferred successfully!';
+    }
 
-    // Fill details
     const recipientEl = document.getElementById('receipt-recipient');
     if (recipientEl) recipientEl.textContent = `@${payload.recipient}`;
 
@@ -806,8 +558,46 @@ function fxgTransfer_updateReceiptToInsufficient(message, currentBalance) {
         </button>
       `;
       document.getElementById('receipt-done')?.addEventListener('click', () => {
+        console.log('[fxgTransfer] 🧹 Starting complete cleanup after successful transfer');
+        
+        // ✅ 1. CRITICAL: Clear the stored payload
+        delete window._currentTransferPayload;
+        
+        // ✅ 2. Close receipt modal
         fxgTransfer_closeReceiptModal();
-        fxgTransfer_resetTransferForm();
+        
+        // ✅ 3. Full reset of the form
+        const els = fxgTransfer_resolveElements();
+        
+        if (els.usernameEl) {
+          els.usernameEl.value = '';
+          els.usernameEl.classList.remove('invalid', 'valid', 'filled');
+        }
+        
+        if (els.amountEl) {
+          els.amountEl.value = '';
+          els.amountEl.classList.remove('invalid', 'valid', 'filled');
+        }
+        
+        if (els.usernameErr) els.usernameErr.textContent = '';
+        if (els.amountErr) els.amountErr.textContent = '';
+        
+        if (els.continueBtn) {
+          const text = els.continueBtn.querySelector('.fxg-btn-text') || els.continueBtn;
+          text.textContent = 'Continue';
+          els.continueBtn.disabled = true;
+          els.continueBtn.classList.remove('active');
+        }
+        
+        if (els.successEl) els.successEl.hidden = true;
+        
+        // ✅ 4. Close main transfer modal
+        fxgTransfer_closeModal();
+        
+        // ✅ 5. Refresh balance display
+        fxgTransfer_refreshOnModalOpen();
+        
+        console.log('[fxgTransfer] ✅ Complete cleanup finished - ready for next transfer');
       });
     }
   }
@@ -815,7 +605,7 @@ function fxgTransfer_updateReceiptToInsufficient(message, currentBalance) {
   function fxgTransfer_updateReceiptToFailed(payload, errorMessage) {
     const icon = document.getElementById('receipt-icon');
     if (icon) {
-      icon.className = 'receipt-icon failed';
+      icon.className = 'fxg-receipt-icon failed';
       icon.innerHTML = `
         <svg class="cross" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 52">
           <circle class="cross__circle" cx="26" cy="26" r="25" fill="none"/>
@@ -829,7 +619,16 @@ function fxgTransfer_updateReceiptToInsufficient(message, currentBalance) {
     if (statusEl) statusEl.textContent = 'Transfer Failed';
 
     const messageEl = document.getElementById('receipt-message');
-    if (messageEl) messageEl.textContent = errorMessage;
+    if (messageEl) {
+      messageEl.className = 'fxg-receipt-error';
+      messageEl.textContent = errorMessage;
+    }
+
+    const recipientEl = document.getElementById('receipt-recipient');
+    if (recipientEl) recipientEl.textContent = `@${payload.recipient}`;
+
+    const amountEl = document.getElementById('receipt-amount');
+    if (amountEl) amountEl.textContent = `₦${fmt(payload.amount)}`;
 
     const detailsEl = document.getElementById('receipt-details');
     if (detailsEl) detailsEl.style.display = 'none';
@@ -850,6 +649,7 @@ function fxgTransfer_updateReceiptToInsufficient(message, currentBalance) {
         fxgTransfer_openConfirmModal(payload);
       });
       document.getElementById('receipt-done')?.addEventListener('click', () => {
+        delete window._currentTransferPayload; // Clear payload on close too
         fxgTransfer_closeReceiptModal();
         fxgTransfer_resetTransferForm();
       });
@@ -857,9 +657,11 @@ function fxgTransfer_updateReceiptToInsufficient(message, currentBalance) {
   }
 
   function fxgTransfer_updateReceiptToInsufficient(message, currentBalance) {
+    const payload = window._currentTransferPayload || {}; // Safely get payload
+    
     const icon = document.getElementById('receipt-icon');
     if (icon) {
-      icon.className = 'receipt-icon failed';
+      icon.className = 'fxg-receipt-icon failed';
       icon.innerHTML = `
         <svg class="cross" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 52">
           <circle class="cross__circle" cx="26" cy="26" r="25" fill="none"/>
@@ -874,12 +676,19 @@ function fxgTransfer_updateReceiptToInsufficient(message, currentBalance) {
 
     const messageEl = document.getElementById('receipt-message');
     if (messageEl) {
+      messageEl.className = 'fxg-receipt-error';
       messageEl.innerHTML = `
         ${message}<br><br>
         <strong>Current balance: ₦${fmt(currentBalance)}</strong><br><br>
         Please fund your wallet to complete this transfer.
       `;
     }
+
+    const recipientEl = document.getElementById('receipt-recipient');
+    if (recipientEl && payload.recipient) recipientEl.textContent = `@${payload.recipient}`;
+
+    const amountEl = document.getElementById('receipt-amount');
+    if (amountEl && payload.amount) amountEl.textContent = `₦${fmt(payload.amount)}`;
 
     const detailsEl = document.getElementById('receipt-details');
     if (detailsEl) detailsEl.style.display = 'none';
@@ -896,12 +705,14 @@ function fxgTransfer_updateReceiptToInsufficient(message, currentBalance) {
         </button>
       `;
       document.getElementById('receipt-fund-wallet')?.addEventListener('click', () => {
+        delete window._currentTransferPayload;
         fxgTransfer_closeReceiptModal();
         if (window.ModalManager?.openModal) {
           window.ModalManager.openModal('addMoneyModal');
         }
       });
       document.getElementById('receipt-done')?.addEventListener('click', () => {
+        delete window._currentTransferPayload;
         fxgTransfer_closeReceiptModal();
         fxgTransfer_resetTransferForm();
       });
@@ -918,6 +729,7 @@ function fxgTransfer_updateReceiptToInsufficient(message, currentBalance) {
     if (backdrop) {
       backdrop.addEventListener('click', (e) => {
         if (e.target === backdrop) {
+          delete window._currentTransferPayload;
           fxgTransfer_closeReceiptModal();
         }
       });
@@ -925,6 +737,7 @@ function fxgTransfer_updateReceiptToInsufficient(message, currentBalance) {
 
     wrapper.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
+        delete window._currentTransferPayload;
         fxgTransfer_closeReceiptModal();
       }
     });
@@ -940,7 +753,6 @@ function fxgTransfer_updateReceiptToInsufficient(message, currentBalance) {
       return;
     }
 
-    // Bind trigger
     if (els.trigger && !els.trigger._fxg_bound) {
       els.trigger.addEventListener('click', e => {
         e.preventDefault();
@@ -949,7 +761,6 @@ function fxgTransfer_updateReceiptToInsufficient(message, currentBalance) {
       els.trigger._fxg_bound = true;
     }
 
-    // Bind close
     if (els.closeBtn && !els.closeBtn._fxg_bound) {
       els.closeBtn.addEventListener('click', e => {
         e.preventDefault();
@@ -965,7 +776,6 @@ function fxgTransfer_updateReceiptToInsufficient(message, currentBalance) {
       els.backdrop._fxg_bound = true;
     }
 
-    // Validation
     function fxgTransfer_validate() {
       if (!els.usernameEl || !els.amountEl || !els.continueBtn) return false;
 
@@ -990,7 +800,6 @@ function fxgTransfer_updateReceiptToInsufficient(message, currentBalance) {
       return valid;
     }
 
-    // Amount input
     if (els.amountEl && !els.amountEl._fxg_bound) {
       let prevFormatted = '';
       els.amountEl.addEventListener('input', e => {
@@ -1016,7 +825,6 @@ function fxgTransfer_updateReceiptToInsufficient(message, currentBalance) {
       els.usernameEl._fxg_bound = true;
     }
 
-    // Form submit
     if (els.form && !els.form._fxg_bound) {
       els.form.addEventListener('submit', ev => {
         ev.preventDefault();
@@ -1033,7 +841,6 @@ function fxgTransfer_updateReceiptToInsufficient(message, currentBalance) {
       els.form._fxg_bound = true;
     }
 
-    // Reset on modal open
     window.addEventListener('modalOpened', ev => {
       if (ev?.detail === 'fxgTransferModal') {
         fxgTransfer_refreshOnModalOpen();
@@ -1043,7 +850,6 @@ function fxgTransfer_updateReceiptToInsufficient(message, currentBalance) {
       }
     });
 
-    // Bind events
     fxgTransfer_bindConfirmModalEvents();
     fxgTransfer_bindReceiptModalEvents();
   }
@@ -1069,82 +875,18 @@ function fxgTransfer_updateReceiptToInsufficient(message, currentBalance) {
 
   fxgTransfer_bootstrap();
 
-  // Debug helpers (preserves your console IIFE as a callable function)
+  // Expose to window for global access (optional debug helpers)
+  window.fxgTransfer_showProcessingReceipt = fxgTransfer_showProcessingReceipt;
+  window.fxgTransfer_updateReceiptToSuccess = fxgTransfer_updateReceiptToSuccess;
+  window.fxgTransfer_updateReceiptToFailed = fxgTransfer_updateReceiptToFailed;
+  window.fxgTransfer_updateReceiptToInsufficient = fxgTransfer_updateReceiptToInsufficient;
+
   window.fxgTransfer = window.fxgTransfer || {};
   window.fxgTransfer.getBalance = () => BALANCE;
   window.fxgTransfer.setBalance = v => {
     fxgTransfer_updateLocalBalance(Number(v) || 0);
     if (typeof window.updateAllBalances === 'function') {
       try { window.updateAllBalances(BALANCE); } catch {}
-    }
-  };
-
-  // original console tester now available as a helper:
-  window.fxgTransfer.runConsoleTest = async function runConsoleTest({ recipient = 'Enitan', amount = 200000 } = {}) {
-    try {
-      console.log('%c=== Starting Transfer Test ===', 'color: cyan; font-weight: bold; font-size: 16px;');
-
-      // Step 1: Get fresh session + token
-      console.log('Fetching session token...');
-      const sessionToken = await fxgTransfer_getSharedJWT();
-      if (!sessionToken) {
-        console.error('No session token found');
-        return;
-      }
-      console.log('✅ Got fresh session token (length:', sessionToken.length, ')');
-
-      // Step 2: Prepare transfer payload
-      const payload = { recipient, amount };
-      console.log('Sending transfer with payload:', payload);
-
-      // Step 3: Trigger PIN modal and verify on server
-      const verification = await fxgTransfer_verifyPinOrBiometric({ sessionToken, payload });
-      if (!verification?.success) {
-        console.error('Verification failed:', verification?.reason || verification);
-        return;
-      }
-      console.log('Received pin-verified token (len):', (verification.token || '').length);
-
-      // Step 4: Call the transfer endpoint with the pin-verified JWT
-      const transferRes = await fetch(`${API_BASE}/api/wallet/transfer`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${verification.token}`
-        },
-        body: JSON.stringify(payload)
-      });
-
-      console.log('Transfer response status:', transferRes.status);
-
-      let transferText = await transferRes.text();
-      console.log('Raw response body:', transferText);
-
-      let transferData = null;
-      try {
-        transferData = JSON.parse(transferText);
-        console.log('Parsed response:', transferData);
-      } catch (e) {
-        console.warn('Response was not valid JSON');
-      }
-
-      if (transferRes.ok) {
-        console.log('%cTRANSFER SUCCESS!', 'color: lime; font-size: 18px; font-weight: bold');
-        console.log('Result:', transferData);
-        if (transferData?.newBalance && typeof window.updateAllBalances === 'function') {
-          window.updateAllBalances(transferData.newBalance);
-          console.log('Balance UI refreshed');
-        }
-      } else {
-        console.error('%cTRANSFER FAILED', 'color: red; font-size: 18px; font-weight: bold');
-        console.error('Error message:', transferData?.error || transferText || 'Unknown');
-      }
-
-    } catch (err) {
-      console.error('%cTest crashed:', 'color: orange; font-weight: bold', err);
-    } finally {
-      console.log('%c=== Test Finished ===', 'color: cyan; font-weight: bold;');
     }
   };
 
