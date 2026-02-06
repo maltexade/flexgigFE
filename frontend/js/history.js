@@ -676,6 +676,39 @@ function showTransactionReceipt(tx) {
         console.error('[Receipt] #receiptModal container not found in DOM');
         return;
     }
+        // If modal doesn't exist → create it dynamically
+    if (!modal) {
+        console.warn('[Receipt] #receiptModal missing → creating it now');
+        
+        modal = document.createElement('div');
+        modal.id = 'receiptModal';
+        modal.className = 'hidden';
+        modal.setAttribute('aria-hidden', 'true');
+        modal.setAttribute('inert', '');
+        modal.style.cssText = `
+            position: fixed; inset: 0; z-index: 999999; display: none;
+            background: rgba(0,0,0,0.65);
+        `;
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'opay-backdrop';
+        backdrop.setAttribute('data-close', '');
+        backdrop.style.cssText = 'position: absolute; inset: 0; z-index: 1;';
+
+        const wrapper = document.createElement('div');
+        wrapper.className = 'receipt-content-wrapper';
+        wrapper.style.cssText = 'position: relative; z-index: 2; width: 100%; height: 100%; overflow-y: auto; display: flex; flex-direction: column;';
+
+        modal.appendChild(backdrop);
+        modal.appendChild(wrapper);
+        document.body.appendChild(modal);
+
+        // Make sure close works even if ModalManager isn't fully ready
+        backdrop.addEventListener('click', () => {
+            ModalManager?.closeModal?.('receiptModal') || modal.classList.add('hidden');
+        });
+    }
+    
 
     // Get the inner wrapper where we inject content
     const wrapper = modal.querySelector('.receipt-content-wrapper');
