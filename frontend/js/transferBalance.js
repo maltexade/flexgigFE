@@ -472,268 +472,243 @@
   // ────────────────────────────────────────────────
   // Receipt modal functions
   // ────────────────────────────────────────────────
-  function fxgTransfer_showProcessingReceipt(payload) {
-    const modal = document.getElementById(RECEIPT_MODAL_ID);
-    if (!modal) {
-      console.error('[fxgTransfer] Receipt modal not found in DOM');
-      return;
-    }
-
-    window._currentTransferPayload = payload;
-
-    if (window.ModalManager && typeof window.ModalManager.openModal === 'function') {
-      const openModals = window.ModalManager.getOpenModals();
-      openModals.forEach(id => {
-        if (id !== 'fxgReceiptModal' && id !== 'fxg-transfer-receipt-modal') {
-          window.ModalManager.closeModal(id);
-        }
-      });
-      
-      window.ModalManager.openModal('fxgReceiptModal');
-    } else {
-      modal.classList.remove('hidden');
-      modal.style.display = 'flex';
-      modal.setAttribute('aria-hidden', 'false');
-      document.body.classList.add('modal-open');
-    }
-
-    requestAnimationFrame(() => {
-      const icon = document.getElementById('receipt-icon');
-      if (icon) {
-        icon.className = 'fxg-receipt-icon processing';
-        icon.innerHTML = '<div class="spinner"></div>';
-      }
-      
-      modal.classList.add('show');
-
-      const statusEl = document.getElementById('receipt-status');
-      if (statusEl) statusEl.textContent = 'Processing Transfer';
-
-      const messageEl = document.getElementById('receipt-message');
-      if (messageEl) {
-        messageEl.className = 'fxg-receipt-note';
-        messageEl.innerHTML = `
-          Transferring <strong>₦${fmt(payload.amount)}</strong> to <strong>@${payload.recipient}</strong>...<br><br>
-          Please hold on while we process your transfer.
-        `;
-      }
-
-      const detailsEl = document.getElementById('receipt-details');
-      if (detailsEl) detailsEl.style.display = 'none';
-
-      const actionsEl = document.getElementById('receipt-actions');
-      if (actionsEl) actionsEl.style.display = 'none';
-    });
+  // ────────────────────────────────────────────────
+// Receipt modal functions
+// ────────────────────────────────────────────────
+function fxgTransfer_showProcessingReceipt(payload) {
+  const modal = document.getElementById(RECEIPT_MODAL_ID);
+  if (!modal) {
+    console.error('[fxgTransfer] Receipt modal not found');
+    return;
   }
 
-  function fxgTransfer_updateReceiptToSuccess(payload, newBalance, reference) {
+  // Persist payload for later states
+  window._currentTransferPayload = payload;
+
+  // IMPORTANT: Do NOT close other modals (transfer stays open)
+  if (window.ModalManager?.openModal) {
+    window.ModalManager.openModal('fxgReceiptModal');
+  } else {
+    modal.classList.remove('hidden');
+    modal.style.display = 'flex';
+    modal.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('modal-open');
+  }
+
+  requestAnimationFrame(() => {
     const icon = document.getElementById('receipt-icon');
     if (icon) {
-      icon.className = 'fxg-receipt-icon success';
-      icon.innerHTML = `
-        <svg class="checkmark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 52">
-          <circle class="checkmark__circle" cx="26" cy="26" r="25" fill="none"/>
-          <path class="checkmark__check" fill="none" d="M14.1 27.2l7.1 7.2 16.7-16.8"/>
-        </svg>
-      `;
+      icon.className = 'fxg-receipt-icon processing';
+      icon.innerHTML = '<div class="spinner"></div>';
     }
 
+    modal.classList.add('show');
+
     const statusEl = document.getElementById('receipt-status');
-    if (statusEl) statusEl.textContent = 'Transfer Successful';
+    if (statusEl) statusEl.textContent = 'Processing Transfer';
 
     const messageEl = document.getElementById('receipt-message');
     if (messageEl) {
       messageEl.className = 'fxg-receipt-note';
-      messageEl.textContent = 'Your balance has been transferred successfully!';
+      messageEl.innerHTML = `
+        Transferring <strong>₦${fmt(payload.amount)}</strong>
+        to <strong>@${payload.recipient}</strong>…<br><br>
+        Please hold on while we process your transfer.
+      `;
     }
-
-    const recipientEl = document.getElementById('receipt-recipient');
-    if (recipientEl) recipientEl.textContent = `@${payload.recipient}`;
-
-    const amountEl = document.getElementById('receipt-amount');
-    if (amountEl) amountEl.textContent = `₦${fmt(payload.amount)}`;
-
-    const balanceEl = document.getElementById('receipt-new-balance');
-    if (balanceEl) balanceEl.textContent = `₦${fmt(newBalance)}`;
-
-    const dateEl = document.getElementById('receipt-date');
-    if (dateEl) dateEl.textContent = new Date().toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
-
-    const refEl = document.getElementById('receipt-transaction-id');
-    if (refEl) refEl.textContent = reference || 'N/A';
 
     const detailsEl = document.getElementById('receipt-details');
-    if (detailsEl) detailsEl.style.display = 'block';
+    if (detailsEl) detailsEl.style.display = 'none';
 
     const actionsEl = document.getElementById('receipt-actions');
-    if (actionsEl) {
-      actionsEl.style.display = 'flex';
-      actionsEl.innerHTML = `
-        <button id="receipt-done" style="flex:1; background:#333; color:white; border:none; border-radius:50px; padding:14px; font-weight:600;">
-          Done
-        </button>
-      `;
-      document.getElementById('receipt-done')?.addEventListener('click', () => {
-        console.log('[fxgTransfer] 🧹 Starting complete cleanup after successful transfer');
-        
-        // ✅ 1. CRITICAL: Clear the stored payload
-        delete window._currentTransferPayload;
-        
-        // ✅ 2. Close receipt modal
-        fxgTransfer_closeReceiptModal();
-        
-        // ✅ 3. Full reset of the form
-        const els = fxgTransfer_resolveElements();
-        
-        if (els.usernameEl) {
-          els.usernameEl.value = '';
-          els.usernameEl.classList.remove('invalid', 'valid', 'filled');
-        }
-        
-        if (els.amountEl) {
-          els.amountEl.value = '';
-          els.amountEl.classList.remove('invalid', 'valid', 'filled');
-        }
-        
-        if (els.usernameErr) els.usernameErr.textContent = '';
-        if (els.amountErr) els.amountErr.textContent = '';
-        
-        if (els.continueBtn) {
-          const text = els.continueBtn.querySelector('.fxg-btn-text') || els.continueBtn;
-          text.textContent = 'Continue';
-          els.continueBtn.disabled = true;
-          els.continueBtn.classList.remove('active');
-        }
-        
-        if (els.successEl) els.successEl.hidden = true;
-        
-        // ✅ 4. Close main transfer modal
-        fxgTransfer_closeModal();
-        
-        // ✅ 5. Refresh balance display
-        fxgTransfer_refreshOnModalOpen();
-        
-        console.log('[fxgTransfer] ✅ Complete cleanup finished - ready for next transfer');
-      });
-    }
-  }
-
-  // New helper function (add this after fxgTransfer_resetTransferForm or in the main scope)
-function fxgTransfer_reopenTransferModal(payload) {
-  // Ensure main modal is closed first to avoid stacking issues
-  fxgTransfer_closeModal();
-  
-  // Get elements
-  const els = fxgTransfer_resolveElements();
-  
-  // Restore username
-  if (els.usernameEl && payload.recipient) {
-    els.usernameEl.value = payload.recipient;
-    // Trigger input event to run validation and any UI updates
-    els.usernameEl.dispatchEvent(new Event('input'));
-  }
-  
-  // Restore amount (use formatted string to match input expectations)
-  if (els.amountEl && payload.amount) {
-    const formattedAmount = fmt(payload.amount);
-    els.amountEl.value = formattedAmount;
-    // Trigger input event to run validation, formatting, and UI updates
-    els.amountEl.dispatchEvent(new Event('input'));
-  }
-  
-  // Open the transfer modal
-  fxgTransfer_openModal();
-  
-  // Small delay for any async UI refresh if needed (e.g., balance)
-  setTimeout(() => {
-    if (els.successEl) els.successEl.hidden = true; // Hide success if shown
-  }, 100);
+    if (actionsEl) actionsEl.style.display = 'none';
+  });
 }
 
-// Updated fxgTransfer_updateReceiptToFailed
+function fxgTransfer_updateReceiptToSuccess(payload, newBalance, reference) {
+  const icon = document.getElementById('receipt-icon');
+  if (icon) {
+    icon.className = 'fxg-receipt-icon success';
+    icon.innerHTML = `
+      <svg class="checkmark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 52">
+        <circle class="checkmark__circle" cx="26" cy="26" r="25" fill="none"/>
+        <path class="checkmark__check" fill="none" d="M14.1 27.2l7.1 7.2 16.7-16.8"/>
+      </svg>
+    `;
+  }
+
+  document.getElementById('receipt-status').textContent = 'Transfer Successful';
+  document.getElementById('receipt-message').textContent =
+    'Your balance has been transferred successfully!';
+
+  document.getElementById('receipt-recipient').textContent = `@${payload.recipient}`;
+  document.getElementById('receipt-amount').textContent = `₦${fmt(payload.amount)}`;
+  document.getElementById('receipt-new-balance').textContent = `₦${fmt(newBalance)}`;
+  document.getElementById('receipt-date').textContent =
+    new Date().toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
+  document.getElementById('receipt-transaction-id').textContent = reference || 'N/A';
+
+  const detailsEl = document.getElementById('receipt-details');
+  if (detailsEl) detailsEl.style.display = 'block';
+
+  const actionsEl = document.getElementById('receipt-actions');
+  if (!actionsEl) return;
+
+  actionsEl.style.display = 'flex';
+  actionsEl.innerHTML = `
+    <button id="receipt-done"
+      style="flex:1;background:#333;color:#fff;border:none;
+             border-radius:50px;padding:14px;font-weight:600">
+      Done
+    </button>
+  `;
+
+  document.getElementById('receipt-done').onclick = () => {
+    console.log('[fxgTransfer] ✅ Final cleanup (success)');
+
+    // 1. Clear payload
+    delete window._currentTransferPayload;
+
+    // 2. Close receipt
+    fxgTransfer_closeReceiptModal();
+
+    // 3. Reset form
+    fxgTransfer_resetTransferForm();
+
+    // 4. Close main transfer modal
+    fxgTransfer_closeModal();
+
+    // 5. Refresh balances
+    fxgTransfer_refreshOnModalOpen();
+  };
+}
+
 function fxgTransfer_updateReceiptToFailed(payload, errorMessage) {
-  // ... (icon, status, message, details setup remains the same)
+  const icon = document.getElementById('receipt-icon');
+  if (icon) {
+    icon.className = 'fxg-receipt-icon failed';
+    icon.innerHTML = `
+      <svg class="cross" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 52">
+        <circle class="cross__circle" cx="26" cy="26" r="25" fill="none"/>
+        <path class="cross__path" fill="none" d="M16 16 36 36"/>
+        <path class="cross__path" fill="none" d="M16 36 36 16"/>
+      </svg>
+    `;
+  }
+
+  document.getElementById('receipt-status').textContent = 'Transfer Failed';
+
+  const msg = document.getElementById('receipt-message');
+  msg.className = 'fxg-receipt-error';
+  msg.textContent = errorMessage;
+
+  document.getElementById('receipt-recipient').textContent = `@${payload.recipient}`;
+  document.getElementById('receipt-amount').textContent = `₦${fmt(payload.amount)}`;
+
+  document.getElementById('receipt-details').style.display = 'none';
 
   const actionsEl = document.getElementById('receipt-actions');
-  if (actionsEl) {
-    actionsEl.style.display = 'flex';
-    actionsEl.innerHTML = `
-      <button id="receipt-try-again" style="flex:1; background:linear-gradient(90deg,#00d4aa,#00bfa5); color:white; border:none; border-radius:50px; padding:14px; font-weight:600; margin-right:8px;">
-        Try Again
-      </button>
-      <button id="receipt-done" style="flex:1; background:#333; color:white; border:none; border-radius:50px; padding:14px; font-weight:600;">
-        Close
-      </button>
-    `;
-    document.getElementById('receipt-try-again')?.addEventListener('click', () => {
-      fxgTransfer_closeReceiptModal();
-      fxgTransfer_openConfirmModal(payload);
-    });
-    document.getElementById('receipt-done')?.addEventListener('click', () => {
-      delete window._currentTransferPayload; // Clean up global payload
-      fxgTransfer_closeReceiptModal();
-      fxgTransfer_reopenTransferModal(payload); // Reopen with preserved inputs instead of reset
-    });
-  }
+  actionsEl.style.display = 'flex';
+  actionsEl.innerHTML = `
+    <button id="receipt-try-again"
+      style="flex:1;background:linear-gradient(90deg,#00d4aa,#00bfa5);
+             color:#fff;border:none;border-radius:50px;padding:14px;
+             font-weight:600;margin-right:8px">
+      Try Again
+    </button>
+    <button id="receipt-close"
+      style="flex:1;background:#333;color:#fff;border:none;
+             border-radius:50px;padding:14px;font-weight:600">
+      Close
+    </button>
+  `;
+
+  document.getElementById('receipt-try-again').onclick = () => {
+    fxgTransfer_closeReceiptModal();
+    fxgTransfer_openConfirmModal(payload);
+  };
+
+  document.getElementById('receipt-close').onclick = () => {
+    // NOTE: payload + inputs intentionally preserved
+    fxgTransfer_closeReceiptModal();
+  };
 }
 
-// Updated fxgTransfer_updateReceiptToInsufficient (no change to param list, uses local payload)
 function fxgTransfer_updateReceiptToInsufficient(message, currentBalance) {
-  const payload = window._currentTransferPayload || {}; // Safely get payload
-  
-  // ... (icon, status, message, details setup remains the same)
+  const payload = window._currentTransferPayload || {};
+
+  document.getElementById('receipt-status').textContent = 'Insufficient Balance';
+
+  const msg = document.getElementById('receipt-message');
+  msg.className = 'fxg-receipt-error';
+  msg.innerHTML = `
+    ${message}<br><br>
+    <strong>Current balance: ₦${fmt(currentBalance)}</strong><br><br>
+    Please fund your wallet to continue.
+  `;
+
+  if (payload.recipient) {
+    document.getElementById('receipt-recipient').textContent = `@${payload.recipient}`;
+  }
+  if (payload.amount) {
+    document.getElementById('receipt-amount').textContent = `₦${fmt(payload.amount)}`;
+  }
+
+  document.getElementById('receipt-details').style.display = 'none';
 
   const actionsEl = document.getElementById('receipt-actions');
-  if (actionsEl) {
-    actionsEl.style.display = 'flex';
-    actionsEl.innerHTML = `
-      <button id="receipt-fund-wallet" style="flex:1; background:linear-gradient(90deg,#00d4aa,#00bfa5); color:white; border:none; border-radius:50px; padding:14px; font-weight:600; margin-right:8px;">
-        Fund Wallet
-      </button>
-      <button id="receipt-done" style="flex:1; background:#333; color:white; border:none; border-radius:50px; padding:14px; font-weight:600;">
-        Close
-      </button>
-    `;
-    document.getElementById('receipt-fund-wallet')?.addEventListener('click', () => {
-      delete window._currentTransferPayload;
-      fxgTransfer_closeReceiptModal();
-      if (window.ModalManager?.openModal) {
-        window.ModalManager.openModal('addMoneyModal');
-      }
-    });
-    document.getElementById('receipt-done')?.addEventListener('click', () => {
-      delete window._currentTransferPayload;
-      fxgTransfer_closeReceiptModal();
-      fxgTransfer_reopenTransferModal(payload); // Reopen with preserved inputs instead of reset
-    });
-  }
+  actionsEl.style.display = 'flex';
+  actionsEl.innerHTML = `
+    <button id="receipt-fund-wallet"
+      style="flex:1;background:linear-gradient(90deg,#00d4aa,#00bfa5);
+             color:#fff;border:none;border-radius:50px;padding:14px;
+             font-weight:600;margin-right:8px">
+      Fund Wallet
+    </button>
+    <button id="receipt-close"
+      style="flex:1;background:#333;color:#fff;border:none;
+             border-radius:50px;padding:14px;font-weight:600">
+      Close
+    </button>
+  `;
+
+  document.getElementById('receipt-fund-wallet').onclick = () => {
+    delete window._currentTransferPayload;
+    fxgTransfer_closeReceiptModal();
+    window.ModalManager?.openModal?.('addMoneyModal');
+  };
+
+  document.getElementById('receipt-close').onclick = () => {
+    fxgTransfer_closeReceiptModal();
+  };
 }
 
-  // Bind close events for receipt modal
-  function fxgTransfer_bindReceiptModalEvents() {
-    const wrapper = document.getElementById(RECEIPT_MODAL_ID);
-    if (!wrapper || wrapper.dataset.eventsBound) return;
+// ────────────────────────────────────────────────
+// Receipt modal bindings
+// ────────────────────────────────────────────────
+function fxgTransfer_bindReceiptModalEvents() {
+  const wrapper = document.getElementById(RECEIPT_MODAL_ID);
+  if (!wrapper || wrapper.dataset.eventsBound) return;
 
-    const backdrop = wrapper.querySelector('.fxg-receipt-backdrop');
-
-    if (backdrop) {
-      backdrop.addEventListener('click', (e) => {
-        if (e.target === backdrop) {
-          delete window._currentTransferPayload;
-          fxgTransfer_closeReceiptModal();
-        }
-      });
-    }
-
-    wrapper.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
-        delete window._currentTransferPayload;
+  const backdrop = wrapper.querySelector('.fxg-receipt-backdrop');
+  if (backdrop) {
+    backdrop.addEventListener('click', e => {
+      if (e.target === backdrop) {
+        // DO NOT clear payload here
         fxgTransfer_closeReceiptModal();
       }
     });
-
-    wrapper.dataset.eventsBound = 'true';
   }
+
+  wrapper.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      fxgTransfer_closeReceiptModal();
+    }
+  });
+
+  wrapper.dataset.eventsBound = 'true';
+}
+
 
   // --- Main UI init ---
   function fxgTransfer_initUI() {
