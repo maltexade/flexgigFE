@@ -670,314 +670,305 @@ window.resolvePreloadWaiters = resolvePreloadWaiters; // optional for debugging
 
 
 function showTransactionReceipt(tx) {
-    // Get the static modal container (must exist in HTML)
-    const modal = document.getElementById('receiptModal');
-    if (!modal) {
-        console.error('[Receipt] #receiptModal container not found in DOM');
-        return;
-    }
-        // If modal doesn't exist → create it dynamically
-    if (!modal) {
-        console.warn('[Receipt] #receiptModal missing → creating it now');
-        
-        modal = document.createElement('div');
-        modal.id = 'receiptModal';
-        modal.className = 'hidden';
-        modal.setAttribute('aria-hidden', 'true');
-        modal.setAttribute('inert', '');
-        modal.style.cssText = `
-            position: fixed; inset: 0; z-index: 999999; display: none;
-            background: rgba(0,0,0,0.65);
-        `;
+    let modal = document.getElementById('receiptModal');// Defensive creation if missing
+if (!modal) {
+    console.warn('[Receipt] #receiptModal missing → creating it');
+    modal = document.createElement('div');
+    modal.id = 'receiptModal';
+    modal.className = 'hidden';
+    modal.setAttribute('aria-hidden', 'true');
+    modal.setAttribute('inert', '');
+    modal.style.cssText = 'position: fixed !important; inset: 0; width: 100%; height: 100%; z-index: 1000000 !important; display: none; background: rgba(0,0,0,0.65); transition: opacity 0.3s ease, visibility 0.3s ease;';
 
-        const backdrop = document.createElement('div');
-        backdrop.className = 'opay-backdrop';
-        backdrop.setAttribute('data-close', '');
-        backdrop.style.cssText = 'position: absolute; inset: 0; z-index: 1;';
+    const backdrop = document.createElement('div');
+    backdrop.className = 'opay-backdrop';
+    backdrop.setAttribute('data-close', '');
+    backdrop.style.cssText = 'position: absolute; inset: 0; z-index: 1;';
 
-        const wrapper = document.createElement('div');
-        wrapper.className = 'receipt-content-wrapper';
-        wrapper.style.cssText = 'position: relative; z-index: 2; width: 100%; height: 100%; overflow-y: auto; display: flex; flex-direction: column;';
+    const wrapper = document.createElement('div');
+    wrapper.className = 'receipt-content-wrapper';
+    wrapper.style.cssText = 'position: relative; z-index: 2; width: 100%; max-width: 420px; height: 100%; overflow-y: auto; display: flex; flex-direction: column; margin: 0 auto; background: #121212; transform: translateY(0); opacity: 1; transition: transform 0.3s ease, opacity 0.3s ease;';
 
-        modal.appendChild(backdrop);
-        modal.appendChild(wrapper);
-        document.body.appendChild(modal);
+    modal.appendChild(backdrop);
+    modal.appendChild(wrapper);
+    document.body.appendChild(modal);
+}
 
-        // Make sure close works even if ModalManager isn't fully ready
-        backdrop.addEventListener('click', () => {
-            ModalManager?.closeModal?.('receiptModal') || modal.classList.add('hidden');
-        });
-    }
-    
+const wrapper = modal.querySelector('.receipt-content-wrapper');
+if (!wrapper) {
+    console.error('[Receipt] .receipt-content-wrapper not found inside #receiptModal');
+    return;
+}
 
-    // Get the inner wrapper where we inject content
-    const wrapper = modal.querySelector('.receipt-content-wrapper');
-    if (!wrapper) {
-        console.error('[Receipt] .receipt-content-wrapper not found inside #receiptModal');
-        return;
-    }
+// Clear any previous receipt content
+wrapper.innerHTML = '';
 
-    // Clear any previous receipt content
-    wrapper.innerHTML = '';
+// ────────────────────────────────────────────────
+// All your existing logic to prepare data
+// ────────────────────────────────────────────────
+const icon = getTxIcon(tx);
 
-    // ────────────────────────────────────────────────
-    // All your existing logic to prepare data
-    // ────────────────────────────────────────────────
-    const icon = getTxIcon(tx);
+const networkInfo = (() => {
+    const desc = (tx.description || '').toLowerCase();
+    const provider = (tx.provider || '').toLowerCase();
+    if (desc.includes('mtn') || provider.includes('mtn')) return { name: 'MTN', color: '#FFC107' };
+    if (desc.includes('airtel') || provider.includes('airtel')) return { name: 'Airtel', color: '#E4002B' };
+    if (desc.includes('glo') || provider.includes('glo')) return { name: 'GLO', color: '#6FBF48' };
+    if (desc.includes('9mobile') || desc.includes('etisalat') || provider.includes('9mobile')) 
+        return { name: '9Mobile', color: '#00A650' };
+    if (desc.includes('opay')) return { name: 'Opay', color: '#1E3225' };
+    if (desc.includes('refund')) return { name: 'Refund', color: '#fb923c' };
+    return { name: 'Transaction', color: '#6c757d' };
+})();
 
-    const networkInfo = (() => {
-        const desc = (tx.description || '').toLowerCase();
-        const provider = (tx.provider || '').toLowerCase();
-        if (desc.includes('mtn') || provider.includes('mtn')) return { name: 'MTN', color: '#FFC107' };
-        if (desc.includes('airtel') || provider.includes('airtel')) return { name: 'Airtel', color: '#E4002B' };
-        if (desc.includes('glo') || provider.includes('glo')) return { name: 'GLO', color: '#6FBF48' };
-        if (desc.includes('9mobile') || desc.includes('etisalat') || provider.includes('9mobile')) 
-            return { name: '9Mobile', color: '#00A650' };
-        if (desc.includes('opay')) return { name: 'Opay', color: '#1E3225' };
-        if (desc.includes('refund')) return { name: 'Refund', color: '#fb923c' };
-        return { name: 'Transaction', color: '#6c757d' };
-    })();
+const amount = formatCurrency(Math.abs(Number(tx.amount || 0)));
+const date = new Date(tx.time || tx.created_at);
+const formattedDate = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+const formattedTime = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
 
-    const amount = formatCurrency(Math.abs(Number(tx.amount || 0)));
-    const date = new Date(tx.time || tx.created_at);
-    const formattedDate = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-    const formattedTime = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+const fullDesc = tx.description || tx.narration || '';
 
-    const fullDesc = tx.description || tx.narration || '';
+const phoneMatch = fullDesc.match(/\b0\d{10}\b|\b[7-9]\d{9}\b/);
+const recipientPhone = phoneMatch ? phoneMatch[0] : (tx.phone || null);
 
-    const phoneMatch = fullDesc.match(/\b0\d{10}\b|\b[7-9]\d{9}\b/);
-    const recipientPhone = phoneMatch ? phoneMatch[0] : (tx.phone || null);
+const dataMatch = fullDesc.match(/(\d+\.?\d*)\s*(GB|MB)|(\d+\.?\d*)\s*(Days?|Hrs?)/gi);
+const dataBundle = dataMatch ? dataMatch.join(', ') : null;
 
-    const dataMatch = fullDesc.match(/(\d+\.?\d*)\s*(GB|MB)|(\d+\.?\d*)\s*(Days?|Hrs?)/gi);
-    const dataBundle = dataMatch ? dataMatch.join(', ') : null;
+const accountNumberMatch = fullDesc.match(/\b\d{10}\b/);
+const accountNumber = accountNumberMatch ? accountNumberMatch[0] : null;
 
-    const accountNumberMatch = fullDesc.match(/\b\d{10}\b/);
-    const accountNumber = accountNumberMatch ? accountNumberMatch[0] : null;
+const nameMatch = fullDesc.match(/(?:from|via|to)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/i);
+const accountName = nameMatch ? nameMatch[1].trim() : null;
 
-    const nameMatch = fullDesc.match(/(?:from|via|to)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/i);
-    const accountName = nameMatch ? nameMatch[1].trim() : null;
+const statusConfig = {
+    success:   { text: 'Successful', color: '#00D4AA' },
+    failed:    { text: 'Failed',     color: '#FF3B30' },
+    pending:   { text: 'Pending',    color: '#FF9500' },
+    refund:    { text: 'Refunded',   color: '#00D4AA' }
+};
 
-    const statusConfig = {
-        success:   { text: 'Successful', color: '#00D4AA' },
-        failed:    { text: 'Failed',     color: '#FF3B30' },
-        pending:   { text: 'Pending',    color: '#FF9500' },
-        refund:    { text: 'Refunded',   color: '#00D4AA' }
-    };
+const statusKey = (tx.status || 'success').toLowerCase();
+const status = statusConfig[
+    statusKey.includes('fail') ? 'failed' :
+    statusKey.includes('refund') ? 'refund' :
+    statusKey.includes('pending') ? 'pending' : 'success'
+];
 
-    const statusKey = (tx.status || 'success').toLowerCase();
-    const status = statusConfig[
-        statusKey.includes('fail') ? 'failed' :
-        statusKey.includes('refund') ? 'refund' :
-        statusKey.includes('pending') ? 'pending' : 'success'
-    ];
+const isDataPurchase     = fullDesc.toLowerCase().includes('data') || dataBundle;
+const isAirtimePurchase  = fullDesc.toLowerCase().includes('airtime');
+const isCreditTransaction = tx.type === 'credit';
 
-    const isDataPurchase     = fullDesc.toLowerCase().includes('data') || dataBundle;
-    const isAirtimePurchase  = fullDesc.toLowerCase().includes('airtime');
-    const isCreditTransaction = tx.type === 'credit';
-
-    // ────────────────────────────────────────────────
-    // The receipt CONTENT (without the outer #receiptModal wrapper)
-    // ────────────────────────────────────────────────
-    const receiptContent = `
-        <div style="height:100%;display:flex;flex-direction:column;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
-            <!-- Top Header Bar -->
-            <div style="background:#1e1e1e;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;position:relative;z-index:10;">
-                <button data-close style="background:none;border:none;color:#aaa;cursor:pointer;padding:8px;border-radius:50%;">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M19 12H5M12 19l-7-7 7-7"/>
-                    </svg>
-                </button>
-                <h2 style="margin:0;color:white;font-size:17px;font-weight:700;letter-spacing:-0.2px;">Transaction Details</h2>
-                <div style="width:40px;"></div>
-            </div>
-
-            <div style="flex:1;display:flex;flex-direction:column;background:#121212;margin-top:env(safe-area-inset-top);overflow-y:auto;transform:translateZ(0);padding:16px;gap:24px;">
-                <!-- Amount & Status Card -->
-                <div style="background:#1e1e1e;border-radius:16px;padding:32px 24px 24px;display:flex;flex-direction:column;align-items:center;position:relative;margin-top:35px;">
-                    <!-- Floating Logo Circle -->
-                    <div class="tx-icon ${icon.cls}" style="
-                        width:50px; height:50px; border-radius:50%;
-                        display:flex; align-items:center; justify-content:center;
-                        position:absolute; top:-25px; left:50%; transform:translateX(-50%);
-                        background:${networkInfo.color}; box-shadow:0 6px 16px rgba(0,0,0,0.5);
-                    ">
-                        ${icon.img 
-                            ? `<img src="${icon.img}" alt="${icon.alt}" class="tx-img" style="width:28px;height:28px;object-fit:contain;image-rendering:crisp-edges;">`
-                            : `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                                 ${tx.type === 'credit' 
-                                    ? '<path d="M12 19V5M5 12l7 7 7-7"/>' 
-                                    : '<path d="M12 5v14M19 12l-7-7-7 7"/>'}
-                               </svg>`
-                        }
-                    </div>
-
-                    <!-- Amount -->
-                    <div style="font-size:32px;font-weight:800;color:white;margin-top:32px;margin-bottom:8px;line-height:1;letter-spacing:-1px;">${amount}</div>
-
-                    <!-- Status -->
-                    <div style="color:${status.color};font-size:16px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:7px;">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
-                            <circle cx="12" cy="12" r="10"/>
-                            <path d="M8 12l2 2 4-4"/>
-                        </svg>
-                        ${status.text}
-                    </div>
-                </div>
-
-                <!-- Details Card -->
-                <div style="background:#1e1e1e;border-radius:16px;padding:20px;display:flex;flex-direction:column;gap:14px;">
-                    <h3 style="margin:0 0 8px;color:#ccc;font-size:16px;font-weight:600;letter-spacing:0.2px;">Transaction Details</h3>
-                    
-                    ${isDataPurchase && recipientPhone ? `
-                        <div class="detail-row">
-                            <span>Recipient Number</span>
-                            <strong style="font-family:ui-monospace,monospace;letter-spacing:0.5px;">${recipientPhone}</strong>
-                        </div>
-                    ` : ''}
-
-                    ${isDataPurchase && dataBundle ? `
-                        <div class="detail-row">
-                            <span>Data Bundle</span>
-                            <strong>${dataBundle}</strong>
-                        </div>
-                    ` : ''}
-
-                    ${isDataPurchase && networkInfo.name !== 'Transaction' ? `
-                        <div class="detail-row">
-                            <span>Network Provider</span>
-                            <strong>${networkInfo.name}</strong>
-                        </div>
-                    ` : ''}
-
-                    ${isCreditTransaction && accountName ? `
-                        <div class="detail-row">
-                            <span>Source Name</span>
-                            <strong>${accountName}</strong>
-                        </div>
-                    ` : ''}
-
-                    ${isCreditTransaction && accountNumber ? `
-                        <div class="detail-row">
-                            <span>Account Number</span>
-                            <strong style="font-family:ui-monospace,monospace;letter-spacing:0.5px;">${accountNumber}</strong>
-                        </div>
-                    ` : ''}
-
-                    <div class="detail-row">
-                        <span>Transaction Type</span>
-                        <strong>${
-                            isDataPurchase ? 'Mobile Data' : 
-                            isAirtimePurchase ? 'Airtime Top-up' : 
-                            isCreditTransaction ? 'Wallet Credit' : 
-                            'Debit'
-                        }</strong>
-                    </div>
-
-                    ${!isCreditTransaction ? `
-                        <div class="detail-row">
-                            <span>Payment Method</span>
-                            <strong>Wallet Balance</strong>
-                        </div>
-                    ` : ''}
-
-                    <div class="detail-row">
-                        <span>Transaction No.</span>
-                        <div style="display:flex;align-items:center;gap:10px;">
-                            <strong style="font-family:ui-monospace,monospace;font-size:12px;letter-spacing:0.8px;">${tx.reference || tx.id || '—'}</strong>
-                            <button data-copy-btn style="background:none;border:none;color:#00d4aa;cursor:pointer;padding:4px;">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-                                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-                                </svg>
-                            </button>
-                        </div>
-                    </div>
-
-                    <div class="detail-row">
-                        <span>Transaction Date</span>
-                        <strong>${formattedDate} · ${formattedTime}</strong>
-                    </div>
-
-                    ${fullDesc ? `
-                        <div class="detail-row" style="flex-direction:column;align-items:flex-start;gap:6px;">
-                            <span>Description</span>
-                            <strong style="color:#ccc;font-weight:400;font-size:13px;line-height:1.5;">${fullDesc}</strong>
-                        </div>
-                    ` : ''}
-                </div>
-
-                <!-- Action Buttons -->
-                <div style="display:flex;gap:12px;margin-top:auto;padding-bottom:env(safe-area-inset-bottom);">
-                    <button onclick="reportTransactionIssue('${tx.id || tx.reference}')" style="flex:1;background:#2c2c2c;color:#00d4aa;border:1.5px solid #00d4aa;border-radius:50px;padding:14px;font-weight:600;cursor:pointer;font-size:14px;">
-                        Report Issue
-                    </button>
-                    <button onclick="shareReceipt(this.closest('#receiptModal'), '${(tx.reference || tx.id || '').replace(/'/g, "\\'")}', '${amount.replace(/'/g, "\\'")}', '${fullDesc.replace(/'/g, "\\'")}', '${formattedDate}', '${formattedTime}', '${status.text}', '${networkInfo.name}', '${networkInfo.color}', '${icon.img || ''}', '${tx.type}')" style="flex:1;background:linear-gradient(90deg,#00d4aa,#00bfa5);color:white;border:none;border-radius:50px;padding:14px;font-weight:600;cursor:pointer;font-size:14px;">
-                        Share Receipt
-                    </button>
-                </div>
-            </div>
+// ────────────────────────────────────────────────
+// The receipt CONTENT (without the outer #receiptModal wrapper)
+// ────────────────────────────────────────────────
+const receiptContent = `
+    <div style="width:100%; min-height:100%; display:flex; flex-direction:column; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:#000;">
+        <!-- Top Header Bar -->
+        <div style="background:#1e1e1e;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;position:relative;z-index:10;">
+            <button data-close style="background:none;border:none;color:#aaa;cursor:pointer;padding:8px;border-radius:50%;">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M19 12H5M12 19l-7-7 7-7"/>
+                </svg>
+            </button>
+            <h2 style="margin:0;color:white;font-size:17px;font-weight:700;letter-spacing:-0.2px;">Transaction Details</h2>
+            <div style="width:40px;"></div>
         </div>
 
-        <style>
-            #receiptModal * { 
-                -webkit-font-smoothing: antialiased;
-                -moz-osx-font-smoothing: grayscale;
-                text-rendering: optimizeLegibility;
-                box-sizing: border-box;
-            }
-            .detail-row {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                color: #e0e0e0;
-                font-size: 14px;
-            }
-            .detail-row span { 
-                color: #999; 
-                font-weight: 500;
-            }
-            .detail-row strong { 
-                color: white; 
-                font-weight: 600;
-            }
-            .detail-row button svg { transition: all 0.2s; }
-            .detail-row button:active svg { transform: scale(0.9); }
-        </style>
-    `;
+        <div style="flex:1;display:flex;flex-direction:column;background:#121212;margin-top:env(safe-area-inset-top);overflow-y:auto;transform:translateZ(0);padding:16px;gap:24px;">
+            <!-- Amount & Status Card -->
+            <div style="background:#1e1e1e;border-radius:16px;padding:32px 24px 24px;display:flex;flex-direction:column;align-items:center;position:relative;margin-top:35px;">
+                <!-- Floating Logo Circle -->
+                <div class="tx-icon ${icon.cls}" style="
+                    width:50px; height:50px; border-radius:50%;
+                    display:flex; align-items:center; justify-content:center;
+                    position:absolute; top:-25px; left:50%; transform:translateX(-50%);
+                    background:${networkInfo.color}; box-shadow:0 6px 16px rgba(0,0,0,0.5);
+                ">
+                    ${icon.img 
+                        ? `<img src="${icon.img}" alt="${icon.alt}" class="tx-img" style="width:28px;height:28px;object-fit:contain;image-rendering:crisp-edges;">`
+                        : `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                             ${tx.type === 'credit' 
+                                ? '<path d="M12 19V5M5 12l7 7 7-7"/>' 
+                                : '<path d="M12 5v14M19 12l-7-7-7 7"/>'}
+                           </svg>`
+                    }
+                </div>
 
-    // Insert the content
-    wrapper.innerHTML = receiptContent;
+                <!-- Amount -->
+                <div style="font-size:32px;font-weight:800;color:white;margin-top:32px;margin-bottom:8px;line-height:1;letter-spacing:-1px;">${amount}</div>
 
-    // Optional: enhance copy button behavior (since it's dynamic)
-    const copyBtn = wrapper.querySelector('[data-copy-btn]');
-    if (copyBtn) {
-        const refText = tx.reference || tx.id || '—';
-        copyBtn.addEventListener('click', () => {
-            navigator.clipboard.writeText(refText).then(() => {
-                copyBtn.innerHTML = '✓';
-                setTimeout(() => {
-                    copyBtn.innerHTML = `
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-                        </svg>
-                    `;
-                }, 1500);
-            });
+                <!-- Status -->
+                <div style="color:${status.color};font-size:16px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:7px;">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"/>
+                        <path d="M8 12l2 2 4-4"/>
+                    </svg>
+                    ${status.text}
+                </div>
+            </div>
+
+            <!-- Details Card -->
+            <div style="background:#1e1e1e;border-radius:16px;padding:20px;display:flex;flex-direction:column;gap:14px;">
+                <h3 style="margin:0 0 8px;color:#ccc;font-size:16px;font-weight:600;letter-spacing:0.2px;">Transaction Details</h3>
+                
+                ${isDataPurchase && recipientPhone ? `
+                    <div class="detail-row">
+                        <span>Recipient Number</span>
+                        <strong style="font-family:ui-monospace,monospace;letter-spacing:0.5px;">${recipientPhone}</strong>
+                    </div>
+                ` : ''}
+
+                ${isDataPurchase && dataBundle ? `
+                    <div class="detail-row">
+                        <span>Data Bundle</span>
+                        <strong>${dataBundle}</strong>
+                    </div>
+                ` : ''}
+
+                ${isDataPurchase && networkInfo.name !== 'Transaction' ? `
+                    <div class="detail-row">
+                        <span>Network Provider</span>
+                        <strong>${networkInfo.name}</strong>
+                    </div>
+                ` : ''}
+
+                ${isCreditTransaction && accountName ? `
+                    <div class="detail-row">
+                        <span>Source Name</span>
+                        <strong>${accountName}</strong>
+                    </div>
+                ` : ''}
+
+                ${isCreditTransaction && accountNumber ? `
+                    <div class="detail-row">
+                        <span>Account Number</span>
+                        <strong style="font-family:ui-monospace,monospace;letter-spacing:0.5px;">${accountNumber}</strong>
+                    </div>
+                ` : ''}
+
+                <div class="detail-row">
+                    <span>Transaction Type</span>
+                    <strong>${
+                        isDataPurchase ? 'Mobile Data' : 
+                        isAirtimePurchase ? 'Airtime Top-up' : 
+                        isCreditTransaction ? 'Wallet Credit' : 
+                        'Debit'
+                    }</strong>
+                </div>
+
+                ${!isCreditTransaction ? `
+                    <div class="detail-row">
+                        <span>Payment Method</span>
+                        <strong>Wallet Balance</strong>
+                    </div>
+                ` : ''}
+
+                <div class="detail-row">
+                    <span>Transaction No.</span>
+                    <div style="display:flex;align-items:center;gap:10px;">
+                        <strong style="font-family:ui-monospace,monospace;font-size:12px;letter-spacing:0.8px;">${tx.reference || tx.id || '—'}</strong>
+                        <button data-copy-btn style="background:none;border:none;color:#00d4aa;cursor:pointer;padding:4px;">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="detail-row">
+                    <span>Transaction Date</span>
+                    <strong>${formattedDate} · ${formattedTime}</strong>
+                </div>
+
+                ${fullDesc ? `
+                    <div class="detail-row" style="flex-direction:column;align-items:flex-start;gap:6px;">
+                        <span>Description</span>
+                        <strong style="color:#ccc;font-weight:400;font-size:13px;line-height:1.5;">${fullDesc}</strong>
+                    </div>
+                ` : ''}
+            </div>
+
+            <!-- Action Buttons -->
+            <div style="display:flex;gap:12px;margin-top:auto;padding-bottom:env(safe-area-inset-bottom);">
+                <button onclick="reportTransactionIssue('${tx.id || tx.reference}')" style="flex:1;background:#2c2c2c;color:#00d4aa;border:1.5px solid #00d4aa;border-radius:50px;padding:14px;font-weight:600;cursor:pointer;font-size:14px;">
+                    Report Issue
+                </button>
+                <!-- <button onclick="shareReceipt(this.closest('#receiptModal'), '${(tx.reference || tx.id || '').replace(/'/g, "\\'")}', '${amount.replace(/'/g, "\\'")}', '${fullDesc.replace(/'/g, "\\'")}', '${formattedDate}', '${formattedTime}', '${status.text}', '${networkInfo.name}', '${networkInfo.color}', '${icon.img || ''}', '${tx.type}')" style="flex:1;background:linear-gradient(90deg,#00d4aa,#00bfa5);color:white;border:none;border-radius:50px;padding:14px;font-weight:600;cursor:pointer;font-size:14px;">
+                    Share Receipt
+                </button> -->
+            </div>
+        </div>
+    </div>
+
+    <style>
+        #receiptModal * { 
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            text-rendering: optimizeLegibility;
+            box-sizing: border-box;
+        }
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            color: #e0e0e0;
+            font-size: 14px;
+        }
+        .detail-row span { 
+            color: #999; 
+            font-weight: 500;
+        }
+        .detail-row strong { 
+            color: white; 
+            font-weight: 600;
+        }
+        .detail-row button svg { transition: all 0.2s; }
+        .detail-row button:active svg { transform: scale(0.9); }
+    </style>
+`;
+
+// Insert the content
+wrapper.innerHTML = receiptContent;
+
+// Optional: enhance copy button behavior (since it's dynamic)
+const copyBtn = wrapper.querySelector('[data-copy-btn]');
+if (copyBtn) {
+    const refText = tx.reference || tx.id || '—';
+    copyBtn.addEventListener('click', () => {
+        navigator.clipboard.writeText(refText).then(() => {
+            copyBtn.innerHTML = '✓';
+            setTimeout(() => {
+                copyBtn.innerHTML = `
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                    </svg>
+                `;
+            }, 1500);
         });
-    }
-
-    // Open via ModalManager — this is the key line!
-    ModalManager.openModal('receiptModal');
+    });
 }
-window.showTransactionReceipt = showTransactionReceipt;
 
-function reportTransactionIssue(txId) {
-  alert(`Report issue for transaction ${txId}\n\nThis will open support chat in production`);
+// Wire up close buttons and backdrop
+modal.querySelectorAll('[data-close]').forEach(btn => {
+  btn.addEventListener('click', () => ModalManager.closeModal('receiptModal'));
+});
+const backdrop = modal.querySelector('.opay-backdrop');
+if (backdrop) {
+  backdrop.addEventListener('click', () => ModalManager.closeModal('receiptModal'));
+}
+
+// Open via ModalManager
+ModalManager.openModal('receiptModal');}function reportTransactionIssue(txId) {
+  alert('Report issue for transaction ' + txId + '\n\nThis will open support chat in production');
   // Later: open WhatsApp, email, or in-app support
-  document.getElementById('receiptModal')?.remove();
+  ModalManager.closeModal('receiptModal');
 }
 
+
+
+window.showTransactionReceipt = showTransactionReceipt;
 window.reportTransactionIssue = reportTransactionIssue;
 window.shareReceipt = shareReceipt;
 
