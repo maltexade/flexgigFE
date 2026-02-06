@@ -7423,97 +7423,101 @@ allPlansModalContent.addEventListener('touchend', handleTouchEnd);
     ninemobile: `<svg class="ninemobile-triangle-icon" width="28" height="28" viewBox="0 0 24 24" fill="none"><polygon points="12,3 21,21 3,21" fill="#7DB700"/></svg>`,
     receive: `<svg class="bank-icon" width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M4 9v9h16V9l-8-5-8 5zm4 4h8v2H8v-2zm0 4h4v2H8v-2z" fill="#00cc00" stroke="#fff" stroke-width="1"/></svg>`
   };
-// --- PERMANENT RENDER FUNCTION (uses forced svgShapes) ---
-function renderRecentTransactions(transactions = []) {
-  recentTransactionsList.innerHTML = '';
 
-  if (!transactions.length) {
-    recentTransactionsSection.classList.remove('active');
-    return;
-  }
+  // --- PERMANENT RENDER FUNCTION (uses forced svgShapes) ---
+  function renderRecentTransactions(transactions = []) {
+    recentTransactionsList.innerHTML = '';
 
-  // NEW: Filter to only successes (case-insensitive, safe for missing status)
-  const successTxs = transactions.filter(tx => 
-    tx?.status?.toLowerCase() === 'success'
-  );
-
-  if (!successTxs.length) {
-    recentTransactionsSection.classList.remove('active');
-    return;
-  }
-
-  recentTransactionsSection.classList.add('active');
-
-  successTxs.forEach(tx => {  // ← Changed to successTxs
-    const txDiv = document.createElement('div');
-    txDiv.className = 'recent-transaction-item';
-
-    const displayName = tx.provider === 'ninemobile'
-      ? '9mobile'
-      : tx.provider
-        ? tx.provider.charAt(0).toUpperCase() + tx.provider.slice(1).toLowerCase()
-        : 'Unknown';
-
-    // Data amount
-    let dataAmount = tx.data || '';
-    if (!dataAmount && tx.description) {
-      const match = tx.description.match(/(\d+\.?\d*\s*(?:GB|TB|MB))/i);
-      if (match) dataAmount = match[1];
+    if (!transactions.length) {
+      recentTransactionsSection.classList.remove('active');
+      return;
     }
 
-    // Correct key mapping + force from global svgShapes
-    const providerKey = tx.provider?.toLowerCase() === '9mobile' ? 'ninemobile' : tx.provider?.toLowerCase();
-    const svg = window.svgShapes[providerKey] || '';
-
-    // Phone + Data LEFT, SVG + Provider RIGHT
-    txDiv.innerHTML = `
-      <span class="tx-desc">${tx.phone} - ${dataAmount}</span>
-      <span class="tx-provider">${svg} ${displayName}</span>
-    `;
-
-    txDiv.setAttribute('role', 'button');
-    txDiv.setAttribute('aria-label', `Reuse transaction for ${tx.phone} on ${displayName}`);
-
-    txDiv.addEventListener('click', () => {
-      const phoneInput = document.getElementById('phone-input');
-      if (!phoneInput) {
-        alert('Phone input field not found.');
-        return;
-      }
-
-      // 1. Format number
-      const result = window.formatNigeriaNumber(tx.phone);
-      phoneInput.value = result.value; // e.g., "0808 336 3636"
-
-      // 2. Normalize and detect provider
-      const normalizedPhone = tx.phone.replace(/^\+234/, '0');
-      const provider = detectProvider(normalizedPhone);
-
-      if (provider) {
-        const providerClass = provider.toLowerCase() === '9mobile' ? 'ninemobile' : provider.toLowerCase();
-        debounce(() => {
-          selectProvider(providerClass);
-          console.log('[DEBUG] Provider auto-selected:', providerClass);
-        }, 100)();
-      }
-
-      // 3. Update UI states
-      if (window.updateContactOrCancel) window.updateContactOrCancel();
-      if (window.updateContinueState) window.updateContinueState();
-      if (window.saveUserState) window.saveUserState();
-      if (window.saveCurrentAppState) window.saveCurrentAppState();
-
-      phoneInput.blur();
+    // Filter to data purchases + successes only
+    const dataSuccessTxs = transactions.filter(tx => {
+      const desc = (tx.description || '').toLowerCase();
+      return desc.includes('data') && // Data-specific filter
+             tx?.status?.toLowerCase() === 'success';
     });
 
-    recentTransactionsList.appendChild(txDiv);
-  });
+    if (!dataSuccessTxs.length) {
+      recentTransactionsSection.classList.remove('active');
+      return;
+    }
 
-  console.log('[recent-tx] Rendered', successTxs.length, 'successful transactions with correct SVGs');
-}
+    recentTransactionsSection.classList.add('active');
 
-// === LOAD, MERGE, DEDUPLICATE, LIMIT TO 5 ===
-let recentTransactions = [];
+    dataSuccessTxs.forEach(tx => {
+      const txDiv = document.createElement('div');
+      txDiv.className = 'recent-transaction-item';
+
+      const displayName = tx.provider === 'ninemobile'
+        ? '9mobile'
+        : tx.provider
+          ? tx.provider.charAt(0).toUpperCase() + tx.provider.slice(1).toLowerCase()
+          : 'Unknown';
+
+      // Improved data amount extraction (more robust regex)
+      let dataAmount = tx.data || '';
+      if (!dataAmount && tx.description) {
+        const match = tx.description.match(/(\d+\.?\d*)\s*(GB|MB|TB|gb|mb|tb)/i);
+        if (match) dataAmount = match[0].toUpperCase(); // e.g., "2GB" or "2.5 GB"
+      }
+      if (!dataAmount) dataAmount = 'Data Purchase'; // Fallback if no match
+
+      // Correct key mapping + force from global svgShapes
+      const providerKey = tx.provider?.toLowerCase() === '9mobile' ? 'ninemobile' : tx.provider?.toLowerCase();
+      const svg = window.svgShapes[providerKey] || '';
+
+      // Phone + Data LEFT, SVG + Provider RIGHT
+      txDiv.innerHTML = `
+        <span class="tx-desc">${tx.phone} - ${dataAmount}</span>
+        <span class="tx-provider">${svg} ${displayName}</span>
+      `;
+
+      txDiv.setAttribute('role', 'button');
+      txDiv.setAttribute('aria-label', `Reuse transaction for ${tx.phone} on ${displayName}`);
+
+      txDiv.addEventListener('click', () => {
+        const phoneInput = document.getElementById('phone-input');
+        if (!phoneInput) {
+          alert('Phone input field not found.');
+          return;
+        }
+
+        // 1. Format number
+        const result = window.formatNigeriaNumber(tx.phone);
+        phoneInput.value = result.value; // e.g., "0808 336 3636"
+
+        // 2. Normalize and detect provider
+        const normalizedPhone = tx.phone.replace(/^\+234/, '0');
+        const provider = detectProvider(normalizedPhone);
+
+        if (provider) {
+          const providerClass = provider.toLowerCase() === '9mobile' ? 'ninemobile' : provider.toLowerCase();
+          debounce(() => {
+            selectProvider(providerClass);
+            console.log('[DEBUG] Provider auto-selected:', providerClass);
+          }, 100)();
+        }
+
+        // 3. Update UI states
+        if (window.updateContactOrCancel) window.updateContactOrCancel();
+        if (window.updateContinueState) window.updateContinueState();
+        if (window.saveUserState) window.saveUserState();
+        if (window.saveCurrentAppState) window.saveCurrentAppState();
+
+        phoneInput.blur();
+      });
+
+      recentTransactionsList.appendChild(txDiv);
+    });
+
+    console.log('[recent-tx] Rendered', dataSuccessTxs.length, 'successful data transactions with correct SVGs');
+  }
+
+  // === LOAD, MERGE, DEDUPLICATE, LIMIT TO 5 ===
+  let recentTransactions = [];
 
   try {
     const stored = localStorage.getItem('recentTransactions');
@@ -7546,6 +7550,8 @@ let recentTransactions = [];
           recentTransactions.push(serverTx);
         }
       });
+    } else {
+      console.warn('[recent-tx] Server fetch not OK:', res.status);
     }
   } catch (err) {
     console.error('[recent-tx] Server fetch failed', err);

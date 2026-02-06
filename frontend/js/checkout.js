@@ -1172,9 +1172,8 @@ async function updateReceiptToSuccess(result) {
   document.getElementById('receipt-status').textContent = 'Transaction Successful';
   document.getElementById('receipt-message').textContent = 'Your data has been delivered successfully!';
 
-
   const data = window._currentCheckoutData;
-  let transactionRef = 'Loading...';
+  let transactionRef = 'Unavailable';
 
   // === FETCH LATEST TRANSACTION & GET REFERENCE ===
   try {
@@ -1199,9 +1198,10 @@ async function updateReceiptToSuccess(result) {
     }
   } catch (e) {
     console.warn('Failed to fetch transaction reference:', e);
-    transactionRef = 'Unavailable';
   }
-const displayAmount = result?.amount ?? data?.price ?? 0;
+
+  const displayAmount = result?.amount ?? data?.price ?? 0;
+
   // === FILL RECEIPT DETAILS ===
   if (data) {
     const providerKey = data.provider.toLowerCase() === '9mobile' ? 'ninemobile' : data.provider.toLowerCase();
@@ -1210,13 +1210,11 @@ const displayAmount = result?.amount ?? data?.price ?? 0;
     
     document.getElementById('receipt-phone').textContent = data.number;
     document.getElementById('receipt-plan').textContent = `${data.dataAmount} / ${data.validity}`;
-      document.getElementById('receipt-amount').textContent = 
-    `₦${Number(displayAmount).toLocaleString()}`;
-
-  document.getElementById('receipt-balance').textContent = 
-    `₦${Number(result?.new_balance ?? data?.new_balance ?? 0).toLocaleString()}`;
+    document.getElementById('receipt-amount').textContent = 
+      `₦${Number(displayAmount).toLocaleString()}`;
     document.getElementById('receipt-transaction-id').textContent = transactionRef;
-    document.getElementById('receipt-balance').textContent = `₦${Number(data.new_balance || 0).toLocaleString()}`;
+    document.getElementById('receipt-balance').textContent = 
+      `₦${Number(result?.new_balance ?? data?.new_balance ?? 0).toLocaleString()}`;
     document.getElementById('receipt-time').textContent = new Date().toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
   }
 
@@ -1226,40 +1224,40 @@ const displayAmount = result?.amount ?? data?.price ?? 0;
   // === AUTO-UPDATE RECENT TRANSACTIONS LIST INSTANTLY ===
   if (typeof window.renderRecentTransactions === 'function') {
     try {
-      const res = await fetch(`${window.__SEC_API_BASE}/api/transactions?limit=20`, {
-        credentials: 'include'
-      });
-      if (res.ok) {
-        const serverData = await res.json();
-        const serverTxs = (serverData.items || []).filter(tx => tx && tx.phone && tx.phone.trim() !== '');
+      // Manually add the new data tx (consistent instant update)
+      const newTx = {
+        id: transactionRef, // Use ref as ID if available
+        phone: data.number,
+        provider: data.provider,
+        data: data.dataAmount, // Explicit GB
+        description: ` ${data.dataAmount} Data Purchase`, // Ensure regex match
+        status: 'success',
+        timestamp: new Date().toISOString(),
+        amount: data.price
+      };
 
-        let merged = serverTxs.slice(0, 5); // Use fresh server data (most accurate)
-
-        // Optional: fall back to localStorage if server fails
-        if (merged.length === 0) {
-          const stored = localStorage.getItem('recentTransactions');
-          if (stored) merged = JSON.parse(stored).slice(0, 5);
-        }
-
-        // Save to localStorage for next load
-        localStorage.setItem('recentTransactions', JSON.stringify(merged));
-
-        // Render immediately
-        window.renderRecentTransactions(merged);
-        console.log('[checkout] Recent transactions auto-updated after success');
-      }
-    } catch (err) {
-      console.warn('[checkout] Failed to auto-refresh recent transactions:', err);
-      // Fallback: just render from localStorage
-      let fallback = [];
+      let currentRecent = [];
       try {
         const stored = localStorage.getItem('recentTransactions');
-        if (stored) fallback = JSON.parse(stored);
+        if (stored) currentRecent = JSON.parse(stored);
       } catch (e) {}
-      window.renderRecentTransactions(fallback);
+
+      // Dedupe and add new
+      currentRecent = currentRecent.filter(tx => 
+        tx.phone !== newTx.phone || tx.amount !== newTx.amount
+      );
+      currentRecent.unshift(newTx);
+      currentRecent = currentRecent.slice(0, 5);
+
+      localStorage.setItem('recentTransactions', JSON.stringify(currentRecent));
+
+      // Render immediately
+      window.renderRecentTransactions(currentRecent);
+      console.log('[checkout] Recent transactions auto-updated after success (manual add)');
+    } catch (err) {
+      console.warn('[checkout] Failed to auto-refresh recent transactions:', err);
     }
   }
-
 }
 
 function updateReceiptToFailed(errorMessage) {
