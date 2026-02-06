@@ -195,12 +195,32 @@
       }
     }
 
-    // Bind send button
-    const sendBtn = document.getElementById('fxg-transfer-confirm-modal-send');
-    if (sendBtn && !sendBtn._fxg_confirm_bound) {
-      sendBtn.addEventListener('click', () => fxgTransfer_confirmSend(payload));
-      sendBtn._fxg_confirm_bound = true;
-    }
+    // Bind send button (robust: always use the latest payload)
+const sendBtn = document.getElementById('fxg-transfer-confirm-modal-send');
+
+// Ensure the current payload is available globally so the handler always reads latest
+window._currentTransferPayload = payload;
+
+if (sendBtn) {
+  // If a previous handler exists remove it first (prevents closure over stale payload)
+  if (sendBtn._fxg_confirm_handler) {
+    try { sendBtn.removeEventListener('click', sendBtn._fxg_confirm_handler); } catch (e) {}
+    sendBtn._fxg_confirm_handler = null;
+  }
+
+  // New handler reads the live payload from window._currentTransferPayload
+  const handler = (e) => {
+    e?.preventDefault?.();
+    // Use the live payload (fallback to local variable if not set)
+    const livePayload = window._currentTransferPayload || payload;
+    fxgTransfer_confirmSend(livePayload);
+  };
+
+  sendBtn.addEventListener('click', handler);
+  sendBtn._fxg_confirm_handler = handler;
+  sendBtn._fxg_confirm_bound = true;
+}
+
   }
 
   function fxgTransfer_closeConfirmModal() {
