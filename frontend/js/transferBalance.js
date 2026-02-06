@@ -161,7 +161,7 @@
 
   function fxgTransfer_closeModal() {
     if (window.ModalManager && typeof window.ModalManager.forceCloseModal === 'function') {
-      window.ModalManager.forceCloseModal(MM_MODAL_ID);
+      window.ModalManager.closeModal(MM_MODAL_ID);
     } else {
       // Fallback
       console.warn('[fxgTransfer] ModalManager not found — using basic fallback close');
@@ -559,7 +559,7 @@ function fxgTransfer_updateReceiptToSuccess(payload, newBalance, reference) {
 
   document.getElementById('receipt-status').textContent = 'Transfer Successful';
   document.getElementById('receipt-message').textContent =
-    'Your balance has been transferred successfully!';
+    'Transfer has been made successfully from your balance!';
 
   document.getElementById('receipt-recipient').textContent = `@${payload.recipient}`;
   document.getElementById('receipt-amount').textContent = `₦${fmt(payload.amount)}`;

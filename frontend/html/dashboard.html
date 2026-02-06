@@ -315,23 +315,29 @@
     </footer>
   </div>
 </div>
-
-<!-- Wallet Transfer Receipt Modal -->
 <!-- Wallet Transfer Receipt Modal -->
 <div id="fxg-transfer-receipt-modal" class="fxg-receipt-modal" aria-hidden="true">
   <div class="fxg-receipt-backdrop" data-receipt-close></div>
   
   <div class="fxg-receipt-sheet" role="dialog" aria-modal="true" aria-labelledby="fxg-receipt-title" tabindex="-1">
-    <!-- Single Dynamic Content State -->
-    <div class="fxg-receipt-content">
+    
+    <!-- Header / Status -->
+    <div class="fxg-receipt-header">
       <div id="receipt-icon" class="fxg-receipt-icon">
-        <!-- JS will insert SVG or spinner here -->
+        <!-- JS will insert SVG icon (success/failed) here -->
       </div>
+      <div>
+        <h2 id="receipt-status">Transfer Status</h2> <!-- Success / Failed / Pending -->
+        <p id="receipt-message" class="fxg-receipt-note">Please wait...</p> <!-- Note or error -->
+      </div>
+    </div>
+
+    <!-- Main Content (Amount & optional subtitle) -->
+    <div class="fxg-receipt-content">
+      <div class="fxg-receipt-amount" id="receipt-amount-display">₦0</div>
+      <div class="fxg-receipt-sub" id="receipt-subtext">Transferred to recipient</div>
       
-      <h2 id="receipt-status" class="fxg-receipt-title">Transfer Status</h2> <!-- Neutral default -->
-      
-      <p id="receipt-message" class="fxg-receipt-note">Please wait...</p> <!-- Neutral default; can be error in failed -->
-      
+      <!-- Details Ledger -->
       <div id="receipt-details" class="fxg-receipt-details">
         <div class="fxg-receipt-row">
           <span class="label">Sent to</span>
@@ -339,7 +345,7 @@
         </div>
         <div class="fxg-receipt-row">
           <span class="label">Amount</span>
-          <span class="value amount" id="receipt-amount">₦0</span>
+          <span class="value" id="receipt-amount">₦0</span>
         </div>
         <div class="fxg-receipt-row">
           <span class="label">New Balance</span>
@@ -350,13 +356,15 @@
           <span class="value" id="receipt-date">Just now</span>
         </div>
       </div>
-      
+
+      <!-- Action Buttons -->
       <div id="receipt-actions" class="fxg-receipt-actions">
-        <!-- JS will insert buttons here -->
+        <!-- JS will insert buttons (primary / secondary) here -->
       </div>
     </div>
   </div>
 </div>
+
 
 <!-- Add Money Modal -->
 <div id="addMoneyModal" class="addMoney-modal">

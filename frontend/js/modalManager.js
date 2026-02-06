@@ -1016,7 +1016,7 @@ if (classAnimatedModals.includes(modalId)) {
 
  
 }
-
+window.closeModal = window.closeModal || closeModal; // expose for modals to call on close
   
 
   // Focus trap for accessibility

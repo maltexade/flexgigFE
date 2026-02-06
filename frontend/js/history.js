@@ -565,103 +565,109 @@ window.resolvePreloadWaiters = resolvePreloadWaiters; // optional for debugging
 
   function makeTxNode(tx) {
     try {
-      const safeTruncate = (text) => {
-        if (typeof truncateDescription === 'function') return truncateDescription(text);
-        const w = window.innerWidth;
-        const max = w >= 1024 ? 40 : w >= 640 ? 30 : 25;
-        return text && text.length > max ? text.slice(0, max) + '…' : text || '';
-      };
+        const safeTruncate = (text) => {
+            if (typeof truncateDescription === 'function') return truncateDescription(text);
+            const w = window.innerWidth;
+            const max = w >= 1024 ? 40 : w >= 640 ? 30 : 25;
+            return text && text.length > max ? text.slice(0, max) + '…' : text || '';
+        };
 
-      const formatAmountDisplay = (v) => {
-        const n = Math.abs(Number(v) || 0);
-        const full = '₦' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        return { display: full, full };
-      };
+        const formatAmountDisplay = (v) => {
+            const n = Math.abs(Number(v) || 0);
+            const full = '₦' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            return { display: full, full };
+        };
 
-      const fmtDateTime = (iso) => {
-        const d = new Date(iso || Date.now());
-        const dateStr = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-        const timeStr = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
-        return `${dateStr} · ${timeStr}`;
-      };
+        const fmtDateTime = (iso) => {
+            const d = new Date(iso || Date.now());
+            const dateStr = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+            const timeStr = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+            return `${dateStr} · ${timeStr}`;
+        };
 
-      const item = document.createElement('article');
-      item.className = 'tx-item';
-      item.setAttribute('role', 'listitem');
+        const item = document.createElement('article');
+        item.className = 'tx-item';
+        item.setAttribute('role', 'listitem');
 
-      const isCredit = tx.type === 'credit';
-      const icon = getTxIcon(tx);
+        const isCredit = tx.type === 'credit';
+        const icon = getTxIcon(tx);
 
-      const rawDesc = tx.description || tx.narration || tx.type || 'Transaction';
-      const truncatedDesc = safeTruncate(rawDesc);
-      const amountObj = formatAmountDisplay(tx.amount);
-      const formattedDateTime = fmtDateTime(tx.time || tx.created_at);
+        const rawDesc = tx.description || tx.narration || tx.type || 'Transaction';
+        const truncatedDesc = safeTruncate(rawDesc);
+        const amountObj = formatAmountDisplay(tx.amount);
+        const formattedDateTime = fmtDateTime(tx.time || tx.created_at);
 
-// === STATUS HANDLING (IMPROVED FOR REAL SERVER DATA) ===
-const statusRaw = (tx.status || 'success').toString().toLowerCase().trim();
-let statusClass = 'success';
-let statusText = 'SUCCESS';
+        // === STATUS HANDLING ===
+        const statusRaw = (tx.status || 'success').toString().toLowerCase().trim();
+        let statusClass = 'success';
+        let statusText = 'SUCCESS';
 
-if (statusRaw.includes('fail') || statusRaw.includes('failed')) {
-  statusClass = 'failed';
-  statusText = 'FAILED';
-} else if (statusRaw.includes('refund')) {
-  statusClass = 'refund';
-  statusText = 'REFUNDED';
-} else if (statusRaw.includes('pending')) {
-  statusClass = 'pending';
-  statusText = 'PENDING';
-} else if (statusRaw.includes('success') || statusRaw === 'successful' || statusRaw === 'true') {
-  statusClass = 'success';
-  statusText = 'SUCCESS';
-}
-// Any other unknown status → treat as pending/suspicious
-else {
-  statusClass = 'pending';
-  statusText = statusRaw.toUpperCase() || 'UNKNOWN';
-}
+        if (statusRaw.includes('fail') || statusRaw.includes('failed')) {
+            statusClass = 'failed';
+            statusText = 'FAILED';
+        } else if (statusRaw.includes('refund')) {
+            statusClass = 'refund';
+            statusText = 'REFUNDED';
+        } else if (statusRaw.includes('pending')) {
+            statusClass = 'pending';
+            statusText = 'PENDING';
+        } else if (statusRaw.includes('success') || statusRaw === 'successful' || statusRaw === 'true') {
+            statusClass = 'success';
+            statusText = 'SUCCESS';
+        } else {
+            statusClass = 'pending';
+            statusText = statusRaw.toUpperCase() || 'UNKNOWN';
+        }
 
-      item.innerHTML = `
-        <div class="tx-icon ${icon.cls}" aria-hidden="true">
-          ${icon.img 
-            ? `<div class="tx-svg" aria-hidden="true"><img class="tx-img" src="${icon.img}" alt="${icon.alt}" /></div>`
-            : (isCredit ? 'Down Arrow' : 'Up Arrow')
-          }
-        </div>
-        <div class="tx-content">
-          <div class="tx-row">
-            <div class="tx-desc" title="${rawDesc}">${truncatedDesc}</div>
-            <div class="tx-amount ${isCredit ? 'credit' : 'debit'}" title="${amountObj.full}">
-              ${isCredit ? '+' : '-'} ${amountObj.display}
+        item.innerHTML = `
+            <div class="tx-icon ${icon.cls}" aria-hidden="true">
+                ${icon.img 
+                    ? `<div class="tx-svg" aria-hidden="true"><img class="tx-img" src="${icon.img}" alt="${icon.alt}" /></div>`
+                    : (isCredit
+                        ? `<svg class="tx-arrow down" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#1ea0ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                             <line x1="12" y1="5" x2="12" y2="19"></line>
+                             <polyline points="19 12 12 19 5 12"></polyline>
+                           </svg>`
+                        : `<svg class="tx-arrow up" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ff4d4f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                             <line x1="12" y1="19" x2="12" y2="5"></line>
+                             <polyline points="5 12 12 5 19 12"></polyline>
+                           </svg>`
+                      )
+                }
             </div>
-          </div>
-          <div class="tx-row meta">
-  <div class="tx-time">${formattedDateTime}</div>
-  <div class="tx-status" data-status="${statusClass}" title="${tx.status || 'SUCCESS'}">
-    ${statusText}
-  </div>
-</div>
-        </div>
-      `;
+            <div class="tx-content">
+                <div class="tx-row">
+                    <div class="tx-desc" title="${rawDesc}">${truncatedDesc}</div>
+                    <div class="tx-amount ${isCredit ? 'credit' : 'debit'}" title="${amountObj.full}">
+                        ${isCredit ? '+' : '-'} ${amountObj.display}
+                    </div>
+                </div>
+                <div class="tx-row meta">
+                    <div class="tx-time">${formattedDateTime}</div>
+                    <div class="tx-status" data-status="${statusClass}" title="${tx.status || 'SUCCESS'}">
+                        ${statusText}
+                    </div>
+                </div>
+            </div>
+        `;
 
-      item.addEventListener('click', (e) => {
-  e.preventDefault();
-  e.stopPropagation();
+        item.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            showTransactionReceipt(tx);
+        });
 
-  // Reuse the same logic but show beautiful receipt instead
-  showTransactionReceipt(tx);
-});
-
-      return item;
+        return item;
 
     } catch (err) {
-      console.error('FATAL RENDER ERROR in makeTxNode:', err, tx);
-      const fallback = document.createElement('div');
-      fallback.className = 'tx-item';
-      fallback.textContent = 'Could not render transaction';
-      return fallback;
+        console.error('FATAL RENDER ERROR in makeTxNode:', err, tx);
+        const fallback = document.createElement('div');
+        fallback.className = 'tx-item';
+        fallback.textContent = 'Could not render transaction';
+        return fallback;
     }
-  }
+}
+
 
 function showTransactionReceipt(tx) {
   const existing = document.getElementById('receiptModal');
