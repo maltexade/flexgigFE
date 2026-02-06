@@ -330,6 +330,7 @@ function getModalElement(modalId) {
       markRecentModification(el);
     } catch (e) { /* ignore */ }
   }
+  window.clearActiveFromElement = window.clearActiveFromElement || clearActiveFromElement; // expose for modals to call on open/close
 
   // Describe element succinctly for logs
   function describeElement(el) {
@@ -427,6 +428,7 @@ function getModalElement(modalId) {
     log('debug', `setTriggerActive: Deactivated triggers for ${modalId}`, { modalId, triggers: trgInfo });
   }
 }
+window.setTriggerActive = window.setTriggerActive || setTriggerActive; // expose for modals to call on open/close
 
   function setHomeActive() {
     const homeLink = document.getElementById('homeNavLink') || document.querySelector('[data-home-nav], .home-nav, a.home');
@@ -945,9 +947,11 @@ function closeModal(modalId) {
     }
 
     // Remove active state - but NOT for allPlansModal
-    if (modalId !== 'allPlansModal') {
-      setTriggerActive(modalId, false);
-          } else {
+    // Remove active state ONLY for nav-linked modals
+if (shouldManageActiveState(modalId)) {
+  setTriggerActive(modalId, false);
+}
+ else {
       // ← allPlansModal specific cleanup
       modal.classList.remove('active'); // triggers CSS exit animation
       history.replaceState({ isModal: false }, '', window.location.pathname);

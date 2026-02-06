@@ -588,18 +588,53 @@ function fxgTransfer_updateReceiptToSuccess(payload, newBalance, reference) {
   else console.warn('[fxgTransfer] Missing receipt-details element');
 
   const actionsEl = document.getElementById('receipt-actions');
-  if (actionsEl) {
-    actionsEl.style.display = 'flex';
-    actionsEl.innerHTML = `
-      <button id="receipt-done" style="flex:1; background:#333; color:white; border:none; border-radius:50px; padding:14px; font-weight:600;">
-        Done
-      </button>
-    `;
-    document.getElementById('receipt-done')?.addEventListener('click', () => {
-      fxgTransfer_closeReceiptModal();
-      fxgTransfer_resetTransferForm();
-    });
-  } else console.warn('[fxgTransfer] Missing receipt-actions element');
+if (actionsEl) {
+  actionsEl.style.display = 'flex';
+  actionsEl.innerHTML = `
+    <button id="receipt-done" data-close style="flex:1; background:#333; color:white; border:none; border-radius:50px; padding:14px; font-weight:600;">
+      Done
+    </button>
+  `;
+  document.getElementById('receipt-done')?.addEventListener('click', () => {
+    // Close receipt modal
+    fxgTransfer_closeReceiptModal();
+    
+    // Full reset of the form
+    const els = fxgTransfer_resolveElements();
+    
+    // Clear username input
+    if (els.usernameEl) {
+      els.usernameEl.value = '';
+      els.usernameEl.classList.remove('invalid', 'valid');
+    }
+    
+    // Clear amount input
+    if (els.amountEl) {
+      els.amountEl.value = '';
+      els.amountEl.classList.remove('invalid', 'valid');
+    }
+    
+    // Clear error messages
+    if (els.usernameErr) els.usernameErr.textContent = '';
+    if (els.amountErr) els.amountErr.textContent = '';
+    
+    // Reset continue button
+    if (els.continueBtn) {
+      const text = els.continueBtn.querySelector('.fxg-btn-text') || els.continueBtn;
+      text.textContent = 'Continue';
+      els.continueBtn.disabled = true;
+      els.continueBtn.classList.remove('active');
+    }
+    
+    // Hide success message if any
+    if (els.successEl) els.successEl.hidden = true;
+    
+    // Close main transfer modal
+    fxgTransfer_closeModal();
+    
+    console.log('[fxgTransfer] ✅ Full form reset completed');
+  });
+}
 }
 
 function fxgTransfer_updateReceiptToFailed(payload, errorMessage) {
