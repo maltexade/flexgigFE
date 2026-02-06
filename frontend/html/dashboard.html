@@ -1611,13 +1611,38 @@
 </div>
 
 
-<!-- Static container for dynamic receipt modal -->
-<div id="receiptModal" class="hidden" aria-hidden="true" inert style="display:none;">
-  <div class="opay-backdrop" data-close></div>
+<!-- Static full-screen receipt modal container -->
+<div id="receiptModal" 
+     class="hidden" 
+     aria-hidden="true" 
+     inert 
+     style="
+       position: fixed !important;
+       inset: 0;
+       width: 100%;
+       height: 100%;
+       z-index: 999999 !important;           /* very high – above almost everything */
+       display: none;
+       background: rgba(0,0,0,0.65);          /* semi-transparent overlay */
+     ">
   
-  <!-- This is where we'll inject the dynamic receipt content -->
-  <div class="receipt-content-wrapper" style="position:relative; height:100%;">
-    <!-- content will be inserted here -->
+  <!-- Backdrop – closes modal when clicked -->
+  <div class="opay-backdrop" 
+       data-close 
+       style="position: absolute; inset: 0; z-index: 1;"></div>
+  
+  <!-- Content wrapper – centers and contains the receipt -->
+  <div class="receipt-content-wrapper" 
+       style="
+         position: relative;
+         z-index: 2;
+         width: 100%;
+         height: 100%;
+         overflow-y: auto;
+         display: flex;
+         flex-direction: column;
+       ">
+    <!-- Dynamic content will be injected here -->
   </div>
 </div>
 

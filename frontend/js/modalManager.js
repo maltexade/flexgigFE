@@ -1373,6 +1373,32 @@ log('debug', 'handlePopstate: openModalsStack snapshot', { stack: openModalsStac
       }
     });
 
+    // Add this in initialize() or after all other setup
+document.addEventListener('click', function(e) {
+  // Find closest [data-close] (handles dynamic elements)
+  const closeBtn = e.target.closest('[data-close]');
+  if (!closeBtn) return;
+
+  // Prevent default if it's a button/link
+  e.preventDefault();
+
+  // Find the nearest modal (receiptModal or any other)
+  const modal = closeBtn.closest('.hidden, [aria-hidden="true"], #receiptModal, .opay-modal, .modal');
+  if (!modal) return;
+
+  const modalId = modal.id || 'unknown';
+
+  if (modalId && ModalManager.closeModal) {
+    console.log(`[ModalManager] Closing modal via delegated data-close: ${modalId}`);
+    ModalManager.closeModal(modalId);
+  } else {
+    // Fallback: just hide it
+    modal.classList.add('hidden');
+    modal.style.display = 'none';
+    console.warn('[ModalManager] Closed via fallback (no closeModal found)');
+  }
+}, true);  // true = capture phase — catches before other handlers
+
     // HOME BUTTON HANDLER - Separate from other triggers
     const homeNavLink = document.getElementById('homeNavLink');
     if (homeNavLink) {
