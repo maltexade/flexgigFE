@@ -619,10 +619,11 @@ function resetCheckoutUI() {
 // ==================== AUTHENTICATION WITH DEDICATED PIN MODAL ====================
 async function triggerCheckoutAuthWithDedicatedModal() {
   return new Promise((resolve) => {
-    window._checkoutPinResolve = (success) => {
-      delete window._checkoutPinResolve;
-      resolve(success);
-    };
+    window._checkoutPinResolve = (authResult) => {
+  delete window._checkoutPinResolve;
+  resolve(authResult);
+};
+
 
     if (typeof window.showCheckoutPinModal === 'function') {
       window.showCheckoutPinModal();
@@ -832,7 +833,11 @@ try {
   console.log('[checkout-pin] Biometric success');
 
   hideCheckoutPinModal();
-  window._checkoutPinResolve?.(true);
+  window._checkoutPinResolve?.({
+  success: true,
+  biometricToken: result.token // issued by backend
+});
+
   return;
 }
 
@@ -1000,11 +1005,15 @@ async function verifyPin(pin) {
       });
 
       // ✅ Success path
-      if (res.ok) {
-        hideCheckoutPinModal();
-        window._checkoutPinResolve?.(true);
-        return;
-      }
+      if (res.ok && data.pinToken) {
+  hideCheckoutPinModal();
+  window._checkoutPinResolve?.({
+    success: true,
+    pinToken: data.pinToken
+  });
+  return;
+}
+
 
       // ❌ Error handling based on real server code/message
       switch (data.code) {
@@ -1163,94 +1172,119 @@ async function updateReceiptToSuccess(result) {
   document.getElementById('receipt-status').textContent = 'Transaction Successful';
   document.getElementById('receipt-message').textContent = 'Your data has been delivered successfully!';
 
-
   const data = window._currentCheckoutData;
-  let transactionRef = 'Loading...';
-
-  // === FETCH LATEST TRANSACTION & GET REFERENCE ===
-  try {
-    const res = await fetch('https://api.flexgig.com.ng/api/transactions?limit=20', {
-      credentials: 'include'
-    });
-    const json = await res.json();
-    const txs = json.items || json || [];
-
-    const match = txs.find(tx => 
-      Math.abs(tx.amount - data.price) <= 10 &&
-      tx.reference &&
-      tx.reference.startsWith('data_') &&
-      tx.reference.includes('bcee735e')
-    );
-
-    if (match?.reference) {
-      transactionRef = match.reference;
-    } else {
-      const fallback = txs.find(tx => tx.reference?.startsWith('data_'));
-      transactionRef = fallback?.reference || 'Unavailable';
-    }
-  } catch (e) {
-    console.warn('Failed to fetch transaction reference:', e);
-    transactionRef = 'Unavailable';
+  if (!data) {
+    console.warn('[updateReceiptToSuccess] No checkout data available');
+    return;
   }
-const displayAmount = result?.amount ?? data?.price ?? 0;
-  // === FILL RECEIPT DETAILS ===
-  if (data) {
-    const providerKey = data.provider.toLowerCase() === '9mobile' ? 'ninemobile' : data.provider.toLowerCase();
-    const svg = svgShapes[providerKey] || '';
-    document.getElementById('receipt-provider').innerHTML = `${svg} ${data.provider.toUpperCase()}`;
-    
-    document.getElementById('receipt-phone').textContent = data.number;
-    document.getElementById('receipt-plan').textContent = `${data.dataAmount} / ${data.validity}`;
-      document.getElementById('receipt-amount').textContent = 
-    `₦${Number(displayAmount).toLocaleString()}`;
+
+  console.log('[checkout] Starting success update with data:', {
+    phone: data.number,
+    provider: data.provider,
+    dataAmount: data.dataAmount || '(missing)',
+    price: data.price,
+    reference: data.reference || '(none)'
+  });
+
+  // Use checkout reference or generate fallback
+  let transactionRef = data.reference || 'TX-' + Date.now().toString(36);
+
+  const displayAmount = Number(result?.amount ?? data?.price ?? 0);
+
+  // Fill receipt using checkout data
+  const providerKey = data.provider?.toLowerCase() === '9mobile' ? 'ninemobile' : data.provider?.toLowerCase() || '';
+  const svg = window.svgShapes?.[providerKey] || '';
+
+  document.getElementById('receipt-provider').innerHTML = `${svg} ${data.provider?.toUpperCase() || 'Unknown'}`;
+  document.getElementById('receipt-phone').textContent = data.number || '—';
+  
+  document.getElementById('receipt-plan').textContent = 
+    data.dataAmount ? `${data.dataAmount} / ${data.validity || '—'}` : 'Data Bundle';
+
+  document.getElementById('receipt-amount').textContent = 
+    `₦${displayAmount.toLocaleString('en-NG')}`;
+
+  document.getElementById('receipt-transaction-id').textContent = transactionRef;
 
   document.getElementById('receipt-balance').textContent = 
-    `₦${Number(result?.new_balance ?? data?.new_balance ?? 0).toLocaleString()}`;
-    document.getElementById('receipt-transaction-id').textContent = transactionRef;
-    document.getElementById('receipt-balance').textContent = `₦${Number(data.new_balance || 0).toLocaleString()}`;
-    document.getElementById('receipt-time').textContent = new Date().toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
-  }
+    `₦${Number(result?.new_balance ?? data?.new_balance ?? 0).toLocaleString('en-NG')}`;
+
+  document.getElementById('receipt-time').textContent = 
+    new Date().toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
 
   document.getElementById('receipt-details').style.display = 'block';
   document.getElementById('receipt-actions').style.display = 'flex';
 
-  // === AUTO-UPDATE RECENT TRANSACTIONS LIST INSTANTLY ===
+  // === AUTO-UPDATE RECENT TRANSACTIONS LIST (no API call) ===
   if (typeof window.renderRecentTransactions === 'function') {
     try {
-      const res = await fetch(`${window.__SEC_API_BASE}/api/transactions?limit=20`, {
-        credentials: 'include'
-      });
-      if (res.ok) {
-        const serverData = await res.json();
-        const serverTxs = (serverData.items || []).filter(tx => tx && tx.phone && tx.phone.trim() !== '');
+      // Normalize phone number (remove spaces)
+      const cleanPhone = data.number?.replace(/\s+/g, '') || '—';
 
-        let merged = serverTxs.slice(0, 5); // Use fresh server data (most accurate)
+      const newTx = {
+        id: transactionRef,
+        phone: cleanPhone,  // Store without spaces
+        provider: data.provider,
+        data_amount: data.dataAmount || 'Data Bundle', // Clean from checkout
+        description: `${data.dataAmount || 'Data'} Data Purchase`,
+        status: 'success',
+        timestamp: new Date().toISOString(),
+        amount: data.price,
+        created_at: new Date().toISOString()
+      };
 
-        // Optional: fall back to localStorage if server fails
-        if (merged.length === 0) {
-          const stored = localStorage.getItem('recentTransactions');
-          if (stored) merged = JSON.parse(stored).slice(0, 5);
-        }
+      console.log('[checkout] New tx object prepared (phone cleaned):', newTx);
 
-        // Save to localStorage for next load
-        localStorage.setItem('recentTransactions', JSON.stringify(merged));
-
-        // Render immediately
-        window.renderRecentTransactions(merged);
-        console.log('[checkout] Recent transactions auto-updated after success');
-      }
-    } catch (err) {
-      console.warn('[checkout] Failed to auto-refresh recent transactions:', err);
-      // Fallback: just render from localStorage
-      let fallback = [];
+      let currentRecent = [];
       try {
         const stored = localStorage.getItem('recentTransactions');
-        if (stored) fallback = JSON.parse(stored);
-      } catch (e) {}
-      window.renderRecentTransactions(fallback);
-    }
-  }
+        if (stored) {
+          currentRecent = JSON.parse(stored);
+          if (!Array.isArray(currentRecent)) currentRecent = [];
+        }
+        console.log(`[checkout] Loaded ${currentRecent.length} existing recent txs from localStorage`);
+      } catch (e) {
+        console.warn('[checkout] localStorage parse error:', e);
+      }
 
+      // Helper to normalize phone for comparison
+      function normalizePhone(phone) {
+        return phone?.replace(/\s+/g, '') || '';
+      }
+
+      // Dedupe: remove any with same clean phone + amount
+      currentRecent = currentRecent.filter(tx => 
+        normalizePhone(tx.phone) !== normalizePhone(newTx.phone) || 
+        tx.amount !== newTx.amount
+      );
+
+      // Add new one at top
+      currentRecent.unshift(newTx);
+
+      // Keep only top 5
+      currentRecent = currentRecent.slice(0, 5);
+
+      console.log('[checkout] Updated list (after dedupe & slice):', currentRecent.length, 'items');
+      console.table(currentRecent.map(tx => ({
+        phone: tx.phone,
+        data_amount: tx.data_amount || '(none)',
+        amount: tx.amount,
+        time: tx.timestamp || '—'
+      })));
+
+      // Save back
+      localStorage.setItem('recentTransactions', JSON.stringify(currentRecent));
+      console.log('[checkout] localStorage updated successfully');
+
+      // Force render
+      window.renderRecentTransactions(currentRecent);
+      console.log('[checkout] Recent transactions list re-rendered instantly');
+    } catch (err) {
+      console.error('[checkout] Failed to update recent list:', err);
+    }
+  } else {
+    console.warn('[checkout] renderRecentTransactions function not found — list won’t update');
+  }
 }
 
 function updateReceiptToFailed(errorMessage) {
