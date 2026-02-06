@@ -482,6 +482,11 @@ window.setTriggerActive = window.setTriggerActive || setTriggerActive; // expose
       hasPullHandle: false
     },
     fxgReceiptModal: { id: 'fxg-transfer-receipt-modal', element: null, hasPullHandle: false },
+      receiptModal: { 
+    id: 'receiptModal', 
+    element: null, 
+    hasPullHandle: false 
+  },
   };
 
   // ─────────────────────────────────────────────────────────────
@@ -494,6 +499,7 @@ const bottomSheetModals = [
   'fxg-transfer-modal',
   'fxg-transfer-confirm-modal',
   'fxgReceiptModal',
+  'receiptModal',
 ];
 
 function lockBodyScroll(lock = true) {
