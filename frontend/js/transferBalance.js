@@ -511,7 +511,7 @@ function fxgTransfer_showProcessingReceipt(payload) {
   }
 
   requestAnimationFrame(() => {
-    const icon = document.getElementById('receipt-icon');
+    const icon = document.getElementById('fxg-receipt-icon');
     if (icon) {
       icon.className = 'fxg-receipt-icon processing';
       icon.innerHTML = '<div class="spinner"></div>';
@@ -519,10 +519,10 @@ function fxgTransfer_showProcessingReceipt(payload) {
 
     modal.classList.add('show');
 
-    const statusEl = document.getElementById('receipt-status');
+    const statusEl = document.getElementById('fxg-receipt-status');
     if (statusEl) statusEl.textContent = 'Processing Transfer';
 
-    const messageEl = document.getElementById('receipt-message');
+    const messageEl = document.getElementById('fxg-receipt-message');
     if (messageEl) {
       messageEl.className = 'fxg-receipt-note';
       messageEl.innerHTML = `
@@ -532,22 +532,22 @@ function fxgTransfer_showProcessingReceipt(payload) {
       `;
     }
 
-    const subtextEl = document.getElementById('receipt-subtext');
+    const subtextEl = document.getElementById('fxg-receipt-subtext');
     if (subtextEl) subtextEl.textContent = subtext;
 
-    const headerAmtEl = document.getElementById('receipt-amount-display');
+    const headerAmtEl = document.getElementById('fxg-receipt-amount-display');
     if (headerAmtEl) headerAmtEl.textContent = `₦${fmt(payload.amount)}`;
 
-    const detailsEl = document.getElementById('receipt-details');
+    const detailsEl = document.getElementById('fxg-receipt-details');
     if (detailsEl) detailsEl.style.display = 'none';
 
-    const actionsEl = document.getElementById('receipt-actions');
+    const actionsEl = document.getElementById('fxg-receipt-actions');
     if (actionsEl) actionsEl.style.display = 'none';
   });
 }
 
 function fxgTransfer_updateReceiptToSuccess(payload, newBalance, reference) {
-  const icon = document.getElementById('receipt-icon');
+  const icon = document.getElementById('fxg-receipt-icon');
   if (icon) {
     icon.className = 'fxg-receipt-icon success';
     icon.innerHTML = `
@@ -560,28 +560,28 @@ function fxgTransfer_updateReceiptToSuccess(payload, newBalance, reference) {
 
   const subtext = `Transfer completed to @${payload.recipient}`; // dynamic
 
-  document.getElementById('receipt-status').textContent = 'Transfer Successful';
-  document.getElementById('receipt-message').textContent =
+  document.getElementById('fxg-receipt-status').textContent = 'Transfer Successful';
+  document.getElementById('fxg-receipt-message').textContent =
     'Transfer has been made successfully from your balance!';
 
-  const subtextEl = document.getElementById('receipt-subtext');
+  const subtextEl = document.getElementById('fxg-receipt-subtext');
   if (subtextEl) subtextEl.textContent = subtext;
 
-  document.getElementById('receipt-recipient').textContent = `@${payload.recipient}`;
-  document.getElementById('receipt-amount').textContent = `₦${fmt(payload.amount)}`;
+  document.getElementById('fxg-receipt-recipient').textContent = `@${payload.recipient}`;
+  document.getElementById('fxg-receipt-amount').textContent = `₦${fmt(payload.amount)}`;
 
-  const headerAmtEl = document.getElementById('receipt-amount-display');
+  const headerAmtEl = document.getElementById('fxg-receipt-amount-display');
   if (headerAmtEl) headerAmtEl.textContent = `₦${fmt(payload.amount)}`;
 
-  document.getElementById('receipt-new-balance').textContent = `₦${fmt(newBalance)}`;
-  document.getElementById('receipt-date').textContent =
+  document.getElementById('fxg-receipt-new-balance').textContent = `₦${fmt(newBalance)}`;
+  document.getElementById('fxg-receipt-date').textContent =
     new Date().toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
-  document.getElementById('receipt-transaction-id').textContent = reference || 'N/A';
+  document.getElementById('fxg-receipt-transaction-id').textContent = reference || 'N/A';
 
-  const detailsEl = document.getElementById('receipt-details');
+  const detailsEl = document.getElementById('fxg-receipt-details');
   if (detailsEl) detailsEl.style.display = 'block';
 
-  const actionsEl = document.getElementById('receipt-actions');
+  const actionsEl = document.getElementById('fxg-receipt-actions');
   if (!actionsEl) return;
 
   actionsEl.style.display = 'flex';
@@ -593,7 +593,7 @@ function fxgTransfer_updateReceiptToSuccess(payload, newBalance, reference) {
     </button>
   `;
 
-  document.getElementById('receipt-done').onclick = () => {
+  document.getElementById('fxg-receipt-done').onclick = () => {
     delete window._currentTransferPayload;
     fxgTransfer_closeReceiptModal();
     fxgTransfer_resetTransferForm();
@@ -603,7 +603,7 @@ function fxgTransfer_updateReceiptToSuccess(payload, newBalance, reference) {
 }
 
 function fxgTransfer_updateReceiptToFailed(payload, errorMessage) {
-  const icon = document.getElementById('receipt-icon');
+  const icon = document.getElementById('fxg-receipt-icon');
   if (icon) {
     icon.className = 'fxg-receipt-icon failed';
     icon.innerHTML = `
@@ -616,45 +616,45 @@ function fxgTransfer_updateReceiptToFailed(payload, errorMessage) {
   }
 
   // Header
-  document.getElementById('receipt-status').textContent = 'Transfer Failed';
-  const msg = document.getElementById('receipt-message');
+  document.getElementById('fxg-receipt-status').textContent = 'Transfer Failed';
+  const msg = document.getElementById('fxg-receipt-message');
   msg.className = 'fxg-receipt-error';
   msg.textContent = errorMessage; // keep real API error at the top
 
   // Dynamic subtext at the bottom
-  const subtextEl = document.getElementById('receipt-subtext');
+  const subtextEl = document.getElementById('fxg-receipt-subtext');
   if (subtextEl) {
     subtextEl.textContent = `Transfer to @${payload.recipient} could not be completed.`;
   }
 
   // Details (optional hidden for failed)
-  document.getElementById('receipt-recipient').textContent = `@${payload.recipient}`;
-  document.getElementById('receipt-amount').textContent = `₦${fmt(payload.amount)}`;
-  document.getElementById('receipt-details').style.display = 'none';
+  document.getElementById('fxg-receipt-recipient').textContent = `@${payload.recipient}`;
+  document.getElementById('fxg-receipt-amount').textContent = `₦${fmt(payload.amount)}`;
+  document.getElementById('fxg-receipt-details').style.display = 'none';
 
   // Actions
-  const actionsEl = document.getElementById('receipt-actions');
+  const actionsEl = document.getElementById('fxg-receipt-actions');
   actionsEl.style.display = 'flex';
   actionsEl.innerHTML = `
-    <button id="receipt-try-again"
+    <button id="fxg-receipt-try-again"
       style="flex:1;background:linear-gradient(90deg,#00d4aa,#00bfa5);
              color:#fff;border:none;border-radius:50px;padding:14px;
              font-weight:600;margin-right:8px">
       Try Again
     </button>
-    <button id="receipt-close"
+    <button id="fxg-receipt-close"
       style="flex:1;background:#333;color:#fff;border:none;
              border-radius:50px;padding:14px;font-weight:600">
       Close
     </button>
   `;
 
-  document.getElementById('receipt-try-again').onclick = () => {
+  document.getElementById('fxg-receipt-try-again').onclick = () => {
     fxgTransfer_closeReceiptModal();
     ModalManager.openModal('fxgTransferModal');
   };
 
-  document.getElementById('receipt-close').onclick = () => {
+  document.getElementById('fxg-receipt-close').onclick = () => {
     fxgTransfer_closeReceiptModal();
   };
 }
@@ -664,9 +664,9 @@ function fxgTransfer_updateReceiptToInsufficient(message, currentBalance) {
   const payload = window._currentTransferPayload || {};
   const subtext = `You do not have enough funds to complete this transfer.`; // dynamic
 
-  document.getElementById('receipt-status').textContent = 'Insufficient Balance';
+  document.getElementById('fxg-receipt-status').textContent = 'Insufficient Balance';
 
-  const msg = document.getElementById('receipt-message');
+  const msg = document.getElementById('fxg-receipt-message');
   msg.className = 'fxg-receipt-error';
   msg.innerHTML = `
     ${message}<br><br>
@@ -675,41 +675,41 @@ function fxgTransfer_updateReceiptToInsufficient(message, currentBalance) {
     Please fund your wallet to continue.
   `;
 
-  const subtextEl = document.getElementById('receipt-subtext');
+  const subtextEl = document.getElementById('fxg-receipt-subtext');
   if (subtextEl) subtextEl.textContent = subtext;
 
   if (payload.recipient) {
-    document.getElementById('receipt-recipient').textContent = `@${payload.recipient}`;
+    document.getElementById('fxg-receipt-recipient').textContent = `@${payload.recipient}`;
   }
   if (payload.amount) {
-    document.getElementById('receipt-amount').textContent = `₦${fmt(payload.amount)}`;
+    document.getElementById('fxg-receipt-amount').textContent = `₦${fmt(payload.amount)}`;
   }
 
-  document.getElementById('receipt-details').style.display = 'none';
+  document.getElementById('fxg-receipt-details').style.display = 'none';
 
-  const actionsEl = document.getElementById('receipt-actions');
+  const actionsEl = document.getElementById('fxg-receipt-actions');
   actionsEl.style.display = 'flex';
   actionsEl.innerHTML = `
-    <button id="receipt-fund-wallet"
+    <button id="fxg-receipt-fund-wallet"
       style="flex:1;background:linear-gradient(90deg,#00d4aa,#00bfa5);
              color:#fff;border:none;border-radius:50px;padding:14px;
              font-weight:600;margin-right:8px">
       Fund Wallet
     </button>
-    <button id="receipt-close"
+    <button id="fxg-receipt-close"
       style="flex:1;background:#333;color:#fff;border:none;
              border-radius:50px;padding:14px;font-weight:600">
       Close
     </button>
   `;
 
-  document.getElementById('receipt-fund-wallet').onclick = () => {
+  document.getElementById('fxg-receipt-fund-wallet').onclick = () => {
     delete window._currentTransferPayload;
     fxgTransfer_closeReceiptModal();
     window.ModalManager?.openModal?.('addMoneyModal');
   };
 
-  document.getElementById('receipt-close').onclick = () => {
+  document.getElementById('fxg-receipt-close').onclick = () => {
     fxgTransfer_closeReceiptModal();
   };
 }

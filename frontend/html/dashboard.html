@@ -315,6 +315,8 @@
     </footer>
   </div>
 </div>
+
+
 <!-- Wallet Transfer Receipt Modal -->
 <div id="fxg-transfer-receipt-modal" class="fxg-receipt-modal" aria-hidden="true">
   <div class="fxg-receipt-backdrop" data-receipt-close></div>
@@ -323,42 +325,42 @@
     
     <!-- Header / Status -->
     <div class="fxg-receipt-header">
-      <div id="receipt-icon" class="fxg-receipt-icon">
+      <div id="fxg-receipt-icon" class="fxg-receipt-icon">
         <!-- JS will insert SVG icon (success/failed) here -->
       </div>
       <div>
-        <h2 id="receipt-status">Transfer Status</h2> <!-- Success / Failed / Pending -->
-        <p id="receipt-message" class="fxg-receipt-note">Please wait...</p> <!-- Note or error -->
+        <h2 id="fxg-receipt-status">Transfer Status</h2> <!-- Success / Failed / Pending -->
+        <p id="fxg-receipt-message" class="fxg-receipt-note">Please wait...</p> <!-- Note or error -->
       </div>
     </div>
 
     <!-- Main Content (Amount & optional subtitle) -->
     <div class="fxg-receipt-content">
-      <div class="fxg-receipt-amount" id="receipt-amount-display">₦0</div>
-      <div class="fxg-receipt-sub" id="receipt-subtext">Transferred to recipient</div>
+      <div class="fxg-receipt-amount" id="fxg-receipt-amount-display">₦0</div>
+      <div class="fxg-receipt-sub" id="fxg-receipt-subtext">Transferred to recipient</div>
       
       <!-- Details Ledger -->
-      <div id="receipt-details" class="fxg-receipt-details">
+      <div id="fxg-receipt-details" class="fxg-receipt-details">
         <div class="fxg-receipt-row">
           <span class="label">Sent to</span>
-          <span class="value" id="receipt-recipient">@username</span>
+          <span class="value" id="fxg-receipt-recipient">@username</span>
         </div>
         <div class="fxg-receipt-row">
           <span class="label">Amount</span>
-          <span class="value" id="receipt-amount">₦0</span>
+          <span class="value" id="fxg-receipt-amount">₦0</span>
         </div>
         <div class="fxg-receipt-row">
           <span class="label">New Balance</span>
-          <span class="value" id="receipt-new-balance">₦0</span>
+          <span class="value" id="fxg-receipt-new-balance">₦0</span>
         </div>
         <div class="fxg-receipt-row">
           <span class="label">Date</span>
-          <span class="value" id="receipt-date">Just now</span>
+          <span class="value" id="fxg-receipt-date">Just now</span>
         </div>
       </div>
 
       <!-- Action Buttons -->
-      <div id="receipt-actions" class="fxg-receipt-actions">
+      <div id="fxg-receipt-actions" class="fxg-receipt-actions">
         <!-- JS will insert buttons (primary / secondary) here -->
       </div>
     </div>
