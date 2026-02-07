@@ -7404,6 +7404,8 @@ allPlansModalContent.addEventListener('touchend', handleTouchEnd);
 
 
 
+
+// Prevent double execution on reload / duplicate includes
 if (window.__recentTxInitialized) {
   console.log('[recent-tx] Already initialized — skipping');
 } else {
@@ -7418,6 +7420,7 @@ if (window.__recentTxInitialized) {
       return;
     }
 
+    // === FORCE YOUR 28px svgShapes GLOBALLY ===
     window.svgShapes = {
       mtn: `<svg class="yellow-circle-icon" width="28" height="28" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="#FFD700"/></svg>`,
       airtel: `<svg class="airtel-rect-icon" width="28" height="28" viewBox="0 0 24 24" fill="none"><rect x="4" y="6" width="20" height="12" rx="4" fill="#e4012b"/></svg>`,
@@ -7426,17 +7429,21 @@ if (window.__recentTxInitialized) {
       receive: `<svg class="bank-icon" width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M4 9v9h16V9l-8-5-8 5zm4 4h8v2H8v-2zm0 4h4v2H8v-2z" fill="#00cc00" stroke="#fff" stroke-width="1"/></svg>`
     };
 
+    // Helper to normalize phone numbers (for dedupe)
     function normalizePhone(phone) {
       return phone?.replace(/\s+/g, '').replace(/^0/, '+234') || '';
     }
 
+    // --- PERMANENT RENDER FUNCTION ---
     function renderRecentTransactions(transactions = []) {
       recentTransactionsList.innerHTML = '';
+
       if (!transactions.length) {
         recentTransactionsSection.classList.remove('active');
         return;
       }
 
+      // Filter to data purchases + successes only
       const dataSuccessTxs = transactions.filter(tx => {
         const desc = (tx.description || '').toLowerCase();
         return desc.includes('data') && tx?.status?.toLowerCase() === 'success';
@@ -7453,14 +7460,26 @@ if (window.__recentTxInitialized) {
         const txDiv = document.createElement('div');
         txDiv.className = 'recent-transaction-item';
 
-        const displayName = tx.provider === 'ninemobile' ? '9mobile' : tx.provider ? tx.provider.charAt(0).toUpperCase() + tx.provider.slice(1).toLowerCase() : 'Unknown';
+        const displayName = tx.provider === 'ninemobile'
+          ? '9mobile'
+          : tx.provider
+            ? tx.provider.charAt(0).toUpperCase() + tx.provider.slice(1).toLowerCase()
+            : 'Unknown';
 
+        // Priority 1: Use clean column from transactions table
         let dataAmount = tx.data_amount || '';
+
+        // Priority 2: Fallback regex (catches GB and MB reliably)
         if (!dataAmount && tx.description) {
           const match = tx.description.match(/(\d+\.?\d*)\s*(GB|MB|TB|gb|mb|tb)/i);
-          if (match) dataAmount = match[0].toUpperCase();
-          else if (tx.description.toLowerCase().includes('data')) dataAmount = 'Data Bundle';
+          if (match) {
+            dataAmount = match[0].toUpperCase(); // e.g. "5GB", "200MB", "1.5 GB"
+          } else if (tx.description.toLowerCase().includes('data')) {
+            dataAmount = 'Data Bundle';
+          }
         }
+
+        // Ultimate fallback
         if (!dataAmount) dataAmount = 'Data Purchase';
 
         const providerKey = tx.provider?.toLowerCase() === '9mobile' ? 'ninemobile' : tx.provider?.toLowerCase();
@@ -7476,22 +7495,30 @@ if (window.__recentTxInitialized) {
 
         txDiv.addEventListener('click', () => {
           const phoneInput = document.getElementById('phone-input');
-          if (!phoneInput) return alert('Phone input field not found.');
+          if (!phoneInput) {
+            alert('Phone input field not found.');
+            return;
+          }
 
           const result = window.formatNigeriaNumber(tx.phone);
           phoneInput.value = result.value;
 
           const normalizedPhone = tx.phone.replace(/^\+234/, '0');
           const provider = detectProvider(normalizedPhone);
+
           if (provider) {
             const providerClass = provider.toLowerCase() === '9mobile' ? 'ninemobile' : provider.toLowerCase();
-            debounce(() => selectProvider(providerClass), 100)();
+            debounce(() => {
+              selectProvider(providerClass);
+              console.log('[DEBUG] Provider auto-selected:', providerClass);
+            }, 100)();
           }
 
           if (window.updateContactOrCancel) window.updateContactOrCancel();
           if (window.updateContinueState) window.updateContinueState();
           if (window.saveUserState) window.saveUserState();
           if (window.saveCurrentAppState) window.saveCurrentAppState();
+
           phoneInput.blur();
         });
 
@@ -7501,10 +7528,15 @@ if (window.__recentTxInitialized) {
       console.log('[recent-tx] Rendered', dataSuccessTxs.length, 'successful data transactions');
     }
 
+    // === LOAD, MERGE, DEDUPLICATE, LIMIT TO 5 ===
     let recentTransactions = [];
+
     try {
       const stored = localStorage.getItem('recentTransactions');
-      if (stored) recentTransactions = JSON.parse(stored) || [];
+      if (stored) {
+        recentTransactions = JSON.parse(stored);
+        if (!Array.isArray(recentTransactions)) recentTransactions = [];
+      }
     } catch (e) {
       console.warn('[recent-tx] localStorage parse error', e);
     }
@@ -7512,18 +7544,28 @@ if (window.__recentTxInitialized) {
     recentTransactions = recentTransactions.filter(tx => tx && tx.phone && tx.phone.trim() !== '');
 
     try {
-      const res = await fetch(`${window.__SEC_API_BASE}/api/transactions?limit=100`, { credentials: 'include' });
+      const res = await fetch(`${window.__SEC_API_BASE}/api/transactions?limit=100`, {
+        credentials: 'include',
+      });
+
       if (res.ok) {
         const data = await res.json();
         const serverTxs = (data.items || []).filter(tx => tx && tx.phone && tx.phone.trim() !== '');
+
         serverTxs.forEach(serverTx => {
           const exists = recentTransactions.some(localTx =>
             (localTx.id && serverTx.id && localTx.id === serverTx.id) ||
-            (normalizePhone(localTx.phone) === normalizePhone(serverTx.phone) && localTx.amount === serverTx.amount)
+            (normalizePhone(localTx.phone) === normalizePhone(serverTx.phone) && 
+             localTx.amount === serverTx.amount)
           );
-          if (!exists) recentTransactions.push(serverTx);
+
+          if (!exists) {
+            recentTransactions.push(serverTx);
+          }
         });
-      } else console.warn('[recent-tx] Server fetch not OK:', res.status);
+      } else {
+        console.warn('[recent-tx] Server fetch not OK:', res.status);
+      }
     } catch (err) {
       console.error('[recent-tx] Server fetch failed', err);
     }
@@ -7544,12 +7586,12 @@ if (window.__recentTxInitialized) {
     }
 
     renderRecentTransactions(recentTransactions);
+
     window.renderRecentTransactions = renderRecentTransactions;
 
     console.log('%c[recent-tx] INITIALIZED — single run guaranteed', 'color:lime;font-weight:bold');
   })();
 }
-
 
 /* ===========================================================
    PIN modal — unified keypad + keyboard input + toast system
