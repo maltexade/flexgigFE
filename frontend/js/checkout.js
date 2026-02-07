@@ -1229,7 +1229,7 @@ async function updateReceiptToSuccess(result) {
         description: `${data.dataAmount || 'Data'} Data Purchase`,
         status: 'success',
         timestamp: new Date().toISOString(),
-        amount: data.price,
+        amount: data.dataAmount || 'Data Bundle',
         created_at: new Date().toISOString()
       };
 
