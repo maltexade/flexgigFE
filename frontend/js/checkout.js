@@ -1158,7 +1158,6 @@ function showProcessingReceipt(data) {
   // Store data
   window._currentCheckoutData = data;
 }
-
 async function updateReceiptToSuccess(result) {
   const icon = document.getElementById('receipt-icon');
   icon.className = 'receipt-icon success';
@@ -1186,50 +1185,35 @@ async function updateReceiptToSuccess(result) {
     reference: data.reference || '(none)'
   });
 
-  // Use checkout reference or generate fallback
   let transactionRef = data.reference || 'TX-' + Date.now().toString(36);
-
   const displayAmount = Number(result?.amount ?? data?.price ?? 0);
 
-  // Fill receipt using checkout data
   const providerKey = data.provider?.toLowerCase() === '9mobile' ? 'ninemobile' : data.provider?.toLowerCase() || '';
   const svg = window.svgShapes?.[providerKey] || '';
 
   document.getElementById('receipt-provider').innerHTML = `${svg} ${data.provider?.toUpperCase() || 'Unknown'}`;
   document.getElementById('receipt-phone').textContent = data.number || '—';
-  
-  document.getElementById('receipt-plan').textContent = 
-    data.dataAmount ? `${data.dataAmount} / ${data.validity || '—'}` : 'Data Bundle';
-
-  document.getElementById('receipt-amount').textContent = 
-    `₦${displayAmount.toLocaleString('en-NG')}`;
-
+  document.getElementById('receipt-plan').textContent = data.dataAmount ? `${data.dataAmount} / ${data.validity || '—'}` : 'Data Bundle';
+  document.getElementById('receipt-amount').textContent = `₦${displayAmount.toLocaleString('en-NG')}`;
   document.getElementById('receipt-transaction-id').textContent = transactionRef;
-
-  document.getElementById('receipt-balance').textContent = 
-    `₦${Number(result?.new_balance ?? data?.new_balance ?? 0).toLocaleString('en-NG')}`;
-
-  document.getElementById('receipt-time').textContent = 
-    new Date().toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
-
+  document.getElementById('receipt-balance').textContent = `₦${Number(result?.new_balance ?? data?.new_balance ?? 0).toLocaleString('en-NG')}`;
+  document.getElementById('receipt-time').textContent = new Date().toLocaleString('en-NG', { dateStyle: 'medium', timeStyle: 'short' });
   document.getElementById('receipt-details').style.display = 'block';
   document.getElementById('receipt-actions').style.display = 'flex';
 
   // === AUTO-UPDATE RECENT TRANSACTIONS LIST (no API call) ===
   if (typeof window.renderRecentTransactions === 'function') {
     try {
-      // Normalize phone number (remove spaces)
       const cleanPhone = data.number?.replace(/\s+/g, '') || '—';
-
       const newTx = {
         id: transactionRef,
-        phone: cleanPhone,  // Store without spaces
+        phone: cleanPhone,
         provider: data.provider,
-        data_amount: data.dataAmount || 'Data Bundle', // Clean from checkout
+        data_amount: data.dataAmount || 'Data Bundle',
         description: `${data.dataAmount || 'Data'} Data Purchase`,
         status: 'success',
         timestamp: new Date().toISOString(),
-        amount: data.dataAmount || 'Data Bundle',
+        amount: data.price,
         created_at: new Date().toISOString()
       };
 
@@ -1247,38 +1231,21 @@ async function updateReceiptToSuccess(result) {
         console.warn('[checkout] localStorage parse error:', e);
       }
 
-      // Helper to normalize phone for comparison
-      function normalizePhone(phone) {
-        return phone?.replace(/\s+/g, '') || '';
-      }
+      function normalizePhone(phone) { return phone?.replace(/\s+/g, '') || ''; }
 
-      // Dedupe: remove any with same clean phone + amount
-      currentRecent = currentRecent.filter(tx => 
-        normalizePhone(tx.phone) !== normalizePhone(newTx.phone) || 
-        tx.amount !== newTx.amount
-      );
-
-      // Add new one at top
+      // Dedupe by phone + amount
+      currentRecent = currentRecent.filter(tx => normalizePhone(tx.phone) !== normalizePhone(newTx.phone) || tx.amount !== newTx.amount);
       currentRecent.unshift(newTx);
-
-      // Keep only top 5
       currentRecent = currentRecent.slice(0, 5);
 
       console.log('[checkout] Updated list (after dedupe & slice):', currentRecent.length, 'items');
-      console.table(currentRecent.map(tx => ({
-        phone: tx.phone,
-        data_amount: tx.data_amount || '(none)',
-        //amount: tx.amount,
-        time: tx.timestamp || '—'
-      })));
+      console.table(currentRecent.map(tx => ({ phone: tx.phone, data_amount: tx.data_amount || '(none)', amount: tx.amount, time: tx.timestamp || '—' })));
 
-      // Save back
       localStorage.setItem('recentTransactions', JSON.stringify(currentRecent));
       console.log('[checkout] localStorage updated successfully');
-
-      // Force render
       window.renderRecentTransactions(currentRecent);
       console.log('[checkout] Recent transactions list re-rendered instantly');
+
     } catch (err) {
       console.error('[checkout] Failed to update recent list:', err);
     }
@@ -1286,6 +1253,7 @@ async function updateReceiptToSuccess(result) {
     console.warn('[checkout] renderRecentTransactions function not found — list won’t update');
   }
 }
+
 
 function updateReceiptToFailed(errorMessage) {
   const icon = document.getElementById('receipt-icon');
