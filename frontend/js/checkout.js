@@ -1268,7 +1268,7 @@ async function updateReceiptToSuccess(result) {
       console.table(currentRecent.map(tx => ({
         phone: tx.phone,
         data_amount: tx.data_amount || '(none)',
-        amount: tx.amount,
+        //amount: tx.amount,
         time: tx.timestamp || '—'
       })));
 
