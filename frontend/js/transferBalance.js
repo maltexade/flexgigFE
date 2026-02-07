@@ -586,7 +586,7 @@ function fxgTransfer_updateReceiptToSuccess(payload, newBalance, reference) {
 
   actionsEl.style.display = 'flex';
   actionsEl.innerHTML = `
-    <button id="receipt-done"
+    <button id="fxg-receipt-done"
       style="flex:1;background:#333;color:#fff;border:none;
              border-radius:50px;padding:14px;font-weight:600">
       Done
