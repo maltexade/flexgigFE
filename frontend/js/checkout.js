@@ -1201,7 +1201,7 @@ async function updateReceiptToSuccess(result) {
   document.getElementById('receipt-details').style.display = 'block';
   document.getElementById('receipt-actions').style.display = 'flex';
 
-  // === AUTO-UPDATE RECENT TRANSACTIONS LIST (no API call) ===
+  // === ONLY LOCAL TRANSACTIONS UPDATE ===
   if (typeof window.renderRecentTransactions === 'function') {
     try {
       const cleanPhone = data.number?.replace(/\s+/g, '') || '—';
@@ -1217,40 +1217,26 @@ async function updateReceiptToSuccess(result) {
         created_at: new Date().toISOString()
       };
 
-      console.log('[checkout] New tx object prepared (phone cleaned):', newTx);
-
       let currentRecent = [];
       try {
         const stored = localStorage.getItem('recentTransactions');
-        if (stored) {
-          currentRecent = JSON.parse(stored);
-          if (!Array.isArray(currentRecent)) currentRecent = [];
-        }
-        console.log(`[checkout] Loaded ${currentRecent.length} existing recent txs from localStorage`);
+        if (stored) currentRecent = JSON.parse(stored) || [];
       } catch (e) {
         console.warn('[checkout] localStorage parse error:', e);
       }
 
       function normalizePhone(phone) { return phone?.replace(/\s+/g, '') || ''; }
 
-      // Dedupe by phone + amount
       currentRecent = currentRecent.filter(tx => normalizePhone(tx.phone) !== normalizePhone(newTx.phone) || tx.amount !== newTx.amount);
       currentRecent.unshift(newTx);
       currentRecent = currentRecent.slice(0, 5);
 
-      console.log('[checkout] Updated list (after dedupe & slice):', currentRecent.length, 'items');
-      console.table(currentRecent.map(tx => ({ phone: tx.phone, data_amount: tx.data_amount || '(none)', amount: tx.amount, time: tx.timestamp || '—' })));
-
       localStorage.setItem('recentTransactions', JSON.stringify(currentRecent));
-      console.log('[checkout] localStorage updated successfully');
       window.renderRecentTransactions(currentRecent);
-      console.log('[checkout] Recent transactions list re-rendered instantly');
 
     } catch (err) {
       console.error('[checkout] Failed to update recent list:', err);
     }
-  } else {
-    console.warn('[checkout] renderRecentTransactions function not found — list won’t update');
   }
 }
 
