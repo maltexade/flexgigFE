@@ -677,7 +677,7 @@ function showGeneratedAccount(data) {
 
       <div style="margin-bottom:12px;">
         <p style="margin:0; font-size:10px; opacity:0.75; text-transform: uppercase;">Bank</p>
-        <img src="/frontend/img/opay-logo.png" alt="Bank Logo" onerror="this.style.display='none'" style="width:auto; height:36px; margin-top:6px; object-fit:contain;">
+        <img src="/frontend/img/9PSB.png" alt="9PSB" onerror="this.style.display='none'" style="width:auto; height:36px; margin-top:6px; object-fit:contain;">
       </div>
 
       <div style="margin-bottom:12px;">
