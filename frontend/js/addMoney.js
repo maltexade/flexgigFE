@@ -698,11 +698,19 @@ function showGeneratedAccount(data) {
         </div>
       </div>
 
-      <div style="margin-bottom:10px;">
-        <p style="margin:0; font-size:10px; opacity:0.75; text-transform: uppercase;">Expires In</p>
-        <div style="margin-top:6px; background:#10b981; padding:6px 12px; border-radius:10px; font-size:18px; font-weight:700; display:inline-block;">
-          <span id="genCountdown">30:00</span>
+      <div style="margin-bottom:10px; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;">
+        <!-- Countdown (left side) -->
+        <div>
+          <p style="margin:0; font-size:10px; opacity:0.75; text-transform: uppercase;">Expires In</p>
+          <div style="margin-top:6px; background:#10b981; padding:6px 12px; border-radius:10px; font-size:18px; font-weight:700; display:inline-block;">
+            <span id="genCountdown">30:00</span>
+          </div>
         </div>
+
+        <!-- I Have Paid Button (right side) -->
+        <button id="iHavePaidBtn" class="addMoney-fund-btn" style="background:#3b82f6; padding:12px 20px; font-size:15px; font-weight:700; min-width:140px; white-space:nowrap;">
+          I Have Paid
+        </button>
       </div>
 
       <div style="margin-top:18px; display:flex; justify-content:center;">
@@ -710,6 +718,56 @@ function showGeneratedAccount(data) {
       </div>
     </div>
   `;
+
+  // --- "I Have Paid" Button Handler ---
+const iHavePaidBtn = modalContent.querySelector('#iHavePaidBtn');
+if (iHavePaidBtn) {
+  iHavePaidBtn.addEventListener('click', async () => {
+    iHavePaidBtn.disabled = true;
+    iHavePaidBtn.textContent = 'Verifying...';
+    iHavePaidBtn.style.background = '#6b7280'; // gray while loading
+
+    try {
+      // Call your backend endpoint to check if payment is completed
+      // Adjust the path to match your actual API route
+      const res = await apiFetch('/api/fund-wallet/verify-pending', {
+        method: 'POST',
+        body: { reference: data.reference } // send the reference from the pending tx
+      });
+
+      if (res.ok && res.data?.status === 'completed') {
+        // Payment confirmed!
+        showSuccessToast('Payment Confirmed!', `₦${Number(data.amount).toLocaleString()} added to wallet`);
+
+        // Clear pending tx
+        removePendingTxFromStorage();
+
+        // Close modal & reopen fresh form
+        if (window.ModalManager?.closeModal) {
+          window.ModalManager.closeModal('addMoneyModal');
+        } else {
+          addMoneyModal.style.transform = 'translateY(100%)';
+        }
+
+        setTimeout(() => openAddMoneyModalContent(), 500);
+
+      } else if (res.ok && res.data?.status === 'pending') {
+        // Still pending
+        showLocalNotify('Payment still processing. Please wait a moment.', 'info');
+      } else {
+        // Failed or not found
+        showLocalNotify(res.error?.message || 'Payment not found yet. Try again in 30 seconds.', 'error');
+      }
+    } catch (err) {
+      console.error('[I Have Paid] Verification failed:', err);
+      showLocalNotify('Network error. Please try again.', 'error');
+    } finally {
+      iHavePaidBtn.disabled = false;
+      iHavePaidBtn.textContent = 'I Have Paid – Verify Now';
+      iHavePaidBtn.style.background = '#3b82f6';
+    }
+  });
+}
 
   // Replace modal content
   const contentContainer = addMoneyModal.querySelector('.addMoney-modal-content');
