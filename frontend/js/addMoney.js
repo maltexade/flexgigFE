@@ -697,21 +697,22 @@ function showGeneratedAccount(data) {
           </button>
         </div>
       </div>
+<p id="expires-in" style="margin:0; font-size:10px; opacity:0.75; text-transform: uppercase;">Expires In</p>
+      <div class="generated-countdown-row">
+          
 
-      <div style="margin-bottom:10px; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;">
-        <!-- Countdown (left side) -->
-        <div>
-          <p style="margin:0; font-size:10px; opacity:0.75; text-transform: uppercase;">Expires In</p>
-          <div style="margin-top:6px; background:#10b981; padding:6px 12px; border-radius:10px; font-size:18px; font-weight:700; display:inline-block;">
-            <span id="genCountdown">30:00</span>
-          </div>
-        </div>
+  <!-- Countdown -->
+  <div>
+    <div class="countdown-box">
+      <span id="genCountdown">30:00</span>
+    </div>
+  </div>
 
-        <!-- I Have Paid Button (right side) -->
-        <button id="iHavePaidBtn" class="addMoney-fund-btn" style="background:#3b82f6; padding:12px 20px; font-size:15px; font-weight:700; min-width:140px; white-space:nowrap;">
-          I Have Paid
-        </button>
-      </div>
+  <!-- Button -->
+  <button id="iHavePaidBtn" class="verify-btn">
+    I Have Paid
+  </button>
+</div>
 
       <div style="margin-top:18px; display:flex; justify-content:center;">
         <button id="cancelTransactionBtn" class="addMoney-cancel-btn" style="background:transparent; border:1px solid rgba(255,255,255,0.12); color:#fff; padding:10px 14px; border-radius:12px; font-weight:700; cursor:pointer; width:100%;">Cancel transaction</button>
@@ -763,7 +764,7 @@ if (iHavePaidBtn) {
       showLocalNotify('Network error. Please try again.', 'error');
     } finally {
       iHavePaidBtn.disabled = false;
-      iHavePaidBtn.textContent = 'I Have Paid – Verify Now';
+      iHavePaidBtn.textContent = 'I Have Paid';
       iHavePaidBtn.style.background = '#3b82f6';
     }
   });
