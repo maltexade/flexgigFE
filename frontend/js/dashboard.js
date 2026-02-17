@@ -3385,6 +3385,126 @@ applyBalanceVisibility();
 }
 
 
+/**
+ * Balance Switch + Eye Toggle Helper
+ * - Makes #balanceSwitch clickable and animates its knob
+ * - Syncs with eye icons (they remain the primary toggle)
+ * - Controls balance mask/show + text update
+ * - Forces smooth knob slide every time
+ * 
+ * Call this once after DOM ready (e.g. in onDashboardLoad or at end of script)
+ */
+function initBalanceSwitchHelper() {
+  // Prevent duplicate init
+  if (window.__balanceSwitchHelperInitialized) return;
+  window.__balanceSwitchHelperInitialized = true;
+
+  // Ensure global state exists (your existing vars)
+  window.isBalanceMasked = localStorage.getItem('balanceMasked') === 'true';
+  window.currentDisplayedBalance = window.currentDisplayedBalance || 0;
+  window.balanceToggleInProgress = false;
+
+  // ── Shared toggle function (same as eye uses) ────────────────────
+  const toggleBalance = () => {
+    if (window.balanceToggleInProgress) return;
+    window.balanceToggleInProgress = true;
+
+    window.isBalanceMasked = !window.isBalanceMasked;
+    localStorage.setItem('balanceMasked', window.isBalanceMasked);
+
+    const shouldShow = !window.isBalanceMasked;
+
+    const formatted = '₦' + window.currentDisplayedBalance.toLocaleString('en-NG', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+
+    // Update text
+    document.querySelectorAll('[data-balance], .balance-real').forEach(el => el.textContent = formatted);
+    document.querySelectorAll('.balance-masked').forEach(el => el.textContent = shouldShow ? formatted : '••••••');
+
+    // Update visibility
+    document.querySelectorAll('.balance-real, [data-balance]').forEach(el => {
+      el.style.opacity = shouldShow ? '1' : '0';
+      el.style.pointerEvents = shouldShow ? '' : 'none';
+    });
+    document.querySelectorAll('.balance-masked').forEach(el => {
+      el.style.opacity = shouldShow ? '0' : '1';
+      el.style.pointerEvents = shouldShow ? 'none' : '';
+    });
+
+    // Sync eyes (your existing animation)
+    document.querySelectorAll('.balance-eye-toggle').forEach(toggle => {
+      toggle.classList.toggle('open', shouldShow);
+      toggle.classList.toggle('closed', !shouldShow);
+      toggle.setAttribute('aria-pressed', shouldShow);
+      toggle.setAttribute('aria-label', shouldShow ? 'Hide balance' : 'Show balance');
+
+      const o = toggle.querySelector('.eye-open-svg');
+      const c = toggle.querySelector('.eye-closed-svg');
+      if (o && c) {
+        o.style.transition = c.style.transition = 'transform 420ms cubic-bezier(.2,.9,.3,1), opacity 320ms ease';
+        o.style.opacity = shouldShow ? '1' : '0';
+        o.style.transform = `translate(-50%,-50%) scaleY(${shouldShow ? 1 : 0.25})`;
+        c.style.opacity = shouldShow ? '0' : '1';
+        c.style.transform = `translate(-50%,-50%) scaleY(${shouldShow ? 0.25 : 1})`;
+      }
+    });
+
+    // ── Force switch knob to slide smoothly ─────────────────────────
+    const sw = document.getElementById('balanceSwitch');
+    if (sw) {
+      sw.setAttribute('aria-checked', shouldShow ? 'true' : 'false');
+
+      const knob = sw.querySelector('.knob');
+      if (knob) {
+        // Double RAF + reflow = reliable animation trigger
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            knob.style.transition = 'none';
+            void knob.offsetWidth; // force reflow
+
+            knob.style.transition = 'transform 0.28s cubic-bezier(0.175, 0.885, 0.32, 1.275) !important';
+            knob.style.transform = shouldShow 
+              ? (sw.classList.contains('small') ? 'translateX(18px)' : 'translateX(26px)')
+              : 'translateX(0)';
+          });
+        });
+      }
+    }
+
+    setTimeout(() => { window.balanceToggleInProgress = false; }, 400);
+  };
+
+  // ── Attach switch listener (clean & safe) ────────────────────────
+  const balanceSwitch = document.getElementById('balanceSwitch');
+  if (balanceSwitch) {
+    // Clone to wipe any old/broken listeners
+    const freshSwitch = balanceSwitch.cloneNode(true);
+    balanceSwitch.parentNode.replaceChild(freshSwitch, balanceSwitch);
+
+    freshSwitch.addEventListener('click', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleBalance();
+    });
+
+    freshSwitch.style.pointerEvents = 'auto';
+    freshSwitch.style.cursor = 'pointer';
+  }
+
+  // ── Eye icons keep their existing handler (no change needed) ─────
+  // Your current setupNuclearEyeToggle() already works perfectly
+  // We just make sure switch follows the same toggleBalance()
+
+  // ── Initial sync ─────────────────────────────────────────────────
+
+  console.log('[Balance Switch Helper] Initialized — switch now clickable + animates knob');
+}
+
+// Run the helper once (safe to call multiple times)
+initBalanceSwitchHelper();
+
 
 // Helper: Update localStorage with user data
 function updateLocalStorageFromUser(user) {
@@ -18636,6 +18756,7 @@ async function onSuccessfulReauth() {
     } else {
       console.debug('[reauth] clear failed or unreachable — keeping canonical flag for persistence');
     }
+    loadLatestHistoryAsFallback();
 
     // Hide UI only if canonical key is gone
     function isCanonicalPending() {

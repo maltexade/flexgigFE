@@ -487,6 +487,7 @@ window.setTriggerActive = window.setTriggerActive || setTriggerActive; // expose
     element: null, 
     hasPullHandle: false 
   },
+  kycVerifyModal: { id: 'kycVerifyModal', element: null, hasPullHandle: false },
   };
 
   // ─────────────────────────────────────────────────────────────
@@ -500,6 +501,7 @@ const bottomSheetModals = [
   'fxg-transfer-confirm-modal',
   'fxgReceiptModal',
   'receiptModal',
+  'kycVerifyModal'
 ];
 
 function lockBodyScroll(lock = true) {
@@ -1018,11 +1020,40 @@ if (classAnimatedModals.includes(modalId)) {
       const main = document.getElementById('mainContent') || document.querySelector('main') || document.body;
       try { main.focus(); } catch (e) { document.body.focus(); }
     }
+    // ── Final safety net: when no modals remain → home MUST be active ────────────
+if (openModalsStack.length === 0) {
+    setTimeout(() => {
+        // Check current reality (after all classList changes have had time to apply)
+        const anyNavActive = document.querySelector(
+            '#homeNavLink.active, .nav-item.active, [aria-current="true"]'
+        );
+
+        if (!anyNavActive) {
+            log('warn', 
+                'Safety net triggered: modal stack empty but NO active nav found → forcing home active'
+            );
+            setHomeActive();
+            
+            // Optional: extra strong version that clears everything first
+            // document.querySelectorAll('.nav-item, [aria-current]').forEach(el => {
+            //     clearActiveFromElement(el);
+            // });
+            // setHomeActive();
+        } else if (!anyNavActive.id?.includes('home') && !anyNavActive.classList.contains('home')) {
+            log('debug', 
+                'Safety net: stack empty, but active state is on non-home → correcting to home'
+            );
+            setHomeActive();
+        }
+    }, 80);   // small delay — enough for DOM/classList to settle, not noticeable to user
+}
   });
 
  
 }
 window.closeModal = window.closeModal || closeModal; // expose for modals to call on close
+window.openModal = window.openModal || openModal;
+window.forceCloseModal = window.forceCloseModal || forceCloseModal;
   
 
   // Focus trap for accessibility
@@ -1313,6 +1344,7 @@ log('debug', 'handlePopstate: openModalsStack snapshot', { stack: openModalsStac
       historyNavLink: 'historyModal',
       addMoneyBtn: 'addMoneyModal',
       'fxg-open-transfer-modal': 'fxgTransferModal',
+      'kycVerifyModal': 'kycVerifyModal',
     };
 
     // Bind triggers to open modals
@@ -1398,6 +1430,16 @@ document.addEventListener('click', function(e) {
     console.warn('[ModalManager] Closed via fallback (no closeModal found)');
   }
 }, true);  // true = capture phase — catches before other handlers
+
+// KYC card delegation — fires when user taps "Get a permanent bank account"
+document.addEventListener('click', (e) => {
+  if (e.target.closest('.addMoney-account-section')) {
+    e.preventDefault();
+    log('debug', 'KYC card clicked — opening kycVerifyModal');
+    openModal('kycVerifyModal');
+  }
+});
+
 
     // HOME BUTTON HANDLER - Separate from other triggers
     const homeNavLink = document.getElementById('homeNavLink');

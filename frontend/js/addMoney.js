@@ -1045,3 +1045,93 @@ console.log('[Fund Wallet] Check WebSocket: getWebSocketStatus()');
     successAudio.play().catch(e => console.warn('Success sound failed:', e));
   };
 })();
+
+// ── KYC Modal Logic ───────────────────────────────────────────
+(function initKYCModal() {
+  const btnBVN    = document.getElementById('kycBtnBVN');
+  const btnNIN    = document.getElementById('kycBtnNIN');
+  const input     = document.getElementById('kycNumberInput');
+  const label     = document.getElementById('kycInputLabel');
+  const hint      = document.getElementById('kycInputHint');
+  const submitBtn = document.getElementById('kycSubmitBtn');
+
+  let activeType = 'BVN';
+
+  // Reset state whenever ModalManager opens this modal
+  document.addEventListener('modalOpened', (e) => {
+    if (e.detail !== 'kycVerifyModal') return;
+    activeType = 'BVN';
+    input.value = '';
+    input.classList.remove('kyc-number-input--error');
+    hint.classList.remove('kyc-input-hint--error');
+    setActiveType('BVN');
+  });
+
+  // BVN / NIN toggle
+  function setActiveType(type) {
+    activeType = type;
+
+    btnBVN.classList.toggle('kyc-type-btn--active', type === 'BVN');
+    btnNIN.classList.toggle('kyc-type-btn--active', type === 'NIN');
+
+    label.textContent     = `Enter your ${type}`;
+    submitBtn.textContent = `Submit ${type}`;
+    hint.textContent      = type === 'BVN'
+      ? 'Your 11-digit BVN — dial *565*0# on any network to retrieve it.'
+      : 'Your 11-digit NIN — check your NIN slip or dial *346# to retrieve it.';
+
+    hint.classList.remove('kyc-input-hint--error');
+    input.classList.remove('kyc-number-input--error');
+    input.value = '';
+  }
+
+  btnBVN?.addEventListener('click', () => setActiveType('BVN'));
+  btnNIN?.addEventListener('click', () => setActiveType('NIN'));
+
+  // Submit
+  submitBtn?.addEventListener('click', async () => {
+    const value = input.value.replace(/\D/g, '');
+
+    if (value.length !== 11) {
+      input.classList.add('kyc-number-input--error');
+      hint.classList.add('kyc-input-hint--error');
+      hint.textContent = `Please enter a valid 11-digit ${activeType}.`;
+      setTimeout(() => {
+        input.classList.remove('kyc-number-input--error');
+        hint.classList.remove('kyc-input-hint--error');
+        hint.textContent = activeType === 'BVN'
+          ? 'Your 11-digit BVN — dial *565*0# on any network to retrieve it.'
+          : 'Your 11-digit NIN — check your NIN slip or dial *346# to retrieve it.';
+      }, 2500);
+      return;
+    }
+
+    submitBtn.disabled    = true;
+    submitBtn.textContent = 'Submitting…';
+
+    try {
+      const res = await apiFetch('/api/kyc/submit', {
+        method: 'POST',
+        body: { type: activeType, number: value }
+      });
+
+      if (res.ok) {
+        // ModalManager handles close + history
+        window.ModalManager?.forceCloseModal('kycVerifyModal');
+        showLocalNotify(`${activeType} submitted successfully!`, 'success');
+      } else {
+        hint.classList.add('kyc-input-hint--error');
+        hint.textContent = res.error?.message || 'Submission failed. Try again.';
+        setTimeout(() => hint.classList.remove('kyc-input-hint--error'), 3000);
+      }
+    } catch (e) {
+      hint.classList.add('kyc-input-hint--error');
+      hint.textContent = 'Network error. Please try again.';
+      setTimeout(() => hint.classList.remove('kyc-input-hint--error'), 3000);
+    } finally {
+      submitBtn.disabled    = false;
+      submitBtn.textContent = `Submit ${activeType}`;
+    }
+  });
+
+})();

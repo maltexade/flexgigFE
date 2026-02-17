@@ -6428,3 +6428,264 @@ body:has(.fxg-modal.show) {
     margin-top: auto;
   }
 }
+
+
+/* ── KYC Full Screen Modal ─────────────────────────────────── */
+
+.kyc-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100000;
+  background: #0a0a0a;
+  display: flex;
+  flex-direction: column;
+}
+
+.kyc-modal-overlay.hidden {
+  display: none;
+}
+
+.kyc-modal-sheet {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding-bottom: env(safe-area-inset-bottom, 20px);
+  /* ModalManager drives opacity + transform */
+  opacity: 0;
+  transform: translateX(100%);
+  transition: transform 0.35s cubic-bezier(0.32, 0.72, 0, 1),
+              opacity 0.3s ease;
+}
+
+/* ModalManager sets opacity:1 + transform:translateY(0) on open */
+.kyc-modal-overlay:not(.hidden) .kyc-modal-sheet {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+/* Header */
+.kyc-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 20px 14px;
+  gap: 12px;
+  position: sticky;
+  top: 0;
+  background: #0a0a0a;
+  z-index: 10;
+}
+
+.kyc-back-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: none;
+  border-radius: 50%;
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.2s;
+}
+
+.kyc-back-btn:active {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.kyc-modal-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: #fff;
+  flex: 1;
+  text-align: center;
+}
+
+.kyc-modal-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.07);
+  margin: 0 20px;
+  flex-shrink: 0;
+}
+
+/* Body */
+.kyc-modal-body {
+  padding: 24px 20px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* Info Banner */
+.kyc-info-banner {
+  background: linear-gradient(135deg,
+    rgba(0, 170, 255, 0.1),
+    rgba(0, 170, 255, 0.03));
+  border: 1px solid rgba(0, 170, 255, 0.18);
+  border-radius: 16px;
+  padding: 16px;
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.kyc-info-icon {
+  background: rgba(0, 170, 255, 0.12);
+  border-radius: 12px;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.kyc-info-text { flex: 1; }
+
+.kyc-info-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 6px;
+}
+
+.kyc-info-desc {
+  margin: 0;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.6);
+  line-height: 1.65;
+}
+
+.kyc-info-desc strong {
+  color: rgba(255, 255, 255, 0.88);
+}
+
+/* ID Type Toggle */
+.kyc-type-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.kyc-section-label {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+}
+
+.kyc-type-btns {
+  display: flex;
+  gap: 10px;
+}
+
+.kyc-type-btn {
+  flex: 1;
+  padding: 14px 0;
+  border-radius: 12px;
+  border: 1.5px solid rgba(255, 255, 255, 0.13);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s, color 0.2s;
+}
+
+.kyc-type-btn--active {
+  border-color: #00AAFF;
+  background: rgba(0, 170, 255, 0.1);
+  color: #00AAFF;
+}
+
+.kyc-type-btn:active {
+  transform: scale(0.97);
+}
+
+/* Input */
+.kyc-input-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.kyc-input-label {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+}
+
+.kyc-number-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1.5px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 15px 16px;
+  font-size: 20px;
+  font-weight: 600;
+  color: #fff;
+  letter-spacing: 3px;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.kyc-number-input::placeholder {
+  color: rgba(255, 255, 255, 0.2);
+  letter-spacing: 0;
+  font-weight: 400;
+  font-size: 15px;
+}
+
+.kyc-number-input:focus {
+  border-color: #00AAFF;
+  box-shadow: 0 0 0 3px rgba(0, 170, 255, 0.1);
+}
+
+.kyc-number-input--error {
+  border-color: #ef4444 !important;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.12) !important;
+}
+
+.kyc-input-hint {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.32);
+  line-height: 1.5;
+}
+
+.kyc-input-hint--error {
+  color: #ef4444;
+}
+
+/* Submit Button */
+.kyc-submit-btn {
+  width: 100%;
+  padding: 16px;
+  background: linear-gradient(135deg, #00AAFF, #0077cc);
+  border: none;
+  border-radius: 14px;
+  color: #fff;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.2s, transform 0.15s;
+  box-shadow: 0 6px 24px rgba(0, 170, 255, 0.22);
+  margin-top: 4px;
+}
+
+.kyc-submit-btn:active {
+  transform: scale(0.98);
+  opacity: 0.85;
+}
+
+.kyc-submit-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}

@@ -440,6 +440,79 @@
 
   </div>
 </div>
+<!-- KYC Full Screen Modal -->
+<div id="kycVerifyModal" class="kyc-modal-overlay hidden" aria-hidden="true" inert>
+  <div class="kyc-modal-sheet">
+
+    <!-- Header -->
+    <div class="kyc-modal-header">
+      <button id="kycVerifyBackBtn" class="kyc-back-btn" data-close>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+          <path d="M15 18l-6-6 6-6" stroke="#fff" stroke-width="2.2"
+                stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+      <h3 class="kyc-modal-title">Complete KYC</h3>
+      <div></div>
+    </div>
+
+    <div class="kyc-modal-divider"></div>
+
+    <!-- Body -->
+    <div class="kyc-modal-body">
+
+      <!-- Info Banner -->
+      <div class="kyc-info-banner">
+        <div class="kyc-info-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"
+                  stroke="#00AAFF" stroke-width="2"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div class="kyc-info-text">
+          <div class="kyc-info-title">Why do we need this?</div>
+          <p class="kyc-info-desc">
+            Verifying your identity with your <strong>BVN</strong> or <strong>NIN</strong>
+            unlocks a permanent personal bank account, higher deposit limits, and keeps
+            your wallet secure — as required by the CBN.
+          </p>
+        </div>
+      </div>
+
+      <!-- ID Type Toggle -->
+      <div class="kyc-type-section">
+        <div class="kyc-section-label">Select ID type</div>
+        <div class="kyc-type-btns">
+          <button id="kycBtnBVN" class="kyc-type-btn kyc-type-btn--active" data-kyc-type="BVN">BVN</button>
+          <button id="kycBtnNIN" class="kyc-type-btn" data-kyc-type="NIN">NIN</button>
+        </div>
+      </div>
+
+      <!-- Input -->
+      <div class="kyc-input-section">
+        <label id="kycInputLabel" class="kyc-input-label">Enter your BVN</label>
+        <input
+          id="kycNumberInput"
+          class="kyc-number-input"
+          type="tel"
+          inputmode="numeric"
+          pattern="[0-9]*"
+          autocomplete="off"
+          maxlength="11"
+          placeholder="e.g. 12345678901"
+        />
+        <div id="kycInputHint" class="kyc-input-hint">
+          Your 11-digit BVN — dial *565*0# on any network to retrieve it.
+        </div>
+      </div>
+
+      <!-- Submit -->
+      <button id="kycSubmitBtn" class="kyc-submit-btn">Submit BVN</button>
+
+    </div>
+  </div>
+</div>
 
 
         <!-- Services -->
