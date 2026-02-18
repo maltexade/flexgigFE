@@ -671,7 +671,7 @@ function showGeneratedAccount(data) {
   modalContent.classList.add('addMoney-generated-content');
 
   modalContent.innerHTML = `
-    <div class="addMoney-generated-body" style="padding:14px; background:#111010ff; border-radius:16px; color:#ffffff; min-height:55vh; max-height:60vh; overflow-y:auto; display:block; text-align:left; box-sizing:border-box;">
+    <div class="addMoney-generated-body" style="padding:5px 14px 14px 14px; background:#111010ff; border-radius:16px; color:#ffffff; min-height:55vh; max-height:60vh; overflow-y:auto; display:block; text-align:left; box-sizing:border-box;">
       <p style="margin:0; font-size:10px; opacity:0.75; text-transform: uppercase;">Amount to Pay</p>
       <div style="font-size:20px; font-weight:700; margin:6px 0 14px;">₦${Number(data.amount).toLocaleString()}</div>
 
@@ -721,54 +721,46 @@ function showGeneratedAccount(data) {
   `;
 
   // --- "I Have Paid" Button Handler ---
-const iHavePaidBtn = modalContent.querySelector('#iHavePaidBtn');
-if (iHavePaidBtn) {
-  iHavePaidBtn.addEventListener('click', async () => {
-    iHavePaidBtn.disabled = true;
-    iHavePaidBtn.textContent = 'Verifying...';
-    iHavePaidBtn.style.background = '#6b7280'; // gray while loading
+iHavePaidBtn.addEventListener('click', async () => {
+  iHavePaidBtn.disabled = true;
+  iHavePaidBtn.textContent = 'Verifying...';
+  iHavePaidBtn.style.background = '#6b7280'; // gray while loading
 
-    try {
-      // Call your backend endpoint to check if payment is completed
-      // Adjust the path to match your actual API route
-      const res = await apiFetch('/api/fund-wallet/verify-pending', {
-        method: 'POST',
-        body: { reference: data.reference } // send the reference from the pending tx
-      });
+  try {
+    const res = await apiFetch('/api/fund-wallet/verify-pending', {
+      method: 'POST',
+      body: { reference: data.reference }
+    });
 
-      if (res.ok && res.data?.status === 'completed') {
-        // Payment confirmed!
-        showSuccessToast('Payment Confirmed!', `₦${Number(data.amount).toLocaleString()} added to wallet`);
+    if (res.ok && res.data?.status === 'completed') {
+      // ✅ Use only showLocalNotify
+      showLocalNotify(`Payment confirmed! ₦${Number(data.amount).toLocaleString()} added to wallet`, 'success');
 
-        // Clear pending tx
-        removePendingTxFromStorage();
+      removePendingTxFromStorage();
 
-        // Close modal & reopen fresh form
-        if (window.ModalManager?.closeModal) {
-          window.ModalManager.closeModal('addMoneyModal');
-        } else {
-          addMoneyModal.style.transform = 'translateY(100%)';
-        }
-
-        setTimeout(() => openAddMoneyModalContent(), 500);
-
-      } else if (res.ok && res.data?.status === 'pending') {
-        // Still pending
-        showLocalNotify('Payment still processing. Please wait a moment.', 'info');
+      if (window.ModalManager?.closeModal) {
+        window.ModalManager.closeModal('addMoneyModal');
       } else {
-        // Failed or not found
-        showLocalNotify(res.error?.message || 'Payment not found yet. Try again in 30 seconds.', 'error');
+        addMoneyModal.style.transform = 'translateY(100%)';
       }
-    } catch (err) {
-      console.error('[I Have Paid] Verification failed:', err);
-      showLocalNotify('Network error. Please try again.', 'error');
-    } finally {
-      iHavePaidBtn.disabled = false;
-      iHavePaidBtn.textContent = 'I Have Paid';
-      iHavePaidBtn.style.background = '#3b82f6';
+
+      setTimeout(() => openAddMoneyModalContent(), 500);
+
+    } else if (res.ok && res.data?.status === 'pending') {
+      showLocalNotify('Payment still processing. Please wait a moment.', 'info');
+    } else {
+      showLocalNotify(res.error?.message || 'Payment not found yet. Try again in 30 seconds.', 'error');
     }
-  });
-}
+  } catch (err) {
+    console.error('[I Have Paid] Verification failed:', err);
+    showLocalNotify('Network error. Please try again.', 'error');
+  } finally {
+    iHavePaidBtn.disabled = false;
+    iHavePaidBtn.textContent = 'I Have Paid';
+    iHavePaidBtn.style.background = '#3b82f6';
+  }
+});
+
 
   // Replace modal content
   const contentContainer = addMoneyModal.querySelector('.addMoney-modal-content');
