@@ -1,79 +1,33 @@
-// --- API helper (put near top of your client script) ---
+// --- API helper ---
 window.__SEC_API_BASE = window.__SEC_API_BASE || 'https://api.flexgig.com.ng';
 
 async function apiFetch(path, opts = {}) {
-  const base = window.__SEC_API_BASE.replace(/\/+$/, ''); // trim trailing slash
+  const base = window.__SEC_API_BASE.replace(/\/+$/, '');
   const url = path.startsWith('http') ? path : `${base}${path.startsWith('/') ? '' : '/'}${path}`;
-
-  const {
-    method = 'GET',
-    headers = {},
-    body = null,
-    timeout = 10000,     // ms
-    retries = 2,         // retry count on network failures / 5xx
-    retryDelay = 500     // initial retry delay (ms) - exponential backoff
-  } = opts;
-
-  // attach auth header if you store token in localStorage (adjust if you use cookie)
-
+  const { method = 'GET', headers = {}, body = null, timeout = 10000, retries = 2, retryDelay = 500 } = opts;
   headers['Accept'] = headers['Accept'] || 'application/json';
-  if (body && !(body instanceof FormData)) {
-    headers['Content-Type'] = headers['Content-Type'] || 'application/json';
-  }
-
+  if (body && !(body instanceof FormData)) headers['Content-Type'] = headers['Content-Type'] || 'application/json';
   let attempt = 0;
   while (true) {
     attempt++;
-
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), timeout);
-
     try {
-      const res = await fetch(url, {
-        method,
-        headers,
-        body: body && !(body instanceof FormData) ? JSON.stringify(body) : body,
-        signal: controller.signal,
-        credentials: 'include' // use if your API relies on cookies; remove if not
-      });
+      const res = await fetch(url, { method, headers, body: body && !(body instanceof FormData) ? JSON.stringify(body) : body, signal: controller.signal, credentials: 'include' });
       clearTimeout(id);
-
-      // Parse JSON safely
       let payload = null;
       const text = await res.text();
       try { payload = text ? JSON.parse(text) : null; } catch (e) { payload = text; }
-
       if (res.ok) return { ok: true, status: res.status, data: payload };
-      // handle 4xx/5xx
-      if (res.status >= 500 && attempt <= retries + 1) {
-        // server error -> retry
-        const wait = retryDelay * Math.pow(2, attempt - 1);
-        await new Promise(r => setTimeout(r, wait));
-        continue;
-      }
-
-      // client error - return error info
+      if (res.status >= 500 && attempt <= retries + 1) { await new Promise(r => setTimeout(r, retryDelay * Math.pow(2, attempt - 1))); continue; }
       return { ok: false, status: res.status, error: payload || { message: res.statusText } };
-
     } catch (err) {
       clearTimeout(id);
-      // AbortError or network error
       if (err.name === 'AbortError') {
-        if (attempt <= retries + 1) {
-          const wait = retryDelay * Math.pow(2, attempt - 1);
-          await new Promise(r => setTimeout(r, wait));
-          continue;
-        }
+        if (attempt <= retries + 1) { await new Promise(r => setTimeout(r, retryDelay * Math.pow(2, attempt - 1))); continue; }
         return { ok: false, error: { message: 'Request timed out' } };
       }
-
-      // other network errors - retry if attempts remain
-      if (attempt <= retries + 1) {
-        const wait = retryDelay * Math.pow(2, attempt - 1);
-        await new Promise(r => setTimeout(r, wait));
-        continue;
-      }
-
+      if (attempt <= retries + 1) { await new Promise(r => setTimeout(r, retryDelay * Math.pow(2, attempt - 1))); continue; }
       return { ok: false, error: { message: err.message || 'Network error' } };
     }
   }
@@ -85,310 +39,336 @@ let countdownTimerInterval = null;
 // --- Modal Elements ---
 const addMoneyModal = document.getElementById('addMoneyModal');
 
+// ─────────────────────────────────────────────────────────────
+// KYC STATE — persisted in localStorage
+// ─────────────────────────────────────────────────────────────
+const KYC_STATE_KEY = 'flexgig.kyc_verified';
 
-// Replace this entire section in your addmoney.js:
+function getKYCState() {
+  try { const raw = localStorage.getItem(KYC_STATE_KEY); return raw ? JSON.parse(raw) : null; }
+  catch (e) { return null; }
+}
 
-// AUTO-CLOSE FUND MODAL + SUCCESS TOAST WHEN PAYMENT ARRIVES
-(function() {
-  const MODAL_ID = 'addMoneyModal';
+function saveKYCState(accounts) {
+  try { localStorage.setItem(KYC_STATE_KEY, JSON.stringify({ verified: true, accounts })); }
+  catch (e) { console.warn('[KYC] Save state failed', e); }
+}
 
-  // UNIFIED handler for balance updates
-  function handleBalanceUpdate(data) {
-    console.log('[Balance Update Received]', data);
-    
-    if (!data || data.type !== 'balance_update') return;
-    
-    const { balance, amount } = data;
-    
-    // ❌ REMOVED: hasShownSuccess blocking logic
-    // Every payment should trigger the modal close + toast
-    
-    console.log('[Balance Update] Processing...');
+// ─────────────────────────────────────────────────────────────
+// PERMANENT ACCOUNTS DATA (fake for testing)
+// ─────────────────────────────────────────────────────────────
+const PERMANENT_ACCOUNTS = [
+  { bankName: 'PalmPay',  accountName: 'Flexgig Digital Network', accountNumber: '8031234567', logo: '/frontend/img/palmpay.png', logoFallback: 'PP', accentColor: '#00c853' },
+  { bankName: '9PSB',     accountName: 'Flexgig Digital Network', accountNumber: '9010987654', logo: '/frontend/img/9PSB.png',    logoFallback: '9P', accentColor: '#0077ff' }
+];
 
-    try {
-      if (typeof removePendingTxFromStorage === 'function') {
-        removePendingTxFromStorage();
-        console.log('[Balance] Cleared local pending tx storage');
-      } else {
-        localStorage.removeItem('flexgig.pending_fund_tx');
-        console.log('[Balance] Cleared local pending tx storage (direct)');
-      }
-    } catch (e) {
-      console.warn('[handleBalanceUpdate] failed to clear pending tx storage', e);
+// ─────────────────────────────────────────────────────────────
+// INJECT STYLES (once)
+// ─────────────────────────────────────────────────────────────
+(function injectPermStyles() {
+  if (document.getElementById('perm-acct-styles')) return;
+  const s = document.createElement('style');
+  s.id = 'perm-acct-styles';
+  s.textContent = `
+    @keyframes permSlideUp {
+      from { opacity: 0; transform: translateY(22px); }
+      to   { opacity: 1; transform: translateY(0); }
     }
-
-    // 1. Close modal using ModalManager
-    if (window.ModalManager && typeof window.ModalManager.closeModal === 'function') {
-      window.ModalManager.closeModal(MODAL_ID);
-      console.log('[Balance Update] Modal closed via ModalManager');
-    } else {
-      const modal = document.getElementById(MODAL_ID);
-      if (modal) {
-        modal.style.transform = 'translateY(100%)';
-        modal.classList.add('hidden');
-        console.log('[Balance Update] Modal closed via style');
-      }
+    @keyframes permBadgePop {
+      0%   { transform: scale(0.6); opacity: 0; }
+      70%  { transform: scale(1.1); }
+      100% { transform: scale(1);   opacity: 1; }
     }
-
-    // 2. Show success toast + sound
-    showSuccessToast(`₦${Number(amount).toLocaleString()} received!`, 
-                    `Wallet updated to ₦${Number(balance).toLocaleString()}`);
-
-    if (typeof window.playSuccessSound === 'function') {
-      window.playSuccessSound();
+    @keyframes permCheckPop {
+      0%   { transform: scale(0); opacity: 0; }
+      60%  { transform: scale(1.2); }
+      100% { transform: scale(1); opacity: 1; }
     }
-
-    // 3. Reopen fresh modal after 500ms
-    setTimeout(() => {
-      openAddMoneyModalContent();
-    }, 500);
-  }
-
-  // Register listener
-  window.addEventListener('balance_update', (e) => {
-    console.log('[Custom Event] balance_update received', e.detail);
-    handleBalanceUpdate(e.detail);
-  });
-
-  // MOBILE FIX: Expose global handler
-  window.__handleBalanceUpdate = handleBalanceUpdate;
-
-  // BEAUTIFUL SUCCESS TOAST (same as before)
-  function showSuccessToast(title, subtitle = '') {
-    const toast = document.createElement('div');
-    toast.style.cssText = `
-      position: fixed;
-      top: calc(env(safe-area-inset-top, 0px) + 20px);
-      left: 50%;
-      transform: translateX(-50%);
-      background: linear-gradient(135deg, #10b981, #059669);
-      color: white;
-      padding: 16px 24px;
-      border-radius: 16px;
-      box-shadow: 0 10px 30px rgba(16, 156, 103, 0.4);
-      z-index: 999999999;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      text-align: center;
-      animation: toastSlideDown 0.45s ease-out, toastFadeOut 0.6s 3s forwards;
-      max-width: min(92%, 380px);
-      width: max-content;
-      backdrop-filter: blur(10px);
-      border: 1px solid rgba(255,255,255,0.25);
-      pointer-events: auto;
-      touch-action: none;
-    `;
-
-    toast.innerHTML = `
-      <div style="font-size: 18px; font-weight: 800; margin-bottom: 4px;">
-        ✓ ${title}
-      </div>
-      ${subtitle ? `<div style="font-size: 14px; opacity: 0.9;">${subtitle}</div>` : ''}
-    `;
-
-    document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 6600);
-    console.log('[Toast] Displayed successfully');
-  }
-
-  // Animations
-  const style = document.createElement("style");
-  style.textContent = `
-    @keyframes toastSlideDown {
-      from { opacity: 0; transform: translate(-50%, -40px); }
-      to   { opacity: 1; transform: translate(-50%, 0); }
+    .perm-acct-card {
+      animation: permSlideUp 0.38s cubic-bezier(.22,.68,0,1.2) both;
     }
-    @keyframes toastFadeOut {
-      to { opacity: 0; transform: translate(-50%, -20px); }
-    }
+    .perm-acct-card:nth-child(2) { animation-delay: 0.08s; }
+    .perm-badge-anim { animation: permBadgePop 0.45s cubic-bezier(.22,.68,0,1.2) 0.25s both; }
+    .perm-check-anim { animation: permCheckPop 0.4s cubic-bezier(.22,.68,0,1.2) 0.1s both; }
+    .perm-copy-btn { transition: transform 0.15s, background 0.2s, border-color 0.2s; border: none; }
+    .perm-copy-btn:active { transform: scale(0.88); }
   `;
-  document.head.appendChild(style);
-
+  document.head.appendChild(s);
 })();
 
-// --- GLOBAL PENDING TRANSACTION TOAST (always outside modal) ---
-window.showPendingTxToast = function(message = "Please complete your pending transaction") {
-  // Remove old if exists
-  document.querySelectorAll('.global-pending-toast').forEach(el => el.remove());
+// ─────────────────────────────────────────────────────────────
+// BUILD COMPACT ACCOUNT CARDS (no-scroll layout)
+// ─────────────────────────────────────────────────────────────
+function buildAccountCards(accounts, container) {
+  accounts.forEach(acct => {
+    const card = document.createElement('div');
+    card.className = 'perm-acct-card';
+    card.style.cssText = `
+      background:#1c1c1e; border:1px solid rgba(255,255,255,0.08);
+      border-radius:14px; padding:12px 14px;
+      position:relative; overflow:hidden;
+    `;
+    card.innerHTML = `
+      <!-- Glow -->
+      <div style="position:absolute;top:-20px;right:-20px;width:75px;height:75px;border-radius:50%;
+        background:radial-gradient(circle,${acct.accentColor}18,transparent 70%);pointer-events:none;"></div>
 
-  const toast = document.createElement('div');
-  toast.className = 'global-pending-toast';
-  toast.style.cssText = `
-    position: fixed;
-    top: calc(env(safe-area-inset-top, 0px) + 22px);
-    left: 50%;
-    transform: translateX(-50%);
-    background: linear-gradient(135deg, #f59e0b, #d97706);
-    color: white;
-    padding: 18px 26px;
-    border-radius: 18px;
-    font-weight: 800;
-    font-size: 16px;
-    text-align: center;
-    box-shadow: 0 14px 35px rgba(217, 119, 6, 0.45);
-    z-index: 2147483647; /* Always above all modals */
-    max-width: min(92%, 420px);
-    width: max-content;
-    backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.28);
-    animation: pendingGlobalSlide 0.45s ease-out;
-    pointer-events: none;
-    user-select: none;
-  `;
+      <!-- Bank + Account Name row -->
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+        <div style="width:36px;height:36px;border-radius:9px;background:#252525;flex-shrink:0;
+          display:flex;align-items:center;justify-content:center;overflow:hidden;">
+          <img src="${acct.logo}" alt="${acct.bankName}"
+            style="width:100%;height:100%;object-fit:contain;"
+            onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+          <div style="display:none;width:100%;height:100%;align-items:center;justify-content:center;
+            font-size:10px;font-weight:800;color:${acct.accentColor};">${acct.logoFallback}</div>
+        </div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:9px;color:rgba(255,255,255,0.4);text-transform:uppercase;letter-spacing:0.5px;">Bank</div>
+          <div style="font-size:13px;font-weight:700;color:#fff;">${acct.bankName}</div>
+        </div>
+      </div>
 
-  toast.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:center;gap:10px;">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-        <circle cx="12" cy="12" r="10"></circle>
-        <path d="M12 8v4m0 4h.01"></path>
+      <!-- Account Name -->
+      <div style="margin-bottom:8px;">
+        <div style="font-size:9px;color:rgba(255,255,255,0.4);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">Account Name</div>
+        <div style="font-size:13px;font-weight:600;color:#fff;">${acct.accountName}</div>
+      </div>
+
+      <!-- Account Number + Copy -->
+      <div>
+        <div style="font-size:9px;color:rgba(255,255,255,0.4);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:5px;">Account Number</div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span style="font-size:18px;font-weight:800;color:#fff;letter-spacing:2px;font-variant-numeric:tabular-nums;">${acct.accountNumber}</span>
+          <button class="perm-copy-btn"
+            data-copy="${acct.accountNumber}" data-bank="${acct.bankName}" data-accent="${acct.accentColor}"
+            style="background:${acct.accentColor}1a;border:1px solid ${acct.accentColor}44 !important;
+              padding:7px 9px;border-radius:9px;cursor:pointer;
+              display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-left:auto;">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+              <path d="M6 11C6 8.17157 6 6.75736 6.87868 5.87868C7.75736 5 9.17157 5 12 5H15C17.8284 5 19.2426 5 20.1213 5.87868C21 6.75736 21 8.17157 21 11V16C21 18.8284 21 20.2426 20.1213 21.1213C19.2426 22 17.8284 22 15 22H12C9.17157 22 7.75736 22 6.87868 21.1213C6 20.2426 6 18.8284 6 16V11Z" stroke="${acct.accentColor}" stroke-width="1.5"/>
+              <path opacity="0.5" d="M6 19C4.34315 19 3 17.6569 3 16V10C3 6.22876 3 4.34315 4.17157 3.17157C5.34315 2 7.22876 2 11 2H15C16.6569 2 18 3.34315 18 5" stroke="${acct.accentColor}" stroke-width="1.5"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    `;
+    container.appendChild(card);
+  });
+
+  // Copy handlers
+  container.querySelectorAll('.perm-copy-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const text = btn.dataset.copy, bank = btn.dataset.bank, accent = btn.dataset.accent;
+      try { await navigator.clipboard.writeText(text); } catch {
+        const ta = document.createElement('textarea');
+        ta.value = text; ta.style.cssText = 'position:fixed;opacity:0;';
+        document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+      }
+      btn.innerHTML = `<svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="#10b981" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+      btn.style.background = '#10b98122'; btn.style.borderColor = '#10b98144';
+
+      const toast = document.createElement('div');
+      toast.style.cssText = `position:fixed;top:20px;left:50%;transform:translateX(-50%);
+        background:linear-gradient(135deg,#10b981,#059669);color:#fff;padding:13px 20px;
+        border-radius:13px;font-weight:700;font-size:13px;z-index:999999999;
+        box-shadow:0 10px 30px rgba(16,185,129,0.35);opacity:0;transition:opacity .3s,transform .35s;
+        max-width:min(90%,340px);text-align:center;pointer-events:none;`;
+      toast.textContent = `✓ ${bank} — ${text} copied!`;
+      document.body.appendChild(toast);
+      requestAnimationFrame(() => { toast.style.opacity = '1'; toast.style.transform += ' translateY(8px)'; });
+      setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 350); }, 2200);
+
+      setTimeout(() => {
+        btn.innerHTML = `<svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+          <path d="M6 11C6 8.17157 6 6.75736 6.87868 5.87868C7.75736 5 9.17157 5 12 5H15C17.8284 5 19.2426 5 20.1213 5.87868C21 6.75736 21 8.17157 21 11V16C21 18.8284 21 20.2426 20.1213 21.1213C19.2426 22 17.8284 22 15 22H12C9.17157 22 7.75736 22 6.87868 21.1213C6 20.2426 6 18.8284 6 16V11Z" stroke="${accent}" stroke-width="1.5"/>
+          <path opacity="0.5" d="M6 19C4.34315 19 3 17.6569 3 16V10C3 6.22876 3 4.34315 4.17157 3.17157C5.34315 2 7.22876 2 11 2H15C16.6569 2 18 3.34315 18 5" stroke="${accent}" stroke-width="1.5"/>
+        </svg>`;
+        btn.style.background = `${accent}1a`; btn.style.borderColor = `${accent}44`;
+      }, 1800);
+    });
+  });
+}
+
+// ─────────────────────────────────────────────────────────────
+// RENDER PERMANENT ACCOUNTS inside .kyc-modal-body
+// Used both after verification AND on subsequent opens via addMoneyBtn
+// showVerifiedBadge = true only right after submitting BVN/NIN
+// ─────────────────────────────────────────────────────────────
+function renderPermAccountsInKYCBody(showVerifiedBadge = false) {
+  const kycModalBody = document.querySelector('#kycVerifyModal .kyc-modal-body');
+  const kycTitle     = document.querySelector('#kycVerifyModal .kyc-modal-title');
+  if (!kycModalBody) return;
+
+  if (kycTitle) kycTitle.textContent = 'Add Money';
+
+  kycModalBody.innerHTML = `
+    ${showVerifiedBadge ? `
+    <!-- KYC Verified header — full original style, shown only right after verify -->
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;">
+      <div class="perm-check-anim" style="
+        width:38px;height:38px;border-radius:50%;flex-shrink:0;
+        background:linear-gradient(135deg,#10b981,#059669);
+        display:flex;align-items:center;justify-content:center;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+          <path d="M5 13l4 4L19 7" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <div style="flex:1;">
+        <div style="font-size:15px;font-weight:800;color:#fff;line-height:1.2;">KYC Verified!</div>
+        <div style="font-size:11px;color:rgba(255,255,255,0.5);margin-top:2px;">Your permanent accounts are ready</div>
+      </div>
+      <div class="perm-badge-anim" style="
+        background:linear-gradient(135deg,#10b981,#059669);color:#fff;
+        font-size:10px;font-weight:800;padding:4px 10px;border-radius:20px;
+        letter-spacing:0.5px;text-transform:uppercase;white-space:nowrap;">Permanent</div>
+    </div>` : ''}
+
+    <!-- Cards -->
+    <div id="kycPermList" style="display:flex;flex-direction:column;gap:10px;"></div>
+
+    <!-- Info note -->
+    <div style="margin-top:12px;padding:10px 13px;background:rgba(255,255,255,0.04);
+      border-radius:11px;border:1px solid rgba(255,255,255,0.07);
+      display:flex;align-items:flex-start;gap:8px;">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" style="flex-shrink:0;margin-top:1px;">
+        <circle cx="12" cy="12" r="10" stroke="#f59e0b" stroke-width="2"/>
+        <path d="M12 8v4m0 4h.01" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"/>
       </svg>
-      ${message}
+      <div style="font-size:11px;color:rgba(255,255,255,0.7);line-height:1.5;">
+        These accounts are <strong style="color:#fff;">permanently assigned</strong> to you.
+        Transfers reflect in your wallet instantly.
+      </div>
     </div>
   `;
 
+  const list = document.getElementById('kycPermList');
+  buildAccountCards(PERMANENT_ACCOUNTS, list);
+}
+
+// ─────────────────────────────────────────────────────────────
+// AUTO-CLOSE FUND MODAL + SUCCESS TOAST
+// ─────────────────────────────────────────────────────────────
+(function() {
+  const MODAL_ID = 'addMoneyModal';
+  function handleBalanceUpdate(data) {
+    if (!data || data.type !== 'balance_update') return;
+    const { balance, amount } = data;
+    try { if (typeof removePendingTxFromStorage === 'function') removePendingTxFromStorage(); else localStorage.removeItem('flexgig.pending_fund_tx'); } catch (e) {}
+    if (window.ModalManager?.closeModal) window.ModalManager.closeModal(MODAL_ID);
+    else { const m = document.getElementById(MODAL_ID); if (m) { m.style.transform = 'translateY(100%)'; m.classList.add('hidden'); } }
+    showSuccessToast(`₦${Number(amount).toLocaleString()} received!`, `Wallet updated to ₦${Number(balance).toLocaleString()}`);
+    if (typeof window.playSuccessSound === 'function') window.playSuccessSound();
+    setTimeout(() => openAddMoneyModalContent(), 500);
+  }
+  window.addEventListener('balance_update', (e) => handleBalanceUpdate(e.detail));
+  window.__handleBalanceUpdate = handleBalanceUpdate;
+
+  function showSuccessToast(title, subtitle = '') {
+    const toast = document.createElement('div');
+    toast.style.cssText = `position:fixed;top:calc(env(safe-area-inset-top,0px) + 20px);left:50%;transform:translateX(-50%);
+      background:linear-gradient(135deg,#10b981,#059669);color:white;padding:16px 24px;border-radius:16px;
+      box-shadow:0 10px 30px rgba(16,156,103,0.4);z-index:999999999;text-align:center;
+      animation:toastSlideDown 0.45s ease-out,toastFadeOut 0.6s 3s forwards;
+      max-width:min(92%,380px);width:max-content;backdrop-filter:blur(10px);
+      border:1px solid rgba(255,255,255,0.25);pointer-events:auto;`;
+    toast.innerHTML = `<div style="font-size:18px;font-weight:800;margin-bottom:4px;">✓ ${title}</div>${subtitle ? `<div style="font-size:14px;opacity:0.9;">${subtitle}</div>` : ''}`;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 6600);
+  }
+  const s = document.createElement('style');
+  s.textContent = `@keyframes toastSlideDown{from{opacity:0;transform:translate(-50%,-40px)}to{opacity:1;transform:translate(-50%,0)}}@keyframes toastFadeOut{to{opacity:0;transform:translate(-50%,-20px)}}`;
+  document.head.appendChild(s);
+})();
+
+window.showPendingTxToast = function(message = 'Please complete your pending transaction') {
+  document.querySelectorAll('.global-pending-toast').forEach(el => el.remove());
+  const toast = document.createElement('div');
+  toast.className = 'global-pending-toast';
+  toast.style.cssText = `position:fixed;top:calc(env(safe-area-inset-top,0px) + 22px);left:50%;transform:translateX(-50%);
+    background:linear-gradient(135deg,#f59e0b,#d97706);color:white;padding:18px 26px;border-radius:18px;
+    font-weight:800;font-size:16px;text-align:center;box-shadow:0 14px 35px rgba(217,119,6,0.45);
+    z-index:2147483647;max-width:min(92%,420px);width:max-content;backdrop-filter:blur(12px);
+    border:1px solid rgba(255,255,255,0.28);animation:pendingGlobalSlide 0.45s ease-out;pointer-events:none;`;
+  toast.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;gap:10px;">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4m0 4h.01"/></svg>${message}</div>`;
   document.body.appendChild(toast);
-
-  // Stay longer — 3 seconds
-  setTimeout(() => {
-    toast.style.opacity = "0";
-    toast.style.transform = "translateX(-50%) translateY(-20px)";
-    setTimeout(() => toast.remove(), 600);
-  }, 3000);
-
-  // Animations
+  setTimeout(() => { toast.style.opacity = '0'; toast.style.transform = 'translateX(-50%) translateY(-20px)'; setTimeout(() => toast.remove(), 600); }, 3000);
   if (!document.getElementById('pending-global-style')) {
-    const style = document.createElement('style');
-    style.id = 'pending-global-style';
-    style.textContent = `
-      @keyframes pendingGlobalSlide {
-        from { opacity: 0; transform: translateX(-50%) translateY(-50px) scale(0.9); }
-        to   { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
-      }
-    `;
-    document.head.appendChild(style);
+    const s = document.createElement('style'); s.id = 'pending-global-style';
+    s.textContent = `@keyframes pendingGlobalSlide{from{opacity:0;transform:translateX(-50%) translateY(-50px) scale(0.9)}to{opacity:1;transform:translateX(-50%) translateY(0) scale(1)}}`;
+    document.head.appendChild(s);
   }
 };
 
+window.addEventListener('balance_update', () => { try { removePendingTxFromStorage(); } catch (e) {} });
+window.addEventListener('storage', (ev) => { try { if (ev.key === PENDING_TX_KEY && ev.newValue === null) openAddMoneyModalContent(); } catch (e) {} });
 
-// Global listener to clear pending tx whenever a balance_update event fires
-window.addEventListener('balance_update', (e) => {
-  try {
-    removePendingTxFromStorage();
-    console.log('[global] balance_update received — cleared pending tx');
-  } catch (err) {
-    console.warn('[global] failed to clear pending tx on balance_update', err);
-  }
-});
-
-
-// Sync UI across tabs: when pending tx is removed elsewhere, reopen fresh add-money form
-window.addEventListener('storage', (ev) => {
-  try {
-    if (ev.key === PENDING_TX_KEY && ev.newValue === null) {
-      console.log('[storage] pending tx removed in another tab — updating UI');
-      // If addMoney modal is open with a generated account, replace it with the fresh form
-      openAddMoneyModalContent();
-    }
-  } catch (e) { /* ignore */ }
-});
-
-
-
-
-// --- Helper: check server for pending transaction (read-only) ---
 async function fetchPendingTransaction() {
-  try {
-    const res = await apiFetch('/api/fund-wallet/pending', { method: 'GET' });
-    if (res.ok && res.data && res.data.reference) return { ok: true, data: res.data };
-    return { ok: false };
-  } catch (e) {
-    console.error('[fetchPendingTransaction] error', e);
-    return { ok: false };
-  }
+  try { const res = await apiFetch('/api/fund-wallet/pending', { method: 'GET' }); if (res.ok && res.data?.reference) return { ok: true, data: res.data }; return { ok: false }; }
+  catch (e) { return { ok: false }; }
 }
 
-// --- Helper: show notification (uses your window.notify or a fallback) ---
 function showLocalNotify(message, type = 'info') {
-  if (typeof window.notify === 'function') {
-    try { window.notify(message, type); return; } catch (e) { /* fallback below */ }
-  }
-
-  // Minimal toast fallback
+  if (typeof window.notify === 'function') { try { window.notify(message, type); return; } catch (e) {} }
   const bg = type === 'error' ? '#ef4444' : (type === 'success' ? '#10b981' : '#f59e0b');
-  const t = Object.assign(document.createElement('div'), {
-    textContent: message,
-    style: `position:fixed;top:20px;left:50%;transform:translateX(-50%);background:${bg};color:white;padding:12px 20px;border-radius:12px;z-index:999999;font-weight:700;opacity:0;transition:all .3s;`
-  });
+  const t = Object.assign(document.createElement('div'), { textContent: message, style: `position:fixed;top:20px;left:50%;transform:translateX(-50%);background:${bg};color:white;padding:12px 20px;border-radius:12px;z-index:999999;font-weight:700;opacity:0;transition:all .3s;` });
   document.body.appendChild(t);
   requestAnimationFrame(() => { t.style.opacity = '1'; t.style.transform += ' translateY(6px)'; });
   setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 320); }, 3000);
 }
 
-
-
-
-// --- Show Error Screen ---
 function showGeneratedError(message = 'Failed to generate account. Try again.') {
-  // Clear any existing countdown
-  if (countdownTimerInterval) {
-    clearInterval(countdownTimerInterval);
-    countdownTimerInterval = null;
-  }
-
+  if (countdownTimerInterval) { clearInterval(countdownTimerInterval); countdownTimerInterval = null; }
   const contentContainer = addMoneyModal.querySelector('.addMoney-modal-content');
-  contentContainer.innerHTML = `
-    <div class="addMoney-generated-error">
-      <button class="addMoney-modal-close" data-close>&times;</button>
-      <h3 class="addMoney-modal-title">Oops!</h3>
-      <p>${message}</p>
-      <button class="addMoney-fund-btn" id="retryFundBtn">Retry</button>
-    </div>
-  `;
-
-  // Close button
-  contentContainer.querySelector('.addMoney-modal-close')
-    .addEventListener('click', () => {
-      openAddMoneyModalContent();
-    });
-
-  // Retry button
-  document.getElementById('retryFundBtn').addEventListener('click', () => {
-    openAddMoneyModalContent();
-  });
+  contentContainer.innerHTML = `<div class="addMoney-generated-error">
+    <button class="addMoney-modal-close" data-close>&times;</button>
+    <h3 class="addMoney-modal-title">Oops!</h3>
+    <p>${message}</p>
+    <button class="addMoney-fund-btn" id="retryFundBtn">Retry</button>
+  </div>`;
+  contentContainer.querySelector('.addMoney-modal-close').addEventListener('click', () => openAddMoneyModalContent());
+  document.getElementById('retryFundBtn').addEventListener('click', () => openAddMoneyModalContent());
 }
 
-// --- Open Original Add Money Modal Content ---
+// ─────────────────────────────────────────────────────────────
+// OPEN ADD MONEY MODAL CONTENT
+// If KYC verified → close addMoneyModal, open kycVerifyModal (full screen) instead
+// ─────────────────────────────────────────────────────────────
 async function openAddMoneyModalContent() {
-  // Clear any existing countdown
-  if (countdownTimerInterval) {
-    clearInterval(countdownTimerInterval);
-    countdownTimerInterval = null;
+  if (countdownTimerInterval) { clearInterval(countdownTimerInterval); countdownTimerInterval = null; }
+
+  const kycState = getKYCState();
+  if (kycState && kycState.verified) {
+    // Close the bottom-sheet addMoneyModal first (if it's open or being opened)
+    if (window.ModalManager) {
+      // Small delay so the current open animation doesn't fight the close
+      setTimeout(() => {
+        window.ModalManager.closeModal('addMoneyModal');
+        // Open the full-screen KYC modal with permanent accounts (no badge on re-open)
+        setTimeout(() => {
+          renderPermAccountsInKYCBody(false);
+          window.ModalManager.openModal('kycVerifyModal');
+        }, 120);
+      }, 60);
+    }
+    return;
   }
 
+  // Not verified — render normal deposit form inside addMoneyModal
   const contentContainer = addMoneyModal.querySelector('.addMoney-modal-content');
+  const pending = getPendingTxFromStorage();
+  if (pending) {
+    contentContainer.innerHTML = `<div style="padding:18px;text-align:center;">
+      <div style="font-weight:700;margin-bottom:6px;">Getting your pending transaction...</div>
+      <div style="opacity:0.85;font-size:13px;">Loading your unpaid account — it hasn't expired yet.</div>
+    </div>`;
+    window.showPendingTxToast('Please complete your pending transaction.');
+    setTimeout(() => showGeneratedAccount(pending), 150);
+    return;
+  }
 
-  // Try localStorage first
-const pending = getPendingTxFromStorage();
-if (pending) {
-  // Show quick "Getting your pending transaction..." UI briefly
   contentContainer.innerHTML = `
-    <div style="padding:18px; text-align:center;">
-      <div style="font-weight:700; margin-bottom:6px;">Getting your pending transaction...</div>
-      <div style="opacity:0.85; font-size:13px;">Loading your unpaid account — it hasn't expired yet.</div>
-    </div>
-  `;
-
-    // Use the REAL global toast instead
-  window.showPendingTxToast("Please complete your pending transaction.");
-
-  // Load the pending account UI after brief delay
-  setTimeout(() => showGeneratedAccount(pending), 150);
-  return;
-}
-
-
-  // No local pending -> render normal form
-  contentContainer.innerHTML = `
-    <!-- KYC / Bank Card -->
     <div class="addMoney-account-section">
       <div class="addMoney-account-icon">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
@@ -401,25 +381,11 @@ if (pending) {
         <span class="addMoney-account-subtitle">Complete KYC</span>
       </div>
     </div>
-
-    <!-- Instant Deposit Label -->
     <div class="addMoney-instant-label">Instant Deposit</div>
-
-    <!-- Amount Input -->
     <div class="addMoney-amount-section">
-      <input
-  type="tel"                 
-  id="addMoneyAmountInput"
-  class="addMoney-amount-input"
-  autocomplete="off"           
-  inputmode="decimal"          
-  pattern="[0-9]*"             
-  placeholder="₦ Enter amount"
-/>
-
+      <input type="tel" id="addMoneyAmountInput" class="addMoney-amount-input"
+        autocomplete="off" inputmode="decimal" pattern="[0-9]*" placeholder="₦ Enter amount"/>
     </div>
-
-    <!-- Quick Amount Buttons -->
     <div class="addMoney-quick-amounts">
       <button class="addMoney-quick-btn">₦500</button>
       <button class="addMoney-quick-btn">₦1,000</button>
@@ -428,785 +394,465 @@ if (pending) {
       <button class="addMoney-quick-btn">₦5,000</button>
       <button class="addMoney-quick-btn">₦10,000</button>
     </div>
-
-    <!-- Fund Wallet Button -->
     <button id="addMoneyFundBtn" class="addMoney-fund-btn">Fund Wallet</button>
   `;
-
-  // Reassign elements and events after restoring content
   assignAddMoneyEvents();
 }
 window.openAddMoneyModalContent = window.openAddMoneyModalContent || openAddMoneyModalContent;
 
-/* 3) When a balance update arrives (payment completed), clear localStorage so modal won't show old tx */
 (function patchBalanceUpdateClear() {
   const origHandle = window.__handleBalanceUpdate;
   window.__handleBalanceUpdate = function(data) {
-    try {
-      if (data && data.type === 'balance_update') {
-        // clear local pending tx on successful payment
-        removePendingTxFromStorage();
-      }
-    } catch (e) { /* ignore */ }
-
-    if (typeof origHandle === 'function') {
-      try { origHandle(data); } catch (e) { console.error('[handleBalanceUpdate] wrapped handler error', e); }
-    } else {
-      // keep existing handler behavior if none existed
-      handleBalanceUpdate(data);
-    }
+    try { if (data?.type === 'balance_update') removePendingTxFromStorage(); } catch (e) {}
+    if (typeof origHandle === 'function') { try { origHandle(data); } catch (e) {} }
   };
 })();
-window.openAddMoneyModalContent = window.openAddMoneyModalContent || openAddMoneyModalContent;
 
 // --- Assign Events to Add Money Modal ---
 function assignAddMoneyEvents() {
   const amountInput = document.getElementById('addMoneyAmountInput');
-  const quickBtns = document.querySelectorAll('.addMoney-quick-btn');
-  const fundBtn = document.getElementById('addMoneyFundBtn');
-
+  const quickBtns   = document.querySelectorAll('.addMoney-quick-btn');
+  const fundBtn     = document.getElementById('addMoneyFundBtn');
   if (!amountInput || !fundBtn) return;
 
-  let rawAmount = "";
-
-  // Amount input formatting
-  amountInput.addEventListener("input", () => {
-    let v = amountInput.value.replace(/[^0-9]/g, "");
-    rawAmount = v;
-    amountInput.value = v ? "₦" + Number(v).toLocaleString() : "";
-    quickBtns.forEach(b => b.classList.remove("selected"));
+  let rawAmount = '';
+  amountInput.addEventListener('input', () => {
+    let v = amountInput.value.replace(/[^0-9]/g, '');
+    rawAmount = v; amountInput.value = v ? '₦' + Number(v).toLocaleString() : '';
+    quickBtns.forEach(b => b.classList.remove('selected'));
   });
-
-  // Quick buttons
   quickBtns.forEach(btn => {
-    btn.addEventListener("click", () => {
-      quickBtns.forEach(b => b.classList.remove("selected"));
-      btn.classList.add("selected");
-      const value = btn.textContent.replace(/[^0-9]/g, "");
-      rawAmount = value;
-      amountInput.value = "₦" + Number(value).toLocaleString();
+    btn.addEventListener('click', () => {
+      quickBtns.forEach(b => b.classList.remove('selected')); btn.classList.add('selected');
+      const value = btn.textContent.replace(/[^0-9]/g, ''); rawAmount = value;
+      amountInput.value = '₦' + Number(value).toLocaleString();
     });
   });
 
-  // Fund wallet button
   let isFundingInProgress = false;
-
   fundBtn.addEventListener('click', async () => {
-  // PREVENT DOUBLE-CLICK / DOUBLE-EXECUTION
-  if (isFundingInProgress) {
-    console.log('[Fund Wallet] Already processing — ignoring duplicate click');
-    return;
-  }
-
-  const amount = parseInt(amountInput.value.replace(/[^0-9]/g, ""), 10);
-  if (!amount || amount <= 0) {
-    window.notify?.('Please enter a valid amount.', 'error');
-    return;
-  }
-
-  // 1) If localStorage has a pending tx
-  const localPending = getPendingTxFromStorage();
-  if (localPending) {
-    window.showPendingTxToast("Please complete your pending transaction.");
-    showGeneratedAccount(localPending);
-    return;
-  }
-
-  // 2) No local pending → check server
-  isFundingInProgress = true;
-  fundBtn.disabled = true;
-  fundBtn.textContent = 'Checking…';
-
-  try {
-    // --- WITHLOADER ADDED HERE ---
-    const check = window.withLoader
-      ? await window.withLoader(() => fetchPendingTransaction())
-      : await fetchPendingTransaction();
-
-    if (check.ok && check.data) {
-      showGeneratedAccount(check.data);
-      window.showPendingTxToast("Please complete your pending transaction.");
-      return;
-    }
-
-    // 3) No pending → create new transaction
-    fundBtn.textContent = 'Processing...';
-
-    const res = window.withLoader
-      ? await window.withLoader(() =>
-          apiFetch('/api/fund-wallet', {
-            method: 'POST',
-            body: { amount }
-          })
-        )
-      : await apiFetch('/api/fund-wallet', {
-          method: 'POST',
-          body: { amount }
-        });
-
-    if (res.ok) {
-      showGeneratedAccount(res.data);
-    } else {
-      showGeneratedError(res.error?.message || 'Failed to generate account.');
-    }
-
-  } catch (err) {
-    console.error('[Fund Wallet Error]', err);
-    showGeneratedError('Network error. Try again.');
-  } finally {
-    isFundingInProgress = false;
-    fundBtn.disabled = false;
-    fundBtn.textContent = 'Fund Wallet';
-  }
-});
-
+    if (isFundingInProgress) return;
+    const amount = parseInt(amountInput.value.replace(/[^0-9]/g, ''), 10);
+    if (!amount || amount <= 0) { window.notify?.('Please enter a valid amount.', 'error'); return; }
+    const localPending = getPendingTxFromStorage();
+    if (localPending) { window.showPendingTxToast('Please complete your pending transaction.'); showGeneratedAccount(localPending); return; }
+    isFundingInProgress = true; fundBtn.disabled = true; fundBtn.textContent = 'Checking…';
+    try {
+      const check = window.withLoader ? await window.withLoader(() => fetchPendingTransaction()) : await fetchPendingTransaction();
+      if (check.ok && check.data) { showGeneratedAccount(check.data); window.showPendingTxToast('Please complete your pending transaction.'); return; }
+      fundBtn.textContent = 'Processing...';
+      const res = window.withLoader
+        ? await window.withLoader(() => apiFetch('/api/fund-wallet', { method: 'POST', body: { amount } }))
+        : await apiFetch('/api/fund-wallet', { method: 'POST', body: { amount } });
+      if (res.ok) showGeneratedAccount(res.data);
+      else showGeneratedError(res.error?.message || 'Failed to generate account.');
+    } catch (err) { showGeneratedError('Network error. Try again.'); }
+    finally { isFundingInProgress = false; fundBtn.disabled = false; fundBtn.textContent = 'Fund Wallet'; }
+  });
 }
 
 /* ---------- localStorage helpers ---------- */
 const PENDING_TX_KEY = 'flexgig.pending_fund_tx';
 
 function savePendingTxToStorage(tx) {
-  try {
-    // Normalize stored shape: accountNumber, bankName, reference, orderNo, amount, expiresAt, status
-    const store = {
-      accountNumber: tx.accountNumber,
-      bankName: tx.bankName,
-      reference: tx.reference,
-      orderNo: tx.orderNo,
-      amount: Number(tx.amount),
-      expiresAt: tx.expiresAt, // ISO string expected
-      status: tx.status || 'pending',
-      savedAt: new Date().toISOString()
-    };
-    localStorage.setItem(PENDING_TX_KEY, JSON.stringify(store));
-    console.log('[localStorage] Saved pending tx', store);
-  } catch (e) {
-    console.warn('[localStorage] Save failed', e);
-  }
+  try { localStorage.setItem(PENDING_TX_KEY, JSON.stringify({ accountNumber: tx.accountNumber, bankName: tx.bankName, reference: tx.reference, orderNo: tx.orderNo, amount: Number(tx.amount), expiresAt: tx.expiresAt, status: tx.status || 'pending', savedAt: new Date().toISOString() })); } catch (e) {}
 }
-
-function removePendingTxFromStorage() {
-  try {
-    localStorage.removeItem(PENDING_TX_KEY);
-    console.log('[localStorage] Removed pending tx');
-  } catch (e) {
-    console.warn('[localStorage] Remove failed', e);
-  }
-}
-
+function removePendingTxFromStorage() { try { localStorage.removeItem(PENDING_TX_KEY); } catch (e) {} }
 function getPendingTxFromStorage() {
   try {
-    const raw = localStorage.getItem(PENDING_TX_KEY);
-    if (!raw) return null;
-    const tx = JSON.parse(raw);
-
-    if (!tx || !tx.expiresAt || !tx.reference) return null;
-
-    // Validate expiry
-    const now = Date.now();
+    const raw = localStorage.getItem(PENDING_TX_KEY); if (!raw) return null;
+    const tx = JSON.parse(raw); if (!tx?.expiresAt || !tx?.reference) return null;
     const expiry = new Date(tx.expiresAt).getTime();
-    if (Number.isNaN(expiry) || expiry <= now) {
-      // expired -> cleanup
-      removePendingTxFromStorage();
-      return null;
-    }
-
-    // only return when status is pending
-    if ((tx.status || '').toLowerCase() !== 'pending') {
-      removePendingTxFromStorage();
-      return null;
-    }
-
+    if (Number.isNaN(expiry) || expiry <= Date.now()) { removePendingTxFromStorage(); return null; }
+    if ((tx.status || '').toLowerCase() !== 'pending') { removePendingTxFromStorage(); return null; }
     return tx;
-  } catch (e) {
-    console.warn('[localStorage] Read failed', e);
-    return null;
-  }
+  } catch (e) { return null; }
 }
 
-// --- Show Generated Bank Account ---
+// --- Show Generated Bank Account (temporary) ---
 function showGeneratedAccount(data) {
-  // Save to localStorage immediately so reloads show it
   try {
-    // ensure expiresAt is ISO (backend already sends ISO), but normalize if needed
-    if (data.expiresAt && typeof data.expiresAt === 'string') {
-      // ok
-    } else if (data.expiresAt instanceof Date) {
-      data.expiresAt = data.expiresAt.toISOString();
-    } else if (data.expiresAt && typeof data.expiresAt === 'number') {
-      // timestamp ms
-      data.expiresAt = new Date(data.expiresAt).toISOString();
-    }
-    savePendingTxToStorage({
-      accountNumber: data.accountNumber,
-      bankName: data.bankName,
-      reference: data.reference,
-      orderNo: data.orderNo,
-      amount: data.amount,
-      expiresAt: data.expiresAt,
-      status: data.status || 'pending'
-    });
-  } catch (e) {
-    console.warn('[showGeneratedAccount] could not save to localStorage', e);
-  }
+    if (data.expiresAt instanceof Date) data.expiresAt = data.expiresAt.toISOString();
+    else if (typeof data.expiresAt === 'number') data.expiresAt = new Date(data.expiresAt).toISOString();
+    savePendingTxToStorage({ accountNumber: data.accountNumber, bankName: data.bankName, reference: data.reference, orderNo: data.orderNo, amount: data.amount, expiresAt: data.expiresAt, status: data.status || 'pending' });
+  } catch (e) {}
 
-  // Clear any existing countdown
-  if (countdownTimerInterval) {
-    clearInterval(countdownTimerInterval);
-    countdownTimerInterval = null;
-  }
-
-  // Calculate initial countdown in seconds
-  let countdown;
-  if (data.expiresAt) {
-    const expiryDate = new Date(data.expiresAt);
-    const now = new Date();
-    countdown = Math.floor((expiryDate - now) / 1000);
-    if (countdown < 0) countdown = 0;
-  } else {
-    countdown = 30 * 60; // default 30 minutes
-  }
+  if (countdownTimerInterval) { clearInterval(countdownTimerInterval); countdownTimerInterval = null; }
+  let countdown = data.expiresAt ? Math.max(0, Math.floor((new Date(data.expiresAt) - new Date()) / 1000)) : 30 * 60;
 
   const modalContent = document.createElement('div');
   modalContent.classList.add('addMoney-generated-content');
-
   modalContent.innerHTML = `
-    <div class="addMoney-generated-body" style="padding:7px 14px 14px 14px; background:#111010ff; border-radius:16px; color:#ffffff; min-height:55vh; max-height:60vh; overflow-y:auto; display:block; text-align:left; box-sizing:border-box;">
-      <p style="margin:0; font-size:10px; opacity:0.75; text-transform: uppercase;">Amount to Pay</p>
-      <div style="font-size:20px; font-weight:700; margin:6px 0 14px;">₦${Number(data.amount).toLocaleString()}</div>
-
+    <div class="addMoney-generated-body" style="padding:7px 14px 14px 14px;background:#111010ff;border-radius:16px;color:#ffffff;min-height:55vh;max-height:60vh;overflow-y:auto;display:block;text-align:left;box-sizing:border-box;">
+      <p style="margin:0;font-size:10px;opacity:0.75;text-transform:uppercase;">Amount to Pay</p>
+      <div style="font-size:20px;font-weight:700;margin:6px 0 14px;">₦${Number(data.amount).toLocaleString()}</div>
       <div style="margin-bottom:12px;">
-        <p style="margin:0; font-size:10px; opacity:0.75; text-transform: uppercase;">Bank</p>
-        <img src="/frontend/img/9PSB.png" alt="9PSB" onerror="this.style.display='none'" style="width:auto; height:36px; margin-top:6px; object-fit:contain;">
+        <p style="margin:0;font-size:10px;opacity:0.75;text-transform:uppercase;">Bank</p>
+        <img src="/frontend/img/9PSB.png" alt="9PSB" onerror="this.style.display='none'" style="width:auto;height:36px;margin-top:6px;object-fit:contain;">
       </div>
-
       <div style="margin-bottom:12px;">
-        <p style="margin:0; font-size:10px; opacity:0.75; text-transform: uppercase;">Account Name</p>
-        <div style="font-size:15px; font-weight:600; margin-top:4px;">Flexgig Digital Network</div>
+        <p style="margin:0;font-size:10px;opacity:0.75;text-transform:uppercase;">Account Name</p>
+        <div style="font-size:15px;font-weight:600;margin-top:4px;">Flexgig Digital Network</div>
       </div>
-
       <div style="margin-bottom:10px;">
-        <p style="margin:0; font-size:10px; opacity:0.75; text-transform: uppercase;">Account Number</p>
-        <div style="display:flex; align-items:center; gap:10px; margin-top:6px; flex-wrap: wrap;">
-          <span style="font-size:18px; font-weight:700; letter-spacing:1px; word-break: break-all;">${data.accountNumber}</span>
-          <button class="copy-btn" data-copy="${data.accountNumber}" style="border:none; background:#3b82f6; padding:8px 10px; border-radius:8px; cursor:pointer;">
+        <p style="margin:0;font-size:10px;opacity:0.75;text-transform:uppercase;">Account Number</p>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:6px;flex-wrap:wrap;">
+          <span style="font-size:18px;font-weight:700;letter-spacing:1px;word-break:break-all;">${data.accountNumber}</span>
+          <button class="copy-btn" data-copy="${data.accountNumber}" style="border:none;background:#3b82f6;padding:8px 10px;border-radius:8px;cursor:pointer;">
             <svg width="18px" height="18px" viewBox="0 0 24 24" fill="none">
-              <path d="M6 11C6 8.17157 6 6.75736 6.87868 5.87868C7.75736 5 9.17157 5 12 5H15C17.8284 5 19.2426 5 20.1213 5.87868C21 6.75736 21 8.17157 21 11V16C21 18.8284 21 20.2426 20.1213 21.1213C19.2426 22 17.8284 22 15 22H12C9.17157 22 7.75736 22 6.87868 21.1213C6 20.2426 6 18.8284 6 16V11Z" stroke="#ffffff" stroke-width="1.3"></path>
-              <path opacity="0.5" d="M6 19C4.34315 19 3 17.6569 3 16V10C3 6.22876 3 4.34315 4.17157 3.17157C5.34315 2 7.22876 2 11 2H15C16.6569 2 18 3.34315 18 5" stroke="#ffffff" stroke-width="1.3"></path>
+              <path d="M6 11C6 8.17157 6 6.75736 6.87868 5.87868C7.75736 5 9.17157 5 12 5H15C17.8284 5 19.2426 5 20.1213 5.87868C21 6.75736 21 8.17157 21 11V16C21 18.8284 21 20.2426 20.1213 21.1213C19.2426 22 17.8284 22 15 22H12C9.17157 22 7.75736 22 6.87868 21.1213C6 20.2426 6 18.8284 6 16V11Z" stroke="#ffffff" stroke-width="1.3"/>
+              <path opacity="0.5" d="M6 19C4.34315 19 3 17.6569 3 16V10C3 6.22876 3 4.34315 4.17157 3.17157C5.34315 2 7.22876 2 11 2H15C16.6569 2 18 3.34315 18 5" stroke="#ffffff" stroke-width="1.3"/>
             </svg>
           </button>
         </div>
       </div>
-<p id="expires-in" style="margin:0; font-size:10px; opacity:0.75; text-transform: uppercase;">Expires In</p>
+      <p style="margin:0;font-size:10px;opacity:0.75;text-transform:uppercase;">Expires In</p>
       <div class="generated-countdown-row">
-          
-
-  <!-- Countdown -->
-  <div>
-    <div class="countdown-box">
-      <span id="genCountdown">30:00</span>
-    </div>
-  </div>
-
-  <!-- Button -->
-  <button id="iHavePaidBtn" class="verify-btn">
-    I Have Paid
-  </button>
-</div>
-
-      <div style="margin-top:18px; display:flex; justify-content:center;">
-        <button id="cancelTransactionBtn" class="addMoney-cancel-btn" style="background:transparent; border:1px solid rgba(255,255,255,0.12); color:#fff; padding:10px 14px; border-radius:12px; font-weight:700; cursor:pointer; width:100%;">Cancel transaction</button>
+        <div><div class="countdown-box"><span id="genCountdown">30:00</span></div></div>
+        <button id="iHavePaidBtn" class="verify-btn">I Have Paid</button>
       </div>
-    </div>
-  `;
+      <div style="margin-top:18px;display:flex;justify-content:center;">
+        <button id="cancelTransactionBtn" class="addMoney-cancel-btn" style="background:transparent;border:1px solid rgba(255,255,255,0.12);color:#fff;padding:10px 14px;border-radius:12px;font-weight:700;cursor:pointer;width:100%;">Cancel transaction</button>
+      </div>
+    </div>`;
 
-  // --- "I Have Paid" Button Handler ---
-const iHavePaidBtn = modalContent.querySelector('#iHavePaidBtn');
-if (iHavePaidBtn) {
-  iHavePaidBtn.addEventListener('click', async () => {
-    iHavePaidBtn.disabled = true;
-    iHavePaidBtn.textContent = 'Verifying...';
-    iHavePaidBtn.style.background = '#6b7280';
-
-    try {
-      const res = await apiFetch('/api/fund-wallet/verify-pending', {
-        method: 'POST',
-        body: { reference: data.reference }
-      });
-
-      const resData = res.data || {};
-      const status  = resData?.status || (res.ok ? 'unknown' : 'error');
-      const message = resData?.message || res.error?.message || JSON.stringify(resData);
-
-      // --- Show toast with server response ---
-      const colors  = { completed: '#10b981', pending: '#f59e0b', failed: '#ef4444', error: '#ef4444' };
-      const bg      = colors[status] || '#3b82f6';
-      const toast   = document.createElement('div');
-      toast.style.cssText = `
-        position:fixed; top:20px; left:50%; transform:translateX(-50%);
-        background:${bg}; color:white; padding:14px 22px; border-radius:14px;
-        font-weight:700; font-size:14px; z-index:999999999;
-        box-shadow:0 10px 30px rgba(0,0,0,0.3); text-align:center;
-        max-width:min(90%,380px); transition:opacity .4s;
-      `;
-      toast.textContent = `[${status.toUpperCase()}] ${message}`;
-      document.body.appendChild(toast);
-      setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 400); }, 4000);
-
-      // --- Handle each status ---
-      if (status === 'completed') {
-        removePendingTxFromStorage();
-
-        // Trigger the full balance update flow (closes modal, success toast, sound)
-        const amount  = resData?.amount  ?? data.amount  ?? 0;
-        const balance = resData?.balance ?? 0;
-
-        if (typeof window.__handleBalanceUpdate === 'function') {
-          window.__handleBalanceUpdate({ type: 'balance_update', amount, balance });
-        } else {
-          window.dispatchEvent(new CustomEvent('balance_update', {
-            detail: { type: 'balance_update', amount, balance }
-          }));
+  const iHavePaidBtn = modalContent.querySelector('#iHavePaidBtn');
+  if (iHavePaidBtn) {
+    iHavePaidBtn.addEventListener('click', async () => {
+      iHavePaidBtn.disabled = true; iHavePaidBtn.textContent = 'Verifying...'; iHavePaidBtn.style.background = '#6b7280';
+      try {
+        const res = await apiFetch('/api/fund-wallet/verify-pending', { method: 'POST', body: { reference: data.reference } });
+        const resData = res.data || {}, status = resData?.status || (res.ok ? 'unknown' : 'error');
+        const message = resData?.message || res.error?.message || JSON.stringify(resData);
+        const colors = { completed: '#10b981', pending: '#f59e0b', failed: '#ef4444', error: '#ef4444' };
+        const toast = document.createElement('div');
+        toast.style.cssText = `position:fixed;top:20px;left:50%;transform:translateX(-50%);background:${colors[status]||'#3b82f6'};color:white;padding:14px 22px;border-radius:14px;font-weight:700;font-size:14px;z-index:999999999;box-shadow:0 10px 30px rgba(0,0,0,0.3);text-align:center;max-width:min(90%,380px);transition:opacity .4s;`;
+        toast.textContent = `[${status.toUpperCase()}] ${message}`;
+        document.body.appendChild(toast);
+        setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 400); }, 4000);
+        if (status === 'completed') {
+          removePendingTxFromStorage();
+          const amt = resData?.amount ?? data.amount ?? 0, bal = resData?.balance ?? 0;
+          if (typeof window.__handleBalanceUpdate === 'function') window.__handleBalanceUpdate({ type: 'balance_update', amount: amt, balance: bal });
+          else window.dispatchEvent(new CustomEvent('balance_update', { detail: { type: 'balance_update', amount: amt, balance: bal } }));
         }
+      } catch (err) { showLocalNotify('Network error. Please try again.', 'error'); }
+      finally { iHavePaidBtn.disabled = false; iHavePaidBtn.textContent = 'I Have Paid'; iHavePaidBtn.style.background = '#3b82f6'; }
+    });
+  }
 
-      } else if (status === 'pending') {
-        // still waiting — button re-enables so they can try again
-      } else {
-        // unexpected status — already shown via toast above
-      }
-
-    } catch (err) {
-      console.error('[I Have Paid] Verification failed:', err);
-      showLocalNotify('Network error. Please try again.', 'error');
-    } finally {
-      iHavePaidBtn.disabled = false;
-      iHavePaidBtn.textContent = 'I Have Paid';
-      iHavePaidBtn.style.background = '#3b82f6';
-    }
-  });
-}
-
-  // Replace modal content
   const contentContainer = addMoneyModal.querySelector('.addMoney-modal-content');
-  contentContainer.innerHTML = '';
-  contentContainer.appendChild(modalContent);
+  contentContainer.innerHTML = ''; contentContainer.appendChild(modalContent);
 
-  // --- Copy Account Number ---
-    const copyBtn = modalContent.querySelector('.copy-btn');
-
-  copyBtn?.addEventListener('click', async e => {
-  const text = e.currentTarget.dataset.copy;
-  await navigator.clipboard.writeText(text);
-  const t = Object.assign(document.createElement('div'), {
-    textContent: `✓ ${text} copied!`,
-    style: `position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#10b981;color:white;padding:16px 28px;border-radius:16px;font-weight:bold;z-index:999999;box-shadow:0 10px 30px rgba(0,0,0,0.3);opacity:0;transition:opacity .3s,transform .4s`
+  modalContent.querySelector('.copy-btn')?.addEventListener('click', async e => {
+    const text = e.currentTarget.dataset.copy;
+    await navigator.clipboard.writeText(text);
+    const t = Object.assign(document.createElement('div'), { textContent: `✓ ${text} copied!`, style: `position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#10b981;color:white;padding:16px 28px;border-radius:16px;font-weight:bold;z-index:999999;box-shadow:0 10px 30px rgba(0,0,0,0.3);opacity:0;transition:opacity .3s,transform .4s` });
+    document.body.appendChild(t);
+    requestAnimationFrame(() => (t.style.opacity = '1', t.style.transform += ' translateY(10px)'));
+    setTimeout(() => (t.style.opacity = '0', setTimeout(() => t.remove(), 400)), 2800);
   });
-  document.body.appendChild(t);
-  requestAnimationFrame(() => (t.style.opacity = '1', t.style.transform += ' translateY(10px)'));
-  setTimeout(() => (t.style.opacity = '0', setTimeout(() => t.remove(), 400)), 2800);
-});
 
-  // --- Countdown + Expire Handling ---
   const countdownEl = modalContent.querySelector('#genCountdown');
   const updateCountdown = () => {
     if (!countdownEl) return;
-    const minutes = Math.floor(countdown / 60);
-    const seconds = countdown % 60;
-    countdownEl.textContent = countdown > 0
-      ? `${String(minutes).padStart(2,'0')}:${String(seconds).padStart(2,'0')}`
-      : 'EXPIRED';
-
-    if (countdown <= 0) {
-      countdownEl.parentElement.style.background = '#ef4444';
-    }
+    countdownEl.textContent = countdown > 0 ? `${String(Math.floor(countdown/60)).padStart(2,'0')}:${String(countdown%60).padStart(2,'0')}` : 'EXPIRED';
+    if (countdown <= 0) countdownEl.parentElement.style.background = '#ef4444';
   };
-
   if (countdownTimerInterval) clearInterval(countdownTimerInterval);
-  countdownTimerInterval = setInterval(() => {
-    countdown--;
-    updateCountdown();
-    if (countdown < 0) {
-      removePendingTxFromStorage();
-      handleTransactionCancelOrExpire(data.reference);
-    }
-  }, 1000);
+  countdownTimerInterval = setInterval(() => { countdown--; updateCountdown(); if (countdown < 0) { removePendingTxFromStorage(); handleTransactionCancelOrExpire(data.reference); } }, 1000);
   updateCountdown();
 
-  // --- Cancel Button ---
-  const cancelBtn = modalContent.querySelector('#cancelTransactionBtn');
-  if (cancelBtn) {
-    cancelBtn.addEventListener('click', () => {
-      removePendingTxFromStorage();
-      handleTransactionCancelOrExpire(data.reference);
-    });
-  }
-
-  // --- Close Button (optional) ---
-  const closeBtn = modalContent.querySelector('.addMoney-modal-close');
-  if (closeBtn) {
-    closeBtn.addEventListener('click', () => {
-      if (window.ModalManager?.closeModal) window.ModalManager.closeModal('addMoneyModal');
-      else addMoneyModal.style.transform = 'translateY(100%)';
-      if (countdownTimerInterval) {
-        clearInterval(countdownTimerInterval);
-        countdownTimerInterval = null;
-      }
-    });
-  }
+  modalContent.querySelector('#cancelTransactionBtn')?.addEventListener('click', () => { removePendingTxFromStorage(); handleTransactionCancelOrExpire(data.reference); });
 }
 
-// --- Cancel / Expire Transaction Helper ---
 async function handleTransactionCancelOrExpire(reference) {
-  // 1. Stop timer
   countdownTimerInterval && clearInterval(countdownTimerInterval);
-
-  // 2. Close modal FIRST (with nice animation)
-  window.ModalManager?.closeModal?.('addMoneyModal') ||
-    (document.getElementById('addMoneyModal').style.transform = 'translateY(100%)');
-
-  // ⭐ Toast must appear IMMEDIATELY after modal starts closing
-  const t = Object.assign(document.createElement('div'), {
-    textContent: reference ? 'Transaction cancelled' : 'Session expired',
-    style: `
-      position:fixed;
-      top:20px;
-      left:50%;
-      transform:translateX(-50%);
-      background:#f59e0b;
-      color:white;
-      padding:16px 28px;
-      border-radius:16px;
-      font-weight:bold;
-      z-index:999999;
-      box-shadow:0 10px 30px rgba(0,0,0,0.3);
-      opacity:0;
-      transition:all .4s;
-    `
-  });
-
-  // ⭐ Append & animate immediately
+  window.ModalManager?.closeModal?.('addMoneyModal') || (document.getElementById('addMoneyModal').style.transform = 'translateY(100%)');
+  const t = Object.assign(document.createElement('div'), { textContent: reference ? 'Transaction cancelled' : 'Session expired', style: `position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#f59e0b;color:white;padding:16px 28px;border-radius:16px;font-weight:bold;z-index:999999;box-shadow:0 10px 30px rgba(0,0,0,0.3);opacity:0;transition:all .4s;` });
   document.body.appendChild(t);
-  requestAnimationFrame(() => {
-    t.style.opacity = '1';
-    t.style.transform += ' translateY(10px)';
-  });
-
-  // Remove later
-  setTimeout(() => {
-    t.style.opacity = '0';
-    setTimeout(() => t.remove(), 400);
-  }, 2500);
-
-  // 3. Handle backend cancel AFTER modal animation
+  requestAnimationFrame(() => { t.style.opacity = '1'; t.style.transform += ' translateY(10px)'; });
+  setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 400); }, 2500);
   setTimeout(async () => {
-    if (reference) {
-      try {
-        await apiFetch(`/api/fund-wallet/cancel/${reference}`, { method:'POST' });
-      } catch (e) {
-        console.error('Cancel failed:', e);
-      }
-    }
-
-    // 5. Reopen fresh Add Money form
+    if (reference) { try { await apiFetch(`/api/fund-wallet/cancel/${reference}`, { method: 'POST' }); } catch (e) {} }
     openAddMoneyModalContent();
-  }, 400); // match close animation
+  }, 400);
 }
+window.handleTransactionCancelOrExpire = window.handleTransactionCancelOrExpire || handleTransactionCancelOrExpire;
 
-window.handleTransactionCancelOrExpire = window.handleTransactionCancelOrExpire || handleTransactionCancelOrExpire; 
+if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', () => { if (addMoneyModal) assignAddMoneyEvents(); }); }
+else { if (addMoneyModal) assignAddMoneyEvents(); }
 
-
-// --- Initialize when DOM is ready ---
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => {
-    if (addMoneyModal) {
-      assignAddMoneyEvents();
-    }
-  });
-} else {
-  if (addMoneyModal) {
-    assignAddMoneyEvents();
-  }
-}
-
-// FINAL — ZERO FLASH + USER CAN STILL TYPE PERFECTLY
-document.addEventListener("modalOpened", (e) => {
-  if (e.detail !== "addMoneyModal") return;
-
+document.addEventListener('modalOpened', (e) => {
+  if (e.detail !== 'addMoneyModal') return;
   const input = document.getElementById('addMoneyAmountInput');
   if (!input) return;
-
-  // Step 1: Make it temporarily untouchable + kill keyboard
-  input.setAttribute('readonly', 'readonly');
-  input.setAttribute('inputmode', 'none');
-  input.style.pointerEvents = 'none';
-  input.blur();
-
-  // Step 2: After modal is fully visible, re-enable ONLY on real user tap
-  requestAnimationFrame(() => {
-    setTimeout(() => {
-      input.style.pointerEvents = '';
-      input.removeAttribute('readonly');
-      input.removeAttribute('inputmode');
-
-      // Now enable input when user actually taps
-      const enable = () => {
-        input.focus();
-        input.removeEventListener('click', enable);
-        input.removeEventListener('touchstart', enable);
-      };
-
-      input.addEventListener('click', enable);
-      input.addEventListener('touchstart', enable);
-    }, 300);
-  });
+  input.setAttribute('readonly','readonly'); input.setAttribute('inputmode','none'); input.style.pointerEvents = 'none'; input.blur();
+  requestAnimationFrame(() => { setTimeout(() => {
+    input.style.pointerEvents = ''; input.removeAttribute('readonly'); input.removeAttribute('inputmode');
+    const enable = () => { input.focus(); input.removeEventListener('click', enable); input.removeEventListener('touchstart', enable); };
+    input.addEventListener('click', enable); input.addEventListener('touchstart', enable);
+  }, 300); });
 });
 
-// --- Cleanup countdown on page unload ---
-window.addEventListener('beforeunload', () => {
-  if (countdownTimerInterval) {
-    clearInterval(countdownTimerInterval);
-  }
-});
+window.addEventListener('beforeunload', () => { if (countdownTimerInterval) clearInterval(countdownTimerInterval); });
 
-// --- MOBILE DEBUG: Test balance update manually ---
 window.testBalanceUpdate = function(amount = 5000, balance = 50000) {
-  console.log('[TEST] Triggering balance update...');
-  
-  // Test via global handler
-  if (window.__handleBalanceUpdate) {
-    window.__handleBalanceUpdate({
-      type: 'balance_update',
-      amount: amount,
-      balance: balance
-    });
-  }
-  
-  // Also dispatch custom event
-  window.dispatchEvent(new CustomEvent('balance_update', {
-    detail: {
-      type: 'balance_update',
-      amount: amount,
-      balance: balance
-    }
-  }));
-  
-  console.log('[TEST] Balance update dispatched');
-  alert('Test balance update sent! Check console for logs.');
+  if (window.__handleBalanceUpdate) window.__handleBalanceUpdate({ type: 'balance_update', amount, balance });
+  window.dispatchEvent(new CustomEvent('balance_update', { detail: { type: 'balance_update', amount, balance } }));
 };
-
-// 🔥 MOBILE DEBUG: WebSocket status indicator
 window.getWebSocketStatus = function() {
-  const status = {
-    userID: window.__USER_UID || localStorage.getItem('userId'),
-    wsState: 'Not connected',
-    listenerRegistered: !!window.__handleBalanceUpdate,
-    modalExists: !!document.getElementById('addMoneyModal')
-  };
-  
-  console.table(status);
-  alert(JSON.stringify(status, null, 2));
-  return status;
+  const s = { userID: window.__USER_UID || localStorage.getItem('userId'), wsState: 'Not connected', listenerRegistered: !!window.__handleBalanceUpdate, modalExists: !!document.getElementById('addMoneyModal') };
+  console.table(s); return s;
 };
 
-console.log('[Fund Wallet] Script loaded.');
-console.log('[Fund Wallet] Test balance update: testBalanceUpdate(5000, 50000)');
-console.log('[Fund Wallet] Check WebSocket: getWebSocketStatus()');
-
-/* ---------- Ensure add-money modal reads localStorage before opening ---------- */
-// Paste this once (e.g. near the bottom of your addmoney.js)
 (function ensureAddMoneyModalPreloads() {
-  // Helper: safe call to prepare modal content
-  function prepareAddMoneyModal() {
-    try {
-      if (typeof openAddMoneyModalContent === 'function') {
-        openAddMoneyModalContent();
-        console.log('[preload] addMoney modal content prepared from localStorage');
-      } else {
-        console.warn('[preload] openAddMoneyModalContent not available');
-      }
-    } catch (e) {
-      console.warn('[preload] failed to prepare addMoney modal', e);
-    }
-  }
-
-  // 1) Intercept clicks on common openers (data attribute, class, id)
-  const clickSelectors = [
-    '[data-open-modal="addMoneyModal"]', // generic data attribute pattern
-    '.open-add-money-btn',               // optional class usage
-    '#openAddMoneyBtn'                   // optional id usage
-  ];
-  clickSelectors.forEach(sel => {
-    document.addEventListener('click', (ev) => {
-      const el = ev.target.closest && ev.target.closest(sel);
-      if (!el) return;
-      // prepare content first (no await needed)
-      prepareAddMoneyModal();
-      // allow other click handlers (and modal open) to run
-    });
-  });
-
-  // 2) If your app uses a ModalManager with openModal(name) — wrap it so it prepares first
-  if (window.ModalManager && typeof window.ModalManager.openModal === 'function') {
+  function prepareAddMoneyModal() { try { if (typeof openAddMoneyModalContent === 'function') openAddMoneyModalContent(); } catch (e) {} }
+  const clickSelectors = ['[data-open-modal="addMoneyModal"]','.open-add-money-btn','#openAddMoneyBtn'];
+  clickSelectors.forEach(sel => { document.addEventListener('click', (ev) => { const el = ev.target.closest?.(sel); if (!el) return; prepareAddMoneyModal(); }); });
+  if (window.ModalManager?.openModal) {
     const origOpen = window.ModalManager.openModal.bind(window.ModalManager);
-    window.ModalManager.openModal = function(name, ...args) {
-      if (name === 'addMoneyModal') {
-        prepareAddMoneyModal();
-      }
-      return origOpen(name, ...args);
-    };
+    window.ModalManager.openModal = function(name, ...args) { if (name === 'addMoneyModal') prepareAddMoneyModal(); return origOpen(name, ...args); };
   }
-
-  // 3) If your app dispatches a custom 'modalOpened' event after open, also prepare on it.
-  //    This is safe: openAddMoneyModalContent is idempotent.
-  document.addEventListener('modalOpened', (e) => {
-    if (e?.detail === 'addMoneyModal') {
-      prepareAddMoneyModal();
-    }
-  });
-
-  // 4) For extra safety, if someone programmatically focuses the add-money button via keyboard,
-  //    handle keydown Enter/Space on those openers (same selectors).
+  document.addEventListener('modalOpened', (e) => { if (e?.detail === 'addMoneyModal') prepareAddMoneyModal(); });
   document.addEventListener('keydown', (ev) => {
     if (ev.key !== 'Enter' && ev.key !== ' ') return;
     const active = document.activeElement;
-    if (!active) return;
-    if (active.matches && clickSelectors.some(sel => active.matches(sel))) {
-      prepareAddMoneyModal();
-    }
+    if (active?.matches && clickSelectors.some(sel => active.matches(sel))) prepareAddMoneyModal();
   });
-
-  // 5) Optional: if you want the modal content prepared immediately on page load
-  //    (so the first click has zero delay), call prepareAddMoneyModal() here — uncomment if desired:
-
-
 })();
-// ─────────────────────────────────────────────────────────────
-// SUCCESS SOUND – “Ding!” when payment is received
-// Just place your file at: /sounds/success-ding.wav (or change the path below)
-// ─────────────────────────────────────────────────────────────
+
 (function addPaymentSuccessSound() {
-  // Change this path if you put the file somewhere else
-  const SOUND_URL = '/frontend/sound/paymentReceived.wav';
-
-  // Create the audio element once (reuse it forever
-  const successAudio = new Audio(SOUND_URL);
-  successAudio.preload = 'auto';
-  successAudio.volume = 0.65; // feels perfect on mobile & desktop
-
-  // Fix iOS/Android silent-mode issues – we “unlock” audio on first user touch
+  const successAudio = new Audio('/frontend/sound/paymentReceived.wav');
+  successAudio.preload = 'auto'; successAudio.volume = 0.65;
   let audioUnlocked = false;
   function unlockAudio() {
     if (audioUnlocked) return;
-    successAudio.play().catch(() => {}); // empty play → unlocks audio context
-    successAudio.pause();
-    successAudio.currentTime = 0;
-    audioUnlocked = true;
-
-    // Remove listeners after first real interaction
-    document.body.removeEventListener('touchstart', unlockAudio);
-    document.body.removeEventListener('click', unlockAudio);
+    successAudio.play().catch(() => {}); successAudio.pause(); successAudio.currentTime = 0; audioUnlocked = true;
+    document.body.removeEventListener('touchstart', unlockAudio); document.body.removeEventListener('click', unlockAudio);
   }
   document.body.addEventListener('touchstart', unlockAudio, { once: true });
   document.body.addEventListener('click', unlockAudio, { once: true });
-
-  // Public function you can call anywhere
-  window.playSuccessSound = function () {
-    if (!audioUnlocked) {
-      // If somehow not unlocked yet, try once more
-      successAudio.play().catch(() => {});
-      return;
-    }
-    successAudio.currentTime = 0; // rewind
-    successAudio.play().catch(e => console.warn('Success sound failed:', e));
+  window.playSuccessSound = function() {
+    if (!audioUnlocked) { successAudio.play().catch(() => {}); return; }
+    successAudio.currentTime = 0; successAudio.play().catch(e => console.warn('Success sound failed:', e));
   };
 })();
 
-// ── KYC Modal Logic ───────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// KYC MODAL LOGIC
+// ─────────────────────────────────────────────────────────────
 (function initKYCModal() {
-  const btnBVN    = document.getElementById('kycBtnBVN');
-  const btnNIN    = document.getElementById('kycBtnNIN');
-  const input     = document.getElementById('kycNumberInput');
-  const label     = document.getElementById('kycInputLabel');
-  const hint      = document.getElementById('kycInputHint');
-  const submitBtn = document.getElementById('kycSubmitBtn');
+  const kycModalBody  = document.querySelector('#kycVerifyModal .kyc-modal-body');
+  const kycTitle      = document.querySelector('#kycVerifyModal .kyc-modal-title');
+  const submitBtn     = document.getElementById('kycSubmitBtn');
+  if (!kycModalBody) return;
 
   let activeType = 'BVN';
+  const originalFormHTML = kycModalBody.innerHTML;
 
-  // Reset state whenever ModalManager opens this modal
+  // On every open: if KYC already verified → show permanent accounts (no badge)
+  // If not verified → restore the form
   document.addEventListener('modalOpened', (e) => {
     if (e.detail !== 'kycVerifyModal') return;
-    activeType = 'BVN';
-    input.value = '';
-    input.classList.remove('kyc-number-input--error');
-    hint.classList.remove('kyc-input-hint--error');
-    setActiveType('BVN');
+    const kycState = getKYCState();
+    if (kycState?.verified) {
+      // Opened via addMoneyBtn redirect — show accounts, no verified badge
+      renderPermAccountsInKYCBody(false);
+    } else {
+      restoreKYCForm();
+      activeType = 'BVN';
+      setActiveType('BVN');
+      if (kycTitle) kycTitle.textContent = 'Complete KYC';
+    }
   });
 
-  // BVN / NIN toggle
-  function setActiveType(type) {
-    activeType = type;
-
-    btnBVN.classList.toggle('kyc-type-btn--active', type === 'BVN');
-    btnNIN.classList.toggle('kyc-type-btn--active', type === 'NIN');
-
-    label.textContent     = `Enter your ${type}`;
-    submitBtn.textContent = `Submit ${type}`;
-    hint.textContent      = type === 'BVN'
-      ? 'Your 11-digit BVN — dial *565*0# on any network to retrieve it.'
-      : 'Your 11-digit NIN — check your NIN slip or dial *346# to retrieve it.';
-
-    hint.classList.remove('kyc-input-hint--error');
-    input.classList.remove('kyc-number-input--error');
-    input.value = '';
+  function restoreKYCForm() {
+    kycModalBody.innerHTML = originalFormHTML;
+    document.getElementById('kycBtnBVN')?.addEventListener('click', () => setActiveType('BVN'));
+    document.getElementById('kycBtnNIN')?.addEventListener('click', () => setActiveType('NIN'));
+    document.getElementById('kycSubmitBtn')?.addEventListener('click', handleSubmit);
   }
 
-  btnBVN?.addEventListener('click', () => setActiveType('BVN'));
-  btnNIN?.addEventListener('click', () => setActiveType('NIN'));
+  function setActiveType(type) {
+    activeType = type;
+    const _b = document.getElementById('kycBtnBVN'), _n = document.getElementById('kycBtnNIN');
+    const _l = document.getElementById('kycInputLabel'), _h = document.getElementById('kycInputHint');
+    const _i = document.getElementById('kycNumberInput'), _s = document.getElementById('kycSubmitBtn');
+    _b?.classList.toggle('kyc-type-btn--active', type === 'BVN');
+    _n?.classList.toggle('kyc-type-btn--active', type === 'NIN');
+    if (_l) _l.textContent = `Enter your ${type}`;
+    if (_s) _s.textContent = `Submit ${type}`;
+    if (_h) { _h.textContent = type === 'BVN' ? 'Your 11-digit BVN — dial *565*0# on any network to retrieve it.' : 'Your 11-digit NIN — check your NIN slip or dial *346# to retrieve it.'; _h.classList.remove('kyc-input-hint--error'); }
+    if (_i) { _i.classList.remove('kyc-number-input--error'); _i.value = ''; }
+  }
 
-  // Submit
-  submitBtn?.addEventListener('click', async () => {
-    const value = input.value.replace(/\D/g, '');
+  document.getElementById('kycBtnBVN')?.addEventListener('click', () => setActiveType('BVN'));
+  document.getElementById('kycBtnNIN')?.addEventListener('click', () => setActiveType('NIN'));
 
+  async function handleSubmit() {
+    const _input = document.getElementById('kycNumberInput'), _hint = document.getElementById('kycInputHint'), _submit = document.getElementById('kycSubmitBtn');
+    const value = _input?.value.replace(/\D/g, '') ?? '';
     if (value.length !== 11) {
-      input.classList.add('kyc-number-input--error');
-      hint.classList.add('kyc-input-hint--error');
-      hint.textContent = `Please enter a valid 11-digit ${activeType}.`;
+      _input?.classList.add('kyc-number-input--error'); _hint?.classList.add('kyc-input-hint--error');
+      if (_hint) _hint.textContent = `Please enter a valid 11-digit ${activeType}.`;
       setTimeout(() => {
-        input.classList.remove('kyc-number-input--error');
-        hint.classList.remove('kyc-input-hint--error');
-        hint.textContent = activeType === 'BVN'
-          ? 'Your 11-digit BVN — dial *565*0# on any network to retrieve it.'
-          : 'Your 11-digit NIN — check your NIN slip or dial *346# to retrieve it.';
+        _input?.classList.remove('kyc-number-input--error'); _hint?.classList.remove('kyc-input-hint--error');
+        if (_hint) _hint.textContent = activeType === 'BVN' ? 'Your 11-digit BVN — dial *565*0# on any network to retrieve it.' : 'Your 11-digit NIN — check your NIN slip or dial *346# to retrieve it.';
       }, 2500);
       return;
     }
 
-    submitBtn.disabled    = true;
-    submitBtn.textContent = 'Submitting…';
+    // ── TESTING PHASE ──
+    if (_submit) { _submit.disabled = true; _submit.textContent = 'Verifying…'; }
+    await new Promise(r => setTimeout(r, 900));
+    if (_submit) { _submit.disabled = false; _submit.textContent = `Submit ${activeType}`; }
 
+    saveKYCState(PERMANENT_ACCOUNTS);
+    // Show full verified header — user just completed KYC for the first time
+    renderPermAccountsInKYCBody(true);
+
+    // ── PRODUCTION: remove testing block above, uncomment this ──
+    // try {
+    //   const res = await apiFetch('/api/kyc/submit', { method:'POST', body:{ type:activeType, number:value } });
+    //   if (res.ok) { saveKYCState(res.data.accounts); renderPermAccountsInKYCBody(true); }
+    //   else { if (_hint) { _hint.classList.add('kyc-input-hint--error'); _hint.textContent = res.error?.message || 'Submission failed.'; } setTimeout(() => _hint?.classList.remove('kyc-input-hint--error'), 3000); }
+    // } catch (e) {
+    //   if (_hint) { _hint.classList.add('kyc-input-hint--error'); _hint.textContent = 'Network error. Try again.'; } setTimeout(() => _hint?.classList.remove('kyc-input-hint--error'), 3000);
+    // } finally { if (_submit) { _submit.disabled = false; _submit.textContent = `Submit ${activeType}`; } }
+  }
+
+  submitBtn?.addEventListener('click', handleSubmit);
+})();
+
+(function () {
+  const KYC_STATE_KEY = 'flexgig.kyc_verified';
+  const ADD_MONEY_BUTTON_SELECTORS = [
+    '[data-modal="addMoneyModal"]',
+    '#addMoneyBtn',
+    '.add-money-btn'
+  ];
+
+  function getKYCState() {
     try {
-      const res = await apiFetch('/api/kyc/submit', {
-        method: 'POST',
-        body: { type: activeType, number: value }
-      });
-
-      if (res.ok) {
-        // ModalManager handles close + history
-        window.ModalManager?.forceCloseModal('kycVerifyModal');
-        showLocalNotify(`${activeType} submitted successfully!`, 'success');
-      } else {
-        hint.classList.add('kyc-input-hint--error');
-        hint.textContent = res.error?.message || 'Submission failed. Try again.';
-        setTimeout(() => hint.classList.remove('kyc-input-hint--error'), 3000);
-      }
-    } catch (e) {
-      hint.classList.add('kyc-input-hint--error');
-      hint.textContent = 'Network error. Please try again.';
-      setTimeout(() => hint.classList.remove('kyc-input-hint--error'), 3000);
-    } finally {
-      submitBtn.disabled    = false;
-      submitBtn.textContent = `Submit ${activeType}`;
+      return JSON.parse(localStorage.getItem(KYC_STATE_KEY));
+    } catch {
+      return null;
     }
-  });
+  }
 
+  function patchAddMoneyButton(btn) {
+    if (!btn || btn.dataset.kycPatched) return;
+    btn.dataset.kycPatched = 'true';
+
+    // Remove old modal triggers
+    btn.removeAttribute('data-modal');
+    btn.removeAttribute('onclick');
+    btn.removeAttribute('href');
+
+    // Attach KYC modal
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      console.log('[KYC] Opening KYC modal directly');
+
+      // Render account cards with animation
+      if (typeof renderPermAccountsInKYCBody === 'function') {
+        renderPermAccountsInKYCBody(false);
+        const cards = document.querySelectorAll(
+          '#kycVerifyModal .perm-acct-card'
+        );
+        cards.forEach((card, i) => {
+          card.style.transform = 'translateY(30px)';
+          card.style.opacity = '0';
+          card.style.transition = 'transform 0.5s ease, opacity 0.5s ease';
+          setTimeout(() => {
+            card.style.transform = 'translateY(0)';
+            card.style.opacity = '1';
+          }, 50 + i * 80);
+        });
+      }
+
+      // Open KYC modal
+      if (window.ModalManager?.openModal) {
+        ModalManager.openModal('kycVerifyModal');
+      } else {
+        const modal = document.querySelector('#kycVerifyModal');
+        if (modal) {
+          modal.classList.add('active');
+          modal.style.display = 'block';
+        }
+      }
+    });
+
+    console.log('[KYC] Add Money button successfully relinked');
+  }
+
+  function init() {
+    const kycState = getKYCState();
+    if (!kycState?.verified) {
+      console.log('[KYC] Not verified, no changes applied');
+      return;
+    }
+
+    console.log('[KYC] Verified user detected');
+
+    // Observe DOM to catch button dynamically
+    const observer = new MutationObserver(() => {
+      for (const sel of ADD_MONEY_BUTTON_SELECTORS) {
+        const btn = document.querySelector(sel);
+        if (btn) patchAddMoneyButton(btn);
+      }
+    });
+
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    // Run once immediately in case button is already in DOM
+    for (const sel of ADD_MONEY_BUTTON_SELECTORS) {
+      const btn = document.querySelector(sel);
+      if (btn) patchAddMoneyButton(btn);
+    }
+  }
+
+  init();
+})();
+
+(function () {
+  if (!window.renderPermAccountsInKYCBody) return;
+
+  // Patch renderPermAccountsInKYCBody to prevent card glitches
+  window.renderPermAccountsInKYCBody = (function (originalFunc) {
+    let renderedOnce = false;
+
+    return function (showVerifiedBadge = false) {
+      const kycModalBody = document.querySelector('#kycVerifyModal .kyc-modal-body');
+      if (!kycModalBody) return;
+
+      // Only render the account cards once
+      if (!renderedOnce) {
+        renderedOnce = true;
+        originalFunc.call(this, showVerifiedBadge);
+
+        // Optional: animate cards on first render
+        const cards = kycModalBody.querySelectorAll('.perm-acct-card');
+        cards.forEach((card, i) => {
+          card.style.transform = 'translateY(30px)';
+          card.style.opacity = '0';
+          card.style.transition = 'transform 0.5s ease, opacity 0.5s ease';
+          setTimeout(() => {
+            card.style.transform = 'translateY(0)';
+            card.style.opacity = '1';
+          }, 50 + i * 80);
+        });
+      } else {
+        // Only toggle verified badge if already rendered
+        const badge = kycModalBody.querySelector('.perm-check-anim');
+        if (badge) badge.style.display = showVerifiedBadge ? 'flex' : 'none';
+      }
+    };
+  })(window.renderPermAccountsInKYCBody);
+
+  // Safe immediate render; will only build cards once
+  window.renderPermAccountsInKYCBody(false);
+
+  console.log('[KYC] renderPermAccountsInKYCBody patched and ready');
 })();
