@@ -5153,7 +5153,7 @@ a[style*="color: #f00"] { color: var(--danger); }
 /* Content */
 .addMoney-modal-content {
   flex: 1;
-  padding: 18px;
+  padding: 5px 18px 18px 18px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;

@@ -671,7 +671,7 @@ function showGeneratedAccount(data) {
   modalContent.classList.add('addMoney-generated-content');
 
   modalContent.innerHTML = `
-    <div class="addMoney-generated-body" style="padding:5px 14px 14px 14px; background:#111010ff; border-radius:16px; color:#ffffff; min-height:55vh; max-height:60vh; overflow-y:auto; display:block; text-align:left; box-sizing:border-box;">
+    <div class="addMoney-generated-body" style="padding:7px 14px 14px 14px; background:#111010ff; border-radius:16px; color:#ffffff; min-height:55vh; max-height:60vh; overflow-y:auto; display:block; text-align:left; box-sizing:border-box;">
       <p style="margin:0; font-size:10px; opacity:0.75; text-transform: uppercase;">Amount to Pay</p>
       <div style="font-size:20px; font-weight:700; margin:6px 0 14px;">₦${Number(data.amount).toLocaleString()}</div>
 
@@ -721,46 +721,70 @@ function showGeneratedAccount(data) {
   `;
 
   // --- "I Have Paid" Button Handler ---
-iHavePaidBtn.addEventListener('click', async () => {
-  iHavePaidBtn.disabled = true;
-  iHavePaidBtn.textContent = 'Verifying...';
-  iHavePaidBtn.style.background = '#6b7280'; // gray while loading
+const iHavePaidBtn = modalContent.querySelector('#iHavePaidBtn');
+if (iHavePaidBtn) {
+  iHavePaidBtn.addEventListener('click', async () => {
+    iHavePaidBtn.disabled = true;
+    iHavePaidBtn.textContent = 'Verifying...';
+    iHavePaidBtn.style.background = '#6b7280';
 
-  try {
-    const res = await apiFetch('/api/fund-wallet/verify-pending', {
-      method: 'POST',
-      body: { reference: data.reference }
-    });
+    try {
+      const res = await apiFetch('/api/fund-wallet/verify-pending', {
+        method: 'POST',
+        body: { reference: data.reference }
+      });
 
-    if (res.ok && res.data?.status === 'completed') {
-      // ✅ Use only showLocalNotify
-      showLocalNotify(`Payment confirmed! ₦${Number(data.amount).toLocaleString()} added to wallet`, 'success');
+      const resData = res.data || {};
+      const status  = resData?.status || (res.ok ? 'unknown' : 'error');
+      const message = resData?.message || res.error?.message || JSON.stringify(resData);
 
-      removePendingTxFromStorage();
+      // --- Show toast with server response ---
+      const colors  = { completed: '#10b981', pending: '#f59e0b', failed: '#ef4444', error: '#ef4444' };
+      const bg      = colors[status] || '#3b82f6';
+      const toast   = document.createElement('div');
+      toast.style.cssText = `
+        position:fixed; top:20px; left:50%; transform:translateX(-50%);
+        background:${bg}; color:white; padding:14px 22px; border-radius:14px;
+        font-weight:700; font-size:14px; z-index:999999999;
+        box-shadow:0 10px 30px rgba(0,0,0,0.3); text-align:center;
+        max-width:min(90%,380px); transition:opacity .4s;
+      `;
+      toast.textContent = `[${status.toUpperCase()}] ${message}`;
+      document.body.appendChild(toast);
+      setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 400); }, 4000);
 
-      if (window.ModalManager?.closeModal) {
-        window.ModalManager.closeModal('addMoneyModal');
+      // --- Handle each status ---
+      if (status === 'completed') {
+        removePendingTxFromStorage();
+
+        // Trigger the full balance update flow (closes modal, success toast, sound)
+        const amount  = resData?.amount  ?? data.amount  ?? 0;
+        const balance = resData?.balance ?? 0;
+
+        if (typeof window.__handleBalanceUpdate === 'function') {
+          window.__handleBalanceUpdate({ type: 'balance_update', amount, balance });
+        } else {
+          window.dispatchEvent(new CustomEvent('balance_update', {
+            detail: { type: 'balance_update', amount, balance }
+          }));
+        }
+
+      } else if (status === 'pending') {
+        // still waiting — button re-enables so they can try again
       } else {
-        addMoneyModal.style.transform = 'translateY(100%)';
+        // unexpected status — already shown via toast above
       }
 
-      setTimeout(() => openAddMoneyModalContent(), 500);
-
-    } else if (res.ok && res.data?.status === 'pending') {
-      showLocalNotify('Payment still processing. Please wait a moment.', 'info');
-    } else {
-      showLocalNotify(res.error?.message || 'Payment not found yet. Try again in 30 seconds.', 'error');
+    } catch (err) {
+      console.error('[I Have Paid] Verification failed:', err);
+      showLocalNotify('Network error. Please try again.', 'error');
+    } finally {
+      iHavePaidBtn.disabled = false;
+      iHavePaidBtn.textContent = 'I Have Paid';
+      iHavePaidBtn.style.background = '#3b82f6';
     }
-  } catch (err) {
-    console.error('[I Have Paid] Verification failed:', err);
-    showLocalNotify('Network error. Please try again.', 'error');
-  } finally {
-    iHavePaidBtn.disabled = false;
-    iHavePaidBtn.textContent = 'I Have Paid';
-    iHavePaidBtn.style.background = '#3b82f6';
-  }
-});
-
+  });
+}
 
   // Replace modal content
   const contentContainer = addMoneyModal.querySelector('.addMoney-modal-content');
