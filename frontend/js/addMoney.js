@@ -55,12 +55,18 @@ function saveKYCState(accounts) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// PERMANENT ACCOUNTS DATA (fake for testing)
+// BANK LOGO + ACCENT MAP  (extend as you add more banks)
 // ─────────────────────────────────────────────────────────────
-const PERMANENT_ACCOUNTS = [
-  { bankName: 'PalmPay',  accountName: 'Flexgig Digital Network', accountNumber: '8031234567', logo: '/frontend/img/palmpay.png', logoFallback: 'PP', accentColor: '#00c853' },
-  { bankName: '9PSB',     accountName: 'Flexgig Digital Network', accountNumber: '9010987654', logo: '/frontend/img/9PSB.png',    logoFallback: '9P', accentColor: '#0077ff' }
-];
+const BANK_META = {
+  '9psb':    { logo: '/frontend/img/9PSB.png',    logoFallback: '9P', accentColor: '#0077ff' },
+  'palmpay': { logo: '/frontend/img/palmpay.png', logoFallback: 'PP', accentColor: '#00c853' },
+  '9psp':    { logo: '/frontend/img/9PSB.png',    logoFallback: '9P', accentColor: '#0077ff' },
+};
+
+function getBankMeta(bankName) {
+  const key = (bankName || '').toLowerCase().replace(/\s+/g, '');
+  return BANK_META[key] || { logo: '', logoFallback: (bankName || 'BK').substring(0, 2).toUpperCase(), accentColor: '#6366f1' };
+}
 
 // ─────────────────────────────────────────────────────────────
 // INJECT STYLES (once)
@@ -98,9 +104,12 @@ const PERMANENT_ACCOUNTS = [
 
 // ─────────────────────────────────────────────────────────────
 // BUILD COMPACT ACCOUNT CARDS (no-scroll layout)
+// Accepts an array shaped like the API response:
+//   { accountNumber, accountName, bankName, bankCode, currency }
 // ─────────────────────────────────────────────────────────────
 function buildAccountCards(accounts, container) {
   accounts.forEach(acct => {
+    const meta = getBankMeta(acct.bankName);
     const card = document.createElement('div');
     card.className = 'perm-acct-card';
     card.style.cssText = `
@@ -111,17 +120,17 @@ function buildAccountCards(accounts, container) {
     card.innerHTML = `
       <!-- Glow -->
       <div style="position:absolute;top:-20px;right:-20px;width:75px;height:75px;border-radius:50%;
-        background:radial-gradient(circle,${acct.accentColor}18,transparent 70%);pointer-events:none;"></div>
+        background:radial-gradient(circle,${meta.accentColor}18,transparent 70%);pointer-events:none;"></div>
 
       <!-- Bank + Account Name row -->
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
         <div style="width:36px;height:36px;border-radius:9px;background:#252525;flex-shrink:0;
           display:flex;align-items:center;justify-content:center;overflow:hidden;">
-          <img src="${acct.logo}" alt="${acct.bankName}"
+          <img src="${meta.logo}" alt="${acct.bankName}"
             style="width:100%;height:100%;object-fit:contain;"
             onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
           <div style="display:none;width:100%;height:100%;align-items:center;justify-content:center;
-            font-size:10px;font-weight:800;color:${acct.accentColor};">${acct.logoFallback}</div>
+            font-size:10px;font-weight:800;color:${meta.accentColor};">${meta.logoFallback}</div>
         </div>
         <div style="flex:1;min-width:0;">
           <div style="font-size:9px;color:rgba(255,255,255,0.4);text-transform:uppercase;letter-spacing:0.5px;">Bank</div>
@@ -132,7 +141,7 @@ function buildAccountCards(accounts, container) {
       <!-- Account Name -->
       <div style="margin-bottom:8px;">
         <div style="font-size:9px;color:rgba(255,255,255,0.4);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">Account Name</div>
-        <div style="font-size:13px;font-weight:600;color:#fff;">${acct.accountName}</div>
+        <div style="font-size:13px;font-weight:600;color:#fff;">${acct.accountName || 'Flexgig Digital Network'}</div>
       </div>
 
       <!-- Account Number + Copy -->
@@ -141,13 +150,13 @@ function buildAccountCards(accounts, container) {
         <div style="display:flex;align-items:center;gap:10px;">
           <span style="font-size:18px;font-weight:800;color:#fff;letter-spacing:2px;font-variant-numeric:tabular-nums;">${acct.accountNumber}</span>
           <button class="perm-copy-btn"
-            data-copy="${acct.accountNumber}" data-bank="${acct.bankName}" data-accent="${acct.accentColor}"
-            style="background:${acct.accentColor}1a;border:1px solid ${acct.accentColor}44 !important;
+            data-copy="${acct.accountNumber}" data-bank="${acct.bankName}" data-accent="${meta.accentColor}"
+            style="background:${meta.accentColor}1a;border:1px solid ${meta.accentColor}44 !important;
               padding:7px 9px;border-radius:9px;cursor:pointer;
               display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-left:auto;">
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
-              <path d="M6 11C6 8.17157 6 6.75736 6.87868 5.87868C7.75736 5 9.17157 5 12 5H15C17.8284 5 19.2426 5 20.1213 5.87868C21 6.75736 21 8.17157 21 11V16C21 18.8284 21 20.2426 20.1213 21.1213C19.2426 22 17.8284 22 15 22H12C9.17157 22 7.75736 22 6.87868 21.1213C6 20.2426 6 18.8284 6 16V11Z" stroke="${acct.accentColor}" stroke-width="1.5"/>
-              <path opacity="0.5" d="M6 19C4.34315 19 3 17.6569 3 16V10C3 6.22876 3 4.34315 4.17157 3.17157C5.34315 2 7.22876 2 11 2H15C16.6569 2 18 3.34315 18 5" stroke="${acct.accentColor}" stroke-width="1.5"/>
+              <path d="M6 11C6 8.17157 6 6.75736 6.87868 5.87868C7.75736 5 9.17157 5 12 5H15C17.8284 5 19.2426 5 20.1213 5.87868C21 6.75736 21 8.17157 21 11V16C21 18.8284 21 20.2426 20.1213 21.1213C19.2426 22 17.8284 22 15 22H12C9.17157 22 7.75736 22 6.87868 21.1213C6 20.2426 6 18.8284 6 16V11Z" stroke="${meta.accentColor}" stroke-width="1.5"/>
+              <path opacity="0.5" d="M6 19C4.34315 19 3 17.6569 3 16V10C3 6.22876 3 4.34315 4.17157 3.17157C5.34315 2 7.22876 2 11 2H15C16.6569 2 18 3.34315 18 5" stroke="${meta.accentColor}" stroke-width="1.5"/>
             </svg>
           </button>
         </div>
@@ -192,19 +201,22 @@ function buildAccountCards(accounts, container) {
 
 // ─────────────────────────────────────────────────────────────
 // RENDER PERMANENT ACCOUNTS inside .kyc-modal-body
-// Used both after verification AND on subsequent opens via addMoneyBtn
-// showVerifiedBadge = true only right after submitting BVN/NIN
+// accounts: array from API response or localStorage cache
+// showVerifiedBadge: true only right after first-time BVN/NIN submit
 // ─────────────────────────────────────────────────────────────
-function renderPermAccountsInKYCBody(showVerifiedBadge = false) {
+function renderPermAccountsInKYCBody(showVerifiedBadge = false, accounts = null) {
   const kycModalBody = document.querySelector('#kycVerifyModal .kyc-modal-body');
   const kycTitle     = document.querySelector('#kycVerifyModal .kyc-modal-title');
   if (!kycModalBody) return;
 
   if (kycTitle) kycTitle.textContent = 'Add Money';
 
+  // Prefer passed-in accounts, fall back to localStorage cache
+  const displayAccounts = accounts || getKYCState()?.accounts || [];
+
   kycModalBody.innerHTML = `
     ${showVerifiedBadge ? `
-    <!-- KYC Verified header — full original style, shown only right after verify -->
+    <!-- KYC Verified header — shown only right after submitting BVN/NIN -->
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;">
       <div class="perm-check-anim" style="
         width:38px;height:38px;border-radius:50%;flex-shrink:0;
@@ -243,7 +255,11 @@ function renderPermAccountsInKYCBody(showVerifiedBadge = false) {
   `;
 
   const list = document.getElementById('kycPermList');
-  buildAccountCards(PERMANENT_ACCOUNTS, list);
+  if (displayAccounts.length > 0) {
+    buildAccountCards(displayAccounts, list);
+  } else {
+    list.innerHTML = `<div style="text-align:center;padding:20px;color:rgba(255,255,255,0.4);font-size:13px;">No accounts found. Please contact support.</div>`;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -333,19 +349,16 @@ function showGeneratedError(message = 'Failed to generate account. Try again.') 
 
 // ─────────────────────────────────────────────────────────────
 // OPEN ADD MONEY MODAL CONTENT
-// If KYC verified → close addMoneyModal, open kycVerifyModal (full screen) instead
+// If KYC verified → close addMoneyModal, open kycVerifyModal instead
 // ─────────────────────────────────────────────────────────────
 async function openAddMoneyModalContent() {
   if (countdownTimerInterval) { clearInterval(countdownTimerInterval); countdownTimerInterval = null; }
 
   const kycState = getKYCState();
   if (kycState && kycState.verified) {
-    // Close the bottom-sheet addMoneyModal first (if it's open or being opened)
     if (window.ModalManager) {
-      // Small delay so the current open animation doesn't fight the close
       setTimeout(() => {
         window.ModalManager.closeModal('addMoneyModal');
-        // Open the full-screen KYC modal with permanent accounts (no badge on re-open)
         setTimeout(() => {
           renderPermAccountsInKYCBody(false);
           window.ModalManager.openModal('kycVerifyModal');
@@ -355,7 +368,7 @@ async function openAddMoneyModalContent() {
     return;
   }
 
-  // Not verified — render normal deposit form inside addMoneyModal
+  // Not KYC verified — render normal deposit form
   const contentContainer = addMoneyModal.querySelector('.addMoney-modal-content');
   const pending = getPendingTxFromStorage();
   if (pending) {
@@ -469,7 +482,7 @@ function getPendingTxFromStorage() {
   } catch (e) { return null; }
 }
 
-// --- Show Generated Bank Account (temporary) ---
+// --- Show Generated Bank Account (temporary / dynamic VA) ---
 function showGeneratedAccount(data) {
   try {
     if (data.expiresAt instanceof Date) data.expiresAt = data.expiresAt.toISOString();
@@ -640,7 +653,7 @@ window.getWebSocketStatus = function() {
 })();
 
 // ─────────────────────────────────────────────────────────────
-// KYC MODAL LOGIC
+// KYC MODAL LOGIC — PRODUCTION
 // ─────────────────────────────────────────────────────────────
 (function initKYCModal() {
   const kycModalBody  = document.querySelector('#kycVerifyModal .kyc-modal-body');
@@ -651,14 +664,11 @@ window.getWebSocketStatus = function() {
   let activeType = 'BVN';
   const originalFormHTML = kycModalBody.innerHTML;
 
-  // On every open: if KYC already verified → show permanent accounts (no badge)
-  // If not verified → restore the form
   document.addEventListener('modalOpened', (e) => {
     if (e.detail !== 'kycVerifyModal') return;
     const kycState = getKYCState();
     if (kycState?.verified) {
-      // Opened via addMoneyBtn redirect — show accounts, no verified badge
-      renderPermAccountsInKYCBody(false);
+      renderPermAccountsInKYCBody(false, kycState.accounts || []);
     } else {
       restoreKYCForm();
       activeType = 'BVN';
@@ -691,168 +701,144 @@ window.getWebSocketStatus = function() {
   document.getElementById('kycBtnNIN')?.addEventListener('click', () => setActiveType('NIN'));
 
   async function handleSubmit() {
-    const _input = document.getElementById('kycNumberInput'), _hint = document.getElementById('kycInputHint'), _submit = document.getElementById('kycSubmitBtn');
-    const value = _input?.value.replace(/\D/g, '') ?? '';
+    const _input  = document.getElementById('kycNumberInput');
+    const _hint   = document.getElementById('kycInputHint');
+    const _submit = document.getElementById('kycSubmitBtn');
+    const value   = _input?.value.replace(/\D/g, '') ?? '';
+
     if (value.length !== 11) {
-      _input?.classList.add('kyc-number-input--error'); _hint?.classList.add('kyc-input-hint--error');
+      _input?.classList.add('kyc-number-input--error');
+      _hint?.classList.add('kyc-input-hint--error');
       if (_hint) _hint.textContent = `Please enter a valid 11-digit ${activeType}.`;
       setTimeout(() => {
-        _input?.classList.remove('kyc-number-input--error'); _hint?.classList.remove('kyc-input-hint--error');
-        if (_hint) _hint.textContent = activeType === 'BVN' ? 'Your 11-digit BVN — dial *565*0# on any network to retrieve it.' : 'Your 11-digit NIN — check your NIN slip or dial *346# to retrieve it.';
+        _input?.classList.remove('kyc-number-input--error');
+        _hint?.classList.remove('kyc-input-hint--error');
+        if (_hint) _hint.textContent = activeType === 'BVN'
+          ? 'Your 11-digit BVN — dial *565*0# on any network to retrieve it.'
+          : 'Your 11-digit NIN — check your NIN slip or dial *346# to retrieve it.';
       }, 2500);
       return;
     }
 
-    // ── TESTING PHASE ──
     if (_submit) { _submit.disabled = true; _submit.textContent = 'Verifying…'; }
-    await new Promise(r => setTimeout(r, 900));
-    if (_submit) { _submit.disabled = false; _submit.textContent = `Submit ${activeType}`; }
 
-    saveKYCState(PERMANENT_ACCOUNTS);
-    // Show full verified header — user just completed KYC for the first time
-    renderPermAccountsInKYCBody(true);
+    try {
+      const res = await apiFetch('/api/kyc/submit', { method: 'POST', body: { type: activeType, number: value } });
 
-    // ── PRODUCTION: remove testing block above, uncomment this ──
-    // try {
-    //   const res = await apiFetch('/api/kyc/submit', { method:'POST', body:{ type:activeType, number:value } });
-    //   if (res.ok) { saveKYCState(res.data.accounts); renderPermAccountsInKYCBody(true); }
-    //   else { if (_hint) { _hint.classList.add('kyc-input-hint--error'); _hint.textContent = res.error?.message || 'Submission failed.'; } setTimeout(() => _hint?.classList.remove('kyc-input-hint--error'), 3000); }
-    // } catch (e) {
-    //   if (_hint) { _hint.classList.add('kyc-input-hint--error'); _hint.textContent = 'Network error. Try again.'; } setTimeout(() => _hint?.classList.remove('kyc-input-hint--error'), 3000);
-    // } finally { if (_submit) { _submit.disabled = false; _submit.textContent = `Submit ${activeType}`; } }
+      if (res.ok && res.data?.accounts) {
+        // Normalise field names from API → what buildAccountCards expects
+        const accounts = res.data.accounts.map(a => ({
+          accountNumber: a.accountNumber || a.account_number,
+          accountName:   a.accountName   || a.account_name,
+          bankName:      a.bankName      || a.bank_name,
+          bankCode:      a.bankCode      || a.bank_code,
+          currency:      a.currency      || 'NGN',
+        }));
+        saveKYCState(accounts);
+        renderPermAccountsInKYCBody(true, accounts);
+      } else if (res.ok && res.data?.alreadyVerified) {
+        // User was already verified — accounts already in cache or returned
+        const accounts = res.data.accounts?.map(a => ({
+          accountNumber: a.accountNumber || a.account_number,
+          accountName:   a.accountName   || a.account_name,
+          bankName:      a.bankName      || a.bank_name,
+          bankCode:      a.bankCode      || a.bank_code,
+          currency:      a.currency      || 'NGN',
+        })) || getKYCState()?.accounts || [];
+        saveKYCState(accounts);
+        renderPermAccountsInKYCBody(false, accounts);
+      } else {
+        if (_hint) { _hint.classList.add('kyc-input-hint--error'); _hint.textContent = res.error?.message || res.data?.message || 'Submission failed. Please try again.'; }
+        setTimeout(() => _hint?.classList.remove('kyc-input-hint--error'), 4000);
+      }
+    } catch (e) {
+      console.error('[KYC] handleSubmit error', e);
+      if (_hint) { _hint.classList.add('kyc-input-hint--error'); _hint.textContent = 'Network error. Please try again.'; }
+      setTimeout(() => _hint?.classList.remove('kyc-input-hint--error'), 4000);
+    } finally {
+      if (_submit) { _submit.disabled = false; _submit.textContent = `Submit ${activeType}`; }
+    }
   }
 
   submitBtn?.addEventListener('click', handleSubmit);
 })();
 
+// ─────────────────────────────────────────────────────────────
+// PATCH ADD MONEY BUTTON — redirect verified users to KYC modal
+// ─────────────────────────────────────────────────────────────
 (function () {
-  const KYC_STATE_KEY = 'flexgig.kyc_verified';
   const ADD_MONEY_BUTTON_SELECTORS = [
     '[data-modal="addMoneyModal"]',
     '#addMoneyBtn',
     '.add-money-btn'
   ];
 
-  function getKYCState() {
-    try {
-      return JSON.parse(localStorage.getItem(KYC_STATE_KEY));
-    } catch {
-      return null;
-    }
-  }
-
   function patchAddMoneyButton(btn) {
     if (!btn || btn.dataset.kycPatched) return;
     btn.dataset.kycPatched = 'true';
-
-    // Remove old modal triggers
     btn.removeAttribute('data-modal');
     btn.removeAttribute('onclick');
     btn.removeAttribute('href');
 
-    // Attach KYC modal
     btn.addEventListener('click', (e) => {
       e.preventDefault();
-      console.log('[KYC] Opening KYC modal directly');
+      const kycState = getKYCState();
 
-      // Render account cards with animation
-      if (typeof renderPermAccountsInKYCBody === 'function') {
-        renderPermAccountsInKYCBody(false);
-        const cards = document.querySelectorAll(
-          '#kycVerifyModal .perm-acct-card'
-        );
+      if (kycState?.verified) {
+        renderPermAccountsInKYCBody(false, kycState.accounts || []);
+        const cards = document.querySelectorAll('#kycVerifyModal .perm-acct-card');
         cards.forEach((card, i) => {
           card.style.transform = 'translateY(30px)';
           card.style.opacity = '0';
           card.style.transition = 'transform 0.5s ease, opacity 0.5s ease';
-          setTimeout(() => {
-            card.style.transform = 'translateY(0)';
-            card.style.opacity = '1';
-          }, 50 + i * 80);
+          setTimeout(() => { card.style.transform = 'translateY(0)'; card.style.opacity = '1'; }, 50 + i * 80);
         });
-      }
-
-      // Open KYC modal
-      if (window.ModalManager?.openModal) {
-        ModalManager.openModal('kycVerifyModal');
+        if (window.ModalManager?.openModal) window.ModalManager.openModal('kycVerifyModal');
+        else { const m = document.querySelector('#kycVerifyModal'); if (m) { m.classList.add('active'); m.style.display = 'block'; } }
       } else {
-        const modal = document.querySelector('#kycVerifyModal');
-        if (modal) {
-          modal.classList.add('active');
-          modal.style.display = 'block';
-        }
+        // Not verified — open normal add money modal
+        if (window.ModalManager?.openModal) window.ModalManager.openModal('addMoneyModal');
+        else { const m = document.getElementById('addMoneyModal'); if (m) { m.classList.add('active'); m.style.display = 'block'; } }
       }
     });
-
-    console.log('[KYC] Add Money button successfully relinked');
   }
 
   function init() {
-    const kycState = getKYCState();
-    if (!kycState?.verified) {
-      console.log('[KYC] Not verified, no changes applied');
-      return;
-    }
-
-    console.log('[KYC] Verified user detected');
-
-    // Observe DOM to catch button dynamically
     const observer = new MutationObserver(() => {
-      for (const sel of ADD_MONEY_BUTTON_SELECTORS) {
-        const btn = document.querySelector(sel);
-        if (btn) patchAddMoneyButton(btn);
-      }
+      ADD_MONEY_BUTTON_SELECTORS.forEach(sel => { const btn = document.querySelector(sel); if (btn) patchAddMoneyButton(btn); });
     });
-
     observer.observe(document.body, { childList: true, subtree: true });
-
-    // Run once immediately in case button is already in DOM
-    for (const sel of ADD_MONEY_BUTTON_SELECTORS) {
-      const btn = document.querySelector(sel);
-      if (btn) patchAddMoneyButton(btn);
-    }
+    ADD_MONEY_BUTTON_SELECTORS.forEach(sel => { const btn = document.querySelector(sel); if (btn) patchAddMoneyButton(btn); });
   }
 
-  init();
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
 })();
 
-(function () {
-  if (!window.renderPermAccountsInKYCBody) return;
-
-  // Patch renderPermAccountsInKYCBody to prevent card glitches
-  window.renderPermAccountsInKYCBody = (function (originalFunc) {
-    let renderedOnce = false;
-
-    return function (showVerifiedBadge = false) {
-      const kycModalBody = document.querySelector('#kycVerifyModal .kyc-modal-body');
-      if (!kycModalBody) return;
-
-      // Only render the account cards once
-      if (!renderedOnce) {
-        renderedOnce = true;
-        originalFunc.call(this, showVerifiedBadge);
-
-        // Optional: animate cards on first render
-        const cards = kycModalBody.querySelectorAll('.perm-acct-card');
-        cards.forEach((card, i) => {
-          card.style.transform = 'translateY(30px)';
-          card.style.opacity = '0';
-          card.style.transition = 'transform 0.5s ease, opacity 0.5s ease';
-          setTimeout(() => {
-            card.style.transform = 'translateY(0)';
-            card.style.opacity = '1';
-          }, 50 + i * 80);
-        });
-      } else {
-        // Only toggle verified badge if already rendered
-        const badge = kycModalBody.querySelector('.perm-check-anim');
-        if (badge) badge.style.display = showVerifiedBadge ? 'flex' : 'none';
-      }
-    };
-  })(window.renderPermAccountsInKYCBody);
-
-  // Safe immediate render; will only build cards once
-  window.renderPermAccountsInKYCBody(false);
-
-  console.log('[KYC] renderPermAccountsInKYCBody patched and ready');
+// ─────────────────────────────────────────────────────────────
+// ON PAGE LOAD — sync KYC state from server (handles browser
+// cache clearing or multi-device scenarios)
+// ─────────────────────────────────────────────────────────────
+(async function syncKYCStateFromServer() {
+  try {
+    const res = await apiFetch('/api/kyc/accounts', { method: 'GET' });
+    if (res.ok && res.data?.kycStatus === 'verified' && Array.isArray(res.data.accounts) && res.data.accounts.length > 0) {
+      const accounts = res.data.accounts.map(a => ({
+        accountNumber: a.account_number || a.accountNumber,
+        accountName:   a.account_name   || a.accountName,
+        bankName:      a.bank_name      || a.bankName,
+        bankCode:      a.bank_code      || a.bankCode,
+        currency:      a.currency       || 'NGN',
+      }));
+      saveKYCState(accounts);
+      console.log('[KYC] State synced from server —', accounts.length, 'accounts');
+    } else if (res.ok && res.data?.kycStatus !== 'verified') {
+      // Server says not verified — clear any stale localStorage flag
+      localStorage.removeItem(KYC_STATE_KEY);
+      console.log('[KYC] Server says not verified — local state cleared');
+    }
+  } catch (e) {
+    // Non-fatal: just use whatever is already in localStorage
+    console.warn('[KYC] Server sync failed (using cached state)', e?.message);
+  }
 })();
