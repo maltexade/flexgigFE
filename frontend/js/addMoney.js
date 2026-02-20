@@ -859,3 +859,33 @@ window.getWebSocketStatus = function() {
     console.warn('[KYC] Server sync failed (using cached state)', e?.message);
   }
 })();
+
+// Patch: stop account card glitching in KYC modal
+(function() {
+  // 1. Disable the slide-up animation that can cause visual glitch on open
+  const style = document.createElement('style');
+  style.id = 'fix-perm-acct-glitch';
+  style.textContent = `
+    .perm-acct-card {
+      animation: none !important;
+      opacity: 1 !important;
+      transform: none !important;
+    }
+  `;
+  document.head.appendChild(style);
+
+  // 2. Prevent double-render by patching renderPermAccountsInKYCBody
+  const original = window.renderPermAccountsInKYCBody;
+  let rendering = false;
+  window.renderPermAccountsInKYCBody = function(showVerifiedBadge, accounts) {
+    if (rendering) {
+      console.debug('[FIX] renderPermAccountsInKYCBody: blocked double render');
+      return;
+    }
+    rendering = true;
+    original(showVerifiedBadge, accounts);
+    setTimeout(() => { rendering = false; }, 500);
+  };
+
+  console.log('[FIX] Account glitch patch applied');
+})();
