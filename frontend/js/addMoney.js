@@ -55,6 +55,23 @@ function saveKYCState(accounts) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// SEED KYC STATE FROM SESSION — call this after login/session fetch
+// Prevents new-device users from seeing the KYC form again
+// ─────────────────────────────────────────────────────────────
+function seedKYCStateFromSessionUser(sessionUser) {
+  if (!sessionUser) return;
+  if (sessionUser.kycStatus === 'verified' && Array.isArray(sessionUser.kycAccounts) && sessionUser.kycAccounts.length > 0) {
+    const existing = getKYCState();
+    // Only write if not already set (avoid overwriting with stale data)
+    if (!existing || !existing.verified) {
+      saveKYCState(sessionUser.kycAccounts);
+      console.log('[KYC] Seeded from session —', sessionUser.kycAccounts.length, 'accounts');
+    }
+  }
+}
+window.seedKYCStateFromSessionUser = seedKYCStateFromSessionUser;
+
+// ─────────────────────────────────────────────────────────────
 // BANK LOGO + ACCENT MAP  (extend as you add more banks)
 // ─────────────────────────────────────────────────────────────
 const BANK_META = {

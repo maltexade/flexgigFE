@@ -3825,6 +3825,13 @@ async function onDashboardLoad() {
     session = null;
   }
 
+
+
+// Seed KYC state from session so new/switched devices get localStorage populated instantly
+if (session?.user && typeof window.seedKYCStateFromSessionUser === 'function') {
+  window.seedKYCStateFromSessionUser(session.user);
+}
+
   setupBroadcastSubscription();
   subscribeToWalletBalance();
   loadLatestHistoryAsFallback();
