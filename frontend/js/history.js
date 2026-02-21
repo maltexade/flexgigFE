@@ -468,7 +468,7 @@ function getTxIcon(tx) {
   if (tx.provider) text += tx.provider.toLowerCase() + ' ';
   if (tx.service) text += tx.service.toLowerCase() + ' ';
 
-  if (text.includes('opay'))      return { cls: 'incoming',       img: '/frontend/svg/bank.svg',      alt: 'Opay' };
+  if (text.includes('funding'))      return { cls: 'incoming',       img: '/frontend/svg/bank.svg',      alt: 'Opay' };
   if (text.includes('mtn'))       return { cls: 'mtn targets',    img: '/frontend/img/mtn.svg',       alt: 'MTN' };
   if (text.includes('airtel'))    return { cls: 'airtel targets', img: '/frontend/svg/airtel-icon.svg', alt: 'Airtel' };
   if (text.includes('glo'))       return { cls: 'glo targets',    img: '/frontend/svg/GLO-icon.svg',  alt: 'GLO' };
