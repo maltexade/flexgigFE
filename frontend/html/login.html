@@ -77,7 +77,6 @@
       font-size: 16px;
     }
     #newPassword { line-height: 1.5; }
-    
     .input:focus { border-color: var(--blue); box-shadow: 0 0 0 4px rgba(37,99,235,.15); }
     .error { color: #f87171; font-size: 14px; min-height: 18px; }
     .btn {
@@ -89,8 +88,30 @@
       background: linear-gradient(90deg, var(--blue), var(--green));
       font-weight: 700;
       cursor: pointer;
+      position: relative;
+      transition: opacity 0.2s;
     }
     .btn[disabled] { opacity: .6; cursor: not-allowed; }
+
+    /* Inline spinner inside button */
+    .btn .btn-spinner {
+      display: none;
+      width: 18px;
+      height: 18px;
+      border: 2.5px solid rgba(255,255,255,0.35);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      position: absolute;
+      right: 16px;
+      top: 50%;
+      transform: translateY(-50%);
+    }
+    .btn.loading .btn-spinner { display: block; }
+    .btn.loading { padding-right: 48px; }
+
+    @keyframes spin { to { transform: translateY(-50%) rotate(360deg); } }
+
     .hint { color: var(--muted); font-size: 13px; margin-top: 10px; }
     .center { text-align: center; }
     .otp-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin: 14px 0 18px; }
@@ -109,9 +130,7 @@
       border: 1px solid var(--border);
       color: var(--white);
     }
-    #forgetpassword {
-      margin-top: 10px;
-    }
+    #forgetpassword { margin-top: 10px; }
     .row { display: flex; align-items: center; gap: 12px; }
     .password-field { position: relative; }
     .eye-toggle {
@@ -175,9 +194,8 @@
         <input class="input" id="email" name="email" type="email" placeholder="you@domain.com" autocomplete="email" />
         <div class="error" id="emailErr"></div>
       </div>
-      <button class="btn" id="emailContinue">Continue</button>
-      <p class="loading" id="emailLoading">Verifying email...</p>
-      <p class="hint center">We’ll check if you already have an account.</p>
+      <button class="btn" id="emailContinue">Continue <span class="btn-spinner"></span></button>
+      <p class="hint center">We'll check if you already have an account.</p>
     </div>
 
     <div class="card hidden" id="step-password">
@@ -196,7 +214,7 @@
         </svg>
         <div class="error" id="passwordErr"></div>
       </div>
-      <button class="btn" id="loginBtn">Login</button>
+      <button class="btn" id="loginBtn">Login <span class="btn-spinner"></span></button>
       <p class="hint center"><a href="#" id="forgotPassword" class="forgot-password">Forgot password?</a></p>
     </div>
 
@@ -209,9 +227,9 @@
       <p class="sub" id="otpSentTo">We sent a code to your email.</p>
       <div class="otp-grid" id="otpGrid"></div>
       <div class="error" id="otpErr"></div>
-      <button class="btn" id="verifyOtpBtn">Verify</button>
+      <button class="btn" id="verifyOtpBtn">Verify <span class="btn-spinner"></span></button>
       <p class="hint center">
-        Didn’t see it? <a href="#" id="resendOtp" class="resend-btn">Resend OTP</a>
+        Didn't see it? <a href="#" id="resendOtp" class="resend-btn">Resend OTP</a>
         <span id="resendCountdown" class="hidden"></span>
       </p>
     </div>
@@ -236,7 +254,7 @@
         </svg>
         <div class="error" id="setPwdErr"></div>
       </div>
-      <button class="btn" id="setPwdBtn">Save password</button>
+      <button class="btn" id="setPwdBtn">Save password <span class="btn-spinner"></span></button>
     </div>
 
     <div class="card hidden" id="step-resetpwd">
@@ -267,22 +285,69 @@
         </svg>
         <div class="error" id="resetPwdErr"></div>
       </div>
-      <button class="btn" id="resetPwdBtn">Reset password</button>
+      <button class="btn" id="resetPwdBtn">Reset password <span class="btn-spinner"></span></button>
     </div>
   </div>
 
   <script>
-  // --- CONFIG ---
+  // ─── withLoader (inline fallback + your external one will override if loaded) ───
+  (function () {
+    let __loaderRefCount = 0;
+    let __backHandler = null;
+    let __loaderBackHandlerInstalled = false;
+
+    // Button-level loading helper (used when no global appLoader exists)
+    window._btnLoading = function (btn, active) {
+      if (active) {
+        btn.setAttribute('disabled', true);
+        btn.classList.add('loading');
+      } else {
+        btn.removeAttribute('disabled');
+        btn.classList.remove('loading');
+      }
+    };
+
+    window.showLoader = window.showLoader || function () {
+      const loader = document.getElementById('appLoader');
+      if (loader) {
+        __loaderRefCount++;
+        if (__loaderRefCount === 1) loader.hidden = false;
+      }
+    };
+
+    window.hideLoader = window.hideLoader || function (forceReset = false) {
+      const loader = document.getElementById('appLoader');
+      if (loader) {
+        if (forceReset) __loaderRefCount = 0;
+        else __loaderRefCount = Math.max(0, __loaderRefCount - 1);
+        if (__loaderRefCount === 0) loader.hidden = true;
+      }
+    };
+
+    window.withLoader = window.withLoader || async function withLoader(task) {
+      showLoader();
+      try {
+        return await task();
+      } catch (err) {
+        throw err;
+      } finally {
+        try { hideLoader(); } catch (e) { /* ignore */ }
+      }
+    };
+  })();
+
+  // ─── CONFIG ───
   const API_BASE = 'https://api.flexgig.com.ng';
   const WEB_BASE = 'https://www.flexgig.com.ng';
-  // --- STATE ---
+
+  // ─── STATE ───
   let currentEmail = '';
-  let accessToken = ''; // For set-password
-  let userUid = ''; // For set-password
+  let accessToken = '';
+  let userUid = '';
   const OTP_LENGTH = 6;
   let resendTimer = null;
 
-  // Helpers
+  // ─── HELPERS ───
   const qs = (s) => document.querySelector(s);
   const show = (id) => {
     hideAll();
@@ -291,7 +356,8 @@
     el.classList.add('fade');
     saveState(id);
   };
-  const hideAll = () => ['#step-email', '#step-password', '#step-otp', '#step-setpwd', '#step-resetpwd'].forEach(s => qs(s).classList.add('hidden'));
+  const hideAll = () => ['#step-email', '#step-password', '#step-otp', '#step-setpwd', '#step-resetpwd']
+    .forEach(s => qs(s).classList.add('hidden'));
   const maskEmail = (email) => {
     const [name, domain] = email.split('@');
     if (!name || !domain) return email;
@@ -299,7 +365,17 @@
     return `${visible}${'*'.repeat(Math.max(1, name.length - 2))}@${domain}`;
   };
 
-  // Save state to localStorage
+  // Button-level loading: disables + shows spinner, restores on done
+  const withBtnLoader = async (btn, task) => {
+    _btnLoading(btn, true);
+    try {
+      return await withLoader(task);
+    } finally {
+      _btnLoading(btn, false);
+    }
+  };
+
+  // ─── STATE PERSISTENCE ───
   const saveState = (id) => {
     const state = {
       step: id,
@@ -308,13 +384,7 @@
     };
     localStorage.setItem('loginState', JSON.stringify(state));
   };
-
-  // Clear state from localStorage
-  const clearState = () => {
-    localStorage.removeItem('loginState');
-  };
-
-  // Restore state on load
+  const clearState = () => localStorage.removeItem('loginState');
   const restoreState = () => {
     const state = JSON.parse(localStorage.getItem('loginState'));
     if (!state) return;
@@ -323,7 +393,6 @@
       qs('#email').value = currentEmail;
       show('#step-email');
     } else if (state.step === '#step-password') {
-      currentEmail = state.email || currentEmail;
       qs('#pwdFor').textContent = `for ${currentEmail}`;
       qs('#password').value = '';
       show('#step-password');
@@ -331,9 +400,7 @@
     } else if (state.step === '#step-otp') {
       qs('#otpSentTo').textContent = `Enter the OTP sent to your email ${maskEmail(currentEmail)}`;
       const boxes = otpGrid.querySelectorAll('input');
-      state.otp.split('').forEach((digit, idx) => {
-        if (boxes[idx]) boxes[idx].value = digit;
-      });
+      state.otp.split('').forEach((digit, idx) => { if (boxes[idx]) boxes[idx].value = digit; });
       show('#step-otp');
       startResendCountdown();
     } else if (state.step === '#step-setpwd') {
@@ -343,7 +410,7 @@
     }
   };
 
-  // Password visibility toggle
+  // ─── PASSWORD VISIBILITY TOGGLE ───
   const togglePasswordVisibility = (inputId, toggleId) => {
     const input = qs(inputId);
     const toggle = qs(toggleId);
@@ -361,7 +428,7 @@
   togglePasswordVisibility('#resetNewPassword', '#toggleResetNewPassword');
   togglePasswordVisibility('#resetConfirmPassword', '#toggleResetConfirmPassword');
 
-  // OTP inputs
+  // ─── OTP INPUTS ───
   const otpGrid = qs('#otpGrid');
   for (let i = 0; i < OTP_LENGTH; i++) {
     const inp = document.createElement('input');
@@ -371,44 +438,30 @@
     inp.autocomplete = 'one-time-code';
     inp.addEventListener('input', (e) => {
       e.target.value = e.target.value.replace(/\D/g, '');
-      if (e.target.value && i < OTP_LENGTH - 1) {
-        otpGrid.children[i + 1].focus();
-      }
-      if (i === OTP_LENGTH - 1 && e.target.value) {
-        e.target.blur();
-        qs('#verifyOtpBtn').click();
-      }
+      if (e.target.value && i < OTP_LENGTH - 1) otpGrid.children[i + 1].focus();
+      if (i === OTP_LENGTH - 1 && e.target.value) { e.target.blur(); qs('#verifyOtpBtn').click(); }
       saveState('#step-otp');
     });
     inp.addEventListener('keydown', (e) => {
-      if (e.key === 'Backspace' && !e.target.value && i > 0) {
-        otpGrid.children[i - 1].focus();
-      }
+      if (e.key === 'Backspace' && !e.target.value && i > 0) otpGrid.children[i - 1].focus();
     });
     otpGrid.appendChild(inp);
   }
-
-  // OTP paste
   otpGrid.addEventListener('paste', (e) => {
     e.preventDefault();
     const paste = (e.clipboardData || window.clipboardData).getData('text').replace(/\D/g, '');
     if (!paste) return;
     const boxes = otpGrid.querySelectorAll('input');
-    boxes.forEach((box, idx) => {
-      box.value = paste[idx] || '';
-    });
+    boxes.forEach((box, idx) => { box.value = paste[idx] || ''; });
     const filled = Math.min(paste.length, OTP_LENGTH) - 1;
     if (filled >= 0) {
       boxes[filled].focus();
-      if (filled === OTP_LENGTH - 1) {
-        boxes[filled].blur();
-        qs('#verifyOtpBtn').click();
-      }
+      if (filled === OTP_LENGTH - 1) { boxes[filled].blur(); qs('#verifyOtpBtn').click(); }
     }
     saveState('#step-otp');
   });
 
-  // Resend OTP countdown
+  // ─── RESEND COUNTDOWN ───
   const startResendCountdown = () => {
     const resendBtn = qs('#resendOtp');
     const countdownEl = qs('#resendCountdown');
@@ -427,23 +480,18 @@
     }, 1000);
   };
 
-  // Step 1: Email continue (robust and handles 400 'Password required')
+  // ─── STEP 1: EMAIL CONTINUE ───
   qs('#emailContinue').addEventListener('click', async () => {
     const email = qs('#email').value.trim().toLowerCase();
     qs('#emailErr').textContent = '';
-    qs('#emailLoading').classList.add('active');
-    qs('#emailContinue').setAttribute('disabled', true);
 
     if (!/^\S+@\S+\.\S+$/.test(email)) {
       qs('#emailErr').textContent = 'Enter a valid email address';
-      qs('#emailLoading').classList.remove('active');
-      qs('#emailContinue').removeAttribute('disabled');
       return;
     }
-
     currentEmail = email;
 
-    try {
+    await withBtnLoader(qs('#emailContinue'), async () => {
       const resp = await fetch(`${API_BASE}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -453,61 +501,50 @@
       const body = await resp.json();
       console.info('login-check response:', body);
 
-      // If 400 with "Password required" — treat as password-needed
       if (!resp.ok && body?.error && (body.error.message === 'Password required' || body.error.code === 'INVALID_INPUT')) {
         qs('#pwdFor').textContent = `for ${email}`;
         qs('#password').value = '';
-        // surface the server message in the password error slot so user sees it
         qs('#passwordErr').textContent = body.error.message || 'Password required';
         show('#step-password');
-        saveState('#step-password');
         setTimeout(() => qs('#password').focus(), 50);
         return;
       }
 
       if (!resp.ok) throw new Error(body.error?.message || body.message || 'Server error');
 
-      // OTP path (new user / OTP factor)
       if (body.status === 'otp_sent' || body.otp_sent || body.requires_otp) {
         qs('#otpSentTo').textContent = `Enter the OTP sent to your email ${maskEmail(email)}`;
         startResendCountdown();
         show('#step-otp');
-        saveState('#step-otp');
         otpGrid.querySelector('input')?.focus();
         return;
       }
 
-      // Password path (existing user)
       if (body.status === 'password_required' || body.hasPassword === true || body.requires_password === true || body.status === 'has_password') {
         qs('#pwdFor').textContent = `for ${email}`;
         qs('#password').value = '';
         if (body.message) qs('#passwordErr').textContent = body.message;
         show('#step-password');
-        saveState('#step-password');
         setTimeout(() => qs('#password').focus(), 50);
         return;
       }
 
-      // fallback: show password input
+      // Fallback: show password input
       qs('#pwdFor').textContent = `for ${email}`;
       qs('#password').value = '';
       show('#step-password');
-      saveState('#step-password');
       setTimeout(() => qs('#password').focus(), 50);
-    } catch (err) {
+    }).catch(err => {
       qs('#emailErr').textContent = err.message || 'Error checking email';
-    } finally {
-      qs('#emailLoading').classList.remove('active');
-      qs('#emailContinue').removeAttribute('disabled');
-    }
+    });
   });
 
-  // Back links
+  // ─── BACK LINKS ───
   qs('#backToEmailPwd').addEventListener('click', (e) => { e.preventDefault(); show('#step-email'); });
   qs('#backToEmailOtp').addEventListener('click', (e) => { e.preventDefault(); clearInterval(resendTimer); show('#step-email'); });
   qs('#backToEmailReset').addEventListener('click', (e) => { e.preventDefault(); show('#step-email'); });
 
-  // Step 2a: Password login
+  // ─── STEP 2a: PASSWORD LOGIN ───
   qs('#loginBtn').addEventListener('click', async () => {
     const password = qs('#password').value;
     qs('#passwordErr').textContent = '';
@@ -515,7 +552,8 @@
       qs('#passwordErr').textContent = 'Password must be at least 8 characters';
       return;
     }
-    try {
+
+    await withBtnLoader(qs('#loginBtn'), async () => {
       const res = await fetch(`${API_BASE}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -535,16 +573,18 @@
         document.cookie = `rt=${data.refreshToken}; path=/; secure; samesite=none; httponly`;
         window.location.href = `${WEB_BASE}/dashboard`;
       }
-    } catch (err) {
+    }).catch(err => {
       qs('#passwordErr').textContent = err.message || 'Login failed';
-    }
+    });
   });
 
-  // Forgot Password
+  // ─── FORGOT PASSWORD ───
   qs('#forgotPassword').addEventListener('click', async (e) => {
     e.preventDefault();
     qs('#passwordErr').textContent = '';
-    try {
+    const btn = qs('#loginBtn'); // Re-use login btn loader for this action
+
+    await withBtnLoader(btn, async () => {
       const res = await fetch(`${API_BASE}/auth/send-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -557,12 +597,12 @@
       otpGrid.querySelector('input')?.focus();
       startResendCountdown();
       show('#step-otp');
-    } catch (err) {
+    }).catch(err => {
       qs('#passwordErr').textContent = err.message;
-    }
+    });
   });
 
-  // Step 2b: Verify OTP
+  // ─── STEP 2b: VERIFY OTP ───
   qs('#verifyOtpBtn').addEventListener('click', async () => {
     const digits = Array.from(otpGrid.querySelectorAll('input')).map(i => i.value).join('');
     qs('#otpErr').textContent = '';
@@ -570,7 +610,8 @@
       qs('#otpErr').textContent = `Enter the ${OTP_LENGTH}-digit code`;
       return;
     }
-    try {
+
+    await withBtnLoader(qs('#verifyOtpBtn'), async () => {
       const res = await fetch(`${API_BASE}/auth/verify-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -584,17 +625,18 @@
       document.cookie = `token=${data.token}; path=/; secure; samesite=none`;
       clearState();
       show('#step-setpwd');
-    } catch (err) {
+    }).catch(err => {
       qs('#otpErr').textContent = err.message;
-    }
+    });
   });
 
-  // Resend OTP
+  // ─── RESEND OTP ───
   qs('#resendOtp').addEventListener('click', async (e) => {
     e.preventDefault();
     if (qs('#resendOtp').hasAttribute('disabled')) return;
     qs('#otpErr').textContent = '';
-    try {
+
+    await withLoader(async () => {
       const res = await fetch(`${API_BASE}/auth/resend-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -606,32 +648,31 @@
       qs('#otpSentTo').textContent = `New OTP sent to ${maskEmail(currentEmail)}`;
       startResendCountdown();
       saveState('#step-otp');
-    } catch (err) {
+    }).catch(err => {
       qs('#otpErr').textContent = err.message;
-    }
+    });
   });
 
-  // Step 3: Set password
+  // ─── STEP 3: SET PASSWORD ───
   qs('#setPwdBtn').addEventListener('click', async () => {
     const p1 = qs('#newPassword').value;
     const p2 = qs('#confirmPassword').value;
-    const err = qs('#setPwdErr');
-    err.textContent = '';
-    if (!p1 || p1.length < 8) return err.textContent = 'Password must be at least 8 characters';
-    if (p1 !== p2) return err.textContent = 'Passwords do not match';
-    try {
+    const errEl = qs('#setPwdErr');
+    errEl.textContent = '';
+    if (!p1 || p1.length < 8) { errEl.textContent = 'Password must be at least 8 characters'; return; }
+    if (p1 !== p2) { errEl.textContent = 'Passwords do not match'; return; }
+
+    await withBtnLoader(qs('#setPwdBtn'), async () => {
       const res = await fetch(`${API_BASE}/auth/set-password`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${accessToken}`,
-        },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
         body: JSON.stringify({ uid: userUid, password: p1 }),
         credentials: 'include',
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error?.message || 'Failed to set password');
       clearState();
+
       // Auto-login after setting password
       const loginRes = await fetch(`${API_BASE}/auth/login`, {
         method: 'POST',
@@ -644,23 +685,23 @@
       document.cookie = `token=${loginData.token}; path=/; secure; samesite=none`;
       document.cookie = `rt=${loginData.refreshToken}; path=/; secure; samesite=none; httponly`;
       window.location.href = `${WEB_BASE}/dashboard`;
-    } catch (err) {
-      err.textContent = err.message;
-    }
+    }).catch(err => {
+      errEl.textContent = err.message;
+    });
   });
 
-  // Step 4: Reset password
+  // ─── STEP 4: RESET PASSWORD ───
   qs('#resetPwdBtn').addEventListener('click', async () => {
     const code = qs('#resetCode').value.trim();
     const p1 = qs('#resetNewPassword').value;
     const p2 = qs('#resetConfirmPassword').value;
-    const err = qs('#resetPwdErr');
-    err.textContent = '';
-    if (!code) return err.textContent = 'Enter the reset code';
-    if (!p1 || p1.length < 8) return err.textContent = 'Password must be at least 8 characters';
-    if (p1 !== p2) return err.textContent = 'Passwords do not match';
-    try {
-      // Verify OTP for recovery
+    const errEl = qs('#resetPwdErr');
+    errEl.textContent = '';
+    if (!code) { errEl.textContent = 'Enter the reset code'; return; }
+    if (!p1 || p1.length < 8) { errEl.textContent = 'Password must be at least 8 characters'; return; }
+    if (p1 !== p2) { errEl.textContent = 'Passwords do not match'; return; }
+
+    await withBtnLoader(qs('#resetPwdBtn'), async () => {
       const verifyRes = await fetch(`${API_BASE}/auth/verify-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -671,19 +712,16 @@
       if (!verifyRes.ok) throw new Error(verifyData.error?.message || 'Invalid reset code');
       accessToken = verifyData.token;
       userUid = verifyData.user.uid;
-      // Set new password
+
       const setRes = await fetch(`${API_BASE}/auth/set-password`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${accessToken}`,
-        },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${accessToken}` },
         body: JSON.stringify({ uid: userUid, password: p1 }),
         credentials: 'include',
       });
       const setData = await setRes.json();
       if (!setRes.ok) throw new Error(setData.error?.message || 'Failed to set password');
-      // Auto-login
+
       const loginRes = await fetch(`${API_BASE}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -696,12 +734,12 @@
       document.cookie = `token=${loginData.token}; path=/; secure; samesite=none`;
       document.cookie = `rt=${loginData.refreshToken}; path=/; secure; samesite=none; httponly`;
       window.location.href = `${WEB_BASE}/dashboard`;
-    } catch (err) {
-      err.textContent = err.message;
-    }
+    }).catch(err => {
+      errEl.textContent = err.message;
+    });
   });
 
-  // Handle reset password URL params and initial state
+  // ─── INIT ───
   window.addEventListener('load', () => {
     const params = new URLSearchParams(window.location.search);
     const email = params.get('email');
@@ -714,7 +752,6 @@
       restoreState();
     }
   });
-</script>
-
+  </script>
 </body>
 </html>
