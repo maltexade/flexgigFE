@@ -619,6 +619,19 @@ async function subscribeToWalletBalance(force = false) {
     return;
   }
 
+  // ✅ Remove existing channel before creating a new one
+  if (balanceRealtimeChannel) {
+    console.log('[Wallet Realtime] Removing existing channel before re-subscribing');
+    try {
+      const authClient = await getSharedAuthClient(false);
+      if (authClient) await authClient.removeChannel(balanceRealtimeChannel);
+    } catch (e) {
+      console.warn('[Wallet Realtime] Failed to remove old channel (non-fatal):', e?.message);
+    }
+    balanceRealtimeChannel = null;
+    window.__balanceRealtimeChannel = null;
+  }
+
   isSubscribing = true;
 
   try {
