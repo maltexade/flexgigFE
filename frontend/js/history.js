@@ -2177,6 +2177,19 @@ async function subscribeToTransactions(force = false) {
     return;
   }
 
+  // ✅ If a channel already exists, remove it before creating a new one
+  if (txRealtimeChannel) {
+    console.log('[Tx Realtime] Removing existing channel before re-subscribing');
+    try {
+      const authClient = await getSharedAuthClient(false);
+      if (authClient) await authClient.removeChannel(txRealtimeChannel);
+    } catch (e) {
+      console.warn('[Tx Realtime] Failed to remove old channel (non-fatal):', e?.message);
+    }
+    txRealtimeChannel = null;
+    window.__txRealtimeChannel = null;
+  }
+
   txIsSubscribing = true;
 
   try {
