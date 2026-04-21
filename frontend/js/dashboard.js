@@ -604,6 +604,7 @@ let activeRetryTimer = null;
 let lastHealthyTs = 0;
 const SUBSCRIPTION_RETRY_MS = 15000;
 const HEALTHY_THRESHOLD_MS = 5000;
+let isIntentionalWalletClose = false;
 
 async function subscribeToWalletBalance(force = false) {
   const now = Date.now();
@@ -622,6 +623,7 @@ async function subscribeToWalletBalance(force = false) {
   // ✅ Remove existing channel before creating a new one
   if (balanceRealtimeChannel) {
     console.log('[Wallet Realtime] Removing existing channel before re-subscribing');
+    isIntentionalWalletClose = true; // ✅ prevent CLOSED from triggering retry
     try {
       const authClient = await getSharedAuthClient(false);
       if (authClient) await authClient.removeChannel(balanceRealtimeChannel);
@@ -630,6 +632,7 @@ async function subscribeToWalletBalance(force = false) {
     }
     balanceRealtimeChannel = null;
     window.__balanceRealtimeChannel = null;
+    isIntentionalWalletClose = false; // ✅ re-enable after removal
   }
 
   isSubscribing = true;
@@ -782,6 +785,10 @@ async function subscribeToWalletBalance(force = false) {
             }
           }, 30000);
         } else if (['CLOSED', 'CHANNEL_ERROR', 'TIMED_OUT'].includes(status)) {
+          if (isIntentionalWalletClose) {
+            console.log('[Wallet Realtime] CLOSED due to intentional removal — ignoring');
+            return;
+          }
           console.warn('[Wallet Realtime] Channel state:', status);
           scheduleRetry();
         }

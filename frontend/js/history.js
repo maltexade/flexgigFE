@@ -2159,6 +2159,7 @@ let txIsSubscribing = false;
 let txRetryTimer = null;
 let lastTxHealthy = 0;
 let realtimeFailedCount = 0;
+let txIsIntentionalClose = false;
 
 const TX_RETRY_MS = 15000;
 const TX_HEALTHY_THRESHOLD = 5000;
@@ -2180,6 +2181,7 @@ async function subscribeToTransactions(force = false) {
   // ✅ If a channel already exists, remove it before creating a new one
   if (txRealtimeChannel) {
     console.log('[Tx Realtime] Removing existing channel before re-subscribing');
+    txIsIntentionalClose = true; // ✅ suppress failure counter during removal
     try {
       const authClient = await getSharedAuthClient(false);
       if (authClient) await authClient.removeChannel(txRealtimeChannel);
@@ -2188,6 +2190,7 @@ async function subscribeToTransactions(force = false) {
     }
     txRealtimeChannel = null;
     window.__txRealtimeChannel = null;
+    txIsIntentionalClose = false;
   }
 
   txIsSubscribing = true;
@@ -2344,6 +2347,10 @@ async function subscribeToTransactions(force = false) {
           if (txRetryTimer) clearTimeout(txRetryTimer);
         } 
         else if (['CLOSED', 'CHANNEL_ERROR', 'TIMED_OUT'].includes(status)) {
+          if (txIsIntentionalClose) {
+            console.log('[Tx Realtime] CLOSED due to intentional removal — ignoring');
+            return;
+          }
           realtimeFailedCount++;
           console.warn('[Tx Realtime] Channel failed - attempt:', realtimeFailedCount);
 
