@@ -539,16 +539,17 @@ window.resolvePreloadWaiters = resolvePreloadWaiters; // optional for debugging
   function hide(el) { el?.classList.add('hidden'); }
 
   function safeFetch(url, opts = {}) {
-    const headers = Object.assign({}, opts.headers || {}, CONFIG.authHeader());
-    return fetch(url, { ...opts, headers, credentials: 'include' })
-      .then(res => {
-        if (!res.ok) {
-          const err = new Error('Network response was not ok');
-          err.status = res.status;
-          throw err;
-        }
-        return res.json();
-      });
+    return fetch(url, {
+      ...opts,
+      credentials: 'include'
+    })
+    .then(async res => {
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text);
+      }
+      return res.json();
+    });
   }
 
   function truncateDescription(text) {
