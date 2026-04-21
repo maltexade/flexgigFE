@@ -1553,7 +1553,7 @@ async function loadLatestHistoryAsFallback() {
   let allTx = state.items.slice(); // Start with whatever realtime already gave us
 
   try {
-    const data = await safeFetch(`${CONFIG.apiEndpoint}?limit=200&page=1`);
+    const data = await safeFetch(`${CONFIG.apiEndpoint}?limit=100&page=1`);
     const apiItems = data.items || [];
 
     console.log('[Tx Fallback] API returned', apiItems.length, 'items');
