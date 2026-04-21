@@ -307,6 +307,7 @@ if (sendBtn) {
       };
 
       if (typeof window.showCheckoutPinModal === 'function') {
+        window._pinModalAction = 'transfer';
         requestAnimationFrame(() => {
           window.showCheckoutPinModal();
         });
@@ -315,6 +316,7 @@ if (sendBtn) {
         resolve({ success: false, reason: 'modal_unavailable' });
       }
     }).then((modalResult) => {
+      delete window._pinModalAction;
       if (!modalResult || modalResult.success !== true) {
         return { success: false, reason: modalResult?.reason || 'cancelled' };
       }

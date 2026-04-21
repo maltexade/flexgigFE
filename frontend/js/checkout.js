@@ -970,6 +970,7 @@ async function verifyPin(pin) {
     let raw = '';
     try {
       const token = localStorage.getItem('token') || '';
+      const action = window._pinModalAction || 'buy-data';
       const res = await fetch('https://api.flexgig.com.ng/api/verify-pin', {
         method: 'POST',
         headers: {
@@ -977,7 +978,7 @@ async function verifyPin(pin) {
           'Authorization': `Bearer ${token}`
         },
         credentials: 'include',
-        body: JSON.stringify({ pin, action: 'buy-data' })
+        body: JSON.stringify({ pin, action })
       });
 
       // ✅ Read raw response as text first
