@@ -977,7 +977,7 @@ async function verifyPin(pin) {
           'Authorization': `Bearer ${token}`
         },
         credentials: 'include',
-        body: JSON.stringify({ pin })
+        body: JSON.stringify({ pin, action: 'buy-data' })
       });
 
       // ✅ Read raw response as text first
