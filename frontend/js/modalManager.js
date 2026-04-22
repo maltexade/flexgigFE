@@ -1405,6 +1405,17 @@ log('debug', 'handlePopstate: openModalsStack snapshot', { stack: openModalsStac
       }
     });
 
+        // Referral — coming soon intercept
+    const referralsBtn = document.getElementById('referralsBtn');
+    if (referralsBtn) {
+      referralsBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        showToast('Referral program coming soon!', 'info');
+        log('debug', 'referralsBtn: Blocked — coming soon');
+      }, true);
+    }
+
     // Add this in initialize() or after all other setup
 document.addEventListener('click', function(e) {
   // Find closest [data-close] (handles dynamic elements)
