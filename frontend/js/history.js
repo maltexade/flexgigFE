@@ -2333,6 +2333,7 @@ async function subscribeToTransactions(force = false) {
               applyTransformsAndRender();
               historyList.scrollTop = 0;
             }
+            renderDashboardRecent();
           }
 
           window.dispatchEvent(new CustomEvent('transaction_update', { detail: normalized }));
@@ -2700,7 +2701,7 @@ window.subscribeToUserRealtime = subscribeToUserRealtime;
 
   // ✅ CRITICAL: Only call if we're on the dashboard page
   function initDashboard() {
-    if (document.getElementById('dashboardRecentTxList')) {
+    if (document.getElementById('dbRecentTransactionsHolder')) {
       console.log('[Dashboard] Initializing dashboard view');
       renderDashboardRecent();
     } else {
@@ -2714,14 +2715,14 @@ window.subscribeToUserRealtime = subscribeToUserRealtime;
   // Auto-update when new transaction arrives
   document.addEventListener('transaction_update', () => {
     // Only render if we're on dashboard
-    if (document.getElementById('dashboardRecentTxList')) {
+    if (document.getElementById('dbRecentTransactionsHolder')) {
       renderDashboardRecent();
     }
   });
 
   // Also update after full history load / filter change
   window.addEventListener('transactionHistoryUpdated', () => {
-    if (document.getElementById('dashboardRecentTxList')) {
+    if (document.getElementById('dbRecentTransactionsHolder')) {
       renderDashboardRecent();
     }
   });
