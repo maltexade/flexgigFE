@@ -366,6 +366,7 @@ async function loadMoreTransactions() {
 }
 
 /* -------------------------- APPEND NEW TRANSACTIONS (NO FULL RE-RENDER) -------------------------- */
+/* -------------------------- APPEND NEW TRANSACTIONS (NO FULL RE-RENDER) -------------------------- */
 function appendNewTransactions(newTxs) {
   // Apply current filters to new transactions
   let filtered = applyFilters(newTxs);
@@ -414,7 +415,7 @@ function appendNewTransactions(newTxs) {
   });
 
   // Update dashboard if visible
-  renderDashboardRecent();
+  renderDashboardRecent();  // ✅ INSIDE function, before closing brace
 }
 
 /* -------------------------- RESET PAGINATION HELPER -------------------------- */
