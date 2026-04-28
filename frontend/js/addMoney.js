@@ -286,13 +286,20 @@ function renderPermAccountsInKYCBody(showVerifiedBadge = false, accounts = null)
   const MODAL_ID = 'addMoneyModal';
   function handleBalanceUpdate(data) {
     if (!data || data.type !== 'balance_update') return;
-    const { balance, amount } = data;
-    try { if (typeof removePendingTxFromStorage === 'function') removePendingTxFromStorage(); else localStorage.removeItem('flexgig.pending_fund_tx'); } catch (e) {}
-    if (window.ModalManager?.closeModal) window.ModalManager.closeModal(MODAL_ID);
-    else { const m = document.getElementById(MODAL_ID); if (m) { m.style.transform = 'translateY(100%)'; m.classList.add('hidden'); } }
-    showSuccessToast(`₦${Number(amount).toLocaleString()} received!`, `Wallet updated to ₦${Number(balance).toLocaleString()}`);
-    if (typeof window.playSuccessSound === 'function') window.playSuccessSound();
-    setTimeout(() => openAddMoneyModalContent(), 500);
+    try { removePendingTxFromStorage(); } catch (e) {}
+    
+    // Only close the modal if it's actually open
+    if (window.ModalManager?.getOpenModals?.().includes(MODAL_ID)) {
+      window.ModalManager.closeModal(MODAL_ID);
+      showSuccessToast(`₦${Number(data.amount).toLocaleString()} received!`, `Wallet updated to ₦${Number(data.balance).toLocaleString()}`);
+      if (typeof window.playSuccessSound === 'function') window.playSuccessSound();
+      // Reset content for next open, but only if modal was open
+      setTimeout(() => openAddMoneyModalContent(), 500);
+    } else {
+      // Modal is closed — just show toast, don't touch the modal at all
+      showSuccessToast(`₦${Number(data.amount).toLocaleString()} received!`, `Wallet updated to ₦${Number(data.balance).toLocaleString()}`);
+      if (typeof window.playSuccessSound === 'function') window.playSuccessSound();
+    }
   }
   window.addEventListener('balance_update', (e) => handleBalanceUpdate(e.detail));
   window.__handleBalanceUpdate = handleBalanceUpdate;

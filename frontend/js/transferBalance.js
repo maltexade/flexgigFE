@@ -874,20 +874,36 @@ function fxgTransfer_bindReceiptModalEvents() {
     }
 
     if (els.form && !els.form._fxg_bound) {
-      els.form.addEventListener('submit', ev => {
-        ev.preventDefault();
-        if (!fxgTransfer_validate()) return;
+  els.form.addEventListener('submit', ev => {
+    ev.preventDefault();
+    if (!fxgTransfer_validate()) return;
 
-        const payload = {
-          recipient: (els.usernameEl.value || '').trim(),
-          amount: Number(onlyDigits(els.amountEl.value)),
-          timestamp: new Date().toISOString()
-        };
+    const payload = {
+      recipient: (els.usernameEl.value || '').trim(),
+      amount: Number(onlyDigits(els.amountEl.value)),
+      timestamp: new Date().toISOString()
+    };
 
-        fxgTransfer_openConfirmModal(payload);
-      });
-      els.form._fxg_bound = true;
+    // ✅ Check 1: Reject 0 or empty amount immediately
+    if (!payload.amount || payload.amount <= 0) {
+      if (els.amountErr) els.amountErr.textContent = 'Please enter a valid amount';
+      return;
     }
+
+    // ✅ Check 2: No PIN → open PIN setup modal immediately
+    const hasPin = localStorage.getItem('hasPin') === 'true';
+    if (!hasPin) {
+      if (typeof showToast === 'function') {
+        showToast('Please set up your transaction PIN first.', 'error');
+      }
+      setTimeout(() => window.ModalManager?.openModal?.('pinModal'), 300);
+      return;
+    }
+
+    fxgTransfer_openConfirmModal(payload);
+  });
+  els.form._fxg_bound = true;
+}
 
     window.addEventListener('modalOpened', ev => {
       if (ev?.detail === 'fxgTransferModal') {
