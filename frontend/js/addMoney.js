@@ -471,6 +471,7 @@ function assignAddMoneyEvents() {
     if (isFundingInProgress) return;
     const amount = parseInt(amountInput.value.replace(/[^0-9]/g, ''), 10);
     if (!amount || amount <= 0) { window.notify?.('Please enter a valid amount.', 'error'); return; }
+    if (amount < 100) { window.notify?.('Minimum deposit amount is ₦100.', 'error'); return; }
     const localPending = getPendingTxFromStorage();
     if (localPending) { window.showPendingTxToast('Please complete your pending transaction.'); showGeneratedAccount(localPending); return; }
     isFundingInProgress = true; fundBtn.disabled = true; fundBtn.textContent = 'Checking…';
