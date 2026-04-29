@@ -268,9 +268,10 @@ function renderPermAccountsInKYCBody(showVerifiedBadge = false, accounts = null)
         These accounts are <strong style="color:#fff;">permanently assigned</strong> to you.
         Transfers reflect in your wallet instantly.<br><br>
         <strong style="color:#f59e0b;">Processing fee:</strong>
-        <strong style="color:#fff;">1.5% per deposit, capped at ₦50.</strong><br>
+        <strong style="color:#fff;">1.5% per deposit (maximum ₦50).</strong><br>
         <span style="color:rgba(255,255,255,0.5);">
-          Example: ₦1,000 → you receive ₦985 &nbsp;·&nbsp; ₦5,000 → you receive ₦4,950 &nbsp;·&nbsp; ₦10,000+ → you receive amount minus ₦50
+          We charge 1.5% on small amounts, but the fee never exceeds ₦50 — no matter how much you send.<br>
+          Example: ₦1,000 → ₦15 fee · ₦5,000 → ₦50 fee · ₦10,000 → ₦50 fee
         </span>
       </div>
     </div>
