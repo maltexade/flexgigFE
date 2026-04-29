@@ -179,20 +179,25 @@
       background: rgba(255,255,255,.2);
       color: var(--green);
     }
+    #appLoader {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  backdrop-filter: blur(4px);
+}
+
+#appLoader[hidden] {
+  display: none !important;
+}
   </style>
 </head>
 <body>
 
-  <div id="appLoader" style="
-  position:fixed;
-  inset:0;
-  background:rgba(0,0,0,0.55);
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  z-index:9999;
-  backdrop-filter: blur(4px);
-" hidden>
+  <div id="appLoader" hidden>
   <div style="text-align:center">
     <div style="
       width:40px;height:40px;
