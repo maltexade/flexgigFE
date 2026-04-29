@@ -350,12 +350,37 @@ async function fetchPendingTransaction() {
 }
 
 function showLocalNotify(message, type = 'info') {
-  if (typeof window.notify === 'function') { try { window.notify(message, type); return; } catch (e) {} }
   const bg = type === 'error' ? '#ef4444' : (type === 'success' ? '#10b981' : '#f59e0b');
-  const t = Object.assign(document.createElement('div'), { textContent: message, style: `position:fixed;top:20px;left:50%;transform:translateX(-50%);background:${bg};color:white;padding:12px 20px;border-radius:12px;z-index:999999;font-weight:700;opacity:0;transition:all .3s;` });
+
+  const t = document.createElement('div');
+  t.textContent = message;
+
+  t.style.cssText = `
+    position:fixed;
+    top:env(safe-area-inset-top, 20px);
+    left:50%;
+    transform:translateX(-50%);
+    background:${bg};
+    color:white;
+    padding:14px 22px;
+    border-radius:14px;
+    z-index:2147483647;
+    font-weight:700;
+    box-shadow:0 10px 30px rgba(0,0,0,0.4);
+    pointer-events:none;
+  `;
+
+  // 👇 FORCE OUTSIDE MODAL
   document.body.appendChild(t);
-  requestAnimationFrame(() => { t.style.opacity = '1'; t.style.transform += ' translateY(6px)'; });
-  setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 320); }, 3000);
+
+  requestAnimationFrame(() => {
+    t.style.transform = 'translateX(-50%) translateY(8px)';
+  });
+
+  setTimeout(() => {
+    t.style.opacity = '0';
+    setTimeout(() => t.remove(), 300);
+  }, 3000);
 }
 
 function showGeneratedError(message = 'Failed to generate account. Try again.') {
@@ -469,7 +494,7 @@ function assignAddMoneyEvents() {
   let isFundingInProgress = false;
   // Fee constants (match your backend)
 const FEE_PERCENT = 0.015;
-const FEE_CAP = 100;
+const FEE_CAP = 50;
 
 fundBtn.addEventListener('click', async () => {
   if (isFundingInProgress) return;
