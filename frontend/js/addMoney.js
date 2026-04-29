@@ -560,8 +560,11 @@ fundBtn.addEventListener('click', async () => {
           <path d="M12 8v4m0 4h.01" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"/>
         </svg>
         <div style="font-size:11px;color:rgba(255,255,255,0.6);line-height:1.5;">
-          A <strong style="color:#f59e0b;">1.5% processing fee</strong> (max ₦100) covers payment provider charges.
-          This keeps FlexGig running for you.
+          A <strong style="color:#f59e0b;">1.5% processing fee</strong> applies to each deposit (capped at ₦50).<br>
+          <span style="color:rgba(255,255,255,0.6);">
+            You’ll never be charged more than ₦50, regardless of the amount.<br>
+            This covers payment provider costs and helps keep FlexGig running smoothly.
+          </span>
         </div>
       </div>
 
