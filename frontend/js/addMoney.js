@@ -260,13 +260,18 @@ function renderPermAccountsInKYCBody(showVerifiedBadge = false, accounts = null)
     <div style="margin-top:12px;padding:10px 13px;background:rgba(255,255,255,0.04);
       border-radius:11px;border:1px solid rgba(255,255,255,0.07);
       display:flex;align-items:flex-start;gap:8px;">
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" style="flex-shrink:0;margin-top:1px;">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" style="flex-shrink:0;margin-top:2px;">
         <circle cx="12" cy="12" r="10" stroke="#f59e0b" stroke-width="2"/>
         <path d="M12 8v4m0 4h.01" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"/>
       </svg>
-      <div style="font-size:11px;color:rgba(255,255,255,0.7);line-height:1.5;">
+      <div style="font-size:11px;color:rgba(255,255,255,0.7);line-height:1.6;">
         These accounts are <strong style="color:#fff;">permanently assigned</strong> to you.
-        Transfers reflect in your wallet instantly.
+        Transfers reflect in your wallet instantly.<br><br>
+        <strong style="color:#f59e0b;">Processing fee:</strong>
+        <strong style="color:#fff;">1.5% per deposit, capped at ₦50.</strong><br>
+        <span style="color:rgba(255,255,255,0.5);">
+          Example: ₦1,000 → you receive ₦985 &nbsp;·&nbsp; ₦5,000 → you receive ₦4,950 &nbsp;·&nbsp; ₦10,000+ → you receive amount minus ₦50
+        </span>
       </div>
     </div>
   `;
