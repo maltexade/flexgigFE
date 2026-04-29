@@ -3290,6 +3290,36 @@ if (window.location.pathname.includes('dashboard.html')) {
   });
 }
 
+function responsiveNameSize() {
+  const firstname = document.getElementById('firstname');
+  const support = document.querySelector('.support');
+  const header = document.querySelector('header');
+  
+  if (!firstname || !support || !header) return;
+  
+  const resizeObserver = new ResizeObserver(() => {
+    const headerWidth = header.offsetWidth;
+    const supportWidth = support.offsetWidth;
+    const avatarWidth = document.querySelector('.avatar').offsetWidth;
+    const padding = 22 * 2; // header padding
+    const gaps = 12 + 10; // avatar margin + support gap
+    
+    const availableWidth = headerWidth - supportWidth - avatarWidth - padding - gaps;
+    const nameWidth = firstname.offsetWidth;
+    
+    // If name takes more than 70% of available space, shrink it
+    if (nameWidth > availableWidth * 0.7) {
+      firstname.style.fontSize = '0.95rem';
+    } else if (nameWidth > availableWidth * 0.5) {
+      firstname.style.fontSize = '1rem';
+    } else {
+      firstname.style.fontSize = '1.15rem'; // default
+    }
+  });
+  
+  resizeObserver.observe(header);
+}
+
 // --- Observer to wait for elements ---
 function observeForElements() {
   const targetNode = document.body; // Or a specific parent like document.querySelector('.user-greeting')
@@ -3354,6 +3384,7 @@ function applySessionToDOM(user) {
   if (firstnameEl.textContent !== displayNameCapitalized) {
     firstnameEl.textContent = displayNameCapitalized;
   }
+  responsiveNameSize();
 
   const profilePicture = user.profilePicture || '';
   const isValidImage = profilePicture && /^(data:image\/|https?:\/\/|\/)/i.test(profilePicture);
