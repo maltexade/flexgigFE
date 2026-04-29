@@ -524,7 +524,7 @@ fundBtn.addEventListener('click', async () => {
   const contentContainer = addMoneyModal.querySelector('.addMoney-modal-content');
   contentContainer.innerHTML = `
     <div style="padding:20px;color:#fff;">
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;">
         <button id="feePreviewBack" style="background:none;border:none;color:#aaa;cursor:pointer;padding:4px;">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
             stroke-linecap="round" stroke-linejoin="round">
@@ -563,7 +563,6 @@ fundBtn.addEventListener('click', async () => {
           A <strong style="color:#f59e0b;">1.5% processing fee</strong> applies to each deposit (capped at ₦50).<br>
           <span style="color:rgba(255,255,255,0.6);">
             You’ll never be charged more than ₦50, regardless of the amount.<br>
-            This covers payment provider costs and helps keep FlexGig running smoothly.
           </span>
         </div>
       </div>
