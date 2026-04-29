@@ -132,16 +132,24 @@
     }
     #forgetpassword { margin-top: 10px; }
     .row { display: flex; align-items: center; gap: 12px; }
-    .password-field { position: relative; }
-    .eye-toggle {
-      position: absolute;
-      right: 14px;
-      top: 50%;
-      transform: translateY(-50%);
-      cursor: pointer;
-      width: 24px;
-      height: 24px;
+    .password-field {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
     }
+    .eye-toggle {
+  position: absolute;
+  right: 14px;
+  top: 38px; /* instead of 50% */
+  transform: none;
+  cursor: pointer;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
     .loading {
       display: none;
       font-size: 14px;
@@ -174,6 +182,31 @@
   </style>
 </head>
 <body>
+
+  <div id="appLoader" style="
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,0.55);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  z-index:9999;
+  backdrop-filter: blur(4px);
+" hidden>
+  <div style="text-align:center">
+    <div style="
+      width:40px;height:40px;
+      border:3px solid rgba(255,255,255,0.2);
+      border-top-color:white;
+      border-radius:50%;
+      animation:spin 0.8s linear infinite;
+      margin:auto;
+    "></div>
+    <p style="margin-top:10px;color:#9ca3af;font-size:14px;">
+      Processing...
+    </p>
+  </div>
+</div>
   <div class="wrap">
     <div class="nav">
       <a href="https://www.flexgig.com.ng" id="backTopRight" aria-label="Back to Flexgig">
@@ -307,22 +340,15 @@
       }
     };
 
-    window.showLoader = window.showLoader || function () {
-      const loader = document.getElementById('appLoader');
-      if (loader) {
-        __loaderRefCount++;
-        if (__loaderRefCount === 1) loader.hidden = false;
-      }
-    };
+    window.showLoader = function () {
+  const loader = document.getElementById('appLoader');
+  if (loader) loader.hidden = false;
+};
 
-    window.hideLoader = window.hideLoader || function (forceReset = false) {
-      const loader = document.getElementById('appLoader');
-      if (loader) {
-        if (forceReset) __loaderRefCount = 0;
-        else __loaderRefCount = Math.max(0, __loaderRefCount - 1);
-        if (__loaderRefCount === 0) loader.hidden = true;
-      }
-    };
+window.hideLoader = function () {
+  const loader = document.getElementById('appLoader');
+  if (loader) loader.hidden = true;
+};
 
     window.withLoader = window.withLoader || async function withLoader(task) {
       showLoader();
