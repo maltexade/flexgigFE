@@ -1002,23 +1002,28 @@ window.getWebSocketStatus = function() {
 (async function syncKYCStateFromServer() {
   try {
     const res = await apiFetch('/api/kyc/accounts', { method: 'GET' });
+    console.log('[KYC] sync response:', res.data);
+
     if (res.ok && res.data?.kycStatus === 'verified' && Array.isArray(res.data.accounts) && res.data.accounts.length > 0) {
+      // ✅ Handle snake_case from this endpoint
       const accounts = res.data.accounts.map(a => ({
         accountNumber: a.account_number || a.accountNumber,
-        accountName:   a.account_name   || a.accountName,
+        accountName:   a.account_name   || a.accountName || 'Flexgig Digital Network',
         bankName:      a.bank_name      || a.bankName,
         bankCode:      a.bank_code      || a.bankCode,
         currency:      a.currency       || 'NGN',
       }));
       saveKYCState(accounts);
-      console.log('[KYC] State synced from server —', accounts.length, 'accounts');
-    } else if (res.ok && res.data?.kycStatus !== 'verified') {
-      // Server says not verified — clear any stale localStorage flag
+      console.log('[KYC] State synced from /api/kyc/accounts —', accounts.length, 'accounts');
+
+    } else if (res.ok && res.data?.kycStatus && res.data.kycStatus !== 'verified') {
+      // Only clear if server explicitly confirms not verified
       localStorage.removeItem(KYC_STATE_KEY);
-      console.log('[KYC] Server says not verified — local state cleared');
+      console.log('[KYC] Not verified — local state cleared');
     }
+    // If kycStatus missing or undefined — do nothing, don't clear
+
   } catch (e) {
-    // Non-fatal: just use whatever is already in localStorage
     console.warn('[KYC] Server sync failed (using cached state)', e?.message);
   }
 })();
