@@ -55,6 +55,24 @@ function saveKYCState(accounts) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// BOOT: Seed KYC state from server-embedded data FIRST
+// This runs synchronously before any async calls
+// ─────────────────────────────────────────────────────────────
+(function seedKYCFromEmbeddedData() {
+  const serverData = window.__SERVER_USER_DATA__;
+  if (!serverData) return;
+
+  if (
+    serverData.kycStatus === 'verified' &&
+    Array.isArray(serverData.kycAccounts) &&
+    serverData.kycAccounts.length > 0
+  ) {
+    saveKYCState(serverData.kycAccounts);
+    console.log('[KYC] Seeded from embedded server data —', serverData.kycAccounts.length, 'accounts');
+  }
+})();
+
+// ─────────────────────────────────────────────────────────────
 // SEED KYC STATE FROM SESSION — call this after login/session fetch
 // Prevents new-device users from seeing the KYC form again
 // ─────────────────────────────────────────────────────────────
