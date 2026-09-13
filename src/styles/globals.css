@@ -1,0 +1,76 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom styles */
+:root {
+  color-scheme: dark light;
+}
+
+body {
+  @apply bg-white dark:bg-black text-black dark:text-white;
+}
+
+/* Typography */
+h1, h2, h3, h4, h5, h6 {
+  @apply font-museo font-bold;
+}
+
+h1 {
+  @apply text-4xl;
+}
+
+h2 {
+  @apply text-3xl;
+}
+
+h3 {
+  @apply text-2xl;
+}
+
+/* Links */
+a {
+  @apply text-p1 hover:text-blue-600 transition-colors;
+}
+
+/* Forms */
+input,
+textarea,
+select {
+  @apply bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-md px-3 py-2 text-black dark:text-white transition-colors;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  @apply outline-none ring-2 ring-p1;
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateY(10px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-in-out;
+}
+
+.animate-slide-in {
+  animation: slideIn 0.3s ease-in-out;
+}
